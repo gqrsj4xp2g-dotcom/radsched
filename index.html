@@ -652,6 +652,14 @@ tbody tr:hover{background:var(--bg3)}
 <!-- DR BUILDER -->
 <div id="page-dr-builder" class="page">
   <div class="pg-title">DR Schedule Builder</div>
+  <div class="tabs" style="margin-bottom:12px">
+    <div class="tab on" onclick="drBuilderTab('1st',this)">1st Shift</div>
+    <div class="tab" onclick="drBuilderTab('2nd',this)">2nd Shift</div>
+    <div class="tab" onclick="drBuilderTab('3rd',this)">3rd Shift</div>
+    <div class="tab" onclick="drBuilderTab('home',this)">At Home</div>
+  </div>
+
+  <!-- Shared entry form — shift type driven by active tab -->
   <div class="ibox">
     <div class="g3">
       <div class="fg"><label>Physician</label><select id="sb-phys" onchange="updateSbInfo()"></select></div>
@@ -665,8 +673,63 @@ tbody tr:hover{background:var(--bg3)}
     </div>
     <div id="sb-info" style="margin-bottom:8px"></div>
     <button class="bp" onclick="addDRShift()">Assign Shift</button>
-      <button class="bt bsm" onclick="fillDRHomeShifts()" style="margin-left:6px" title="Auto-assign at-home shift to all unscheduled DR physicians for the selected date">Fill Unscheduled → Home</button>
+    <button class="bt bsm" onclick="fillDRHomeShifts()" style="margin-left:6px" title="Auto-assign at-home shift to all unscheduled DR physicians for the selected date">Fill Unscheduled → Home</button>
   </div>
+
+  <!-- 2nd shift extra fields -->
+  <div id="drb-2nd-extra" class="ibox" style="display:none;background:var(--green-bg);border:1px solid var(--green)">
+    <div style="font-size:11px;font-weight:800;color:var(--green-t);margin-bottom:8px">2ND SHIFT — BULK ASSIGN</div>
+    <div class="g3">
+      <div class="fg"><label>Week Start (Monday)</label><input id="drb-2nd-week" type="date" oninput="update2ndPreview()"></div>
+      <div class="fg"><label>Days to Cover</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="1" checked> Mon</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="2" checked> Tue</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="3" checked> Wed</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="4" checked> Thu</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="5" checked> Fri</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="6"> Sat</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="0"> Sun</label>
+        </div>
+      </div>
+      <div class="fg"><label>Site</label><select id="drb-2nd-site"></select></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Physician (2nd Shift)</label><select id="drb-2nd-phys"></select></div>
+      <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub"></select></div>
+      <div class="fg"><label>Notes</label><input id="drb-2nd-notes" placeholder="Optional"></div>
+    </div>
+    <div id="drb-2nd-preview" style="font-size:11px;color:var(--txt2);margin-bottom:8px"></div>
+    <button class="bp bsm" onclick="bulkAssign2nd3rd('2nd')">Assign 2nd Shift for Week</button>
+  </div>
+
+  <!-- 3rd shift extra fields -->
+  <div id="drb-3rd-extra" class="ibox" style="display:none;background:var(--purple-bg,#f5f3ff);border:1px solid var(--purple,#7c3aed)">
+    <div style="font-size:11px;font-weight:800;color:var(--purple,#7c3aed);margin-bottom:8px">3RD SHIFT — BULK ASSIGN</div>
+    <div class="g3">
+      <div class="fg"><label>Week Start (Monday)</label><input id="drb-3rd-week" type="date" oninput="update3rdPreview()"></div>
+      <div class="fg"><label>Days to Cover</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="1" checked> Mon</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="2" checked> Tue</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="3" checked> Wed</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="4" checked> Thu</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="5" checked> Fri</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="6"> Sat</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="0"> Sun</label>
+        </div>
+      </div>
+      <div class="fg"><label>Site</label><select id="drb-3rd-site"></select></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Physician (3rd Shift)</label><select id="drb-3rd-phys"></select></div>
+      <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub"></select></div>
+      <div class="fg"><label>Notes</label><input id="drb-3rd-notes" placeholder="Optional"></div>
+    </div>
+    <div id="drb-3rd-preview" style="font-size:11px;color:var(--txt2);margin-bottom:8px"></div>
+    <button class="bp bsm" onclick="bulkAssign2nd3rd('3rd')" style="background:var(--purple,#7c3aed)">Assign 3rd Shift for Week</button>
+  </div>
+
   <div class="card" style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>Anchor?</th><th>Sub</th><th>Notes</th><th></th></tr></thead><tbody id="drb-tbody"></tbody></table></div>
 </div>
 
@@ -2293,6 +2356,87 @@ function addVac(){
   renderVacations();
 }
 
+
+/* ─── DR BUILDER TABS: 2ND / 3RD SHIFT ─── */
+function drBuilderTab(shift, el){
+  // Update active tab
+  document.querySelectorAll('#page-dr-builder .tab').forEach(t=>t.classList.remove('on'));
+  if(el) el.classList.add('on');
+  // Set the shift dropdown to match
+  const sd=document.getElementById('sb-shift');
+  if(sd){
+    const map={home:'Home'};
+    sd.value=map[shift]||shift;
+  }
+  // Show/hide bulk panels
+  document.getElementById('drb-2nd-extra').style.display=shift==='2nd'?'block':'none';
+  document.getElementById('drb-3rd-extra').style.display=shift==='3rd'?'block':'none';
+  // Populate bulk panel dropdowns when opening
+  if(shift==='2nd'||shift==='3rd'){
+    const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
+    const drs=S.physicians.filter(p=>p.drFte>0);
+    const physOpts=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+    const siteOpts=siteNames.map(n=>`<option>${n}</option>`).join('');
+    const subOpts=S.drSubs.map(s=>`<option>${s}</option>`).join('');
+    [`drb-${shift}-phys`,`drb-${shift}-site`,`drb-${shift}-sub`].forEach((id,i)=>{
+      const el=document.getElementById(id);if(!el)return;
+      el.innerHTML=i===0?physOpts:i===1?siteOpts:subOpts;
+    });
+    if(shift==='2nd') update2ndPreview();
+    else update3rdPreview();
+  }
+}
+
+function _weekDates(weekStartId, dowClass){
+  const weekEl=document.getElementById(weekStartId);
+  if(!weekEl||!weekEl.value) return [];
+  const mon=parseDateLocal(weekEl.value);
+  const checked=[...document.querySelectorAll('.'+dowClass+':checked')].map(cb=>parseInt(cb.value));
+  const dates=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(mon); d.setDate(mon.getDate()+i);
+    if(checked.includes(d.getDay())) dates.push(fmtDate(d));
+  }
+  return dates;
+}
+
+function update2ndPreview(){
+  const dates=_weekDates('drb-2nd-week','drb-2nd-dow');
+  const el=document.getElementById('drb-2nd-preview');
+  if(el) el.textContent=dates.length?`Will assign 2nd shift on: ${dates.join(', ')}`:'Select a week start date.';
+}
+
+function update3rdPreview(){
+  const dates=_weekDates('drb-3rd-week','drb-3rd-dow');
+  const el=document.getElementById('drb-3rd-preview');
+  if(el) el.textContent=dates.length?`Will assign 3rd shift on: ${dates.join(', ')}`:'Select a week start date.';
+}
+
+function bulkAssign2nd3rd(shift){
+  const dates=_weekDates(`drb-${shift}-week`,`drb-${shift}-dow`);
+  if(!dates.length){alert('Select a week start date and at least one day.');return;}
+  const pid=parseInt(document.getElementById(`drb-${shift}-phys`).value);
+  const site=document.getElementById(`drb-${shift}-site`).value;
+  const sub=document.getElementById(`drb-${shift}-sub`).value;
+  const notes=document.getElementById(`drb-${shift}-notes`).value;
+  const p=S.physicians.find(x=>x.id===pid);
+  if(!p){alert('Select a physician.');return;}
+  let added=0,skipped=0;
+  dates.forEach(date=>{
+    // Skip if already assigned on this date+shift+site
+    if(S.drShifts.find(s=>s.physId===pid&&s.date===date&&s.shift===shift&&s.site===site)){
+      skipped++;return;
+    }
+    S.drShifts.push({id:S.nextId++,physId:pid,date,shift,site,sub,notes,autoHome:false});
+    added++;
+  });
+  triggerSave();
+  renderDRBuilder();
+  const msg=`Assigned ${added} ${shift} shift(s) for ${p.last}${skipped?` (${skipped} already existed)`:''}`;
+  const si=document.getElementById('save-indicator');
+  if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},4000);}
+}
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||'2025-06';
@@ -2326,6 +2470,16 @@ function renderDRBuilder(){
   const drs=S.physicians.filter(p=>p.drFte>0);
   document.getElementById('sb-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   populateSel('sb-sub',S.drSubs,'— any —');populateSel('sb-site',S.sites.map(s=>s.name),'');
+  // Keep bulk panel dropdowns fresh
+  const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
+  const physOpts=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  const siteOpts=siteNames.map(n=>`<option>${n}</option>`).join('');
+  const subOpts=S.drSubs.map(s=>`<option>${s}</option>`).join('');
+  ['2nd','3rd'].forEach(sh=>{
+    const pe=document.getElementById(`drb-${sh}-phys`);if(pe)pe.innerHTML=physOpts;
+    const se=document.getElementById(`drb-${sh}-site`);if(se)se.innerHTML=siteOpts;
+    const ue=document.getElementById(`drb-${sh}-sub`);if(ue)ue.innerHTML=subOpts;
+  });
   document.getElementById('drb-tbody').innerHTML=S.drShifts.sort((a,b)=>a.date>b.date?1:-1).map(s=>{
     const p=S.physicians.find(x=>x.id===s.physId);const isAnc=p?.anchorSite===s.site;
     const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
