@@ -232,6 +232,10 @@ tbody tr:hover{background:var(--bg3)}
 .modal-close{position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--txt3)}
 .modal-title{font-size:16px;font-weight:800;margin-bottom:16px}
 .profile-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:9px;box-shadow:var(--sh)}
+
+    .cal-day.sold-back { background: linear-gradient(135deg, #d1fae5 0%, var(--bg2) 100%) !important; border-left: 3px solid var(--green) !important; }
+    .cal-day.sold-back .cal-num { color: var(--green-t) !important; font-weight: 800; }
+    .sold-back-banner { font-size:9px; font-weight:800; color:var(--green-t); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -602,8 +606,11 @@ tbody tr:hover{background:var(--bg3)}
       <div class="fg"><label>End</label><input id="v-end" type="date"></div>
     </div>
     <div class="g2">
-      <div class="fg"><label>Type</label><select id="v-type"><option>Vacation</option><option>CME</option><option>Sick Leave</option><option>Personal</option><option>Conference</option></select></div>
+      <div class="fg"><label>Type</label><select id="v-type" onchange="document.getElementById('v-soldbk-note').style.display=this.value==='Vacation Sold Back'?'block':'none'"><option>Vacation</option><option>Vacation Sold Back</option><option>CME</option><option>Sick Leave</option><option>Personal</option><option>Conference</option></select></div>
       <div class="fg"><label>Notes</label><input id="v-notes"></div>
+    </div>
+    <div class="note ni" id="v-soldbk-note" style="display:none;font-size:11px">
+      <strong>Vacation Sold Back:</strong> Weekdays in this period are automatically filled with DR Home shifts and blocked for IR assignment. The physician is considered "working" and available for DR read-from-home.
     </div>
     <button class="bp" onclick="addVac()">Add Time Off</button>
   </div>
@@ -1330,19 +1337,41 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 
     <!-- Vacations Import -->
     <div class="card">
-      <div class="card-title">Import Vacations & Time Off</div>
-      <div class="note ni" style="font-size:11px">Required columns: <strong>Physician</strong> (Last, First or ID), <strong>Start</strong> (YYYY-MM-DD), <strong>End</strong> (YYYY-MM-DD), <strong>Type</strong> (Vacation/CME/Sick Leave/etc), <strong>Notes</strong> (optional)</div>
-      <div style="margin:10px 0">
-        <label style="display:inline-block;cursor:pointer">
-          <div class="bp" style="display:inline-block;padding:7px 14px">📂 Choose Vacations Excel File</div>
-          <input type="file" id="xl-vac-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="previewVacImport(this)">
-        </label>
-        <button class="bt bsm" style="margin-left:8px" onclick="downloadTemplate('vacations')">⬇ Template</button>
+      <div class="card-title">Import Vacations &amp; Time Off</div>
+      <div class="tabs" style="margin-bottom:10px">
+        <div class="tab on" onclick="vacImportTab('picker',this)">📅 Vacation Pick Sheet</div>
+        <div class="tab" onclick="vacImportTab('standard',this)">Standard Format</div>
       </div>
-      <div id="xl-vac-preview"></div>
-      <div id="xl-vac-actions" style="display:none;margin-top:8px">
-        <button class="bg" onclick="applyVacImport()">✓ Import All Valid Rows</button>
-        <span id="xl-vac-count" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+      <div id="vimt-picker">
+        <div class="note ni" style="font-size:11px;margin-bottom:8px">Import from the <strong>vacation pick calendar Excel file</strong> (e.g. 2026_Vacation_Pick-_Published.xlsx). Reads the <em>Calendar View</em> sheet and maps physician last names to your roster. Vacation picks become Vacation records. 2nd/3rd shift entries and Off entries are also imported.</div>
+        <div class="g2" style="margin-bottom:8px">
+          <div class="fg"><label>Vacation Type</label><select id="xl-pick-type"><option value="Vacation">Vacation</option><option value="Vacation Sold Back">Vacation Sold Back</option></select></div>
+          <div class="fg"><label>Week length (days)</label><input id="xl-pick-days" type="number" value="5" min="1" max="7" style="width:80px"><span style="font-size:11px;color:var(--txt3);margin-left:6px">5 = Mon–Fri</span></div>
+        </div>
+        <label style="display:inline-block;cursor:pointer;margin-bottom:8px">
+          <div class="bp" style="display:inline-block;padding:7px 14px">📂 Choose Vacation Pick Excel</div>
+          <input type="file" id="xl-pick-file" accept=".xlsx,.xls" style="display:none" onchange="previewPickImport(this)">
+        </label>
+        <div id="xl-pick-preview"></div>
+        <div id="xl-pick-actions" style="display:none;margin-top:8px">
+          <button class="bg" onclick="applyPickImport()">✓ Import Matched Vacations</button>
+          <span id="xl-pick-count" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+        </div>
+      </div>
+      <div id="vimt-standard" style="display:none">
+        <div class="note ni" style="font-size:11px">Required columns: <strong>Physician</strong>, <strong>Start</strong>, <strong>End</strong> (YYYY-MM-DD), <strong>Type</strong>, <strong>Notes</strong></div>
+        <div style="margin:10px 0">
+          <label style="display:inline-block;cursor:pointer">
+            <div class="bp" style="display:inline-block;padding:7px 14px">📂 Choose Vacations Excel</div>
+            <input type="file" id="xl-vac-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="previewVacImport(this)">
+          </label>
+          <button class="bt bsm" style="margin-left:8px" onclick="downloadTemplate('vacations')">⬇ Template</button>
+        </div>
+        <div id="xl-vac-preview"></div>
+        <div id="xl-vac-actions" style="display:none;margin-top:8px">
+          <button class="bg" onclick="applyVacImport()">✓ Import All Valid Rows</button>
+          <span id="xl-vac-count" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -1811,6 +1840,19 @@ function pname(id){const p=S.physicians.find(x=>x.id===id);return p?p.last+', '+
 function pshort(id){const p=S.physicians.find(x=>x.id===id);return p?p.last:'?';}
 function ini(p){return p.first[0]+p.last[0];}
 function totFte(p){return +(p.drFte+p.irFte).toFixed(2);}
+function isSoldBackDate(physId, date){
+  return S.vacations.some(v=>v.physId===physId&&v.type==='Vacation Sold Back'&&date>=v.start&&date<=v.end);
+}
+
+function soldBackDays(physId){
+  const d=new Set();
+  S.vacations.filter(v=>v.physId===physId&&v.type==='Vacation Sold Back').forEach(v=>{
+    let c=parseDateLocal(v.start),e=parseDateLocal(v.end);
+    while(c<=e){const ds=fmtDate(c);if(parseDateLocal(ds).getDay()>=1&&parseDateLocal(ds).getDay()<=5)d.add(ds);c.setDate(c.getDate()+1);}
+  });
+  return d;
+}
+
 function vacDays(pid){
   const d=new Set();
   S.vacations.filter(v=>v.physId===pid).forEach(v=>{let c=parseDateLocal(v.start),e=parseDateLocal(v.end);while(c<=e){d.add(fmtDate(c));c.setDate(c.getDate()+1);}});
@@ -1993,10 +2035,14 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 
 /* ─── USER MGMT ─── */
 function renderUserMgmt(){
-  const ps=document.getElementById('ca-phys');
-  if(ps&&ps.options.length<2){
-    S.physicians.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.text=p.last+', '+p.first+' ('+p.role+')';ps.appendChild(o);});
-  }
+  // Always rebuild physician dropdowns so they reflect current roster
+  const physOpts='<option value="">No link (set later)</option>'+
+    S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first} (${p.role})</option>`).join('');
+  const ca=document.getElementById('ca-phys');
+  if(ca) ca.innerHTML=physOpts;
+  const lm=document.getElementById('lm-phys');
+  if(lm) lm.innerHTML=physOpts;
+
   document.getElementById('user-mgmt-list').innerHTML='<div class="card"><div class="card-title">Registered Users ('+USERS.length+')</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked Physician</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+
   USERS.map(u=>{const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
     return`<tr><td>${u.first} ${u.last}</td><td style="font-size:11px">${u.email}</td>
@@ -2081,22 +2127,42 @@ function addPhys(){
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
   renderPhysicians();
+  // Refresh user mgmt so physician link dropdowns reflect the new physician
+  if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
 }
-function removePhys(id){if(!confirm('Remove?'))return;S.physicians=S.physicians.filter(p=>p.id!==id);renderPhysicians();}
+function removePhys(id){if(!confirm('Remove?'))return;S.physicians=S.physicians.filter(p=>p.id!==id);renderPhysicians();if(document.getElementById('page-user-mgmt')?.classList.contains('on'))renderUserMgmt();}
 
 /* ─── VACATIONS ─── */
 function renderVacations(){
   document.getElementById('v-phys').innerHTML=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   document.getElementById('vac-tbody').innerHTML=S.vacations.sort((a,b)=>a.start>b.start?1:-1).map(v=>{
     const d=Math.round((new Date(v.end)-new Date(v.start))/86400000)+1;
-    return`<tr><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="S.vacations=S.vacations.filter(x=>x.id!==${v.id});renderVacations()">X</button></td></tr>`;
+    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="S.vacations=S.vacations.filter(x=>x.id!==${v.id});renderVacations()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addVac(){
   const pid=+document.getElementById('v-phys').value;
   const s=document.getElementById('v-start').value,e=document.getElementById('v-end').value;
   if(!s||!e||e<s){alert('Check dates');return;}
-  S.vacations.push({id:S.nextId++,physId:pid,start:s,end:e,type:document.getElementById('v-type').value,notes:document.getElementById('v-notes').value});
+  const vType=document.getElementById('v-type').value;
+  const vNotes=document.getElementById('v-notes').value;
+  S.vacations.push({id:S.nextId++,physId:pid,start:s,end:e,type:vType,notes:vNotes});
+  // Sold back: auto-fill all weekdays with DR home shifts, block IR assignment
+  if(vType==='Vacation Sold Back'){
+    let cur=parseDateLocal(s),endD=parseDateLocal(e);
+    while(cur<=endD){
+      const ds=fmtDate(cur);
+      const dow=cur.getDay();
+      if(dow>=1&&dow<=5){
+        if(!S.drShifts.find(sh=>sh.physId===pid&&sh.date===ds)){
+          S.drShifts.push({id:S.nextId++,physId:pid,date:ds,shift:'Home',
+            site:'At Home / Remote',sub:'General Procedures',
+            notes:'Vacation Sold Back',autoHome:false,soldBack:true});
+        }
+      }
+      cur.setDate(cur.getDate()+1);
+    }
+  }
   renderVacations();
 }
 
@@ -2123,7 +2189,8 @@ function renderDRCal(){
     if(!fsh||fsh==='Holiday') S.holidays.filter(h=>h.date===c.date&&h.group==='DR').forEach(h=>{evs+=`<div class="ev ehol">${pshort(h.physId)} HOL</div>`;});
     (vm[c.date]||[]).filter(pid=>S.physicians.find(p=>p.id===pid&&p.drFte>0)).forEach(pid=>{evs+=`<div class="ev evac">${pshort(pid)} off</div>`;});
     S.openShifts.filter(o=>o.date===c.date&&!o.claimedBy&&o.group==='DR').forEach(()=>{evs+=`<div class="ev eopen">Open</div>`;});
-    return`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}"><div class="cal-num">${c.day}</div>${evs}</div>`;
+    const _isSB=c.day&&!c.isWknd&&S.vacations.some(v=>v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
+    return`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${_isSB?' sold-back':''}"><div class="cal-num">${c.day}${_isSB?'<span class="sold-back-banner"> SOLD BACK</span>':''}</div>${evs}</div>`;
   }).join('');
 }
 
@@ -2257,6 +2324,7 @@ function previewAA(){
             if(!siteRuleOk(p,st.name,ym,c.date,k))return false;
             if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
             if(!sequenceOk(p,c.date,ym))return false;
+            if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false; // sold-back days only get home shifts
             const vd=vacDays(p.id);if(vd.has(c.date))return false;
             return cnt[p.id].wd<maxDR(p,'wd');
           }).sort((a,b)=>{
@@ -2682,6 +2750,7 @@ function previewIRAA(){
         if(alreadyAssigned) return; // group already has a call physician today
         const pool=gPhys.filter(p=>{
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
+          if(isSoldBackDate(p.id,c.date))return false; // sold-back: DR only
           if(irOnDate(p.id,c.date))return false;
           if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call'))return false;
           if(!sequenceOk(p,c.date,ym))return false;
@@ -3112,6 +3181,7 @@ function previewIRShiftAA(){
           for(let i=ex;i<need;i++){
             const pool=gPhys.filter(p=>{
               const vd=vacDays(p.id); if(vd.has(c.date)) return false;
+              if(isSoldBackDate(p.id,c.date)) return false; // sold-back: DR only
               if(isAssignedOnDate(p.id,c.date)) return false;
               if(!siteRuleOk(p,st.name,ym,c.date,'ir'))return false;
               if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift'))return false;
@@ -4321,6 +4391,213 @@ function clearSupabaseConfig(){
 <script>
 // Capture full page source after DOM is complete — used by Save File feature
 if(typeof _SRC!=='undefined') _SRC=document.documentElement.outerHTML;
+
+/* ─── VACATION PICK SHEET IMPORT ─── */
+function vacImportTab(t,el){
+  document.getElementById('vimt-picker').style.display=t==='picker'?'block':'none';
+  document.getElementById('vimt-standard').style.display=t==='standard'?'block':'none';
+  document.querySelectorAll('#page-import .tab').forEach(x=>x.classList.remove('on'));
+  if(el)el.classList.add('on');
+}
+
+let _xlPickData=[];
+
+function previewPickImport(input){
+  const file=input.files[0];if(!file)return;
+  const prev=document.getElementById('xl-pick-preview');
+  prev.innerHTML='<div style="color:var(--txt2);font-size:12px">Reading file...</div>';
+  if(!window.XLSX){prev.innerHTML='<div class="note ne">SheetJS not loaded.</div>';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+      // Look for "Calendar View" sheet first, else use first sheet
+      const sheetName=wb.SheetNames.find(n=>n.toLowerCase().includes('calendar'))||wb.SheetNames[0];
+      const ws=wb.Sheets[sheetName];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
+      _parsePickSheet(rows,prev);
+    }catch(err){
+      prev.innerHTML=`<div class="note ne">Error reading file: ${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function _parsePickSheet(rows,prev){
+  // Column layout: cols 1,3,5,7 (0-indexed) = week date headers / vacation names
+  //                cols 2,4,6,8 = 2nd shift / 3rd shift / Off entries
+  const MAIN_COLS=[1,3,5,7];
+  const SIDE_COLS=[2,4,6,8];
+  const weeks=[];
+  let curDates=null,curRows=[];
+
+  function _isDateStr(v){return v&&/^\d{4}-\d{2}-\d{2}/.test(String(v));}
+  function _parseName(v){
+    if(!v||typeof v!=='string')return null;
+    const s=v.trim();
+    if(!s||s.match(/^\d+$/)|| s.toLowerCase().includes('picks max')||
+       s.toLowerCase().includes('closed')||s.toLowerCase().includes('indicates'))return null;
+    // Remove pick number suffix: "Fisher - 1", "Brown- BB 1", "Mossa-Basha- 9"
+    // Strip trailing "- [optional letters] [number]" pattern
+    const cleaned=s.replace(/\s*-\s*(BB\s*)?\d+.*$/i,'').trim();
+    return cleaned||null;
+  }
+
+  for(const row of rows){
+    // Check if this row has date headers in main cols
+    const datesInRow=MAIN_COLS.map(c=>{
+      const v=row[c];
+      if(!v)return null;
+      if(v instanceof Date||_isDateStr(v)){
+        const d=_isDateStr(v)?v:new Date(v).toISOString().slice(0,10);
+        return d.slice(0,10);
+      }
+      return null;
+    });
+
+    if(datesInRow.some(d=>d)){
+      // Save previous block
+      if(curDates&&curRows.length){
+        curDates.forEach((wd,ci)=>{
+          if(!wd)return;
+          const mc=MAIN_COLS[ci],sc=SIDE_COLS[ci];
+          const vac=[],shift2=[],shift3=[],off=[];
+          for(const r of curRows){
+            const mv=r[mc],sv=r[sc];
+            const name=_parseName(mv);
+            if(name)vac.push(name);
+            if(sv&&typeof sv==='string'){
+              const s=sv.trim();
+              if(s.match(/2nd\s*shift/i)){
+                const n=s.replace(/2nd\s*shift\s*[-–]\s*/i,'').trim();
+                if(n)shift2.push(n);
+              } else if(s.match(/3rd\s*shift/i)){
+                const n=s.replace(/3rd\s*shift\s*[-–]\s*/i,'').trim();
+                if(n)shift3.push(n);
+              } else if(s.match(/^off\s*[-–]/i)){
+                const n=s.replace(/^off\s*[-–]\s*/i,'').trim();
+                if(n)off.push(n);
+              }
+            }
+          }
+          weeks.push({weekStart:wd,vacation:vac,shift2,shift3,off});
+        });
+      }
+      curDates=datesInRow;
+      curRows=[];
+    } else if(curDates){
+      curRows.push(row);
+    }
+  }
+  // Save last block
+  if(curDates&&curRows.length){
+    curDates.forEach((wd,ci)=>{
+      if(!wd)return;
+      const mc=MAIN_COLS[ci],sc=SIDE_COLS[ci];
+      const vac=[],shift2=[],shift3=[],off=[];
+      for(const r of curRows){
+        const mv=r[mc],sv=r[sc];
+        const name=_parseName(mv);
+        if(name)vac.push(name);
+        if(sv&&typeof sv==='string'){
+          const s=sv.trim();
+          if(s.match(/2nd\s*shift/i)){const n=s.replace(/2nd\s*shift\s*[-–]\s*/i,'').trim();if(n)shift2.push(n);}
+          else if(s.match(/3rd\s*shift/i)){const n=s.replace(/3rd\s*shift\s*[-–]\s*/i,'').trim();if(n)shift3.push(n);}
+          else if(s.match(/^off\s*[-–]/i)){const n=s.replace(/^off\s*[-–]\s*/i,'').trim();if(n)off.push(n);}
+        }
+      }
+      weeks.push({weekStart:wd,vacation:vac,shift2,shift3,off});
+    });
+  }
+
+  // Match names to physicians
+  const vacType=document.getElementById('xl-pick-type')?.value||'Vacation';
+  const days=parseInt(document.getElementById('xl-pick-days')?.value)||5;
+  const matched=[],unmatched=new Set();
+
+  function findPhysLastName(lastName){
+    if(!lastName)return null;
+    const l=lastName.trim().toLowerCase();
+    // Exact match first
+    let p=S.physicians.find(p=>p.last.toLowerCase()===l);
+    if(p)return p;
+    // Hyphenated: "Mossa-Basha" matches physician "Mossa-Basha"
+    p=S.physicians.find(p=>p.last.toLowerCase().replace(/[-\s]/g,'')===l.replace(/[-\s]/g,''));
+    if(p)return p;
+    // Last name is first word (handles "Mossa" matching "Mossa-Basha")
+    p=S.physicians.find(p=>p.last.toLowerCase().startsWith(l)||l.startsWith(p.last.toLowerCase()));
+    return p||null;
+  }
+
+  weeks.forEach(w=>{
+    const startD=w.weekStart;
+    const endD=addDays(startD,days-1);
+    w.vacation.forEach(name=>{
+      const p=findPhysLastName(name);
+      if(p){
+        if(!S.vacations.find(v=>v.physId===p.id&&v.start===startD))
+          matched.push({physId:p.id,start:startD,end:endD,type:vacType,notes:`Imported: ${name}`});
+      } else { unmatched.add(name); }
+    });
+  });
+
+  _xlPickData=matched;
+
+  // Build preview
+  const totalWeeks=weeks.length;
+  const matchedCount=matched.length;
+  const unmatchedArr=[...unmatched];
+
+  let html=`<div style="font-size:12px;font-weight:700;margin-bottom:6px">
+    ${totalWeeks} weeks found · <span style="color:var(--green-t)">${matchedCount} vacation entries matched</span>
+    ${unmatchedArr.length?`· <span style="color:var(--amber,#d97706)">${unmatchedArr.length} names unmatched</span>`:''}
+  </div>`;
+
+  if(matched.length){
+    html+='<div style="overflow-x:auto;max-height:220px;overflow-y:auto"><table><thead><tr><th>Physician</th><th>Week Start</th><th>Week End</th><th>Type</th></tr></thead><tbody>';
+    html+=matched.slice(0,30).map(m=>`<tr><td>${pname(m.physId)}</td><td>${m.start}</td><td>${m.end}</td><td><span class="tag ta">${m.type}</span></td></tr>`).join('');
+    if(matched.length>30)html+=`<tr><td colspan="4" style="color:var(--txt3)">...and ${matched.length-30} more</td></tr>`;
+    html+='</tbody></table></div>';
+  }
+  if(unmatchedArr.length){
+    html+=`<div class="note nw" style="margin-top:6px"><strong>Could not match to physicians:</strong> ${unmatchedArr.slice(0,20).join(', ')}${unmatchedArr.length>20?'...':''}<br>
+    <span style="font-size:10px">Check that these last names match exactly in your physician roster.</span></div>`;
+  }
+  prev.innerHTML=html;
+
+  const actions=document.getElementById('xl-pick-actions');
+  const cnt=document.getElementById('xl-pick-count');
+  if(actions)actions.style.display=matched.length?'block':'none';
+  if(cnt)cnt.textContent=`${matched.length} vacation entries ready`;
+  logImport(`Pick sheet parsed: ${totalWeeks} weeks, ${matchedCount} matched, ${unmatchedArr.length} unmatched`);
+}
+
+function applyPickImport(){
+  if(!_xlPickData.length)return;
+  let added=0,skipped=0;
+  _xlPickData.forEach(r=>{
+    const dup=S.vacations.find(v=>v.physId===r.physId&&v.start===r.start);
+    if(dup){skipped++;return;}
+    S.vacations.push({id:S.nextId++,physId:r.physId,start:r.start,end:r.end,type:r.type,notes:r.notes});
+    // If sold back, auto-fill weekday home shifts
+    if(r.type==='Vacation Sold Back'){
+      let cur=parseDateLocal(r.start),endD=parseDateLocal(r.end);
+      while(cur<=endD){
+        const ds=fmtDate(cur),dow=cur.getDay();
+        if(dow>=1&&dow<=5&&!S.drShifts.find(s=>s.physId===r.physId&&s.date===ds))
+          S.drShifts.push({id:S.nextId++,physId:r.physId,date:ds,shift:'Home',site:'At Home / Remote',sub:'General Procedures',notes:'Vacation Sold Back',autoHome:false,soldBack:true});
+        cur.setDate(cur.getDate()+1);
+      }
+    }
+    added++;
+  });
+  logImport(`Vacation pick import: ${added} added, ${skipped} skipped`,'success');
+  document.getElementById('xl-pick-preview').innerHTML=`<div class="note ns">✓ Imported ${added} vacation record(s). ${skipped} duplicates skipped.</div>`;
+  document.getElementById('xl-pick-actions').style.display='none';
+  triggerSave();
+  _xlPickData=[];
+}
+
 </script>
 </body>
 </html>
