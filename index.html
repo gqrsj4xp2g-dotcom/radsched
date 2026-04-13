@@ -236,6 +236,8 @@ tbody tr:hover{background:var(--bg3)}
     .cal-day.sold-back { background: linear-gradient(135deg, #d1fae5 0%, var(--bg2) 100%) !important; border-left: 3px solid var(--green) !important; }
     .cal-day.sold-back .cal-num { color: var(--green-t) !important; font-weight: 800; }
     .sold-back-banner { font-size:9px; font-weight:800; color:var(--green-t); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+
+    @keyframes rs-spin { to { transform: rotate(360deg); } }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -292,6 +294,13 @@ tbody tr:hover{background:var(--bg3)}
 </div>
 
 <!-- ═══════════════════ APP SCREEN ═══════════════════ -->
+<!-- Loading overlay: shown while fetching Supabase data so seed data never flashes -->
+<div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.88);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+  <div style="width:52px;height:52px;border:5px solid rgba(255,255,255,0.15);border-top-color:#3b82f6;border-radius:50%;animation:rs-spin 0.75s linear infinite"></div>
+  <div style="color:#fff;font-size:16px;font-weight:700;letter-spacing:.02em">Loading shared data…</div>
+  <div style="color:rgba(255,255,255,0.45);font-size:12px">Syncing from database</div>
+</div>
+
 <div id="app">
   <div class="topbar">
     <span class="tb-logo">RadScheduler</span>
@@ -1591,30 +1600,35 @@ async function launchApp(){
   const now=new Date();
   _dashYm=fmtDate(new Date(now.getFullYear(),now.getMonth(),1)).slice(0,7);
 
-  // Load Supabase config from localStorage (saved by user in Settings)
+  // Load Supabase config from localStorage
   _loadSupabaseConfig();
 
-  if(_SUPABASE_URL&&_SUPABASE_KEY){
-    if(si){si.textContent='Loading shared data…';si.style.color='var(--txt2)';}
+  // Check using _getUrl()/_getKey() — not the empty const _SUPABASE_URL/KEY
+  if(_getUrl()&&_getKey()){
+    // Show loading overlay so user never sees seed data
+    document.getElementById('loading-overlay').style.display='flex';
+    if(si){si.textContent='Loading…';si.style.color='var(--txt2)';}
     try{
       const d=await _pullFromSupabase();
       if(d){
         _applyRemoteData(d);
-        if(si){si.textContent='✓ Data loaded';si.style.color='var(--green-t)';
+        if(si){si.textContent='✓ Synced';si.style.color='var(--green-t)';
           setTimeout(()=>{if(si)si.textContent='';},2500);}
       } else {
-        // First run — push current state to Supabase
+        // First run — save seed data to Supabase
         await _pushToSupabase();
-        if(si){si.textContent='✓ Database initialized';si.style.color='var(--green-t)';
+        if(si){si.textContent='✓ Initialized';si.style.color='var(--green-t)';
           setTimeout(()=>{if(si)si.textContent='';},2500);}
       }
       _subscribeRealtime();
     }catch(e){
       console.error('[RS] Supabase load error:',e);
-      if(si){si.textContent='⚠ DB error — offline mode';si.style.color='var(--red-t)';}
+      if(si){si.textContent='⚠ DB error — working offline';si.style.color='var(--red-t)';}
+    } finally {
+      document.getElementById('loading-overlay').style.display='none';
     }
   } else {
-    if(si){si.textContent='Offline — use 💾 to export';si.style.color='var(--txt3)';
+    if(si){si.textContent='Offline mode — use 💾 Save File';si.style.color='var(--txt3)';
       setTimeout(()=>{if(si)si.textContent='';},4000);}
   }
   renderDash();
