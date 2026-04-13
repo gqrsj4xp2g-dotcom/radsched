@@ -446,7 +446,10 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-physicians" class="page">
   <div class="pg-title">Physician Roster</div>
   <div class="ibox">
-    <div class="card-title">Add Physician</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="card-title" id="phys-form-title" style="margin:0">Add Physician</div>
+      <button id="phys-cancel-btn" class="br bsm" style="display:none" onclick="cancelEditPhys()">✕ Cancel Edit</button>
+    </div>
     <div class="g3">
       <div class="fg"><label>First Name</label><input id="p-first" placeholder="Jane"></div>
       <div class="fg"><label>Last Name</label><input id="p-last" placeholder="Smith"></div>
@@ -483,7 +486,8 @@ tbody tr:hover{background:var(--bg3)}
         <label class="chk"><input type="checkbox" id="pe-wknd" checked> Weekend Call</label>
       </div>
     </div>
-    <button class="bp" onclick="addPhys()">Add Physician</button>
+    <input type="hidden" id="p-edit-id" value="">
+    <button class="bp" id="phys-submit-btn" onclick="submitPhys()">Add Physician</button>
   </div>
   <div class="card" id="phys-list"></div>
 
@@ -2113,13 +2117,122 @@ function renderPhysicians(){
           ${p.anchorSite?`<div style="margin-top:2px">${ancBadge(c)} <span style="font-size:10px;color:var(--txt3)">Anchor: ${p.anchorSite}</span></div>`:''}
           <div style="font-size:11px;color:var(--txt2);margin-top:1px">DR: ${p.drSubs.join(', ')||'—'} | Allowed: ${(p.allowedSites||[]).join(', ')||'all'}</div>
         </div>
-        <button class="bsm" onclick="openPhysSiteRules(${p.id})" title="Edit site rules">⚙ Site Rules</button>
-        <button class="br bxs" onclick="removePhys(${p.id})">Remove</button>
+        <button class="bsm" onclick="editPhys(${p.id})" title="Edit physician">✏ Edit</button>
+        <button class="bsm" onclick="openPhysSiteRules(${p.id})" title="Edit site rules">⚙ Rules</button>
+        <button class="br bxs" onclick="removePhys(${p.id})">✕</button>
       </div>`;
     });
   });
   document.getElementById('phys-list').innerHTML=html;
 }
+function submitPhys(){
+  const eid=document.getElementById('p-edit-id').value;
+  if(eid) _saveEditPhys(parseInt(eid));
+  else addPhys();
+}
+
+function editPhys(id){
+  const p=S.physicians.find(x=>x.id===id);if(!p)return;
+  // Switch form to edit mode
+  document.getElementById('phys-form-title').textContent='Edit — '+p.last+', '+p.first;
+  document.getElementById('phys-submit-btn').textContent='Save Changes';
+  document.getElementById('phys-submit-btn').className='bg';
+  document.getElementById('phys-cancel-btn').style.display='';
+  document.getElementById('p-edit-id').value=id;
+  // Basic info
+  document.getElementById('p-first').value=p.first;
+  document.getElementById('p-last').value=p.last;
+  document.getElementById('p-deg').value=p.degree||'MD';
+  document.getElementById('p-role').value=p.role||'DR';
+  roleUI();
+  document.getElementById('p-drfte').value=p.drFte??1;
+  const irfteEl=document.getElementById('p-irfte');
+  if(irfteEl) irfteEl.value=p.irFte??0;
+  // IR fields
+  const irgrpEl=document.getElementById('p-irgrp');
+  if(irgrpEl&&p.irGroup) irgrpEl.value=p.irGroup;
+  const irprimEl=document.getElementById('p-irsiteprim');
+  if(irprimEl&&p.irSitePrim) irprimEl.value=p.irSitePrim;
+  // Anchor site
+  const ancEl=document.getElementById('p-anchor');
+  if(ancEl) ancEl.value=p.anchorSite||'';
+  // Allowed sites checkboxes
+  document.querySelectorAll('[name="asite"]').forEach(cb=>{
+    cb.checked=(p.allowedSites||[]).includes(cb.value);
+  });
+  // DR subspecialties
+  document.querySelectorAll('[name="drs"]').forEach(cb=>{
+    cb.checked=(p.drSubs||[]).includes(cb.value);
+  });
+  // IR subspecialties
+  document.querySelectorAll('[name="irs"]').forEach(cb=>{
+    cb.checked=(p.irSubs||[]).includes(cb.value);
+  });
+  // Shift eligibility
+  const se=p.shiftElig||{};
+  ['s1','s2','s3','home','wknd'].forEach(k=>{
+    const el=document.getElementById('pe-'+k);
+    if(el) el.checked=!!se[k];
+  });
+  // Scroll form into view
+  document.querySelector('#page-physicians .ibox')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function _saveEditPhys(id){
+  const p=S.physicians.find(x=>x.id===id);if(!p)return;
+  const first=document.getElementById('p-first').value.trim();
+  const last=document.getElementById('p-last').value.trim();
+  if(!first||!last){alert('First and last name are required.');return;}
+  const role=document.getElementById('p-role').value;
+  const anchor=document.getElementById('p-anchor').value||null;
+  const allowed=[...document.querySelectorAll('[name="asite"]:checked')].map(c=>c.value);
+  if(anchor&&!allowed.includes(anchor)) allowed.push(anchor);
+  // Apply all edits directly to the physician object
+  p.first=first;
+  p.last=last;
+  p.degree=document.getElementById('p-deg').value;
+  p.role=role;
+  p.drFte=parseFloat(document.getElementById('p-drfte').value)||0;
+  p.irFte=role!=='DR'?(parseFloat(document.getElementById('p-irfte')?.value)||0):0;
+  p.irGroup=role!=='DR'?(document.getElementById('p-irgrp')?.value||null):null;
+  p.irSitePrim=role!=='DR'?(document.getElementById('p-irsiteprim')?.value||null):null;
+  p.anchorSite=anchor;
+  p.allowedSites=allowed.length?allowed:S.sites.map(s=>s.name);
+  p.drSubs=[...document.querySelectorAll('[name="drs"]:checked')].map(c=>c.value);
+  p.irSubs=[...document.querySelectorAll('[name="irs"]:checked')].map(c=>c.value);
+  p.shiftElig={
+    s1:!!document.getElementById('pe-s1')?.checked&&role!=='IR',
+    s2:!!document.getElementById('pe-s2')?.checked&&role!=='IR',
+    s3:!!document.getElementById('pe-s3')?.checked&&role!=='IR',
+    home:!!document.getElementById('pe-home')?.checked&&role!=='IR',
+    wknd:!!document.getElementById('pe-wknd')?.checked&&role!=='IR',
+  };
+  p.drSite=anchor||allowed[0]||S.sites[0]?.name||'';
+  triggerSave();
+  cancelEditPhys();
+  renderPhysicians();
+  if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
+}
+
+function cancelEditPhys(){
+  document.getElementById('p-edit-id').value='';
+  document.getElementById('phys-form-title').textContent='Add Physician';
+  document.getElementById('phys-submit-btn').textContent='Add Physician';
+  document.getElementById('phys-submit-btn').className='bp';
+  document.getElementById('phys-cancel-btn').style.display='none';
+  // Reset all fields
+  ['p-first','p-last'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-deg').value='MD';
+  document.getElementById('p-role').value='DR';
+  roleUI();
+  document.getElementById('p-drfte').value='1.0';
+  const irfteEl=document.getElementById('p-irfte');if(irfteEl)irfteEl.value='0';
+  const ancEl=document.getElementById('p-anchor');if(ancEl)ancEl.value='';
+  document.querySelectorAll('[name="asite"],[name="drs"],[name="irs"]').forEach(cb=>cb.checked=false);
+  const defaults={s1:true,s2:false,s3:false,home:true,wknd:true};
+  Object.entries(defaults).forEach(([k,v])=>{const el=document.getElementById('pe-'+k);if(el)el.checked=v;});
+}
+
 function addPhys(){
   const first=document.getElementById('p-first').value.trim(),last=document.getElementById('p-last').value.trim();
   if(!first||!last){alert('Enter name');return;}
