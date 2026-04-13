@@ -1171,7 +1171,47 @@ tbody tr:hover{background:var(--bg3)}
 
 <!-- SETTINGS -->
 <div id="page-settings" class="page">
-  <div class="pg-title">Shift Rules & Configuration</div>
+  <div class="pg-title">⚙ Settings</div>
+
+  <!-- Supabase Connection -->
+  <div class="card" style="margin-bottom:14px;border:2px solid var(--blue)">
+    <div class="card-title">🔗 Supabase — Shared Database</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px">
+      Connect to Supabase to share data across all users in real time. Every schedule change syncs automatically.
+      Get your credentials from <strong>supabase.com → Project Settings → API</strong>.
+    </div>
+    <div id="sb-status" style="margin-bottom:10px;padding:7px 12px;border-radius:var(--r);background:var(--bg3);font-size:12px">
+      Status: <span id="sb-status-text" style="font-weight:800">Not configured</span>
+    </div>
+    <div class="g2" style="margin-bottom:8px">
+      <div class="fg"><label>Project URL</label>
+        <input id="sb-url" placeholder="https://xxxxxxxxxxxx.supabase.co" style="font-size:12px;font-family:monospace">
+      </div>
+      <div class="fg"><label>Anon / Public Key</label>
+        <input id="sb-key" type="password" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="font-size:11px;font-family:monospace">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="bp bsm" onclick="saveSupabaseConfig()">💾 Save &amp; Connect</button>
+      <button class="bt bsm" onclick="testSupabaseConnection()">🔌 Test Connection</button>
+      <button class="br bsm" onclick="clearSupabaseConfig()">✕ Disconnect</button>
+    </div>
+    <div id="sb-msg" style="font-size:12px;min-height:18px"></div>
+    <details style="margin-top:10px">
+      <summary style="font-size:11px;font-weight:700;cursor:pointer;color:var(--txt2)">▶ First-time setup: create the database table</summary>
+      <div style="margin-top:8px;font-size:11px;color:var(--txt2)">
+        In your Supabase dashboard → <strong>SQL Editor</strong> → New query, paste and run:
+      </div>
+      <pre style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 12px;font-size:11px;margin-top:6px;overflow-x:auto;white-space:pre">CREATE TABLE radscheduler (id TEXT PRIMARY KEY, data TEXT);
+ALTER TABLE radscheduler ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true);</pre>
+      <div style="margin-top:6px;font-size:11px;color:var(--txt3)">
+        Then paste your Project URL and anon key above and click Save &amp; Connect.
+      </div>
+    </details>
+  </div>
+
+  <!-- Shift Rules & Config -->
   <div class="g2">
     <div>
       <div class="card">
