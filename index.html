@@ -339,6 +339,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('ir-builder',this)">IR Call Builder</div>
       <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)">IR Shift Auto-Assign</div>
       <div class="snav-item admin-only" onclick="nav('ir-auto',this)">IR Call Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)">⚖ IR Call Rebalancer</div>
       <div class="snav-sect">Compliance & Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
       <div class="snav-item" onclick="nav('holidays',this)">Holiday Call</div>
@@ -1176,6 +1177,43 @@ tbody tr:hover{background:var(--bg3)}
     </div>
   </div>
   <div class="card" id="ha-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+</div>
+
+<!-- IR CALL REBALANCER -->
+<div id="page-ir-rebalance" class="page">
+  <div class="pg-title">⚖ IR Call Rebalancer</div>
+  <div class="pg-sub">Redistribute existing IR call assignments to achieve FTE-proportional equity. Targets are calculated from actual available slots in the month divided by group FTE — not arbitrary caps.</div>
+
+  <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>Month</label><input id="irr-mo" type="month" oninput="renderIRRebalancePrep()"></div>
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="irr-grp" onchange="renderIRRebalancePrep()" style="width:120px">
+        <option value="both">Both Groups</option>
+        <option value="North">North Only</option>
+        <option value="South">South Only</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Call Type</label>
+      <select id="irr-type" onchange="renderIRRebalancePrep()" style="width:140px">
+        <option value="both">Daily + Weekend</option>
+        <option value="daily">Daily Only</option>
+        <option value="weekend">Weekend Only</option>
+      </select>
+    </div>
+    <button class="bp" onclick="previewIRRebalance()" style="margin-bottom:2px">⚖ Preview Rebalance</button>
+    <button class="bt bsm" onclick="renderIRRebalancePrep()" style="margin-bottom:2px">↺ Refresh</button>
+  </div>
+
+  <!-- Current distribution summary -->
+  <div id="irr-current"></div>
+
+  <!-- Rebalance preview -->
+  <div id="irr-preview"></div>
+
+  <div style="margin-top:12px">
+    <button id="irr-apply" class="bg" style="display:none" onclick="applyIRRebalance()">✓ Apply Rebalance</button>
+    <span id="irr-apply-note" style="font-size:11px;color:var(--txt3);margin-left:10px"></span>
+  </div>
 </div>
 
 <!-- ANCHOR REPORT -->
@@ -2316,7 +2354,7 @@ function nav(pg,el){
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
-    'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},
+    'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:renderFTE,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,
   };
@@ -4030,6 +4068,372 @@ function applyIRAA(){
   });
   triggerSave();document.getElementById('ira-box').innerHTML=`<div class="note ns">${S.iraPreview.length} entries applied.</div>`;
   S.iraPreview=[];triggerSave();document.getElementById('ira-apply').style.display='none';
+}
+
+/* ─── IR CALL REBALANCER ─── */
+
+let _irrPlan = null; // holds the last preview plan
+
+function renderIRRebalancePrep(){
+  const moEl = document.getElementById('irr-mo');
+  if(!moEl) return;
+  if(!moEl.value){ const now=new Date(); moEl.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'); }
+  const ym = moEl.value;
+  const grp = document.getElementById('irr-grp')?.value||'both';
+  const typ = document.getElementById('irr-type')?.value||'both';
+  const [y,m] = ym.split('-').map(Number);
+  const label = new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
+
+  // Show current distribution
+  let html = `<div class="card" style="margin-bottom:12px">
+    <div class="card-title">Current Distribution — ${label}</div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Group</th><th>IR FTE</th>
+      ${typ!=='weekend'?'<th>Daily Calls</th><th>Daily Target</th><th>Daily %</th>':''}
+      ${typ!=='daily'?'<th>Wknd Calls</th><th>Wknd Target</th><th>Wknd %</th>':''}
+    </tr></thead><tbody>`;
+
+  const irPs = S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
+  if(!irPs.length){ document.getElementById('irr-current').innerHTML='<div class="note ni">No IR physicians configured for this group.</div>'; return; }
+
+  let anyCall = false;
+  irPs.forEach(p=>{
+    const d = irDailyCnt(p.id,ym);
+    const w = irWkndCnt(p.id,ym);
+    if(d>0||w>0) anyCall=true;
+    const td = irDailyTargetMonth(p,ym), tw = irWkndTargetMonth(p,ym);
+    const pd = td>0?Math.round(d/td*100):0, pw = tw>0?Math.round(w/tw*100):0;
+    const dCls = pd>110?'color:var(--red-t)':pd>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const wCls = pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    html+=`<tr>
+      <td style="font-weight:600">${pname(p.id)}</td>
+      <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+      <td style="text-align:center">${p.irFte}</td>
+      ${typ!=='weekend'?`<td style="text-align:center;font-weight:700">${d}</td>
+        <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
+        <td style="text-align:center;font-weight:700;${dCls}">${pd}%</td>`:''}
+      ${typ!=='daily'?`<td style="text-align:center;font-weight:700">${w}</td>
+        <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
+        <td style="text-align:center;font-weight:700;${wCls}">${pw}%</td>`:''}
+    </tr>`;
+  });
+  html += '</tbody></table></div></div>';
+
+  if(!anyCall){
+    html += '<div class="note ni" style="margin-bottom:10px">No IR call assignments found for this month. Build the schedule first, then use the rebalancer.</div>';
+  }
+  document.getElementById('irr-current').innerHTML = html;
+  document.getElementById('irr-preview').innerHTML = '';
+  document.getElementById('irr-apply').style.display = 'none';
+  document.getElementById('irr-apply-note').textContent = '';
+  _irrPlan = null;
+}
+
+function previewIRRebalance(){
+  const ym = document.getElementById('irr-mo')?.value;
+  const grp = document.getElementById('irr-grp')?.value||'both';
+  const typ = document.getElementById('irr-type')?.value||'both';
+  if(!ym){ alert('Select a month.'); return; }
+
+  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
+  const plan = { daily:[], weekend:[], swapsD:0, swapsW:0, failedD:[], failedW:[] };
+
+  // ── Check for back-to-back conflicts within a new set of assignments ──
+  function inPlanAdjacent(pid, date, assignments, callType){
+    const prev=addDays(date,-1), next=addDays(date,1);
+    if(callType==='daily'){
+      // Adjacent daily
+      if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===prev||a.date===next))) return true;
+      // Inside a weekend span already in plan
+      if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&(date>=a.date&&date<=addDays(a.date,4)))) return true;
+      // Adjacent to weekend in plan (Thu before / Tue after)
+      if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&(date===addDays(a.date,-1)||date===addDays(a.date,4)))) return true;
+    }
+    if(callType==='weekend'){
+      const thu=addDays(date,-1), tue=addDays(date,4), mon=addDays(date,3);
+      if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===thu||a.date===tue))) return true;
+      if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&a.date!==date&&
+        Math.abs(parseDateLocal(date).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)) return true;
+    }
+    return false;
+  }
+
+  // ── Check back-to-back against EXISTING calls outside this month ──
+  function existingAdjacentOutsideMonth(pid, date, callType){
+    const prev=addDays(date,-1), next=addDays(date,1);
+    const outsideCalls = S.irCalls.filter(c=>c.physId===pid&&!c.date.startsWith(ym));
+    if(callType==='daily'){
+      return outsideCalls.some(c=>
+        c.callType==='daily'&&(c.date===prev||c.date===next)||
+        c.callType==='weekend'&&(date>=c.date&&date<=addDays(c.date,4))
+      );
+    }
+    if(callType==='weekend'){
+      const thu=addDays(date,-1), tue=addDays(date,4);
+      return outsideCalls.some(c=>
+        c.callType==='daily'&&(c.date===thu||c.date===tue)||
+        c.callType==='weekend'&&c.date!==date&&Math.abs(parseDateLocal(date).getTime()-parseDateLocal(c.date).getTime())/86400000<=7
+      );
+    }
+    return false;
+  }
+
+  groups.forEach(g=>{
+    const gPhys = S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
+    if(!gPhys.length) return;
+
+    // ── Redistribute DAILY calls ──
+    if(typ==='daily'||typ==='both'){
+      const dailyDates = S.irCalls
+        .filter(c=>c.date.startsWith(ym)&&c.irGroup===g&&c.callType==='daily')
+        .map(c=>c.date).sort();
+
+      const cntD = {}; gPhys.forEach(p=>{ cntD[p.id]=0; });
+      const dailyCapFn = p => Math.max(Math.ceil(irDailyTargetMonth(p,ym)),1);
+      const gAssignments = []; // track within-pass assignments for this group
+
+      dailyDates.forEach(date=>{
+        const origCall = S.irCalls.find(c=>c.date===date&&c.irGroup===g&&c.callType==='daily');
+
+        const eligible = gPhys.filter(p=>{
+          if(vacDays(p.id).has(date)) return false;
+          if(_has2ndOr3rdShift(p.id,date)) return false;
+          if(!_hasIRShiftOnDate(p.id,date)) return false;
+          if(existingAdjacentOutsideMonth(p.id,date,'daily')) return false;
+          if(inPlanAdjacent(p.id,date,gAssignments,'daily')) return false;
+          return dailyCapFn(p)>0;
+        });
+
+        let picked = null;
+        if(eligible.length){
+          // Sort by fill ratio + rotating tiebreaker
+          const n=Math.max(gPhys.length,1);
+          const offset=Object.values(cntD).reduce((s,v)=>s+v,0)%n;
+          eligible.sort((a,b)=>{
+            const mA=dailyCapFn(a)||1, mB=dailyCapFn(b)||1;
+            const rA=cntD[a.id]/mA, rB=cntD[b.id]/mB;
+            if(Math.abs(rA-rB)>1e-9) return rA-rB;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
+            return iA-iB;
+          });
+          picked = eligible[0];
+        }
+
+        if(picked){
+          const isSwap = origCall && origCall.physId !== picked.id;
+          const site = origCall?.site || (S.sites.find(s=>s.irGroup===g)?.name||'');
+          const entry = {physId:picked.id,date,callType:'daily',irGroup:g,site,notes:origCall?.notes||'',
+            origPhysId: origCall?.physId||null, origId: origCall?.id||null, isSwap};
+          plan.daily.push(entry);
+          gAssignments.push(entry);
+          cntD[picked.id]++;
+          if(isSwap) plan.swapsD++;
+        } else {
+          // Keep original
+          plan.failedD.push(date);
+          if(origCall){
+            const entry = {physId:origCall.physId,date,callType:'daily',irGroup:g,site:origCall.site,notes:origCall.notes,
+              origPhysId:origCall.physId,origId:origCall.id,isSwap:false,constrained:true};
+            plan.daily.push(entry);
+            gAssignments.push(entry);
+            cntD[origCall.physId] = (cntD[origCall.physId]||0)+1;
+          }
+        }
+      });
+    }
+
+    // ── Redistribute WEEKEND calls ──
+    if(typ==='weekend'||typ==='both'){
+      const wkndDates = S.irCalls
+        .filter(c=>c.date.startsWith(ym)&&c.irGroup===g&&c.callType==='weekend')
+        .map(c=>c.date).sort();
+
+      const cntW = {}; gPhys.forEach(p=>{ cntW[p.id]=0; });
+      const wkndCapFn = p => Math.max(Math.ceil(irWkndTargetMonth(p,ym)),1);
+      const gWkndAssignments = [];
+
+      wkndDates.forEach(fridayDate=>{
+        const origCall = S.irCalls.find(c=>c.date===fridayDate&&c.irGroup===g&&c.callType==='weekend');
+        const mon = addDays(fridayDate,3);
+
+        const eligible = gPhys.filter(p=>{
+          const vd=vacDays(p.id);
+          if(vd.has(fridayDate)||vd.has(mon)) return false;
+          if(_hasAdjacentIRCall(p.id,fridayDate)||_hasIRCallNearWeekend(p.id,fridayDate)) return false;
+          if(existingAdjacentOutsideMonth(p.id,fridayDate,'weekend')) return false;
+          if(inPlanAdjacent(p.id,fridayDate,gWkndAssignments,'weekend')) return false;
+          const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
+          if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+          return wkndCapFn(p)>0;
+        });
+
+        let picked = null;
+        if(eligible.length){
+          const n=Math.max(gPhys.length,1);
+          const offset=Object.values(cntW).reduce((s,v)=>s+v,0)%n;
+          eligible.sort((a,b)=>{
+            const mA=wkndCapFn(a)||1, mB=wkndCapFn(b)||1;
+            const rA=cntW[a.id]/mA, rB=cntW[b.id]/mB;
+            if(Math.abs(rA-rB)>1e-9) return rA-rB;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
+            return iA-iB;
+          });
+          picked = eligible[0];
+        }
+
+        if(picked){
+          const isSwap = origCall && origCall.physId !== picked.id;
+          const site = origCall?.site || (S.sites.find(s=>s.irGroup===g)?.name||'');
+          const entry = {physId:picked.id,date:fridayDate,callType:'weekend',irGroup:g,site,notes:origCall?.notes||'',
+            origPhysId:origCall?.physId||null,origId:origCall?.id||null,isSwap};
+          plan.weekend.push(entry);
+          gWkndAssignments.push(entry);
+          cntW[picked.id]++;
+          if(isSwap) plan.swapsW++;
+        } else {
+          plan.failedW.push(fridayDate);
+          if(origCall){
+            const entry = {physId:origCall.physId,date:fridayDate,callType:'weekend',irGroup:g,site:origCall.site,notes:origCall.notes,
+              origPhysId:origCall.physId,origId:origCall.id,isSwap:false,constrained:true};
+            plan.weekend.push(entry);
+            gWkndAssignments.push(entry);
+            cntW[origCall.physId]=(cntW[origCall.physId]||0)+1;
+          }
+        }
+      });
+    }
+  });
+
+  _irrPlan = plan;
+  const totalSwaps = plan.swapsD + plan.swapsW;
+  const totalFailed = plan.failedD.length + plan.failedW.length;
+  const [y,m] = ym.split('-').map(Number);
+  const label = new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+
+  let html = '';
+
+  // ── Proposed distribution summary ──
+  const irPs = S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
+  html += `<div class="card" style="margin-bottom:12px">
+    <div class="card-title">Proposed Distribution — ${label}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">${totalSwaps} reassignment(s) · ${totalFailed} date(s) constrained (kept original)</span>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Group</th><th>IR FTE</th>
+      ${typ!=='weekend'?'<th>Daily (was)</th><th>Daily (new)</th><th>Target</th><th>Daily %</th>':''}
+      ${typ!=='daily'?'<th>Wknd (was)</th><th>Wknd (new)</th><th>Target</th><th>Wknd %</th>':''}
+    </tr></thead><tbody>`;
+
+  irPs.forEach(p=>{
+    const oldD = irDailyCnt(p.id,ym), oldW = irWkndCnt(p.id,ym);
+    const newD = plan.daily.filter(a=>a.physId===p.id).length;
+    const newW = plan.weekend.filter(a=>a.physId===p.id).length;
+    const td = irDailyTargetMonth(p,ym), tw = irWkndTargetMonth(p,ym);
+    const pdNew = td>0?Math.round(newD/td*100):0;
+    const pwNew = tw>0?Math.round(newW/tw*100):0;
+    const dCls = pdNew>110?'color:var(--red-t)':pdNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const wCls = pwNew>110?'color:var(--red-t)':pwNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const dChg = newD-oldD, wChg = newW-oldW;
+    const dArrow = dChg>0?`<span style="color:var(--green-t)">▲${dChg}</span>`:dChg<0?`<span style="color:var(--amber,#d97706)">▼${Math.abs(dChg)}</span>`:'';
+    const wArrow = wChg>0?`<span style="color:var(--green-t)">▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)">▼${Math.abs(wChg)}</span>`:'';
+    html+=`<tr>
+      <td style="font-weight:600">${pname(p.id)}</td>
+      <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+      <td style="text-align:center">${p.irFte}</td>
+      ${typ!=='weekend'?`<td style="text-align:center;color:var(--txt3)">${oldD}</td>
+        <td style="text-align:center;font-weight:700">${newD} ${dArrow}</td>
+        <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
+        <td style="text-align:center;font-weight:700;${dCls}">${pdNew}%</td>`:''}
+      ${typ!=='daily'?`<td style="text-align:center;color:var(--txt3)">${oldW}</td>
+        <td style="text-align:center;font-weight:700">${newW} ${wArrow}</td>
+        <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
+        <td style="text-align:center;font-weight:700;${wCls}">${pwNew}%</td>`:''}
+    </tr>`;
+  });
+  html += '</tbody></table></div></div>';
+
+  // ── Swap detail table ──
+  const allSwaps = [...plan.daily, ...plan.weekend]
+    .filter(a=>a.isSwap)
+    .sort((a,b)=>a.date>b.date?1:-1);
+
+  if(allSwaps.length){
+    html += `<div class="card" style="margin-bottom:12px">
+      <div class="card-title">Reassignments (${allSwaps.length})</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Date</th><th>Type</th><th>Group</th><th>From</th><th>To</th>
+      </tr></thead><tbody>`;
+    allSwaps.forEach(a=>{
+      const dates = a.callType==='weekend'?`${a.date} → ${addDays(a.date,3)}`:a.date;
+      html+=`<tr>
+        <td>${dates}</td>
+        <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
+        <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
+        <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
+        <td style="font-weight:600;color:var(--green-t)">→ ${pname(a.physId)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  } else {
+    html += `<div class="note ns" style="margin-bottom:12px">✓ Current distribution is already optimal — no reassignments needed.</div>`;
+  }
+
+  if(totalFailed){
+    const allFailed = [...plan.failedD,...plan.failedW];
+    html += `<div class="note nw" style="margin-bottom:12px">
+      ⚠ ${totalFailed} date(s) kept with original assignment due to constraints (vacation, back-to-back rules, IR shift requirement):
+      <span style="font-size:11px"> ${allFailed.join(', ')}</span>
+    </div>`;
+  }
+
+  document.getElementById('irr-preview').innerHTML = html;
+  document.getElementById('irr-apply').style.display = totalSwaps>0?'inline-block':'none';
+  document.getElementById('irr-apply-note').textContent = totalSwaps>0
+    ? `Will make ${totalSwaps} reassignment(s). Original assignments will be replaced.`
+    : '';
+}
+
+function applyIRRebalance(){
+  if(!_adminOnly('apply IR rebalance')) return;
+  if(!_irrPlan) return;
+  const ym = document.getElementById('irr-mo')?.value;
+  const grp = document.getElementById('irr-grp')?.value||'both';
+  const typ = document.getElementById('irr-type')?.value||'both';
+  if(!ym) return;
+
+  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
+  const callTypesToReplace = [];
+  if(typ==='daily'||typ==='both') callTypesToReplace.push('daily');
+  if(typ==='weekend'||typ==='both') callTypesToReplace.push('weekend');
+
+  // Remove existing calls for the affected months/groups/types
+  S.irCalls = S.irCalls.filter(c=>{
+    if(!c.date.startsWith(ym)) return true;
+    if(!groups.includes(c.irGroup)) return true;
+    if(!callTypesToReplace.includes(c.callType)) return true;
+    return false; // remove these
+  });
+
+  // Add the new assignments
+  const toAdd = [..._irrPlan.daily, ..._irrPlan.weekend];
+  toAdd.forEach(a=>{
+    S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,
+      irGroup:a.irGroup,site:a.site,notes:a.notes||'Rebalanced'});
+  });
+
+  triggerSave();
+  _irrPlan = null;
+  document.getElementById('irr-apply').style.display = 'none';
+  document.getElementById('irr-apply-note').textContent = '';
+
+  const totalSwaps = (_irrPlan===null) ? (toAdd.length) : 0;
+  _updateSaveUI(`✓ Rebalanced — ${toAdd.length} call(s) applied`,'var(--green-t)');
+  renderIRRebalancePrep(); // refresh current distribution
+  document.getElementById('irr-preview').innerHTML =
+    `<div class="note ns">✓ Rebalance applied. ${toAdd.length} IR call assignment(s) updated.</div>`;
 }
 
 /* ─── ANCHOR REPORT ─── */
