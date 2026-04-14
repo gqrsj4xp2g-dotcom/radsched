@@ -1437,7 +1437,8 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div class="g2">
           <div class="fg"><label>Max weekday shifts (1.0 FTE)</label><input id="cfg-wd" type="number" value="20" style="width:70px" oninput="saveCfg()"></div>
           <div class="fg"><label>Max weekend calls (1.0 FTE)</label><input id="cfg-wk" type="number" value="4" style="width:70px" oninput="saveCfg()"></div>
-          <div class="fg"><label>Max IR daily calls (1.0 FTE)</label><input id="cfg-ir" type="number" value="20" style="width:70px" oninput="saveCfg()"></div>
+          <div class="fg"><label>Max IR daily calls (1.0 FTE)</label><input id="cfg-ir-daily" type="number" value="20" style="width:70px" oninput="saveCfg()"></div>
+          <div class="fg"><label>Max IR weekend calls (1.0 FTE)</label><input id="cfg-ir-wknd" type="number" value="4" style="width:70px" oninput="saveCfg()"></div>
           <div class="fg"><label>Min rest days between shifts</label><input id="cfg-rest" type="number" value="1" style="width:70px" oninput="saveCfg()"></div>
         </div>
         <div class="fg" style="background:var(--amber-bg);border:1px solid #fde68a;border-radius:var(--r);padding:10px 12px;margin-top:6px">
@@ -2044,7 +2045,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,rest:1,anchorPct:60},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:60},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
   // Chat messages
@@ -2198,10 +2199,20 @@ function getWeek(date,ym){const [y,m]=ym.split('-').map(Number);const first=new 
 function parseDateLocal(ds){const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);}
 function addDays(ds,n){const d=parseDateLocal(ds);d.setDate(d.getDate()+n);return fmtDate(d);}
 function fmtDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function maxDR(p,t){if(t==='wd')return Math.round(S.cfg.wdMax*p.drFte);if(t==='wk')return Math.round(S.cfg.wkMax*p.drFte);if(t==='ir')return Math.round(S.cfg.irMax*p.irFte);return 0;}
+function maxDR(p,t){
+  if(t==='wd') return Math.round(S.cfg.wdMax*p.drFte);
+  if(t==='wk') return Math.round(S.cfg.wkMax*p.drFte);
+  // ir = combined total (daily cap + weekend cap) — kept for backward compat
+  if(t==='ir') return maxDR(p,'ir-daily')+maxDR(p,'ir-wknd');
+  if(t==='ir-daily') return Math.round((S.cfg.irDailyMax||S.cfg.irMax||20)*p.irFte);
+  if(t==='ir-wknd')  return Math.round((S.cfg.irWkndMax||4)*p.irFte);
+  return 0;
+}
 function drCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
 function wkCnt(pid,ym){return S.weekendCalls.filter(w=>(w.satDate||w.date||"").startsWith(ym)&&w.physId===pid).length;}
 function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
+function irDailyCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='daily').length;}
+function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='weekend').length;}
 
 /* ─── ANCHOR COMPLIANCE ─── */
 // Anchor compliance is a REPORTING tool only — not a scheduling constraint.
@@ -2341,6 +2352,7 @@ function renderMySched(){
   const shifts=S.drShifts.filter(s=>s.physId===p.id&&s.date.startsWith(ym)&&!s.autoHome);
   const wk=S.weekendCalls.filter(s=>s.physId===p.id&&(s.satDate||s.date||'').startsWith(ym));
   const ir=S.irCalls.filter(s=>s.physId===p.id&&s.date.startsWith(ym));
+  const irSh=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym));
   const hols=S.holidays.filter(h=>h.physId===p.id&&h.date.startsWith(ym));
   const vacs=S.vacations.filter(v=>v.physId===p.id&&v.start.slice(0,7)<=ym&&v.end.slice(0,7)>=ym);
   const c=ancComp(p.id,ym);
@@ -2349,7 +2361,8 @@ function renderMySched(){
   let html=`<div class="g4" style="margin-bottom:12px">
     <div class="met"><div class="met-lbl">DR Shifts</div><div class="met-val">${shifts.filter(s=>s.shift!=='Home').length}/${maxDR(p,'wd')}</div><div class="met-sub">this month</div></div>
     <div class="met"><div class="met-lbl">Weekend Calls</div><div class="met-val">${wk.length}/${maxDR(p,'wk')}</div></div>
-    ${p.irFte>0?`<div class="met"><div class="met-lbl">IR Calls</div><div class="met-val">${ir.length}/${maxDR(p,'ir')}</div></div>`:''}
+    ${p.irFte>0?`<div class="met"><div class="met-lbl">IR Calls</div><div class="met-val">${ir.length}/${maxDR(p,'ir')}</div></div>
+    <div class="met"><div class="met-lbl">IR Shifts</div><div class="met-val">${irSh.length}</div><div class="met-sub">this month</div></div>`:''}
     ${c&&!c.noData?`<div class="met"><div class="met-lbl">⚓ Anchor</div><div class="met-val" style="color:${c.ok?'var(--green)':'var(--red)'}">${c.pct}%</div><div class="met-sub">≥${S.cfg.anchorPct}% target</div></div>`:''}
   </div>`;
   if(c&&c.ok===false) html+=`<div class="note nw" style="margin-bottom:10px">⚓ Anchor alert: ${c.pct}% at ${c.anchor} — need ≥${S.cfg.anchorPct}%.</div>`;
@@ -2384,6 +2397,11 @@ function renderMySched(){
       if(ic.callType==='weekend'){const wEnd=addDays(ic.date,3);if(c.date>=ic.date&&c.date<=wEnd)show=true;}
       if(show) evs+=`<div class="ev ${ic.callType==='weekend'?'ewk':'eir'}" title="IR ${ic.callType}">${ic.callType==='weekend'?'📞':'📟'} IR</div>`;
     });
+    irSh.filter(s=>s.date===c.date).forEach(s=>{
+      const shCls=s.shift==='Home'?'ehome':s.shift==='1st'?'eir':s.shift==='2nd'?'e2':'e3';
+      const lbl=s.shift==='Home'?'🏠 Home':s.shift+' IR';
+      evs+=`<div class="ev ${shCls}" title="IR ${s.shift} Shift @ ${s.site}">${lbl} ${s.site.split(' ')[0]}</div>`;
+    });
     hols.filter(h=>h.date===c.date).forEach(h=>evs+=`<div class="ev ehol" title="${h.name}">🏖</div>`);
     if(vacSet.has(c.date)) evs+=`<div class="ev evac" title="Off">Off</div>`;
     const isSB=S.vacations.some(v=>v.physId===p.id&&v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
@@ -2395,6 +2413,7 @@ function renderMySched(){
     ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:s.sub||'—',col:'tb'})),
     ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
     ...ir.map(i=>({date:i.date,type:'IR '+i.callType+(i.callType==='weekend'?' (Fri→Mon)':''),site:i.site,detail:i.irGroup||'—',col:'tt'})),
+    ...irSh.map(s=>({date:s.date,type:'IR '+s.shift+' Shift',site:s.site,detail:s.sub||s.irGroup||'—',col:'tt'})),
     ...hols.map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
@@ -2871,28 +2890,33 @@ function renderFTE(){
     html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization</div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
-        <th>Daily Calls</th><th>Weekend Calls</th><th>Total Calls</th><th>Target</th><th>Utilization</th>
+        <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
+        <th>Weekend Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
         <th>IR Shifts</th><th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
       const dailyCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length;
       const wkndCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length;
-      const irUsed=dailyCalls+wkndCalls;
-      const irMax=maxDR(p,'ir');
-      const irPct=irMax?Math.round(irUsed/irMax*100):0;
+      const dailyMax=maxDR(p,'ir-daily');
+      const wkndMax=maxDR(p,'ir-wknd');
+      const dailyPct=dailyMax?Math.round(dailyCalls/dailyMax*100):0;
+      const wkndPct=wkndMax?Math.round(wkndCalls/wkndMax*100):0;
       const shiftUsed=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym)).length;
-      const cls=irPct>105?'color:var(--red-t)':irPct>=90?'color:var(--green-t)':irPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const statusTxt=irPct>110?'⚠ Over':irPct>=80?'✓ On track':'Low';
-      const statusCls=irPct>110?'color:var(--red-t)':irPct>=80?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const dCls=dailyPct>105?'color:var(--red-t)':dailyPct>=90?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const wCls=wkndPct>105?'color:var(--red-t)':wkndPct>=90?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=dailyPct>110||wkndPct>110;
+      const statusTxt=over?'⚠ Over':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
+      const statusCls=over?'color:var(--red-t)':(dailyPct>=80&&wkndPct>=80)?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
         <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
-        <td style="text-align:center">${dailyCalls}</td>
-        <td style="text-align:center">${wkndCalls}</td>
-        <td style="text-align:center;font-weight:700">${irUsed}</td>
-        <td style="text-align:center;color:var(--txt3)">${irMax}</td>
-        <td style="text-align:center"><span style="${cls};font-weight:700">${irPct}%</span></td>
+        <td style="text-align:center;font-weight:700">${dailyCalls}</td>
+        <td style="text-align:center;color:var(--txt3)">${dailyMax}</td>
+        <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
+        <td style="text-align:center;font-weight:700">${wkndCalls}</td>
+        <td style="text-align:center;color:var(--txt3)">${wkndMax}</td>
+        <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td style="text-align:center">${shiftUsed}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
@@ -3020,29 +3044,34 @@ function renderFTEYear(){
       <div class="card-title">Interventional Radiology — ${yr} Yearly Totals</div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
-        <th>Daily Calls</th><th>Wknd Calls</th><th>Total Calls</th><th>Target</th><th>Util%</th>
+        <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
+        <th>Wknd Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
         <th>IR Shifts</th><th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
       const dailyTotal=months.reduce((s,ym)=>s+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length,0);
       const wkndTotal=months.reduce((s,ym)=>s+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length,0);
-      const irTotal=dailyTotal+wkndTotal;
-      const irTgt=yrTarget(p,'ir');
-      const irPct=irTgt?Math.round(irTotal/irTgt*100):0;
+      const dailyTgt=yrTarget(p,'ir-daily');
+      const wkndTgt=yrTarget(p,'ir-wknd');
+      const dailyPct=dailyTgt?Math.round(dailyTotal/dailyTgt*100):0;
+      const wkndPct=wkndTgt?Math.round(wkndTotal/wkndTgt*100):0;
       const shiftsTotal=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)).length,0);
-      const cls=irPct>105?'color:var(--red-t)':irPct>=85?'color:var(--green-t)':irPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=irPct>110; const low=irPct<50;
-      const statusTxt=over?'⚠ Over':low?'Under':irPct>=80?'✓ On track':'Low';
+      const dCls=dailyPct>105?'color:var(--red-t)':dailyPct>=85?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const wCls=wkndPct>105?'color:var(--red-t)':wkndPct>=85?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=dailyPct>110||wkndPct>110;
+      const low=dailyPct<50&&wkndPct<50;
+      const statusTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
       const statusCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
         <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
-        <td style="text-align:center">${dailyTotal}</td>
-        <td style="text-align:center">${wkndTotal}</td>
-        <td style="text-align:center;font-weight:800">${irTotal}</td>
-        <td style="text-align:center;color:var(--txt3)">${irTgt}</td>
-        <td style="text-align:center"><span style="${cls};font-weight:700">${irPct}%</span></td>
+        <td style="text-align:center;font-weight:700">${dailyTotal}</td>
+        <td style="text-align:center;color:var(--txt3)">${dailyTgt}</td>
+        <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
+        <td style="text-align:center;font-weight:700">${wkndTotal}</td>
+        <td style="text-align:center;color:var(--txt3)">${wkndTgt}</td>
+        <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td style="text-align:center">${shiftsTotal}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
@@ -3053,9 +3082,10 @@ function renderFTEYear(){
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
       <td style="font-weight:800" colspan="3">Team Total</td>
       <td style="text-align:center;font-weight:800">${totDaily}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+yrTarget(p,'ir-daily'),0)}</td>
+      <td></td>
       <td style="text-align:center;font-weight:800">${totWknd}</td>
-      <td style="text-align:center;font-weight:800">${totDaily+totWknd}</td>
-      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+yrTarget(p,'ir'),0)}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+yrTarget(p,'ir-wknd'),0)}</td>
       <td></td><td></td><td></td>
     </tr>`;
     html+=`</tbody></table></div></div>`;
@@ -3741,7 +3771,9 @@ function previewIRAA(){
   const cells=buildCal(ym);
   const vm=vacMap();
   const irPs=S.physicians.filter(p=>p.irFte>0);
-  const cnt={};irPs.forEach(p=>{cnt[p.id]=irCnt(p.id,ym);});
+  // Track daily and weekend counts separately for FTE-normalized distribution
+  const cntD={};const cntW={};
+  irPs.forEach(p=>{cntD[p.id]=irDailyCnt(p.id,ym);cntW[p.id]=irWkndCnt(p.id,ym);});
   const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
 
   // A physician is "on IR call" if they have any irCall or weekend coverage on this date
@@ -3782,15 +3814,15 @@ function previewIRAA(){
           )))return false;
           if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call'))return false;
           if(!sequenceOk(p,c.date,ym))return false;
-          return cnt[p.id]<maxDR(p,'ir');
-        }).sort((a,b)=>cnt[a.id]/maxDR(a,'ir')-cnt[b.id]/maxDR(b,'ir'));
+          return cntD[p.id]<maxDR(p,'ir-daily');
+        }).sort((a,b)=>cntD[a.id]/maxDR(a,'ir-daily')-cntD[b.id]/maxDR(b,'ir-daily'));
         if(pool.length){
           const p=pool[0];
           // Assign to all sites in the group
           const gSites=S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both');
           const primarySite=p.irSitePrim||(gSites[0]?.name||'');
           preview.push({physId:p.id,date:c.date,callType:'daily',irGroup:g,site:primarySite,notes:'Auto'});
-          cnt[p.id]++;
+          cntD[p.id]++;
         } else {
           gaps.push(`${c.date} ${g}`);
         }
@@ -3809,13 +3841,13 @@ function previewIRAA(){
                ||preview.find(a=>!a._drHome&&a.date===c.date&&a.irGroup===g&&a.callType==='weekend');
         if(ex)return;
         const mon=addDays(c.date,3);
-        const pool=gPhys.filter(p=>{const vd=vacDays(p.id);if(vd.has(c.date)||vd.has(mon))return false;return cnt[p.id]<maxDR(p,'ir');}).sort((a,b)=>cnt[a.id]/maxDR(a,'ir')-cnt[b.id]/maxDR(b,'ir')); // FTE-normalized sort
+        const pool=gPhys.filter(p=>{const vd=vacDays(p.id);if(vd.has(c.date)||vd.has(mon))return false;return cntW[p.id]<maxDR(p,'ir-wknd');}).sort((a,b)=>cntW[a.id]/maxDR(a,'ir-wknd')-cntW[b.id]/maxDR(b,'ir-wknd')); // FTE-normalized sort
         if(pool.length){
           const p=pool[0];
           const gSites=S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both');
           const site=p.irSitePrim||(gSites[0]?.name||'');
           preview.push({physId:p.id,date:c.date,callType:'weekend',irGroup:g,site,notes:'Auto'});
-          cnt[p.id]++;
+          cntW[p.id]++;
         } else {
           gaps.push(`Wknd ${c.date} ${g}`);
         }
@@ -3848,14 +3880,17 @@ function previewIRAA(){
     if(irPrev.length>30) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${irPrev.length-30} more</td></tr>`;
     html+='</tbody></table></div>';
   }
-  // Unassigned IR physicians shown separately
+  // Unassigned IR physicians shown separately — split by call type
   const unassigned=[];
   S.physicians.filter(p=>p.irFte>0&&(grpFilter==='both'||p.irGroup===grpFilter)).forEach(p=>{
-    const assigned=irPrev.filter(a=>a.physId===p.id).length;
-    if(assigned<maxDR(p,'ir')) unassigned.push({name:pname(p.id),assigned,max:maxDR(p,'ir')});
+    const aD=dailyPrev.filter(a=>a.physId===p.id).length;
+    const aW=wkndPrev.filter(a=>a.physId===p.id).length;
+    const mD=maxDR(p,'ir-daily'),mW=maxDR(p,'ir-wknd');
+    if(aD<mD||aW<mW)
+      unassigned.push({name:pname(p.id),daily:`${aD}/${mD}`,wknd:`${aW}/${mW}`});
   });
   if(unassigned.length)
-    html+=`<div class="note ni" style="margin-top:8px"><strong>Unassigned IR physicians</strong> (no auto-fill): ${unassigned.map(u=>`${u.name} (${u.assigned}/${u.max})`).join(', ')}</div>`;
+    html+=`<div class="note ni" style="margin-top:8px"><strong>Physicians below target</strong>: ${unassigned.map(u=>`${u.name} (daily ${u.daily} · wknd ${u.wknd})`).join(', ')}</div>`;
   if(gaps.length)
     html+=`<div class="note nw" style="margin-top:8px">⚠ ${gaps.length} gap(s): ${gaps.slice(0,5).join(', ')}</div>`;
   if(!preview.length&&!gaps.length)
@@ -4057,11 +4092,21 @@ function unclaimShift(oid){
 /* ─── SETTINGS ─── */
 function renderSettings(){renderSettingsSupabaseStatus();
   document.getElementById('cfg-wd').value=S.cfg.wdMax;document.getElementById('cfg-wk').value=S.cfg.wkMax;
-  document.getElementById('cfg-ir').value=S.cfg.irMax;document.getElementById('cfg-rest').value=S.cfg.rest;
+  document.getElementById('cfg-ir-daily').value=S.cfg.irDailyMax||S.cfg.irMax||20;
+  document.getElementById('cfg-ir-wknd').value=S.cfg.irWkndMax||4;
+  document.getElementById('cfg-rest').value=S.cfg.rest;
   document.getElementById('cfg-anc').value=S.cfg.anchorPct;
   renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
 }
-function saveCfg(){S.cfg.wdMax=+document.getElementById('cfg-wd').value||20;S.cfg.wkMax=+document.getElementById('cfg-wk').value||4;S.cfg.irMax=+document.getElementById('cfg-ir').value||20;S.cfg.rest=+document.getElementById('cfg-rest').value||1;S.cfg.anchorPct=+document.getElementById('cfg-anc').value||60;}
+function saveCfg(){
+  S.cfg.wdMax=+document.getElementById('cfg-wd').value||20;
+  S.cfg.wkMax=+document.getElementById('cfg-wk').value||4;
+  S.cfg.irDailyMax=+document.getElementById('cfg-ir-daily').value||20;
+  S.cfg.irWkndMax=+document.getElementById('cfg-ir-wknd').value||4;
+  S.cfg.irMax=S.cfg.irDailyMax; // keep legacy field in sync
+  S.cfg.rest=+document.getElementById('cfg-rest').value||1;
+  S.cfg.anchorPct=+document.getElementById('cfg-anc').value||60;
+}
 function renderDRSList(){document.getElementById('drs-list').innerHTML=S.drSubs.map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="S.drSubs.splice(${i},1);renderDRSList()">X</button></div>`).join('');}
 function renderIRSList(){document.getElementById('irs-list').innerHTML=S.irSubs.map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="S.irSubs.splice(${i},1);renderIRSList()">X</button></div>`).join('');}
 function renderSitesList(){document.getElementById('sites-list').innerHTML=S.sites.map((s,i)=>{const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';return`<div class="row"><span style="font-size:12px;flex:1">${s.name}</span>${g}<button class="br bxs" onclick="S.sites.splice(${i},1);renderSitesList()">X</button></div>`;}).join('');}
