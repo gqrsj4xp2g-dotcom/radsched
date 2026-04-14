@@ -1182,6 +1182,1234 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR CALL REBALANCER -->
 <div id="page-ir-rebalance" class="page">
   <div class="pg-title">⚖ IR Call Rebalancer</div>
+  <div class="pg-sub">Redistribute existing IR call assignments across a 6-month period to achieve FTE-proportional equity. Targets are calculated from actual available slots divided by group FTE.</div>
+
+  <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>Year</label>
+      <select id="irr-yr" onchange="renderIRRebalancePrep()" style="width:90px">
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+        <option value="2027">2027</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Period</label>
+      <select id="irr-period" onchange="renderIRRebalancePrep()" style="width:175px">
+        <option value="H1">H1 — Jan through Jun</option>
+        <option value="H2">H2 — Jul through Dec</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="irr-grp" onchange="renderIRRebalancePrep()" style="width:130px">
+        <option value="both">Both Groups</option>
+        <option value="North">North Only</option>
+        <option value="South">South Only</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Call Type</label>
+      <select id="irr-type" onchange="renderIRRebalancePrep()" style="width:150px">
+        <option value="both">Daily + Weekend</option>
+        <option value="daily">Daily Only</option>
+        <option value="weekend">Weekend Only</option>
+      </select>
+    </div>
+    <button class="bp" onclick="previewIRRebalance()" style="margin-bottom:2px">⚖ Preview Rebalance</button>
+    <button class="bt bsm" onclick="renderIRRebalancePrep()" style="margin-bottom:2px">↺ Refresh</button>
+  </div>
+
+  <div id="irr-current"></div>
+  <div id="irr-preview"></div>
+
+  <div style="margin-top:12px">
+    <button id="irr-apply" class="bg" style="display:none" onclick="applyIRRebalance()">✓ Apply Rebalance</button>
+    <span id="irr-apply-note" style="font-size:11px;color:var(--txt3);margin-left:10px"></span>
+  </div>
+</div>
+
+
+<!-- ANCHOR REPORT -->">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RadScheduler</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#1a2e4a;--navy2:#243b5e;--navy3:#0f1e32;
+  --blue:#2563eb;--blue2:#1d4ed8;--blue-bg:#eff6ff;--blue-t:#1e40af;
+  --green:#16a34a;--green-bg:#f0fdf4;--green-t:#14532d;
+  --amber:#d97706;--amber-bg:#fffbeb;--amber-t:#92400e;
+  --red:#dc2626;--red-bg:#fef2f2;--red-t:#991b1b;
+  --purple:#7c3aed;--purple-bg:#f5f3ff;--purple-t:#4c1d95;
+  --teal:#0d9488;--teal-bg:#f0fdfa;--teal-t:#134e4a;
+  --pink:#db2777;--pink-bg:#fdf2f8;
+  --bg:#f5f4f0;--bg2:#fff;--bg3:#eeece8;--bg4:#e8e5df;
+  --txt:#18181b;--txt2:#52525b;--txt3:#a1a1aa;
+  --bdr:#e4e4e7;--bdr2:#d4d4d8;
+  --r:6px;--rl:10px;--rxl:14px;
+  --sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+  --sh2:0 4px 16px rgba(0,0,0,.09),0 2px 6px rgba(0,0,0,.05);
+}
+body{font-family:'Georgia',serif;background:var(--bg);color:var(--txt);font-size:13px;line-height:1.55;min-height:100vh}
+
+
+/* IR schedule builder cells */
+.ir-week-phys-pill{display:flex;align-items:center;justify-content:space-between;border-radius:4px;padding:2px 5px;margin-bottom:2px;font-size:11px}
+.eirs2{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+.e-home-auto{background:#fdf4ff;color:#6b21a8;border:1px dashed #d8b4fe}
+/* ── AUTH ── */
+#auth{display:flex;min-height:100vh;background:var(--navy3)}
+.auth-side{width:420px;flex-shrink:0;background:linear-gradient(160deg,var(--navy) 0%,var(--navy3) 100%);display:flex;flex-direction:column;justify-content:center;padding:52px 44px}
+.auth-side h1{font-size:32px;font-weight:800;color:#fff;letter-spacing:-.8px;line-height:1.1;margin-bottom:12px}
+.auth-side p{color:#94a3b8;font-size:13px;line-height:1.7;margin-bottom:28px}
+.auth-feat{display:flex;align-items:center;gap:10px;margin-bottom:10px;color:#cbd5e1;font-size:12px}
+.auth-feat-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0}
+.auth-main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-card{background:var(--bg2);border-radius:var(--rxl);padding:36px 40px;width:420px;box-shadow:var(--sh2)}
+.auth-logo{font-size:18px;font-weight:800;color:var(--navy);margin-bottom:6px;letter-spacing:-.3px}
+.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:22px;margin-top:16px}
+.auth-tab{flex:1;padding:7px;text-align:center;font-size:12px;font-weight:700;cursor:pointer;border-radius:4px;color:var(--txt2);transition:.15s}
+.auth-tab.on{background:var(--bg2);color:var(--navy);box-shadow:var(--sh)}
+.afield{margin-bottom:13px}
+.afield label{display:block;font-size:10px;font-weight:800;color:var(--txt2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.afield input,.afield select{width:100%;padding:9px 11px;border:1.5px solid var(--bdr2);border-radius:var(--r);font-size:13px;font-family:inherit;background:var(--bg2);color:var(--txt);transition:border .12s}
+.afield input:focus,.afield select:focus{outline:none;border-color:var(--blue)}
+.abtn{width:100%;padding:11px;background:var(--navy);color:#fff;border:none;border-radius:var(--r);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;transition:background .15s;letter-spacing:.02em}
+.abtn:hover{background:var(--blue)}
+.aerr{background:var(--red-bg);color:var(--red-t);border:1px solid #fca5a5;border-radius:var(--r);padding:8px 11px;font-size:12px;margin-bottom:10px;display:none}
+.anote{font-size:10px;color:var(--txt3);text-align:center;margin-top:12px}
+.arole-row{display:flex;gap:6px;margin-bottom:10px}
+.arole-btn{flex:1;padding:8px;border:1.5px solid var(--bdr2);border-radius:var(--r);cursor:pointer;text-align:center;background:var(--bg2);color:var(--txt2);font-size:12px;font-weight:700;transition:.12s;font-family:inherit}
+.arole-btn.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue-t)}
+
+/* ── RESPONSIVE AUTH ── */
+@media(max-width:860px){
+  #auth{flex-direction:column}
+  .auth-side{width:100%;padding:28px 24px 20px;flex-direction:row;align-items:center;flex-wrap:wrap;gap:12px;min-height:auto}
+  .auth-side h1{font-size:22px;margin-bottom:4px;flex:1 1 100%}
+  .auth-side p{display:none}
+  .auth-feat{display:none}
+  .auth-main{padding:16px;justify-content:center}
+  .auth-card{width:100%;max-width:420px;padding:24px 20px}
+}
+@media(max-width:480px){
+  .auth-side{padding:18px 16px 14px}
+  .auth-side h1{font-size:18px}
+  .auth-card{padding:20px 16px}
+  .auth-tabs{margin-bottom:14px}
+}
+
+/* ── RESPONSIVE APP ── */
+@media(max-width:768px){
+  .sidebar{width:160px}
+  .snav-item{font-size:11px;padding:5px 10px}
+  .snav-sect{font-size:8.5px;padding:10px 10px 2px}
+  .page{padding:14px 14px}
+  .pg-title{font-size:16px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .topbar{padding:0 10px;gap:8px}
+  .tb-practice{display:none}
+  .auth-card{width:95%}
+}
+@media(max-width:520px){
+  .layout{flex-direction:column}
+  .sidebar{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--bdr);overflow-x:auto;white-space:nowrap;display:flex;flex-wrap:nowrap;padding:4px 0}
+  .snav-sect{display:none}
+  .snav-item{display:inline-block;border-left:none;border-bottom:2px solid transparent;padding:6px 10px;white-space:nowrap}
+  .snav-item.on{border-left:none;border-bottom-color:var(--blue)}
+  .main{min-height:0}
+  .page{padding:12px 10px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .topbar{height:44px}
+  .tb-divider,.tb-nm,.tb-rl{display:none}
+}
+
+/* ── APP ── */
+#app{display:none;flex-direction:column;min-height:100vh}
+.topbar{height:50px;background:var(--navy);display:flex;align-items:center;padding:0 18px;gap:12px;position:sticky;top:0;z-index:200;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06)}
+.tb-logo{font-size:15px;font-weight:800;color:#fff;letter-spacing:-.3px}
+.tb-divider{width:1px;height:20px;background:rgba(255,255,255,.15)}
+.tb-practice{font-size:11px;color:#64748b}
+.tb-spacer{flex:1}
+.tb-user{display:flex;align-items:center;gap:9px}
+.tb-av{width:28px;height:28px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;flex-shrink:0}
+.tb-name{color:#e2e8f0;font-size:12px;font-weight:700}
+.tb-role{color:#64748b;font-size:10px}
+.tb-btn{padding:5px 11px;border:1px solid rgba(255,255,255,.2);border-radius:var(--r);color:#94a3b8;font-size:11px;cursor:pointer;background:transparent;font-family:inherit;font-weight:600;transition:.12s}
+.tb-btn:hover{background:rgba(255,255,255,.08);color:#fff}
+
+.layout{display:flex;flex:1}
+.sidebar{width:196px;background:var(--bg2);border-right:1px solid var(--bdr);flex-shrink:0;overflow-y:auto}
+.snav-sect{padding:12px 13px 3px;font-size:9.5px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.1em}
+.snav-item{display:block;padding:6px 13px;font-size:12px;color:var(--txt2);cursor:pointer;border-left:3px solid transparent;font-weight:500;transition:.1s}
+.snav-item:hover{background:var(--bg3);color:var(--txt)}
+.snav-item.on{background:var(--blue-bg);color:var(--blue-t);border-left-color:var(--blue);font-weight:700}
+.snav-item.admin-only{display:none}
+
+.main{flex:1;overflow:auto}
+.page{display:none;padding:22px 26px}
+.page.on{display:block}
+.pg-title{font-size:20px;font-weight:800;letter-spacing:-.5px;color:var(--txt);margin-bottom:3px}
+.pg-sub{font-size:12px;color:var(--txt3);margin-bottom:18px}
+
+/* ── CARDS ── */
+.card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;margin-bottom:12px;box-shadow:var(--sh)}
+.card-title{font-size:13px;font-weight:800;margin-bottom:10px;color:var(--txt)}
+.ibox{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;margin-bottom:12px}
+
+/* ── GRID ── */
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+
+/* ── FORM ── */
+.fg{margin-bottom:8px}
+label{font-size:10px;font-weight:800;color:var(--txt2);display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
+input,select,textarea{width:100%;padding:7px 10px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:12px;background:var(--bg2);color:var(--txt);font-family:inherit;transition:border .12s}
+input:focus,select:focus{outline:none;border-color:var(--blue)}
+input[type=checkbox],input[type=radio]{width:auto}
+input[type=number]{width:auto}
+
+/* ── BTNS ── */
+button{padding:6px 14px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:12px;cursor:pointer;background:var(--bg2);color:var(--txt);font-family:inherit;font-weight:700;transition:.12s}
+button:hover{background:var(--bg3)}
+.bp{background:var(--blue);color:#fff;border-color:var(--blue)}.bp:hover{background:var(--blue2)}
+.bg{background:var(--green);color:#fff;border-color:var(--green)}
+.ba{background:var(--amber);color:#fff;border-color:var(--amber)}
+.br{background:var(--red);color:#fff;border-color:var(--red)}
+.bn{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bsm{padding:3px 9px;font-size:11px}.bxs{padding:2px 7px;font-size:10px}
+
+/* ── TAGS ── */
+.tag{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:.02em}
+.tb{background:var(--blue-bg);color:var(--blue-t)}
+.tg{background:var(--green-bg);color:var(--green-t)}
+.ta{background:var(--amber-bg);color:var(--amber-t)}
+.tr{background:var(--red-bg);color:var(--red-t)}
+.tp{background:var(--purple-bg);color:var(--purple-t)}
+.tt{background:var(--teal-bg);color:var(--teal-t)}
+.tpk{background:var(--pink-bg);color:var(--pink)}
+.tgr{background:var(--bg3);color:var(--txt2)}
+
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 10px;border-bottom:1px solid var(--bdr);font-weight:800;font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.05em;background:var(--bg3)}
+td{padding:7px 10px;border-bottom:1px solid var(--bdr);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--bg3)}
+
+/* ── CALENDAR ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-hd{text-align:center;font-size:9.5px;font-weight:800;color:var(--txt3);padding:4px;text-transform:uppercase;letter-spacing:.06em}
+.cal-day{min-height:80px;border:1px solid var(--bdr);border-radius:4px;padding:3px;background:var(--bg2)}
+.cal-day.other{opacity:.28;background:var(--bg3)}
+.cal-day.today{border-color:var(--blue);border-width:2px}
+.cal-day.wknd{background:#fefdf8}
+.cal-num{font-size:10px;font-weight:700;color:var(--txt3);margin-bottom:2px}
+.ev{border-radius:3px;padding:1px 4px;font-size:10px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.e1{background:#dbeafe;color:#1e3a8a}
+.e2{background:#d1fae5;color:#065f46}
+.e3{background:#fef3c7;color:#78350f}
+.ehome{background:#fce7f3;color:#9d174d}
+.ewk{background:#dcfce7;color:#14532d}
+.evac{background:#fee2e2;color:#7f1d1d}
+.ehol{background:#ede9fe;color:#4c1d95}
+.eir{background:#cffafe;color:#164e63}
+.eirs{background:#d1fae5;color:#064e3b}
+.eopen{background:#f4f4f5;color:#52525b;border:1px dashed #a1a1aa}
+.eanc{outline:2px solid var(--amber);outline-offset:-1px}
+
+/* ── ANCHOR UI ── */
+.anc-track{height:7px;border-radius:4px;background:var(--bg3);overflow:hidden;margin-top:3px}
+.anc-fill{height:100%;border-radius:4px;transition:width .3s}
+.af-ok{background:var(--green)}
+.af-lo{background:var(--amber)}
+.af-bad{background:var(--red)}
+.anc-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800}
+.ab-ok{background:var(--green-bg);color:var(--green-t)}
+.ab-lo{background:var(--amber-bg);color:var(--amber-t)}
+.ab-bad{background:var(--red-bg);color:var(--red-t)}
+
+/* ── MISC ── */
+.flex{display:flex;gap:8px;align-items:center}
+.flexe{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bdr)}
+.row:last-child{border-bottom:none}
+.av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+.chk{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:4px 9px;border:1px solid var(--bdr);border-radius:20px;cursor:pointer;background:var(--bg2);margin:2px}
+.chk:has(input:checked){background:var(--blue-bg);border-color:var(--blue);color:var(--blue-t)}
+.note{padding:9px 12px;border-radius:var(--r);font-size:12px;margin-bottom:10px;border-left:3px solid}
+.ni{background:var(--blue-bg);color:var(--blue-t);border-color:var(--blue)}
+.nw{background:var(--amber-bg);color:var(--amber-t);border-color:var(--amber)}
+.ns{background:var(--green-bg);color:var(--green-t);border-color:var(--green)}
+.ne{background:var(--red-bg);color:var(--red-t);border-color:var(--red)}
+.met{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:11px 14px;box-shadow:var(--sh)}
+.met-lbl{font-size:9.5px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.met-val{font-size:24px;font-weight:800;color:var(--txt);line-height:1}
+.met-sub{font-size:10px;color:var(--txt3);margin-top:2px}
+.tabs{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:14px}
+.tab{padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;color:var(--txt2);margin-bottom:-1px}
+.tab.on{border-bottom-color:var(--blue);color:var(--blue)}
+.wktab{padding:4px 10px;font-size:11px;font-weight:700;border:1px solid var(--bdr);border-radius:20px;cursor:pointer;background:var(--bg2);color:var(--txt2);margin:2px}
+.wktab.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.prog{height:5px;border-radius:3px;background:var(--bg3);overflow:hidden;margin-top:3px}
+.pf{height:100%;border-radius:3px;background:var(--blue)}.pf.pw{background:var(--amber)}.pf.po{background:var(--red)}
+.modal-wrap{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;align-items:center;justify-content:center}
+.modal-wrap.open{display:flex}
+.modal{background:var(--bg2);border-radius:var(--rxl);padding:24px 28px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:var(--sh2);position:relative}
+.modal-close{position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--txt3)}
+.modal-title{font-size:16px;font-weight:800;margin-bottom:16px}
+.profile-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:9px;box-shadow:var(--sh)}
+
+    .cal-day.sold-back { background: linear-gradient(135deg, #d1fae5 0%, var(--bg2) 100%) !important; border-left: 3px solid var(--green) !important; }
+    .cal-day.sold-back .cal-num { color: var(--green-t) !important; font-weight: 800; }
+    .sold-back-banner { font-size:9px; font-weight:800; color:var(--green-t); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+
+    @keyframes rs-spin { to { transform: rotate(360deg); } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- ═══════════════════ AUTH SCREEN ═══════════════════ -->
+<div id="auth">
+  <div class="auth-side">
+    <h1>Radiology Practice Scheduler</h1>
+    <p>Complete shift management for diagnostic and interventional radiology practices — with anchor site enforcement, multi-year holiday tracking, and role-based access.</p>
+    <div class="auth-feat"><div class="auth-feat-dot"></div>Anchor site compliance (≥60% enforcement)</div>
+    <div class="auth-feat"><div class="auth-feat-dot"></div>Mixed DR/IR FTE with per-shift eligibility</div>
+    <div class="auth-feat"><div class="auth-feat-dot"></div>IR auto-assign by North/South site group</div>
+    <div class="auth-feat"><div class="auth-feat-dot"></div>Holiday call counter across multiple years</div>
+    <div class="auth-feat"><div class="auth-feat-dot"></div>Admin & physician user roles</div>
+  </div>
+  <div class="auth-main">
+    <div class="auth-card">
+      <div class="auth-logo">RadScheduler</div>
+      <p style="font-size:11px;color:var(--txt3);margin-bottom:2px">Sign in to your practice account</p>
+      <div class="auth-tabs">
+        <div class="auth-tab on" id="at-login" onclick="authTab('login')">Sign In</div>
+        <div class="auth-tab" id="at-reg" onclick="authTab('reg')">Create Account</div>
+      </div>
+      <div class="aerr" id="aerr"></div>
+
+      <div id="af-login">
+        <div class="afield"><label>Email</label><input id="li-email" type="email" placeholder="you@hospital.org"></div>
+        <div class="afield"><label>Password</label><input id="li-pw" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+        <button class="abtn" onclick="doLogin()">Sign In</button>
+        <p class="anote">Demo: <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d5b4b1b8bcbb95a7b4b1fbb6bab8">[email&#160;protected]</a> / admin123 · <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7a1e085419121f143a081b1e54191517">[email&#160;protected]</a> / user123</p><p class="anote" style="margin-top:4px;background:var(--amber-bg);padding:5px 8px;border-radius:4px;color:var(--amber-t)">Admin code: <strong>RAD2025</strong></p>
+      </div>
+
+      <div id="af-reg" style="display:none">
+        <div class="g2">
+          <div class="afield"><label>First Name</label><input id="rf-first" placeholder="Jane"></div>
+          <div class="afield"><label>Last Name</label><input id="rf-last" placeholder="Smith"></div>
+        </div>
+        <div class="afield"><label>Email</label><input id="rf-email" type="email" placeholder="you@hospital.org"></div>
+        <div class="afield"><label>Password</label><input id="rf-pw" type="password" placeholder="Min 8 characters"></div>
+        <div class="afield"><label>Confirm Password</label><input id="rf-pw2" type="password" placeholder="Repeat password"></div>
+        <div class="afield"><label>Account Role</label>
+          <div class="arole-row">
+            <button class="arole-btn on" id="rrole-user" onclick="setRegRole('user')">Physician / User</button>
+            <button class="arole-btn" id="rrole-admin" onclick="setRegRole('admin')">Administrator</button>
+          </div>
+        </div>
+        <div class="afield" id="rf-code-wrap" style="display:none"><label>Admin Access Code</label><input id="rf-code" type="password" placeholder="Contact your IT department"></div>
+        <button class="abtn" onclick="doRegister()">Create Account</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ APP SCREEN ═══════════════════ -->
+<!-- Loading overlay: shown while fetching Supabase data so seed data never flashes -->
+<div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.88);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+  <div style="width:52px;height:52px;border:5px solid rgba(255,255,255,0.15);border-top-color:#3b82f6;border-radius:50%;animation:rs-spin 0.75s linear infinite"></div>
+  <div style="color:#fff;font-size:16px;font-weight:700;letter-spacing:.02em">Loading shared data…</div>
+  <div style="color:rgba(255,255,255,0.45);font-size:12px">Syncing from database</div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <span class="tb-logo">RadScheduler</span>
+    <div class="tb-divider"></div>
+    <span class="tb-practice">Radiology Practice</span>
+    <div class="tb-spacer"></div>
+    <div class="tb-user">
+      <div class="tb-av" id="tb-av">--</div>
+      <div><div class="tb-name" id="tb-nm">—</div><div class="tb-role" id="tb-rl">—</div></div>
+    </div>
+    <span id="save-indicator" style="font-size:10px;color:var(--txt3);margin-right:4px"></span>
+    <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
+    <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
+    <button class="tb-btn" onclick="doLogout()">Sign Out</button>
+  </div>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar">
+      <div class="snav-sect">Overview</div>
+      <div class="snav-item on" onclick="nav('dashboard',this)">Dashboard</div>
+      <div class="snav-item" onclick="nav('my-schedule',this)">My Schedule</div>
+      <div class="snav-item" onclick="nav('chat',this)">💬 Chat</div>
+      <div class="snav-item" onclick="nav('swaps',this)">🔄 Shift Swaps</div>
+      <div class="snav-sect">People</div>
+      <div class="snav-item admin-only" onclick="nav('physicians',this)">Physician Roster</div>
+      <div class="snav-item admin-only" onclick="nav('vacations',this)">Vacations & Time Off</div>
+      <div class="snav-item" onclick="nav('profiles',this)">User Profiles</div>
+      <div class="snav-sect">Diagnostic Rad</div>
+      <div class="snav-item" onclick="nav('dr-cal',this)">DR Calendar</div>
+      <div class="snav-item admin-only" onclick="nav('dr-builder',this)">Schedule Builder</div>
+      <div class="snav-item admin-only" onclick="nav('dr-weekends',this)">Weekend Call</div>
+      <div class="snav-item admin-only" onclick="nav('auto-assign',this)">Auto-Assign DR</div>
+      <div class="snav-sect">Interventional Rad</div>
+      <div class="snav-item" onclick="nav('ir-cal',this)">IR Calendar</div>
+      <div class="snav-item admin-only" onclick="nav('ir-shifts',this)">IR Shift Builder</div>
+      <div class="snav-item admin-only" onclick="nav('ir-builder',this)">IR Call Builder</div>
+      <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)">IR Shift Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-auto',this)">IR Call Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)">⚖ IR Call Rebalancer</div>
+      <div class="snav-sect">Compliance & Special</div>
+      <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
+      <div class="snav-item" onclick="nav('holidays',this)">Holiday Call</div>
+      <div class="snav-item admin-only" onclick="nav('holiday-auto',this)">Holiday Auto-Assign</div>
+      <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
+      <div class="snav-sect">System</div>
+      <div class="snav-item" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
+      <div class="snav-item" onclick="nav('settings',document.querySelector('[onclick*=settings]'))">⚙ Settings</div>
+      <div class="snav-sect admin-only">Admin</div>
+      <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
+      <div class="snav-item admin-only" onclick="nav('settings',this)">⚙ Settings</div>
+      <div class="snav-item admin-only" onclick="nav('import',this)">📥 Import Excel</div>
+      <div class="snav-item admin-only" onclick="nav('site-slots',this)">DR Site Slots</div>
+      <div class="snav-item admin-only" onclick="nav('ir-slots',this)">IR Call Slots</div>
+      <div class="snav-item admin-only" onclick="nav('ir-shift-slots',this)">IR Shift Slots</div>
+    </nav>
+
+    <main class="main" id="main-content">
+
+<!-- DASHBOARD -->
+<div id="page-dashboard" class="page on">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+    <div class="pg-title" style="margin-bottom:0">Dashboard</div>
+    <div class="flexe" style="gap:6px" id="dash-month-nav">
+      <button class="bsm" onclick="dashNavMonth(-1)">◀</button>
+      <span id="dash-month-label" style="font-size:13px;font-weight:700;min-width:90px;text-align:center"></span>
+      <button class="bsm" onclick="dashNavMonth(1)">▶</button>
+    </div>
+  </div>
+  <div class="pg-sub" id="dash-greet" style="margin-bottom:10px"></div>
+
+  <!-- Quick nav cards (admin only) -->
+  <div id="dash-quicknav" class="admin-only" style="display:none;margin-bottom:12px">
+    <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Quick Navigate</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <button class="bsm bn" onclick="nav('dr-cal',document.querySelector('[onclick*=dr-cal]'))">DR Calendar</button>
+      <button class="bsm bn" onclick="nav('ir-cal',document.querySelector('[onclick*=ir-cal]'))">IR Calendar</button>
+      <button class="bsm" onclick="nav('dr-builder',document.querySelector('[onclick*=dr-builder]'))">DR Builder</button>
+      <button class="bsm" onclick="nav('ir-builder',document.querySelector('[onclick*=ir-builder]'))">IR Call Builder</button>
+      <button class="bsm" onclick="nav('auto-assign',document.querySelector('[onclick*=auto-assign]'))">DR Auto-Assign</button>
+      <button class="bsm" onclick="nav('ir-auto',document.querySelector('[onclick*=ir-auto]'))">IR Auto-Assign</button>
+      <button class="bsm" onclick="nav('holidays',document.querySelector('[onclick*=holidays]'))">Holiday Call</button>
+      <button class="bsm" onclick="nav('holiday-auto',document.querySelector('[onclick*=holiday-auto]'))">Holiday Auto-Assign</button>
+      <button class="bsm" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))">Open Shifts</button>
+      <button class="bsm" onclick="nav('anchor-report',document.querySelector('[onclick*=anchor-report]'))">Anchor Report</button>
+    </div>
+  </div>
+
+  <div class="g4" id="dash-metrics" style="margin-bottom:12px"></div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        Anchor Site Compliance
+        <span id="dash-anc-mo" style="font-size:11px;font-weight:400;color:var(--txt3)"></span>
+      </div>
+      <div id="dash-anc"></div>
+    </div>
+    <div class="card"><div class="card-title">Holiday Counter (All Years)</div><div id="dash-hols"></div></div>
+  </div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        Open Shifts
+        <button class="bsm admin-only" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))" style="display:none">View all →</button>
+      </div>
+      <div id="dash-open"></div>
+    </div>
+    <div class="card"><div class="card-title">Upcoming Time Off</div><div id="dash-vac"></div></div>
+  </div>
+
+  <!-- Admin: DR Schedule snapshot -->
+  <div id="dash-admin-section" class="admin-only" style="display:none;margin-top:8px">
+    <div class="g2">
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between">
+          Recent DR Shifts <button class="bsm" onclick="nav('dr-builder',document.querySelector('[onclick*=dr-builder]'))">Builder →</button>
+        </div>
+        <div id="dash-dr-recent"></div>
+      </div>
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between">
+          Recent IR Calls <button class="bsm" onclick="nav('ir-cal',document.querySelector('[onclick*=ir-cal]'))">Calendar →</button>
+        </div>
+        <div id="dash-ir-recent"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MY SCHEDULE -->
+<div id="page-my-schedule" class="page">
+  <div class="pg-title">My Schedule</div>
+  <div class="pg-sub">Your assigned shifts, calls, and time off.</div>
+  <div class="flexe" style="margin-bottom:10px"><div class="fg" style="margin:0"><label>Month</label><input id="my-mo" type="month" oninput="renderMySched()"></div></div>
+  <div id="my-content"></div>
+</div>
+
+<!-- PROFILES -->
+<div id="page-profiles" class="page">
+  <div class="pg-title">User Profiles</div>
+  <div class="pg-sub">All registered accounts in this practice.</div>
+  <div id="profiles-list"></div>
+</div>
+
+<!-- PHYSICIANS -->
+<div id="page-physicians" class="page">
+  <div class="pg-title">Physician Roster</div>
+  <div class="ibox">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="card-title" id="phys-form-title" style="margin:0">Add Physician</div>
+      <button id="phys-cancel-btn" class="br bsm" style="display:none" onclick="cancelEditPhys()">✕ Cancel Edit</button>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>First Name</label><input id="p-first" placeholder="Jane"></div>
+      <div class="fg"><label>Last Name</label><input id="p-last" placeholder="Smith"></div>
+      <div class="fg"><label>Degree</label><select id="p-deg"><option>MD</option><option>DO</option><option>MD PhD</option><option>MD MBA</option></select></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Primary Role</label>
+        <select id="p-role" onchange="roleUI()">
+          <option value="DR">DR Only</option><option value="IR">IR Only</option><option value="MIXED">Mixed DR + IR</option>
+        </select>
+      </div>
+      <div class="fg" id="p-drfte-w"><label>DR FTE</label><input id="p-drfte" type="number" min="0" max="1" step=".05" value="1.0" style="width:75px"></div>
+      <div class="fg" id="p-irfte-w" style="display:none"><label>IR FTE</label><input id="p-irfte" type="number" min="0" max="1" step=".05" value="0" style="width:75px"></div>
+    </div>
+    <div class="g2" id="p-ir-w" style="display:none">
+      <div class="fg"><label>IR Group</label><select id="p-irgrp"><option>North</option><option>South</option></select></div>
+      <div class="fg"><label>Primary IR Site</label><select id="p-irsiteprim"></select></div>
+    </div>
+    <!-- ANCHOR SITE -->
+    <div class="fg" style="background:var(--amber-bg);border:1px solid #fde68a;border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+      <label style="color:var(--amber-t)">⚓ Anchor Site (physician must have ≥60% of shifts here)</label>
+      <select id="p-anchor" style="margin-top:4px"><option value="">No anchor site</option></select>
+      <div style="font-size:10px;color:var(--amber-t);margin-top:4px">Anchor compliance is tracked on the dashboard and enforced during auto-assign.</div>
+    </div>
+    <div class="fg"><label>Allowed Sites (can work at)</label><div id="p-sites-chk" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px"></div></div>
+    <div class="fg"><label>DR Subspecialties</label><div id="sub-dr" style="display:flex;flex-wrap:wrap"></div></div>
+    <div class="fg" id="p-irsub-w" style="display:none"><label>IR Subspecialties</label><div id="sub-ir" style="display:flex;flex-wrap:wrap"></div></div>
+    <div class="fg"><label>Shift Eligibility</label>
+      <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">
+        <label class="chk"><input type="checkbox" id="pe-s1" checked> 1st Shift</label>
+        <label class="chk"><input type="checkbox" id="pe-s2"> 2nd Shift</label>
+        <label class="chk"><input type="checkbox" id="pe-s3"> 3rd Shift</label>
+        <label class="chk"><input type="checkbox" id="pe-home" checked> At Home</label>
+        <label class="chk"><input type="checkbox" id="pe-wknd" checked> Weekend Call</label>
+      </div>
+    </div>
+    <input type="hidden" id="p-edit-id" value="">
+    <button class="bp" id="phys-submit-btn" onclick="submitPhys()">Add Physician</button>
+  </div>
+  <div class="card" id="phys-list"></div>
+
+  <!-- Site Rules Section -->
+  <div id="phys-site-rules-wrap" style="margin-top:12px;display:none">
+    <div class="card">
+      <div class="card-title" id="sr-title">Scheduling Conditions for —</div>
+      <div class="note ni" style="font-size:11px">
+        All rules are enforced during auto-assign. Conditions can restrict, require, or limit assignments at specific sites.
+      </div>
+
+      <div class="tabs" style="margin-bottom:10px">
+        <div class="tab on" onclick="srTab('site',this)">Site Limits</div>
+        <div class="tab" onclick="srTab('day',this)">Day Conditions</div>
+        <div class="tab" onclick="srTab('shift',this)">Shift Type Rules</div>
+        <div class="tab" onclick="srTab('seq',this)">Sequence Rules</div>
+      </div>
+
+      <!-- SITE LIMITS TAB -->
+      <div id="srt-site" class="ibox">
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          Limit or block assignments at a specific hospital
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Site</label><select id="sr-site"></select></div>
+          <div class="fg"><label>Max Shifts / Month</label>
+            <input id="sr-max-mo" type="number" min="0" max="30" placeholder="No limit" style="width:100%">
+          </div>
+          <div class="fg"><label>Max Shifts / Week</label>
+            <input id="sr-max-wk" type="number" min="0" max="7" placeholder="No limit" style="width:100%">
+          </div>
+        </div>
+        <div class="fg">
+          <label class="chk"><input type="checkbox" id="sr-blocked"> Block this site entirely (never assign here)</label>
+        </div>
+        <div class="fg">
+          <label class="chk"><input type="checkbox" id="sr-preferred"> Preferred site (assign here first when possible)</label>
+        </div>
+        <button class="bp bsm" onclick="addSiteRule()">Add / Update Site Rule</button>
+      </div>
+
+      <!-- DAY CONDITIONS TAB -->
+      <div id="srt-day" class="ibox" style="display:none">
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          Require a specific site when working on a certain day of week
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Day of Week</label>
+            <select id="sr-dow">
+              <option value="1">Monday</option><option value="2">Tuesday</option>
+              <option value="3">Wednesday</option><option value="4">Thursday</option>
+              <option value="5">Friday</option><option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div class="fg"><label>Schedule Type</label>
+            <select id="sr-sched-type">
+              <option value="any">Any shift</option>
+              <option value="ir-call">IR Call only</option>
+              <option value="ir-shift">IR Procedure Shift only</option>
+              <option value="dr-shift">DR Shift only</option>
+            </select>
+          </div>
+          <div class="fg"><label>Required Site</label>
+            <select id="sr-req-site"><option value="">Any site (no restriction)</option></select>
+          </div>
+        </div>
+        <div class="fg"><label>Notes / Reason</label>
+          <input id="sr-day-notes" placeholder="e.g. IR Friday coverage requires CHN">
+        </div>
+        <button class="bp bsm" onclick="addDayCondition()">Add Day Condition</button>
+      </div>
+
+      <!-- SHIFT TYPE RULES TAB -->
+      <div id="srt-shift" class="ibox" style="display:none">
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          Restrict what shift types this physician can work at a site
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Site</label><select id="sr-st-site"></select></div>
+          <div class="fg"><label>Allowed Shift Types</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+              <label class="chk"><input type="checkbox" id="sr-st-1st" checked> 1st Shift</label>
+              <label class="chk"><input type="checkbox" id="sr-st-2nd" checked> 2nd Shift</label>
+              <label class="chk"><input type="checkbox" id="sr-st-3rd"> 3rd Shift</label>
+              <label class="chk"><input type="checkbox" id="sr-st-wknd" checked> Weekend Call</label>
+              <label class="chk"><input type="checkbox" id="sr-st-ir" checked> IR Call</label>
+            </div>
+          </div>
+        </div>
+        <button class="bp bsm" onclick="addShiftTypeRule()">Add Shift Type Rule</button>
+      </div>
+
+      <!-- SEQUENCE RULES TAB -->
+      <div id="srt-seq" class="ibox" style="display:none">
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          Control how many days in a row this physician can be assigned
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Max Consecutive Days (any site)</label>
+            <input id="sr-max-consec" type="number" min="1" max="14" placeholder="No limit" style="width:100%">
+          </div>
+          <div class="fg"><label>Min Days Off Between Shifts</label>
+            <input id="sr-min-rest" type="number" min="0" max="14" placeholder="No minimum" style="width:100%">
+          </div>
+          <div class="fg"><label>Max Weekend Calls / Month</label>
+            <input id="sr-max-wk-calls" type="number" min="0" max="8" placeholder="Use global cap" style="width:100%">
+          </div>
+        </div>
+        <div class="fg"><label>Notes</label>
+          <input id="sr-seq-notes" placeholder="e.g. Due to childcare, cannot work more than 3 consecutive days">
+        </div>
+        <button class="bp bsm" onclick="addSeqRule()">Set Sequence Rules</button>
+      </div>
+
+      <div id="sr-list" style="margin-top:12px"></div>
+      <button class="bsm" onclick="closePhysSiteRules()" style="margin-top:8px">← Back to Roster</button>
+    </div>
+  </div>
+</div>
+
+<!-- VACATIONS -->
+<div id="page-vacations" class="page">
+  <div class="pg-title">Vacations & Time Off</div>
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Physician</label><select id="v-phys"></select></div>
+      <div class="fg"><label>Start</label><input id="v-start" type="date"></div>
+      <div class="fg"><label>End</label><input id="v-end" type="date"></div>
+    </div>
+    <div class="g2">
+      <div class="fg"><label>Type</label><select id="v-type" onchange="document.getElementById('v-soldbk-note').style.display=this.value==='Vacation Sold Back'?'block':'none'"><option>Vacation</option><option>Vacation Sold Back</option><option>CME</option><option>Sick Leave</option><option>Personal</option><option>Conference</option></select></div>
+      <div class="fg"><label>Notes</label><input id="v-notes"></div>
+    </div>
+    <div class="note ni" id="v-soldbk-note" style="display:none;font-size:11px">
+      <strong>Vacation Sold Back:</strong> Weekdays in this period are automatically filled with DR Home shifts and blocked for IR assignment. The physician is considered "working" and available for DR read-from-home.
+    </div>
+    <button class="bp" onclick="addVac()">Add Time Off</button>
+  </div>
+  <div class="card"><table><thead><tr><th>Physician</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Notes</th><th></th></tr></thead><tbody id="vac-tbody"></tbody></table></div>
+</div>
+
+<!-- DR CALENDAR -->
+<div id="page-dr-cal" class="page">
+  <div class="pg-title">DR Monthly Schedule</div>
+  <div class="flexe" style="margin-bottom:10px;gap:6px">
+    <div class="fg" style="margin:0"><label>Month</label><input id="drc-mo" type="month" oninput="renderDRCal()"></div>
+    <div class="fg" style="margin:0"><label>Physician</label><select id="drc-phys" onchange="renderDRCal()"><option value="">All</option></select></div>
+    <div class="fg" style="margin:0"><label>Shift</label><select id="drc-shift" onchange="renderDRCal()"><option value="">All</option><option>1st</option><option>2nd</option><option>3rd</option><option>Home</option><option>Weekend</option><option>Holiday</option></select></div>
+  </div>
+  <div class="flex" style="flex-wrap:wrap;gap:4px;margin-bottom:8px">
+    <span class="ev e1" style="padding:2px 8px">1st</span><span class="ev e2" style="padding:2px 8px">2nd</span><span class="ev e3" style="padding:2px 8px">3rd</span>
+    <span class="ev ehome" style="padding:2px 8px">Home</span><span class="ev ewk" style="padding:2px 8px">Weekend</span>
+    <span class="ev ehol" style="padding:2px 8px">Holiday</span><span class="ev evac" style="padding:2px 8px">Off</span>
+    <span class="ev eopen" style="padding:2px 8px">Unfilled</span>
+    <span style="font-size:10px;color:var(--amber-t);display:flex;align-items:center;gap:3px"><span style="display:inline-block;width:10px;height:10px;outline:2px solid var(--amber);border-radius:2px"></span>Non-anchor shift</span>
+  </div>
+  <div class="cal-grid" id="drc-head"></div>
+  <div class="cal-grid" id="drc-body"></div>
+</div>
+
+<!-- DR BUILDER -->
+<div id="page-dr-builder" class="page">
+  <div class="pg-title">DR Schedule Builder</div>
+  <div class="tabs" id="drb-tabs" style="margin-bottom:12px">
+    <div class="tab on" onclick="drBuilderTab('1st',this)">1st Shift</div>
+    <div class="tab" onclick="drBuilderTab('2nd',this)">2nd Shift</div>
+    <div class="tab" onclick="drBuilderTab('3rd',this)">3rd Shift</div>
+    <div class="tab" onclick="drBuilderTab('home',this)">At Home</div>
+  </div>
+
+  <!-- 1ST SHIFT / HOME TAB: single-entry form -->
+  <div id="drbt-1st">
+    <div class="ibox">
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="sb-phys" onchange="updateSbInfo()"></select></div>
+        <div class="fg"><label>Date</label><input id="sb-date" type="date" oninput="updateSbInfo()"></div>
+        <div class="fg"><label>Shift</label><select id="sb-shift"><option value="1st">1st Shift (Days)</option><option value="2nd">2nd Shift (Evenings)</option><option value="3rd">3rd Shift (Nights)</option><option value="Home">At Home</option></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Site</label><select id="sb-site" onchange="updateSbInfo()"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="sb-sub"></select></div>
+        <div class="fg"><label>Notes</label><input id="sb-notes"></div>
+      </div>
+      <div id="sb-info" style="margin-bottom:8px"></div>
+      <button class="bp" onclick="addDRShift()">Assign Shift</button>
+      <button class="bt bsm" onclick="fillDRHomeShifts()" style="margin-left:6px" title="Auto-assign at-home shift to all unscheduled DR physicians for the selected date">Fill Unscheduled → Home</button>
+    </div>
+  </div>
+
+  <!-- 2ND SHIFT TAB -->
+  <div id="drbt-2nd" style="display:none">
+    <div class="ibox" style="border:2px solid var(--green);background:var(--green-bg)">
+      <div style="font-size:12px;font-weight:800;color:var(--green-t);margin-bottom:12px;display:flex;align-items:center;gap:8px">
+        <span style="background:var(--green);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">2nd Shift</span>
+        Evening coverage assignment — assign one physician across multiple weeks at once
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="drb-2nd-phys"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-2nd-site"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub"></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Start Date</label>
+          <input id="drb-2nd-start" type="date" oninput="updateMultiWeekPreview('2nd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Any day — not limited to Monday</div>
+        </div>
+        <div class="fg"><label>End Date</label>
+          <input id="drb-2nd-end" type="date" oninput="updateMultiWeekPreview('2nd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Last day to assign (inclusive)</div>
+        </div>
+        <div class="fg"><label>Notes</label><input id="drb-2nd-notes" placeholder="Optional"></div>
+      </div>
+      <div class="fg"><label>Days of Week</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="1" checked> Mon</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="2" checked> Tue</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="3" checked> Wed</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="4" checked> Thu</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="5" checked> Fri</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="6"> Sat</label>
+          <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="0"> Sun</label>
+        </div>
+      </div>
+      <div id="drb-2nd-preview" style="margin:8px 0;font-size:12px;color:var(--green-t);font-weight:600;min-height:18px"></div>
+      <button class="bp" onclick="bulkAssignMultiWeek('2nd')" style="background:var(--green)">Assign 2nd Shift</button>
+    </div>
+  </div>
+
+  <!-- 3RD SHIFT TAB -->
+  <div id="drbt-3rd" style="display:none">
+    <div class="ibox" style="border:2px solid #7c3aed;background:#f5f3ff">
+      <div style="font-size:12px;font-weight:800;color:#7c3aed;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+        <span style="background:#7c3aed;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">3rd Shift</span>
+        Night/overnight coverage — assign one physician across multiple weeks at once
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="drb-3rd-phys"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-3rd-site"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub"></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Start Date</label>
+          <input id="drb-3rd-start" type="date" oninput="updateMultiWeekPreview('3rd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Any day — not limited to Monday</div>
+        </div>
+        <div class="fg"><label>End Date</label>
+          <input id="drb-3rd-end" type="date" oninput="updateMultiWeekPreview('3rd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Last day to assign (inclusive)</div>
+        </div>
+        <div class="fg"><label>Notes</label><input id="drb-3rd-notes" placeholder="Optional"></div>
+      </div>
+      <div class="fg"><label>Days of Week</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="1" checked> Mon</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="2" checked> Tue</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="3" checked> Wed</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="4" checked> Thu</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="5" checked> Fri</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="6"> Sat</label>
+          <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="0"> Sun</label>
+        </div>
+      </div>
+      <div id="drb-3rd-preview" style="margin:8px 0;font-size:12px;color:#7c3aed;font-weight:600;min-height:18px"></div>
+      <button class="bp" onclick="bulkAssignMultiWeek('3rd')" style="background:#7c3aed">Assign 3rd Shift</button>
+    </div>
+  </div>
+
+  <!-- Shared shift table (all tabs) -->
+  <div class="card" style="overflow-x:auto;margin-top:12px">
+    <div class="admin-only" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <div class="fg" style="margin:0"><label>Filter Shift</label>
+        <select id="drb-filter-shift" onchange="renderDRBuilder()">
+          <option value="">All shifts</option>
+          <option value="1st">1st Only</option>
+          <option value="2nd">2nd Only</option>
+          <option value="3rd">3rd Only</option>
+          <option value="Home">Home Only</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0"><label>Filter Month</label>
+        <input id="drb-filter-mo" type="month" oninput="renderDRBuilder()">
+      </div>
+      <div style="margin-top:18px;display:flex;gap:6px">
+        <button class="br bsm" onclick="clearDRShifts('filtered')" title="Clear shifts matching current filters">🗑 Clear Filtered</button>
+        <button class="br bsm" onclick="clearDRShifts('all')" title="Clear ALL DR shifts" style="opacity:.7">🗑 Clear All DR</button>
+      </div>
+    </div>
+    <table><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>Anchor?</th><th>Sub</th><th>Notes</th><th></th></tr></thead>
+    <tbody id="drb-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- DR WEEKENDS -->
+<div id="page-dr-weekends" class="page">
+  <div class="pg-title">DR Weekend Call</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearWkCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
+  <div class="note ni">DR weekend call assigns the <strong>same physician for both Saturday and Sunday</strong>. Enter the Saturday date.</div>
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Physician</label><select id="wk-phys"></select></div>
+      <div class="fg"><label>Saturday Date</label><input id="wk-date" type="date"></div>
+      <div class="fg"><label>Subspecialty</label><select id="wk-sub"></select></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Site</label><select id="wk-site"></select></div>
+      <div class="fg"><label>Call Type</label><select id="wk-ctype"><option>Primary</option><option>Backup</option></select></div>
+      <div class="fg"><label>Notes</label><input id="wk-notes"></div>
+    </div>
+    <button class="bp" onclick="addWkCall()">Assign Weekend Call</button>
+  </div>
+  <div class="card" style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Saturday</th><th>Sunday</th><th>Sub</th><th>Site</th><th>Type</th><th></th></tr></thead><tbody id="wk-tbody"></tbody></table></div>
+</div>
+
+<!-- AUTO-ASSIGN DR -->
+<div id="page-auto-assign" class="page">
+  <div class="pg-title">DR Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="if(_adminOnly('reset DR auto-assign'))S.aaPreview=[],S.drShifts=S.drShifts.filter(s=>s.notes!='Auto'&&s.notes!='Auto-home'),triggerSave(),renderDRBuilder()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Month</label><input id="aa-mo" type="month"></div>
+      <div class="fg"><label>Type</label><select id="aa-type"><option value="both">Weekday + Weekend</option><option value="weekday">Weekday Only</option><option value="weekend">Weekend Only</option></select></div>
+      <div class="flexe" style="gap:6px;align-items:flex-end;padding-bottom:1px">
+        <button class="ba" onclick="previewAA()">▶ Preview</button>
+        <button class="bp" id="aa-apply" style="display:none" onclick="applyAA()">✓ Apply All</button>
+      </div>
+    </div>
+  </div>
+  <div class="note ni" style="margin-bottom:8px">Respects FTE caps, shift eligibility, vacation blackouts, and anchor site rules (≥60% at anchor).</div>
+  <div class="card" id="aa-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+</div>
+
+<!-- IR CALENDAR -->
+<div id="page-ir-cal" class="page">
+  <div class="pg-title">IR Full Schedule Calendar</div>
+  <div class="flexe" style="margin-bottom:10px;gap:6px;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>Month</label><input id="irc-mo" type="month" oninput="renderIRCal()"></div>
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="irc-grp" onchange="renderIRCal()">
+        <option value="">Both Groups</option>
+        <option>North</option>
+        <option>South</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Physician</label>
+      <select id="irc-phys" onchange="renderIRCal()"><option value="">All</option></select>
+    </div>
+    <div class="fg" style="margin:0"><label>View</label>
+      <select id="irc-view" onchange="renderIRCal()">
+        <option value="both">Call + Daily Shifts</option>
+        <option value="call">Call Only</option>
+        <option value="shifts">Daily Shifts Only</option>
+      </select>
+    </div>
+  </div>
+  <div class="flex" style="flex-wrap:wrap;gap:3px;margin-bottom:8px;font-size:10px;align-items:center">
+    <span style="font-weight:800;color:var(--txt3);font-size:9px;text-transform:uppercase;letter-spacing:.06em;margin-right:2px">CALL:</span>
+    <span class="ev eir" style="padding:2px 7px">N Daily</span>
+    <span class="ev eirs" style="padding:2px 7px">S Daily</span>
+    <span class="ev" style="padding:2px 7px;background:#d1fae5;color:#065f46;border:1px solid #86efac">Weekend</span>
+
+    <span style="font-weight:800;color:var(--txt3);font-size:9px;text-transform:uppercase;letter-spacing:.06em;margin-left:6px;margin-right:2px">SHIFTS:</span>
+    <span class="ev" style="padding:2px 7px;background:#eff6ff;color:#1e40af;border:1px solid #93c5fd">1st</span>
+    <span class="ev" style="padding:2px 7px;background:#f0fdf4;color:#166534;border:1px solid #86efac">2nd</span>
+    <span class="ev" style="padding:2px 7px;background:#fefce8;color:#713f12;border:1px solid #fcd34d">3rd</span>
+    <span class="ev e-home-auto" style="padding:2px 7px">Home</span>
+    <span class="ev ehol" style="padding:2px 7px">Holiday</span>
+    <span class="ev evac" style="padding:2px 7px">Off</span>
+  </div>
+  <div class="cal-grid" id="irc-head"></div>
+  <div class="cal-grid" id="irc-body"></div>
+</div>
+
+<!-- IR SHIFT BUILDER -->
+<div id="page-ir-shifts" class="page">
+  <div class="pg-title">IR Shift Builder</div>
+  <div class="pg-sub">Assign IR physicians to procedural shifts — separate from the on-call schedule.</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
+
+
+
+      <div class="ibox">
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="irs-phys" onchange="updateIRSbInfo()"></select></div>
+        <div class="fg"><label>Date</label><input id="irs-date" type="date" oninput="updateIRSbInfo()"></div>
+        <div class="fg"><label>Shift</label>
+          <select id="irs-shift">
+            <option value="1st">1st Shift (Days)</option>
+            <option value="Home">At Home</option>
+          </select>
+        </div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Site</label><select id="irs-site" onchange="updateIRSbInfo()"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="irs-sub"></select></div>
+        <div class="fg"><label>Notes</label><input id="irs-notes" placeholder="Optional notes"></div>
+      </div>
+      <div id="irs-info" style="margin-bottom:8px"></div>
+      <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
+      <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → Home</button>
+    </div>
+
+  <!-- Shared table + filters -->
+  <div class="admin-only" style="display:flex;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>Filter Month</label><input id="irsf-mo" type="month" oninput="renderIRShiftTable()"></div>
+    <div class="fg" style="margin:0"><label>Filter Physician</label><select id="irsf-phys" onchange="renderIRShiftTable()"><option value="">All</option></select></div>
+    <div class="fg" style="margin:0"><label>Filter Shift</label>
+      <select id="irsf-shift" onchange="renderIRShiftTable()">
+        <option value="">All</option><option>1st</option><option>Home</option>
+      </select>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:6px">
+      <button class="br bsm" onclick="clearIRShifts('filtered')" title="Clear IR shifts matching current filters">🗑 Clear Filtered</button>
+      <button class="br bsm" onclick="clearIRShifts('all')" title="Clear ALL IR shifts" style="opacity:.7">🗑 Clear All IR</button>
+    </div>
+  </div>
+  <div class="card" style="overflow-x:auto">
+    <table>
+      <thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>IR Group</th><th>Subspecialty</th><th>Notes</th><th></th></tr></thead>
+      <tbody id="irs-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- IR SCHEDULE BUILDER (redesigned) -->
+<div id="page-ir-builder" class="page">
+  <div class="pg-title">IR Schedule Builder</div>
+  <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning.</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>  <button class="br bsm" onclick="clearIRCalls('month')" title="Clear IR calls for selected month">🗑 Reset Month</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" onclick="irBuilderTab('weekly',this)">Weekly Builder</div>
+    <div class="tab" onclick="irBuilderTab('manual',this)">Manual Entry</div>
+    <div class="tab" onclick="irBuilderTab('list',this)">All Entries</div>
+  </div>
+
+  <!-- WEEKLY BUILDER TAB -->
+  <div id="irbt-weekly">
+    <div class="ibox">
+      <div class="flexe" style="gap:10px;margin-bottom:8px">
+        <div class="fg" style="margin:0"><label>Week Starting Monday</label><input id="irb-week" type="date" oninput="renderIRWeekBuilder()"></div>
+        <div class="fg" style="margin:0"><label>IR Group</label>
+          <select id="irb-grp" onchange="renderIRWeekBuilder()">
+            <option value="North">North Group</option>
+            <option value="South">South Group</option>
+            <option value="both">Both Groups</option>
+          </select>
+        </div>
+      </div>
+      <div class="note ni" style="margin-bottom:0;font-size:11px">
+        IR call = 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning. Physicians not on call have no automatic assignment.
+      </div>
+    </div>
+    <div id="irb-week-content"></div>
+  </div>
+
+  <!-- MANUAL ENTRY TAB -->
+  <div id="irbt-manual" style="display:none">
+    <div class="ibox">
+      <div class="card-title">Add IR Call Entry</div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="ird-phys"></select></div>
+        <div class="fg"><label>Date</label><input id="ird-date" type="date"></div>
+        <div class="fg"><label>IR Group</label><select id="ird-grp"><option>North</option><option>South</option></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Call Type</label>
+          <select id="ird-ctype">
+            <option value="daily">Daily Call</option>
+            <option value="weekend">Weekend Call (Fri→Mon)</option>
+          </select>
+        </div>
+        <div class="fg"><label>Site</label><select id="ird-site"></select></div>
+        <div class="fg"><label>Notes</label><input id="ird-notes"></div>
+      </div>
+      <button class="bp" onclick="addIRCallManual()">Add IR Call</button>
+    </div>
+  </div>
+
+  <!-- LIST TAB -->
+  <div id="irbt-list" style="display:none">
+    <div class="flexe" style="margin-bottom:8px;gap:5px">
+      <div class="fg" style="margin:0"><label>Month</label><input id="irl-mo" type="month" oninput="renderIRList()"></div>
+      <div class="fg" style="margin:0"><label>Group</label><select id="irl-grp" onchange="renderIRList()"><option value="">Both</option><option>North</option><option>South</option></select></div>
+    </div>
+    <div class="card" style="overflow-x:auto"><table>
+      <thead><tr><th>Physician</th><th>Group</th><th>Call Type</th><th>Date(s)</th><th>Site</th><th>Notes</th><th></th></tr></thead>
+      <tbody id="irl-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- IR SHIFT AUTO-ASSIGN -->
+<div id="page-ir-shift-auto" class="page">
+  <div class="pg-title">IR Shift Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Month</label><input id="irsa-mo" type="month"></div>
+      <div class="fg"><label>Shift Type</label>
+        <select id="irsa-shift">
+          <option value="all">All Shifts</option>
+          <option value="1st">1st Shift Only</option>
+        </select>
+      </div>
+      <div class="fg"><label>IR Group</label>
+        <select id="irsa-grp">
+          <option value="both">Both Groups</option>
+          <option value="North">North Only</option>
+          <option value="South">South Only</option>
+        </select>
+      </div>
+    </div>
+    <div class="flexe" style="gap:8px;margin-top:8px">
+      <button class="ba" onclick="previewIRShiftAA()">▶ Preview</button>
+      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">✓ Apply All</button>
+    </div>
+  </div>
+  <div class="note ni" style="margin-bottom:8px">Fills IR daily procedure schedule by site slots. Load-balanced by shift count per physician.</div>
+  <div class="card" id="irsa-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+</div>
+
+<!-- IR AUTO-ASSIGN -->
+<div id="page-ir-auto" class="page">
+  <div class="pg-title">IR Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Month</label><input id="ira-mo" type="month"></div>
+      <div class="fg"><label>Assignment Type</label>
+        <select id="ira-type">
+          <option value="both">Daily + Weekend Call</option>
+          <option value="daily">Daily Call Only</option>
+          <option value="weekend">Weekend Call Only</option>
+        </select>
+      </div>
+      <div class="fg"><label>IR Group</label>
+        <select id="ira-grp">
+          <option value="both">Both Groups</option>
+          <option value="North">North Only</option>
+          <option value="South">South Only</option>
+        </select>
+      </div>
+    </div>
+    <div class="flexe" style="gap:8px;margin-top:8px">
+      <button class="ba" onclick="previewIRAA()">▶ Preview</button>
+      <button class="bp" id="ira-apply" style="display:none" onclick="applyIRAA()">✓ Apply All</button>
+    </div>
+  </div>
+  <div class="note ni" style="margin-bottom:8px">1 physician per group covers Mon–Thu. Weekend call covers Fri→Mon. Physicians not on call are left unscheduled.</div>
+  <div class="card" id="ira-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+</div>
+
+<!-- CHAT PAGE -->
+<div id="page-chat" class="page">
+  <div class="pg-title">Team Chat</div>
+  <div class="pg-sub">Real-time messaging with your radiology team. Messages persist for this session.</div>
+  <div style="display:flex;gap:12px;height:580px">
+    <!-- Channel list -->
+    <div style="width:160px;flex-shrink:0">
+      <div class="card" style="height:100%;padding:10px">
+        <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Channels</div>
+        <div id="chat-channels"></div>
+        <div style="margin-top:12px;font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Online</div>
+        <div id="chat-online"></div>
+      </div>
+    </div>
+    <!-- Message area -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden">
+        <div style="padding:10px 14px;border-bottom:1px solid var(--bdr);font-weight:800;font-size:13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center">
+          <span id="chat-channel-title"># general</span>
+          <span style="font-size:10px;color:var(--txt3)" id="chat-member-count"></span>
+        </div>
+        <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px"></div>
+        <div style="padding:10px 14px;border-top:1px solid var(--bdr);display:flex;gap:8px">
+          <input id="chat-input" placeholder="Message #general..." style="flex:1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}">
+          <button class="bp" onclick="sendChatMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SHIFT SWAPS PAGE -->
+<div id="page-swaps" class="page">
+  <div class="pg-title">Shift Swap Requests</div>
+  <div class="pg-sub">Request to swap a shift with a colleague. Both parties must approve before the swap is finalized.</div>
+  <div class="tabs">
+    <div class="tab on" onclick="swapTab('request',this)">New Request</div>
+    <div class="tab" onclick="swapTab('pending',this)">Pending Approval</div>
+    <div class="tab" onclick="swapTab('history',this)">History</div>
+  </div>
+
+  <!-- NEW REQUEST -->
+  <div id="swpt-request">
+    <div class="ibox">
+      <div class="card-title">Request Shift Swap</div>
+      <div class="g2">
+        <div>
+          <div style="font-size:11px;font-weight:800;color:var(--blue-t);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Your Shift (offering)</div>
+          <div class="fg"><label>Your Shift Date</label><input id="sw-my-date" type="date" oninput="loadMyShifts()"></div>
+          <div class="fg"><label>Shift</label><select id="sw-my-shift"><option value="">Select your shift...</option></select></div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:800;color:var(--green-t);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Requested Shift (wanting)</div>
+          <div class="fg"><label>Colleague</label><select id="sw-their-phys" onchange="loadTheirShifts()"><option value="">Select colleague...</option></select></div>
+          <div class="fg"><label>Their Shift Date</label><input id="sw-their-date" type="date" oninput="loadTheirShifts()"></div>
+          <div class="fg"><label>Shift</label><select id="sw-their-shift"><option value="">Select their shift...</option></select></div>
+        </div>
+      </div>
+      <div class="fg"><label>Message (optional)</label><input id="sw-msg" placeholder="e.g. Family event on that date, can cover your Friday shift"></div>
+      <button class="bp" onclick="submitSwapRequest()">Submit Swap Request</button>
+    </div>
+  </div>
+
+  <!-- PENDING -->
+  <div id="swpt-pending" style="display:none">
+    <div class="note ni">Swaps require approval from both parties. Once both approve, shifts are automatically updated in the schedule.</div>
+    <div id="swp-pending-list"></div>
+  </div>
+
+  <!-- HISTORY -->
+  <div id="swpt-history" style="display:none">
+    <div id="swp-history-list"></div>
+  </div>
+</div>
+
+<!-- HOLIDAY AUTO-ASSIGN PAGE -->
+<div id="page-holiday-auto" class="page">
+  <div class="pg-title">Holiday Auto-Assign</div>
+  <div class="pg-sub">Automatically assign physicians to holiday call slots, balancing across the team. Configured holidays are blackout dates — no normal daily shifts will be assigned on those days.</div>
+
+  <div class="g2" style="margin-bottom:10px">
+    <div class="card">
+      <div class="card-title">Holiday Blackout Dates</div>
+      <div class="note ni" style="font-size:11px">On these dates, the auto-assign engines will skip normal shift assignments. Only holiday call can be assigned.</div>
+      <div class="flex" style="gap:6px;margin-bottom:8px">
+        <input id="hb-name" placeholder="Holiday name" style="flex:1">
+        <input id="hb-date" type="date" style="width:140px">
+        <button class="bp bsm" onclick="addBlackout()">Add</button>
+      </div>
+      <div id="hb-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Holiday Call Needs</div>
+      <div class="note ni" style="font-size:11px">Configure how many physicians are needed per holiday per group.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        <select id="hn-name" style="flex:1;min-width:130px"><option>New Year's Day</option><option>MLK Day</option><option>Memorial Day</option><option>Independence Day</option><option>Labor Day</option><option>Thanksgiving</option><option>Christmas Eve</option><option>Christmas Day</option><option>New Year's Eve</option><option>Other</option></select>
+        <select id="hn-grp" style="width:90px"><option value="DR">DR</option><option value="IR">IR</option><option value="Both">Both</option></select>
+        <input id="hn-slots" type="number" min="1" max="10" value="1" style="width:60px">
+        <button class="bp bsm" onclick="addHolidayNeed()">Add</button>
+      </div>
+      <div id="hn-list"></div>
+    </div>
+  </div>
+
+  <div class="ibox">
+    <div class="card-title">Auto-Assign Holiday Call</div>
+    <div class="g3">
+      <div class="fg"><label>Year</label><input id="ha-year" type="number" value="2025" min="2024" max="2030" style="width:90px"></div>
+      <div class="fg"><label>Group</label><select id="ha-grp"><option value="both">Both DR + IR</option><option value="DR">DR Only</option><option value="IR">IR Only</option></select></div>
+      <div class="fg"><label>Balance By</label><select id="ha-bal"><option value="holidays">Holiday count</option><option value="shifts">Total shifts</option></select></div>
+    </div>
+    <div class="flexe" style="gap:8px">
+      <button class="ba" onclick="previewHolidayAA()">Preview</button>
+      <button class="bp" id="ha-apply" style="display:none" onclick="applyHolidayAA()">Apply All</button>
+    </div>
+  </div>
+  <div class="card" id="ha-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+</div>
+
+<!-- IR CALL REBALANCER -->
+<div id="page-ir-rebalance" class="page">
+  <div class="pg-title">⚖ IR Call Rebalancer</div>
   <div class="pg-sub">Redistribute existing IR call assignments to achieve FTE-proportional equity. Targets are calculated from actual available slots in the month divided by group FTE — not arbitrary caps.</div>
 
   <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
@@ -4074,38 +5302,61 @@ function applyIRAA(){
 
 let _irrPlan = null; // holds the last preview plan
 
-function renderIRRebalancePrep(){
-  const moEl = document.getElementById('irr-mo');
-  if(!moEl) return;
-  if(!moEl.value){ const now=new Date(); moEl.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'); }
-  const ym = moEl.value;
-  const grp = document.getElementById('irr-grp')?.value||'both';
-  const typ = document.getElementById('irr-type')?.value||'both';
-  const [y,m] = ym.split('-').map(Number);
-  const label = new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
-  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
+// Returns the array of 6 YM strings for the selected period
+function _irrMonths(){
+  const yr = parseInt(document.getElementById('irr-yr')?.value||new Date().getFullYear());
+  const period = document.getElementById('irr-period')?.value||'H1';
+  const startM = period==='H1'?1:7;
+  return Array.from({length:6},(_,i)=>`${yr}-${String(startM+i).padStart(2,'0')}`);
+}
 
-  // Show current distribution
-  let html = `<div class="card" style="margin-bottom:12px">
-    <div class="card-title">Current Distribution — ${label}</div>
+function _irrPeriodLabel(months){
+  const [y,m0]=months[0].split('-').map(Number);
+  const [,m1]=months[5].split('-').map(Number);
+  const fmt=(m)=>new Date(y,m-1,1).toLocaleString('default',{month:'short'});
+  return `${fmt(m0)}–${fmt(m1)} ${y}`;
+}
+
+// 6-month targets: sum of monthly targets across the period
+function irDailyTargetPeriod(p, months){
+  return months.reduce((s,ym)=>s+irDailyTargetMonth(p,ym),0);
+}
+function irWkndTargetPeriod(p, months){
+  return months.reduce((s,ym)=>s+irWkndTargetMonth(p,ym),0);
+}
+
+function renderIRRebalancePrep(){
+  const months = _irrMonths();
+  const label  = _irrPeriodLabel(months);
+  const grp    = document.getElementById('irr-grp')?.value||'both';
+  const typ    = document.getElementById('irr-type')?.value||'both';
+  const irPs   = S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
+
+  if(!irPs.length){
+    document.getElementById('irr-current').innerHTML='<div class="note ni">No IR physicians configured for this group.</div>';
+    return;
+  }
+
+  // Show current distribution across 6 months
+  let html=`<div class="card" style="margin-bottom:12px">
+    <div class="card-title">Current Distribution — ${label}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">6-month period · targets = actual slots ÷ group FTE × physician FTE</span>
+    </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${typ!=='weekend'?'<th>Daily Calls</th><th>Daily Target</th><th>Daily %</th>':''}
-      ${typ!=='daily'?'<th>Wknd Calls</th><th>Wknd Target</th><th>Wknd %</th>':''}
+      ${typ!=='weekend'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
+      ${typ!=='daily'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
     </tr></thead><tbody>`;
 
-  const irPs = S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
-  if(!irPs.length){ document.getElementById('irr-current').innerHTML='<div class="note ni">No IR physicians configured for this group.</div>'; return; }
-
-  let anyCall = false;
+  let anyCall=false;
   irPs.forEach(p=>{
-    const d = irDailyCnt(p.id,ym);
-    const w = irWkndCnt(p.id,ym);
+    const d=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
+    const w=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
     if(d>0||w>0) anyCall=true;
-    const td = irDailyTargetMonth(p,ym), tw = irWkndTargetMonth(p,ym);
-    const pd = td>0?Math.round(d/td*100):0, pw = tw>0?Math.round(w/tw*100):0;
-    const dCls = pd>110?'color:var(--red-t)':pd>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
-    const wCls = pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const td=irDailyTargetPeriod(p,months), tw=irWkndTargetPeriod(p,months);
+    const pd=td>0?Math.round(d/td*100):0, pw=tw>0?Math.round(w/tw*100):0;
+    const dCls=pd>110?'color:var(--red-t)':pd>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const wCls=pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
     html+=`<tr>
       <td style="font-weight:600">${pname(p.id)}</td>
       <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
@@ -4118,40 +5369,38 @@ function renderIRRebalancePrep(){
         <td style="text-align:center;font-weight:700;${wCls}">${pw}%</td>`:''}
     </tr>`;
   });
-  html += '</tbody></table></div></div>';
+  html+='</tbody></table></div></div>';
 
-  if(!anyCall){
-    html += '<div class="note ni" style="margin-bottom:10px">No IR call assignments found for this month. Build the schedule first, then use the rebalancer.</div>';
-  }
-  document.getElementById('irr-current').innerHTML = html;
-  document.getElementById('irr-preview').innerHTML = '';
-  document.getElementById('irr-apply').style.display = 'none';
-  document.getElementById('irr-apply-note').textContent = '';
-  _irrPlan = null;
+  if(!anyCall)
+    html+='<div class="note ni" style="margin-bottom:10px">No IR call assignments found in this period. Build the schedule first, then rebalance.</div>';
+
+  document.getElementById('irr-current').innerHTML=html;
+  document.getElementById('irr-preview').innerHTML='';
+  document.getElementById('irr-apply').style.display='none';
+  document.getElementById('irr-apply-note').textContent='';
+  _irrPlan=null;
 }
 
 function previewIRRebalance(){
-  const ym = document.getElementById('irr-mo')?.value;
-  const grp = document.getElementById('irr-grp')?.value||'both';
-  const typ = document.getElementById('irr-type')?.value||'both';
-  if(!ym){ alert('Select a month.'); return; }
+  const months  = _irrMonths();
+  const label   = _irrPeriodLabel(months);
+  const grp     = document.getElementById('irr-grp')?.value||'both';
+  const typ     = document.getElementById('irr-type')?.value||'both';
+  const groups  = ['North','South'].filter(g=>grp==='both'||g===grp);
+  const inPeriod= (date)=>months.some(ym=>date.startsWith(ym));
 
-  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
-  const plan = { daily:[], weekend:[], swapsD:0, swapsW:0, failedD:[], failedW:[] };
+  const plan={daily:[],weekend:[],swapsD:0,swapsW:0,failedD:[],failedW:[]};
 
-  // ── Check for back-to-back conflicts within a new set of assignments ──
+  // ── Back-to-back checks against assignments already placed in this plan ──
   function inPlanAdjacent(pid, date, assignments, callType){
-    const prev=addDays(date,-1), next=addDays(date,1);
+    const prev=addDays(date,-1),next=addDays(date,1);
     if(callType==='daily'){
-      // Adjacent daily
       if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===prev||a.date===next))) return true;
-      // Inside a weekend span already in plan
       if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&(date>=a.date&&date<=addDays(a.date,4)))) return true;
-      // Adjacent to weekend in plan (Thu before / Tue after)
       if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&(date===addDays(a.date,-1)||date===addDays(a.date,4)))) return true;
     }
     if(callType==='weekend'){
-      const thu=addDays(date,-1), tue=addDays(date,4), mon=addDays(date,3);
+      const thu=addDays(date,-1),tue=addDays(date,4);
       if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===thu||a.date===tue))) return true;
       if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&a.date!==date&&
         Math.abs(parseDateLocal(date).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)) return true;
@@ -4159,282 +5408,264 @@ function previewIRRebalance(){
     return false;
   }
 
-  // ── Check back-to-back against EXISTING calls outside this month ──
-  function existingAdjacentOutsideMonth(pid, date, callType){
-    const prev=addDays(date,-1), next=addDays(date,1);
-    const outsideCalls = S.irCalls.filter(c=>c.physId===pid&&!c.date.startsWith(ym));
+  // ── Back-to-back checks against calls OUTSIDE the 6-month window ──
+  function outsideAdjacent(pid, date, callType){
+    const outside=S.irCalls.filter(c=>c.physId===pid&&!inPeriod(c.date));
+    const prev=addDays(date,-1),next=addDays(date,1);
     if(callType==='daily'){
-      return outsideCalls.some(c=>
+      return outside.some(c=>
         c.callType==='daily'&&(c.date===prev||c.date===next)||
         c.callType==='weekend'&&(date>=c.date&&date<=addDays(c.date,4))
       );
     }
     if(callType==='weekend'){
-      const thu=addDays(date,-1), tue=addDays(date,4);
-      return outsideCalls.some(c=>
+      const thu=addDays(date,-1),tue=addDays(date,4);
+      return outside.some(c=>
         c.callType==='daily'&&(c.date===thu||c.date===tue)||
-        c.callType==='weekend'&&c.date!==date&&Math.abs(parseDateLocal(date).getTime()-parseDateLocal(c.date).getTime())/86400000<=7
+        c.callType==='weekend'&&c.date!==date&&
+          Math.abs(parseDateLocal(date).getTime()-parseDateLocal(c.date).getTime())/86400000<=7
       );
     }
     return false;
   }
 
   groups.forEach(g=>{
-    const gPhys = S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
+    const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
     if(!gPhys.length) return;
 
-    // ── Redistribute DAILY calls ──
+    // ── Daily calls across all 6 months ──
     if(typ==='daily'||typ==='both'){
-      const dailyDates = S.irCalls
-        .filter(c=>c.date.startsWith(ym)&&c.irGroup===g&&c.callType==='daily')
+      const dailyDates=S.irCalls
+        .filter(c=>inPeriod(c.date)&&c.irGroup===g&&c.callType==='daily')
         .map(c=>c.date).sort();
 
-      const cntD = {}; gPhys.forEach(p=>{ cntD[p.id]=0; });
-      const dailyCapFn = p => Math.max(Math.ceil(irDailyTargetMonth(p,ym)),1);
-      const gAssignments = []; // track within-pass assignments for this group
+      const cntD={}; gPhys.forEach(p=>{cntD[p.id]=0;});
+      const dailyCapFn=p=>Math.max(Math.ceil(irDailyTargetPeriod(p,months)),1);
+      const gAsgn=[];
 
       dailyDates.forEach(date=>{
-        const origCall = S.irCalls.find(c=>c.date===date&&c.irGroup===g&&c.callType==='daily');
+        const orig=S.irCalls.find(c=>c.date===date&&c.irGroup===g&&c.callType==='daily');
 
-        const eligible = gPhys.filter(p=>{
+        const eligible=gPhys.filter(p=>{
           if(vacDays(p.id).has(date)) return false;
           if(_has2ndOr3rdShift(p.id,date)) return false;
           if(!_hasIRShiftOnDate(p.id,date)) return false;
-          if(existingAdjacentOutsideMonth(p.id,date,'daily')) return false;
-          if(inPlanAdjacent(p.id,date,gAssignments,'daily')) return false;
+          if(outsideAdjacent(p.id,date,'daily')) return false;
+          if(inPlanAdjacent(p.id,date,gAsgn,'daily')) return false;
           return dailyCapFn(p)>0;
         });
 
-        let picked = null;
+        let picked=null;
         if(eligible.length){
-          // Sort by fill ratio + rotating tiebreaker
           const n=Math.max(gPhys.length,1);
-          const offset=Object.values(cntD).reduce((s,v)=>s+v,0)%n;
+          const off=Object.values(cntD).reduce((s,v)=>s+v,0)%n;
           eligible.sort((a,b)=>{
-            const mA=dailyCapFn(a)||1, mB=dailyCapFn(b)||1;
-            const rA=cntD[a.id]/mA, rB=cntD[b.id]/mB;
+            const mA=dailyCapFn(a)||1,mB=dailyCapFn(b)||1;
+            const rA=cntD[a.id]/mA,rB=cntD[b.id]/mB;
             if(Math.abs(rA-rB)>1e-9) return rA-rB;
-            const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
-            const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
             return iA-iB;
           });
-          picked = eligible[0];
+          picked=eligible[0];
         }
 
         if(picked){
-          const isSwap = origCall && origCall.physId !== picked.id;
-          const site = origCall?.site || (S.sites.find(s=>s.irGroup===g)?.name||'');
-          const entry = {physId:picked.id,date,callType:'daily',irGroup:g,site,notes:origCall?.notes||'',
-            origPhysId: origCall?.physId||null, origId: origCall?.id||null, isSwap};
-          plan.daily.push(entry);
-          gAssignments.push(entry);
-          cntD[picked.id]++;
+          const isSwap=!!(orig&&orig.physId!==picked.id);
+          const site=orig?.site||(S.sites.find(s=>s.irGroup===g)?.name||'');
+          const e={physId:picked.id,date,callType:'daily',irGroup:g,site,notes:orig?.notes||'',
+            origPhysId:orig?.physId||null,origId:orig?.id||null,isSwap};
+          plan.daily.push(e); gAsgn.push(e); cntD[picked.id]++;
           if(isSwap) plan.swapsD++;
         } else {
-          // Keep original
           plan.failedD.push(date);
-          if(origCall){
-            const entry = {physId:origCall.physId,date,callType:'daily',irGroup:g,site:origCall.site,notes:origCall.notes,
-              origPhysId:origCall.physId,origId:origCall.id,isSwap:false,constrained:true};
-            plan.daily.push(entry);
-            gAssignments.push(entry);
-            cntD[origCall.physId] = (cntD[origCall.physId]||0)+1;
+          if(orig){
+            const e={physId:orig.physId,date,callType:'daily',irGroup:g,site:orig.site,notes:orig.notes,
+              origPhysId:orig.physId,origId:orig.id,isSwap:false,constrained:true};
+            plan.daily.push(e); gAsgn.push(e); cntD[orig.physId]=(cntD[orig.physId]||0)+1;
           }
         }
       });
     }
 
-    // ── Redistribute WEEKEND calls ──
+    // ── Weekend calls across all 6 months ──
     if(typ==='weekend'||typ==='both'){
-      const wkndDates = S.irCalls
-        .filter(c=>c.date.startsWith(ym)&&c.irGroup===g&&c.callType==='weekend')
+      const wkndDates=S.irCalls
+        .filter(c=>inPeriod(c.date)&&c.irGroup===g&&c.callType==='weekend')
         .map(c=>c.date).sort();
 
-      const cntW = {}; gPhys.forEach(p=>{ cntW[p.id]=0; });
-      const wkndCapFn = p => Math.max(Math.ceil(irWkndTargetMonth(p,ym)),1);
-      const gWkndAssignments = [];
+      const cntW={}; gPhys.forEach(p=>{cntW[p.id]=0;});
+      const wkndCapFn=p=>Math.max(Math.ceil(irWkndTargetPeriod(p,months)),1);
+      const gWAsgn=[];
 
       wkndDates.forEach(fridayDate=>{
-        const origCall = S.irCalls.find(c=>c.date===fridayDate&&c.irGroup===g&&c.callType==='weekend');
-        const mon = addDays(fridayDate,3);
+        const orig=S.irCalls.find(c=>c.date===fridayDate&&c.irGroup===g&&c.callType==='weekend');
+        const mon=addDays(fridayDate,3);
 
-        const eligible = gPhys.filter(p=>{
+        const eligible=gPhys.filter(p=>{
           const vd=vacDays(p.id);
           if(vd.has(fridayDate)||vd.has(mon)) return false;
           if(_hasAdjacentIRCall(p.id,fridayDate)||_hasIRCallNearWeekend(p.id,fridayDate)) return false;
-          if(existingAdjacentOutsideMonth(p.id,fridayDate,'weekend')) return false;
-          if(inPlanAdjacent(p.id,fridayDate,gWkndAssignments,'weekend')) return false;
+          if(outsideAdjacent(p.id,fridayDate,'weekend')) return false;
+          if(inPlanAdjacent(p.id,fridayDate,gWAsgn,'weekend')) return false;
           const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
           return wkndCapFn(p)>0;
         });
 
-        let picked = null;
+        let picked=null;
         if(eligible.length){
           const n=Math.max(gPhys.length,1);
-          const offset=Object.values(cntW).reduce((s,v)=>s+v,0)%n;
+          const off=Object.values(cntW).reduce((s,v)=>s+v,0)%n;
           eligible.sort((a,b)=>{
-            const mA=wkndCapFn(a)||1, mB=wkndCapFn(b)||1;
-            const rA=cntW[a.id]/mA, rB=cntW[b.id]/mB;
+            const mA=wkndCapFn(a)||1,mB=wkndCapFn(b)||1;
+            const rA=cntW[a.id]/mA,rB=cntW[b.id]/mB;
             if(Math.abs(rA-rB)>1e-9) return rA-rB;
-            const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
-            const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
             return iA-iB;
           });
-          picked = eligible[0];
+          picked=eligible[0];
         }
 
         if(picked){
-          const isSwap = origCall && origCall.physId !== picked.id;
-          const site = origCall?.site || (S.sites.find(s=>s.irGroup===g)?.name||'');
-          const entry = {physId:picked.id,date:fridayDate,callType:'weekend',irGroup:g,site,notes:origCall?.notes||'',
-            origPhysId:origCall?.physId||null,origId:origCall?.id||null,isSwap};
-          plan.weekend.push(entry);
-          gWkndAssignments.push(entry);
-          cntW[picked.id]++;
+          const isSwap=!!(orig&&orig.physId!==picked.id);
+          const site=orig?.site||(S.sites.find(s=>s.irGroup===g)?.name||'');
+          const e={physId:picked.id,date:fridayDate,callType:'weekend',irGroup:g,site,notes:orig?.notes||'',
+            origPhysId:orig?.physId||null,origId:orig?.id||null,isSwap};
+          plan.weekend.push(e); gWAsgn.push(e); cntW[picked.id]++;
           if(isSwap) plan.swapsW++;
         } else {
           plan.failedW.push(fridayDate);
-          if(origCall){
-            const entry = {physId:origCall.physId,date:fridayDate,callType:'weekend',irGroup:g,site:origCall.site,notes:origCall.notes,
-              origPhysId:origCall.physId,origId:origCall.id,isSwap:false,constrained:true};
-            plan.weekend.push(entry);
-            gWkndAssignments.push(entry);
-            cntW[origCall.physId]=(cntW[origCall.physId]||0)+1;
+          if(orig){
+            const e={physId:orig.physId,date:fridayDate,callType:'weekend',irGroup:g,site:orig.site,notes:orig.notes,
+              origPhysId:orig.physId,origId:orig.id,isSwap:false,constrained:true};
+            plan.weekend.push(e); gWAsgn.push(e); cntW[orig.physId]=(cntW[orig.physId]||0)+1;
           }
         }
       });
     }
   });
 
-  _irrPlan = plan;
-  const totalSwaps = plan.swapsD + plan.swapsW;
-  const totalFailed = plan.failedD.length + plan.failedW.length;
-  const [y,m] = ym.split('-').map(Number);
-  const label = new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+  _irrPlan=plan;
+  const totalSwaps=plan.swapsD+plan.swapsW;
+  const totalFailed=plan.failedD.length+plan.failedW.length;
+  const irPs=S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
 
-  let html = '';
+  let html='';
 
   // ── Proposed distribution summary ──
-  const irPs = S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
-  html += `<div class="card" style="margin-bottom:12px">
+  html+=`<div class="card" style="margin-bottom:12px">
     <div class="card-title">Proposed Distribution — ${label}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">${totalSwaps} reassignment(s) · ${totalFailed} date(s) constrained (kept original)</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">${totalSwaps} reassignment(s) · ${totalFailed} date(s) constrained</span>
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${typ!=='weekend'?'<th>Daily (was)</th><th>Daily (new)</th><th>Target</th><th>Daily %</th>':''}
-      ${typ!=='daily'?'<th>Wknd (was)</th><th>Wknd (new)</th><th>Target</th><th>Wknd %</th>':''}
+      ${typ!=='weekend'?'<th>Daily (was)</th><th>Daily (new)</th><th>6-Mo Target</th><th>Daily %</th>':''}
+      ${typ!=='daily'?'<th>Wknd (was)</th><th>Wknd (new)</th><th>6-Mo Target</th><th>Wknd %</th>':''}
     </tr></thead><tbody>`;
 
   irPs.forEach(p=>{
-    const oldD = irDailyCnt(p.id,ym), oldW = irWkndCnt(p.id,ym);
-    const newD = plan.daily.filter(a=>a.physId===p.id).length;
-    const newW = plan.weekend.filter(a=>a.physId===p.id).length;
-    const td = irDailyTargetMonth(p,ym), tw = irWkndTargetMonth(p,ym);
-    const pdNew = td>0?Math.round(newD/td*100):0;
-    const pwNew = tw>0?Math.round(newW/tw*100):0;
-    const dCls = pdNew>110?'color:var(--red-t)':pdNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
-    const wCls = pwNew>110?'color:var(--red-t)':pwNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
-    const dChg = newD-oldD, wChg = newW-oldW;
-    const dArrow = dChg>0?`<span style="color:var(--green-t)">▲${dChg}</span>`:dChg<0?`<span style="color:var(--amber,#d97706)">▼${Math.abs(dChg)}</span>`:'';
-    const wArrow = wChg>0?`<span style="color:var(--green-t)">▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)">▼${Math.abs(wChg)}</span>`:'';
+    const oldD=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
+    const oldW=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+    const newD=plan.daily.filter(a=>a.physId===p.id).length;
+    const newW=plan.weekend.filter(a=>a.physId===p.id).length;
+    const td=irDailyTargetPeriod(p,months), tw=irWkndTargetPeriod(p,months);
+    const pdNew=td>0?Math.round(newD/td*100):0;
+    const pwNew=tw>0?Math.round(newW/tw*100):0;
+    const dCls=pdNew>110?'color:var(--red-t)':pdNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const wCls=pwNew>110?'color:var(--red-t)':pwNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+    const dChg=newD-oldD,wChg=newW-oldW;
+    const dArrow=dChg>0?`<span style="color:var(--green-t)"> ▲${dChg}</span>`:dChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(dChg)}</span>`:'';
+    const wArrow=wChg>0?`<span style="color:var(--green-t)"> ▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(wChg)}</span>`:'';
     html+=`<tr>
       <td style="font-weight:600">${pname(p.id)}</td>
       <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
       <td style="text-align:center">${p.irFte}</td>
       ${typ!=='weekend'?`<td style="text-align:center;color:var(--txt3)">${oldD}</td>
-        <td style="text-align:center;font-weight:700">${newD} ${dArrow}</td>
+        <td style="text-align:center;font-weight:700">${newD}${dArrow}</td>
         <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700;${dCls}">${pdNew}%</td>`:''}
       ${typ!=='daily'?`<td style="text-align:center;color:var(--txt3)">${oldW}</td>
-        <td style="text-align:center;font-weight:700">${newW} ${wArrow}</td>
+        <td style="text-align:center;font-weight:700">${newW}${wArrow}</td>
         <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700;${wCls}">${pwNew}%</td>`:''}
     </tr>`;
   });
-  html += '</tbody></table></div></div>';
+  html+='</tbody></table></div></div>';
 
-  // ── Swap detail table ──
-  const allSwaps = [...plan.daily, ...plan.weekend]
-    .filter(a=>a.isSwap)
-    .sort((a,b)=>a.date>b.date?1:-1);
-
+  // ── Reassignment detail table ──
+  const allSwaps=[...plan.daily,...plan.weekend].filter(a=>a.isSwap).sort((a,b)=>a.date>b.date?1:-1);
   if(allSwaps.length){
-    html += `<div class="card" style="margin-bottom:12px">
+    html+=`<div class="card" style="margin-bottom:12px">
       <div class="card-title">Reassignments (${allSwaps.length})</div>
       <div style="overflow-x:auto"><table><thead><tr>
-        <th>Date</th><th>Type</th><th>Group</th><th>From</th><th>To</th>
+        <th>Date</th><th>Type</th><th>Group</th><th>From</th><th>→ To</th>
       </tr></thead><tbody>`;
     allSwaps.forEach(a=>{
-      const dates = a.callType==='weekend'?`${a.date} → ${addDays(a.date,3)}`:a.date;
+      const dates=a.callType==='weekend'?`${a.date} → ${addDays(a.date,3)}`:a.date;
       html+=`<tr>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
         <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
-        <td style="font-weight:600;color:var(--green-t)">→ ${pname(a.physId)}</td>
+        <td style="font-weight:600;color:var(--green-t)">${pname(a.physId)}</td>
       </tr>`;
     });
-    html += '</tbody></table></div></div>';
+    html+='</tbody></table></div></div>';
   } else {
-    html += `<div class="note ns" style="margin-bottom:12px">✓ Current distribution is already optimal — no reassignments needed.</div>`;
+    html+='<div class="note ns" style="margin-bottom:12px">✓ Distribution is already optimal for this period — no reassignments needed.</div>';
   }
 
   if(totalFailed){
-    const allFailed = [...plan.failedD,...plan.failedW];
-    html += `<div class="note nw" style="margin-bottom:12px">
-      ⚠ ${totalFailed} date(s) kept with original assignment due to constraints (vacation, back-to-back rules, IR shift requirement):
-      <span style="font-size:11px"> ${allFailed.join(', ')}</span>
-    </div>`;
+    const allFailed=[...plan.failedD,...plan.failedW].sort();
+    html+=`<div class="note nw" style="margin-bottom:12px">⚠ ${totalFailed} date(s) kept with original physician due to constraints (vacation, back-to-back, IR shift requirement):<br>
+      <span style="font-size:11px">${allFailed.join(', ')}</span></div>`;
   }
 
-  document.getElementById('irr-preview').innerHTML = html;
-  document.getElementById('irr-apply').style.display = totalSwaps>0?'inline-block':'none';
-  document.getElementById('irr-apply-note').textContent = totalSwaps>0
-    ? `Will make ${totalSwaps} reassignment(s). Original assignments will be replaced.`
-    : '';
+  document.getElementById('irr-preview').innerHTML=html;
+  document.getElementById('irr-apply').style.display=totalSwaps>0?'inline-block':'none';
+  document.getElementById('irr-apply-note').textContent=totalSwaps>0
+    ?`Will make ${totalSwaps} reassignment(s) across ${months[0].slice(0,7)} – ${months[5].slice(0,7)}.`:'';
 }
 
 function applyIRRebalance(){
   if(!_adminOnly('apply IR rebalance')) return;
   if(!_irrPlan) return;
-  const ym = document.getElementById('irr-mo')?.value;
-  const grp = document.getElementById('irr-grp')?.value||'both';
-  const typ = document.getElementById('irr-type')?.value||'both';
-  if(!ym) return;
+  const months  =_irrMonths();
+  const grp     =document.getElementById('irr-grp')?.value||'both';
+  const typ     =document.getElementById('irr-type')?.value||'both';
+  const groups  =['North','South'].filter(g=>grp==='both'||g===grp);
+  const inPeriod=(date)=>months.some(ym=>date.startsWith(ym));
+  const types   =[];
+  if(typ==='daily'||typ==='both') types.push('daily');
+  if(typ==='weekend'||typ==='both') types.push('weekend');
 
-  const groups = ['North','South'].filter(g=>grp==='both'||g===grp);
-  const callTypesToReplace = [];
-  if(typ==='daily'||typ==='both') callTypesToReplace.push('daily');
-  if(typ==='weekend'||typ==='both') callTypesToReplace.push('weekend');
-
-  // Remove existing calls for the affected months/groups/types
-  S.irCalls = S.irCalls.filter(c=>{
-    if(!c.date.startsWith(ym)) return true;
+  // Remove existing calls in the 6-month window for affected groups/types
+  S.irCalls=S.irCalls.filter(c=>{
+    if(!inPeriod(c.date)) return true;
     if(!groups.includes(c.irGroup)) return true;
-    if(!callTypesToReplace.includes(c.callType)) return true;
-    return false; // remove these
+    if(!types.includes(c.callType)) return true;
+    return false;
   });
 
-  // Add the new assignments
-  const toAdd = [..._irrPlan.daily, ..._irrPlan.weekend];
+  // Insert the new plan
+  const toAdd=[..._irrPlan.daily,..._irrPlan.weekend];
   toAdd.forEach(a=>{
     S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,
       irGroup:a.irGroup,site:a.site,notes:a.notes||'Rebalanced'});
   });
 
   triggerSave();
-  _irrPlan = null;
-  document.getElementById('irr-apply').style.display = 'none';
-  document.getElementById('irr-apply-note').textContent = '';
-
-  const totalSwaps = (_irrPlan===null) ? (toAdd.length) : 0;
-  _updateSaveUI(`✓ Rebalanced — ${toAdd.length} call(s) applied`,'var(--green-t)');
-  renderIRRebalancePrep(); // refresh current distribution
-  document.getElementById('irr-preview').innerHTML =
+  _irrPlan=null;
+  document.getElementById('irr-apply').style.display='none';
+  document.getElementById('irr-apply-note').textContent='';
+  _updateSaveUI(`✓ Rebalanced — ${toAdd.length} IR call(s) updated`,'var(--green-t)');
+  renderIRRebalancePrep();
+  document.getElementById('irr-preview').innerHTML=
     `<div class="note ns">✓ Rebalance applied. ${toAdd.length} IR call assignment(s) updated.</div>`;
 }
+
 
 /* ─── ANCHOR REPORT ─── */
 function renderAnchorReport(){
