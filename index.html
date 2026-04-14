@@ -3769,83 +3769,137 @@ function previewIRAA(){
   const grpFilter=document.getElementById('ira-grp')?.value||'both';
   const preview=[],gaps=[];
   const cells=buildCal(ym);
-  const vm=vacMap();
   const irPs=S.physicians.filter(p=>p.irFte>0);
-  // Track daily and weekend counts separately for FTE-normalized distribution
+
+  // Track daily and weekend counts SEPARATELY — FTE-normalized distribution per type
   const cntD={};const cntW={};
   irPs.forEach(p=>{cntD[p.id]=irDailyCnt(p.id,ym);cntW[p.id]=irWkndCnt(p.id,ym);});
   const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
 
-  // A physician is "on IR call" if they have any irCall or weekend coverage on this date
+  // ── Sorting helpers ─────────────────────────────────────────────────────────
+  // FTE-normalized sort: physician with lowest (calls/cap) ratio goes first.
+  // Tiebreaker: rotate first-pick priority so no single physician always wins ties.
+  // Rotation offset advances with every assignment made, cycling through group positions.
+  function _sortByFte(pool, gPhys, cntMap, capFn){
+    const n = Math.max(gPhys.length, 1);
+    const offset = Object.values(cntMap).reduce((s,v)=>s+v, 0) % n;
+    return pool.slice().sort((a,b)=>{
+      const mA=capFn(a)||1, mB=capFn(b)||1;
+      const rA=cntMap[a.id]/mA, rB=cntMap[b.id]/mB;
+      if(Math.abs(rA-rB)>1e-9) return rA-rB;
+      // Equal ratio — rotate who gets first pick
+      const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
+      const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
+      return iA-iB;
+    });
+  }
+
+  // ── Conflict helpers ────────────────────────────────────────────────────────
+  // Is physician on IR call on this date (existing or preview)?
   function irOnDate(pid,date){
     if(S.irCalls.find(ic=>ic.physId===pid&&ic.date===date)) return true;
     if(S.irCalls.find(ic=>ic.physId===pid&&ic.callType==='weekend'&&date>=ic.date&&date<=addDays(ic.date,3))) return true;
-    if(preview.find(a=>!a._drHome&&a.physId===pid&&a.date===date)) return true;
+    if(preview.find(a=>a.physId===pid&&a.date===date)) return true;
     return false;
   }
 
+  // Does assigning a daily call on `date` conflict with preview entries?
+  function previewAdjacentToDaily(pid,date){
+    const prev=addDays(date,-1), next=addDays(date,1);
+    return preview.some(a=>a.physId===pid&&(
+      // Another daily call immediately adjacent
+      (a.callType==='daily'&&(a.date===prev||a.date===next))||
+      // Inside a weekend span already in preview (Fri through Tue)
+      (a.callType==='weekend'&&(date>=a.date&&date<=addDays(a.date,4)))
+    ));
+  }
+
+  // Does assigning a weekend call starting `fridayDate` conflict with preview entries?
+  function previewConflictsWeekend(pid,fridayDate){
+    const thu=addDays(fridayDate,-1);
+    const tue=addDays(fridayDate,4);
+    return preview.some(a=>a.physId===pid&&(
+      // Daily call on Thu before or Tue after
+      (a.callType==='daily'&&(a.date===thu||a.date===tue))||
+      // Back-to-back weekend in preview (within 7 days)
+      (a.callType==='weekend'&&a.date!==fridayDate&&
+        Math.abs(parseDateLocal(fridayDate).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)
+    ));
+  }
+
+  // ── Daily call auto-assign (Mon–Thu, one physician per group covers all sites) ──
   if(typ==='daily'||typ==='both'){
     cells.filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)).forEach(c=>{
       groups.forEach(g=>{
         const gPhys=irPs.filter(p=>p.irGroup===g);
-        // One physician covers ALL hospitals in the group Mon-Thu; Fri starts weekend call
-        const alreadyAssigned=S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='daily')
-                             ||preview.find(a=>!a._drHome&&a.date===c.date&&a.irGroup===g&&a.callType==='daily');
-        if(alreadyAssigned) return; // group already has a call physician today
-        const pool=gPhys.filter(p=>{
-          const vd=vacDays(p.id);if(vd.has(c.date))return false;
-          if(isSoldBackDate(p.id,c.date))return false;
-          if(irOnDate(p.id,c.date))return false;
-          // Block 2nd/3rd shift workers
-          if(_has2ndOr3rdShift(p.id,c.date))return false;
-          // Must have an IR procedure shift assigned this day to be eligible for daily call
-          if(!_hasIRShiftOnDate(p.id,c.date))return false;
-          // No back-to-back: check adjacent days in both existing calls and preview
-          const adjPrev=addDays(c.date,-1),adjNext=addDays(c.date,1);
-          // Block back-to-back: daily adjacent to any existing call or preview
+        const alreadyAssigned=
+          S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='daily')||
+          preview.find(a=>a.date===c.date&&a.irGroup===g&&a.callType==='daily');
+        if(alreadyAssigned) return;
+
+        const adjPrev=addDays(c.date,-1), adjNext=addDays(c.date,1);
+        const eligible=gPhys.filter(p=>{
+          const vd=vacDays(p.id); if(vd.has(c.date)) return false;
+          if(isSoldBackDate(p.id,c.date)) return false;
+          if(irOnDate(p.id,c.date)) return false;
+          if(_has2ndOr3rdShift(p.id,c.date)) return false;
+          if(!_hasIRShiftOnDate(p.id,c.date)) return false;
+          // Adjacency vs existing irCalls
           if(S.irCalls.some(ic=>ic.physId===p.id&&(
             ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext)||
             ic.callType==='weekend'&&(c.date>=ic.date&&c.date<=addDays(ic.date,4)||
               adjPrev>=ic.date&&adjPrev<=addDays(ic.date,3))
-          )))return false;
-          if(preview.some(a=>!a._drHome&&a.physId===p.id&&(
-            a.callType==='daily'&&(a.date===adjPrev||a.date===adjNext)||
-            a.callType==='weekend'&&(c.date>=a.date&&c.date<=addDays(a.date,4))
-          )))return false;
-          if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call'))return false;
-          if(!sequenceOk(p,c.date,ym))return false;
-          return cntD[p.id]<maxDR(p,'ir-daily');
-        }).sort((a,b)=>cntD[a.id]/maxDR(a,'ir-daily')-cntD[b.id]/maxDR(b,'ir-daily'));
+          ))) return false;
+          // Adjacency vs preview
+          if(previewAdjacentToDaily(p.id,c.date)) return false;
+          if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call')) return false;
+          if(!sequenceOk(p,c.date,ym)) return false;
+          const mD=maxDR(p,'ir-daily');
+          return mD>0 && cntD[p.id]<mD;
+        });
+
+        const pool=_sortByFte(eligible,gPhys,cntD,p=>maxDR(p,'ir-daily'));
         if(pool.length){
           const p=pool[0];
-          // Assign to all sites in the group
-          const gSites=S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both');
-          const primarySite=p.irSitePrim||(gSites[0]?.name||'');
+          const primarySite=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
           preview.push({physId:p.id,date:c.date,callType:'daily',irGroup:g,site:primarySite,notes:'Auto'});
           cntD[p.id]++;
         } else {
           gaps.push(`${c.date} ${g}`);
         }
       });
-
-      // NOTE: unassigned IR physicians are intentionally left unscheduled (no auto-home)
     });
   }
 
+  // ── Weekend call auto-assign (Fri evening → Mon morning) ────────────────────
   if(typ==='weekend'||typ==='both'){
-    // Weekend call: Fri evening → Mon morning (triggered on Friday, covers Fri-Mon)
-  cells.filter(c=>c.day&&c.dow===5).forEach(c=>{
+    cells.filter(c=>c.day&&c.dow===5).forEach(c=>{
       groups.forEach(g=>{
         const gPhys=irPs.filter(p=>p.irGroup===g);
-        const ex=S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='weekend')
-               ||preview.find(a=>!a._drHome&&a.date===c.date&&a.irGroup===g&&a.callType==='weekend');
-        if(ex)return;
+        const ex=
+          S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='weekend')||
+          preview.find(a=>a.date===c.date&&a.irGroup===g&&a.callType==='weekend');
+        if(ex) return;
         const mon=addDays(c.date,3);
-        const pool=gPhys.filter(p=>{const vd=vacDays(p.id);if(vd.has(c.date)||vd.has(mon))return false;return cntW[p.id]<maxDR(p,'ir-wknd');}).sort((a,b)=>cntW[a.id]/maxDR(a,'ir-wknd')-cntW[b.id]/maxDR(b,'ir-wknd')); // FTE-normalized sort
+        const span=[c.date,addDays(c.date,1),addDays(c.date,2),mon];
+
+        const eligible=gPhys.filter(p=>{
+          const vd=vacDays(p.id); if(vd.has(c.date)||vd.has(mon)) return false;
+          if(isSoldBackDate(p.id,c.date)) return false;
+          // Adjacency vs existing irCalls (Thu before and Tue after rule)
+          if(_hasAdjacentIRCall(p.id,c.date)||_hasIRCallNearWeekend(p.id,c.date)) return false;
+          // Adjacency vs preview entries
+          if(previewConflictsWeekend(p.id,c.date)) return false;
+          // No 2nd/3rd shift on any day of the Fri→Mon span
+          if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+          const mW=maxDR(p,'ir-wknd');
+          return mW>0 && cntW[p.id]<mW;
+        });
+
+        const pool=_sortByFte(eligible,gPhys,cntW,p=>maxDR(p,'ir-wknd'));
         if(pool.length){
           const p=pool[0];
-          const gSites=S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both');
-          const site=p.irSitePrim||(gSites[0]?.name||'');
+          const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
           preview.push({physId:p.id,date:c.date,callType:'weekend',irGroup:g,site,notes:'Auto'});
           cntW[p.id]++;
         } else {
@@ -3856,18 +3910,17 @@ function previewIRAA(){
   }
 
   S.iraPreview=preview;
-  const irPrev=preview.filter(a=>!a._drHome);
-  const homePrev=preview.filter(a=>a._drHome);
+  const irPrev=preview.filter(a=>a.callType==='daily'||a.callType==='weekend');
   const dailyPrev=irPrev.filter(a=>a.callType==='daily');
   const wkndPrev=irPrev.filter(a=>a.callType==='weekend');
 
-  let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} entries — ${gaps.length} gap(s)<br>
-    <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily (1 per group covers all group hospitals) · ${wkndPrev.length} weekend · ${homePrev.length} DR home fills</span></div>`;
+  let html=`<div style="font-weight:700;margin-bottom:8px">${irPrev.length} call assignments — ${gaps.length} gap(s)<br>
+    <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily · ${wkndPrev.length} weekend</span></div>`;
 
   if(irPrev.length){
     html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Group</th><th>Date</th><th>Type</th><th>Covers</th></tr></thead><tbody>';
-    irPrev.slice(0,30).forEach(a=>{
-      const dates=a.callType==='weekend'?`${a.date} → ${addDays(a.date,3)}`:a.date;
+    irPrev.slice(0,40).forEach(a=>{
+      const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
       const gSites=S.sites.filter(s=>s.irGroup===a.irGroup||s.irGroup==='Both').map(s=>s.name.split(' ')[0]).join(', ');
       const coverLbl=a.callType==='daily'?`All ${a.irGroup} sites (${gSites})`:a.site;
       html+=`<tr>
@@ -3877,29 +3930,53 @@ function previewIRAA(){
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td style="font-size:11px;color:var(--txt2)">${coverLbl}</td></tr>`;
     });
-    if(irPrev.length>30) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${irPrev.length-30} more</td></tr>`;
+    if(irPrev.length>40) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${irPrev.length-40} more</td></tr>`;
     html+='</tbody></table></div>';
   }
-  // Unassigned IR physicians shown separately — split by call type
-  const unassigned=[];
+
+  // Per-physician tally showing daily and weekend separately vs FTE targets
+  const tally=[];
   S.physicians.filter(p=>p.irFte>0&&(grpFilter==='both'||p.irGroup===grpFilter)).forEach(p=>{
-    const aD=dailyPrev.filter(a=>a.physId===p.id).length;
-    const aW=wkndPrev.filter(a=>a.physId===p.id).length;
-    const mD=maxDR(p,'ir-daily'),mW=maxDR(p,'ir-wknd');
-    if(aD<mD||aW<mW)
-      unassigned.push({name:pname(p.id),daily:`${aD}/${mD}`,wknd:`${aW}/${mW}`});
+    const newD=dailyPrev.filter(a=>a.physId===p.id).length;
+    const newW=wkndPrev.filter(a=>a.physId===p.id).length;
+    const totD=cntD[p.id]||0, totW=cntW[p.id]||0;
+    const mD=maxDR(p,'ir-daily'), mW=maxDR(p,'ir-wknd');
+    const pctD=mD?Math.round(totD/mD*100):0, pctW=mW?Math.round(totW/mW*100):0;
+    tally.push({p,newD,newW,totD,totW,mD,mW,pctD,pctW});
   });
-  if(unassigned.length)
-    html+=`<div class="note ni" style="margin-top:8px"><strong>Physicians below target</strong>: ${unassigned.map(u=>`${u.name} (daily ${u.daily} · wknd ${u.wknd})`).join(', ')}</div>`;
+  if(tally.length){
+    html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution Preview</div>
+      <table style="font-size:11px"><thead><tr><th>Physician</th><th>FTE</th>
+        <th>Daily (new)</th><th>Daily total</th><th>Daily cap</th><th>Daily %</th>
+        <th>Wknd (new)</th><th>Wknd total</th><th>Wknd cap</th><th>Wknd %</th>
+      </tr></thead><tbody>`;
+    tally.forEach(({p,newD,newW,totD,totW,mD,mW,pctD,pctW})=>{
+      const dCls=pctD>105?'color:var(--red-t)':pctD>=80?'color:var(--green-t)':'color:var(--txt2)';
+      const wCls=pctW>105?'color:var(--red-t)':pctW>=80?'color:var(--green-t)':'color:var(--txt2)';
+      html+=`<tr>
+        <td style="font-weight:600">${p.last}</td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center;color:var(--teal-t)">+${newD}</td>
+        <td style="text-align:center">${totD}</td>
+        <td style="text-align:center;color:var(--txt3)">${mD}</td>
+        <td style="text-align:center;font-weight:700;${dCls}">${pctD}%</td>
+        <td style="text-align:center;color:var(--teal-t)">+${newW}</td>
+        <td style="text-align:center">${totW}</td>
+        <td style="text-align:center;color:var(--txt3)">${mW}</td>
+        <td style="text-align:center;font-weight:700;${wCls}">${pctW}%</td>
+      </tr>`;
+    });
+    html+='</tbody></table></div>';
+  }
+
   if(gaps.length)
-    html+=`<div class="note nw" style="margin-top:8px">⚠ ${gaps.length} gap(s): ${gaps.slice(0,5).join(', ')}</div>`;
-  if(!preview.length&&!gaps.length)
+    html+=`<div class="note nw" style="margin-top:8px">\u26a0 ${gaps.length} gap(s): ${gaps.slice(0,5).join(', ')}</div>`;
+  if(!irPrev.length&&!gaps.length)
     html='<div class="note ns">All IR call slots already filled for this period.</div>';
 
   document.getElementById('ira-box').innerHTML=html;
-  document.getElementById('ira-apply').style.display=preview.length?'inline-block':'none';
+  document.getElementById('ira-apply').style.display=irPrev.length?'inline-block':'none';
 }
-
 function applyIRAA(){
   if(!_adminOnly('apply IR auto-assign'))return;
   S.iraPreview.forEach(a=>{
