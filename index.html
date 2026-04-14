@@ -2204,24 +2204,48 @@ function wkCnt(pid,ym){return S.weekendCalls.filter(w=>(w.satDate||w.date||"").s
 function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
 
 /* ─── ANCHOR COMPLIANCE ─── */
-function ancComp(physId,ym){
-  const p=S.physicians.find(x=>x.id===physId);
-  if(!p||!p.anchorSite) return null;
-  const all=[...S.drShifts.filter(s=>s.physId===physId&&s.date.startsWith(ym)&&!s.autoHome),...S.weekendCalls.filter(s=>s.physId===physId&&(s.satDate||s.date||'').startsWith(ym))];
-  const tot=all.length;
-  if(!tot) return {tot:0,atAnc:0,pct:0,ok:null,noData:true,anchor:p.anchorSite};
-  const atAnc=all.filter(s=>s.site===p.anchorSite).length;
-  const pct=Math.round(atAnc/tot*100);
-  return{tot,atAnc,pct,ok:pct>=S.cfg.anchorPct,anchor:p.anchorSite};
+// Anchor compliance is a REPORTING tool only — not a scheduling constraint.
+// Data sources: S.drShifts (non-autoHome) + S.weekendCalls for the given month.
+// S.irCalls and S.irShifts are NEVER included.
+
+function ancComp(physId, ym){
+  // Returns null if physician has no anchor site configured.
+  // Returns {tot, atAnc, pct, ok, noData, anchor} otherwise.
+  const p = S.physicians.find(x => x.id === physId);
+  if(!p || !p.anchorSite) return null;
+
+  // DR weekday shifts assigned to this physician this month (exclude auto-home fills)
+  const drShifts = S.drShifts.filter(s =>
+    s.physId === physId &&
+    s.date.startsWith(ym) &&
+    !s.autoHome
+  );
+
+  // DR weekend calls for this physician this month
+  const wkCalls = S.weekendCalls.filter(w =>
+    w.physId === physId &&
+    (w.satDate || w.date || '').startsWith(ym)
+  );
+
+  const tot = drShifts.length + wkCalls.length;
+  if(!tot) return {tot:0, atAnc:0, pct:0, ok:null, noData:true, anchor:p.anchorSite};
+
+  const atAnc = drShifts.filter(s => s.site === p.anchorSite).length
+              + wkCalls.filter(w => w.site === p.anchorSite).length;
+
+  const pct = Math.round(atAnc / tot * 100);
+  return {tot, atAnc, pct, ok: pct >= S.cfg.anchorPct, anchor: p.anchorSite};
 }
+
 function ancBadge(c){
   if(!c) return '';
   if(c.noData) return '<span class="anc-badge" style="background:var(--bg3);color:var(--txt3)">No shifts</span>';
-  const cls=c.ok?'ab-ok':c.pct<40?'ab-bad':'ab-lo';
+  const cls = c.ok ? 'ab-ok' : c.pct < 40 ? 'ab-bad' : 'ab-lo';
   return `<span class="anc-badge ${cls}">${c.pct}% at anchor</span>`;
 }
+
 function ancBar(pct){
-  const cls=pct>=S.cfg.anchorPct?'af-ok':pct>=40?'af-lo':'af-bad';
+  const cls = pct >= S.cfg.anchorPct ? 'af-ok' : pct >= 40 ? 'af-lo' : 'af-bad';
   return `<div class="anc-track"><div class="anc-fill ${cls}" style="width:${Math.min(100,pct)}%"></div></div>`;
 }
 
@@ -3153,12 +3177,12 @@ function addDRShift(){
   if(!date){alert('Select date');return;}
   const p=S.physicians.find(x=>x.id===pid);
   if(p.role==='IR'){alert('IR-only physicians cannot be assigned DR shifts.');return;}
+  // Hard block: physician is on vacation this date
+  if(vacDays(pid).has(date)){alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);return;}
   const kMap={s1:'1st',s2:'2nd',s3:'3rd',home:'Home'};
   const k=Object.entries(kMap).find(([,v])=>v===shift)?.[0];
   if(k&&!p.shiftElig[k]&&!confirm(`${p.last} is not designated for ${shift} shift. Continue?`))return;
   if(p.allowedSites?.length&&!p.allowedSites.includes(site)&&!confirm(`${p.last} is not normally assigned to ${site}. Continue?`))return;
-  const c=ancComp(pid,date.slice(0,7));
-  if(c&&!c.ok&&site!==p.anchorSite&&!confirm(`Anchor alert: ${p.last} is at ${c.pct}% compliance (need ≥${S.cfg.anchorPct}%). Assigning to non-anchor site. Continue?`))return;
   if(drCnt(pid,date.slice(0,7))>=maxDR(p,'wd')&&!confirm(`${p.last} at FTE cap. Add anyway?`))return;
   S.drShifts.push({id:S.nextId++,physId:pid,date,shift,site,sub:document.getElementById('sb-sub').value,notes:document.getElementById('sb-notes').value,autoHome:false});
   triggerSave();updateSbInfo();renderDRBuilder();
@@ -3199,6 +3223,13 @@ function addWkCall(){
   if(parseDateLocal(satDate).getDay()!==6&&!confirm('Not a Saturday. Continue?'))return;
   const sunDate=addDays(satDate,1);
   const p=S.physicians.find(x=>x.id===pid);
+  // Hard block: physician is on vacation on Saturday or Sunday of this weekend
+  const vd=vacDays(pid);
+  if(vd.has(satDate)||vd.has(sunDate)){
+    const vacDay=vd.has(satDate)?satDate:sunDate;
+    alert(`${p.last} is on vacation on ${vacDay}. Remove the vacation entry first if this is incorrect.`);
+    return;
+  }
   const sub=document.getElementById('wk-sub').value;const site=document.getElementById('wk-site').value;
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
   if(wkCnt(pid,satDate.slice(0,7))>=maxDR(p,'wk')&&!confirm('At weekend cap. Add anyway?'))return;
@@ -3215,19 +3246,6 @@ function previewAA(){
   const cells=buildCal(ym);
   const drs=S.physicians.filter(p=>p.drFte>0&&p.role==='DR'); // MIXED physicians excluded from DR auto-assign
   const cnt={};drs.forEach(p=>{cnt[p.id]={wd:drCnt(p.id,ym),wk:wkCnt(p.id,ym)};});
-
-  // Build preview anchor counts
-  const ancCnt={};drs.forEach(p=>{
-    const all=[...S.drShifts.filter(s=>s.physId===p.id&&s.date.startsWith(ym)),...S.weekendCalls.filter(s=>s.physId===p.id&&(s.satDate||s.date||'').startsWith(ym))];
-    ancCnt[p.id]={total:all.length,atAnc:all.filter(s=>s.site===p.anchorSite).length};
-  });
-
-  function anchorOkAfter(p,site,isPreview){
-    if(!p.anchorSite) return true;
-    const futureTotal=ancCnt[p.id].total+1;
-    const futureAtAnc=ancCnt[p.id].atAnc+(site===p.anchorSite?1:0);
-    return futureAtAnc/futureTotal>=S.cfg.anchorPct/100;
-  }
 
   if(typ==='weekday'||typ==='both'){
     cells.filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).forEach(c=>{
@@ -3269,7 +3287,7 @@ function previewAA(){
             const p=pool2[0];
             if(!p){gaps.push(`${c.date} ${st.name} ${sh}`);if(!S.openShifts.find(o=>o.date===c.date&&o.site===st.name&&o.shiftType===sh+' Shift'))S.openShifts.push({id:S.nextId++,date:c.date,shiftType:sh+' Shift',sub:'',site:st.name,group:'DR',claimedBy:null,notes:''});continue;}
             preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:p.drSubs[0]||'',notes:'Auto',autoHome:false});
-            cnt[p.id].wd++;ancCnt[p.id].total++;if(st.name===p.anchorSite)ancCnt[p.id].atAnc++;
+            cnt[p.id].wd++;
           }
         });
       });
@@ -3586,6 +3604,16 @@ function renderIRWeekBuilder(){
   document.getElementById('irb-week-content').innerHTML=html;
 }
 
+function _hasIRShiftOnDate(physId, date){
+  // Rule: IR daily call only for physicians with an IR procedure shift (non-home) assigned that day
+  return !!(S.irShifts||[]).find(s => s.physId===physId && s.date===date && s.shift!=='Home');
+}
+
+function _has2ndOr3rdShift(physId, date){
+  // Rule: physicians on a 2nd or 3rd DR shift are blocked from all IR shifts and IR call that day
+  return S.drShifts.some(s => s.physId===physId && s.date===date && (s.shift==='2nd'||s.shift==='3rd'));
+}
+
 function _hasAdjacentIRCall(physId, date){
   // Blocks back-to-back: no daily call immediately adjacent to another call
   // Rule: no daily call on Thu (day before Fri weekend start) or Tue (day after Mon weekend end)
@@ -3648,6 +3676,10 @@ function addIRCallFromGrid(sel,date,callType,group){
     alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
     alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');sel.value='';return;}
+  if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){
+    alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');sel.value='';return;}
+  if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){
+    alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');sel.value='';return;}
   const site=(S.sites.find(s=>s.irGroup===group)||{}).name||'';
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site,notes:''});
   sel.value='';renderIRWeekBuilder();
@@ -3660,6 +3692,10 @@ function addIRWeekend(group,fridayDate){
   if(!physId){alert('Select physician');return;}
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
   if(_hasAdjacentIRCall(physId,fridayDate)||_hasIRCallNearWeekend(physId,fridayDate)){alert('Back-to-back call not allowed: '+pname(physId)+' has daily call adjacent to this weekend.');return;}
+  // Block if physician has a 2nd/3rd shift on any day of the weekend span (Fri→Mon)
+  const _wkSpan=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),addDays(fridayDate,3)];
+  if(_wkSpan.some(d=>_has2ndOr3rdShift(physId,d))){
+    alert(pname(physId)+' has a 2nd/3rd shift during this weekend span and cannot take IR weekend call.');return;}
   S.irCalls.push({id:S.nextId++,physId,date:fridayDate,callType:'weekend',irGroup:group,site,notes:''});
   renderIRWeekBuilder();
 }
@@ -3674,6 +3710,8 @@ function addIRCallManual(){
   const p=S.physicians.find(x=>x.id===physId);
   if(p?.irGroup&&p.irGroup!==irGroup&&!confirm(`${p.last} is in ${p.irGroup} group. Assign to ${irGroup}?`))return;
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');return;}
+  if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');return;}
+  if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site,notes:document.getElementById('ird-notes').value});
   alert('Added. Refresh the list tab to see all entries.');
@@ -3726,6 +3764,10 @@ function previewIRAA(){
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
           if(isSoldBackDate(p.id,c.date))return false;
           if(irOnDate(p.id,c.date))return false;
+          // Block 2nd/3rd shift workers
+          if(_has2ndOr3rdShift(p.id,c.date))return false;
+          // Must have an IR procedure shift assigned this day to be eligible for daily call
+          if(!_hasIRShiftOnDate(p.id,c.date))return false;
           // No back-to-back: check adjacent days in both existing calls and preview
           const adjPrev=addDays(c.date,-1),adjNext=addDays(c.date,1);
           // Block back-to-back: daily adjacent to any existing call or preview
@@ -3835,50 +3877,109 @@ function applyIRAA(){
 
 /* ─── ANCHOR REPORT ─── */
 function renderAnchorReport(){
-  const moEl=document.getElementById('anc-mo');
-  if(!moEl) return;
-  if(!moEl.value){const now=new Date();moEl.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');}
-  let ym=moEl.value;
-  const el=document.getElementById('anc-content');
-  if(el) el.innerHTML='';
-  const drs=S.physicians.filter(p=>p.drFte>0&&p.anchorSite);
-  if(!drs.length){if(el)el.innerHTML='<div class="note ni">No physicians have anchor sites configured. Set an anchor site on each physician profile.</div>';return;}
-  // If no shifts in selected month, auto-fall back to the most recent month with shift data
-  const hasShifts=(ym2)=>S.drShifts.some(s=>s.date.startsWith(ym2)&&!s.autoHome)||S.weekendCalls.some(s=>(s.satDate||s.date||'').startsWith(ym2));
-  if(!hasShifts(ym)){
-    // Collect all months that have shifts, pick the most recent
-    const allMonths=new Set([
-      ...S.drShifts.filter(s=>!s.autoHome).map(s=>s.date.slice(0,7)),
-      ...S.weekendCalls.map(w=>(w.satDate||w.date||'').slice(0,7)).filter(Boolean),
-    ]);
-    const sorted=[...allMonths].filter(Boolean).sort().reverse();
-    if(sorted.length){ym=sorted[0];moEl.value=ym;}
-    else{
-      if(el)el.innerHTML='<div class="note ni">No shifts have been assigned yet. Assign shifts first, then return here to check compliance.</div>';
-      return;
-    }
+  const moEl = document.getElementById('anc-mo');
+  const el   = document.getElementById('anc-content');
+  if(!moEl || !el) return;
+
+  // Ensure picker has a value — default to current month, NEVER auto-redirect later
+  if(!moEl.value){
+    const now = new Date();
+    moEl.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
   }
-  const [y,m]=ym.split('-').map(Number);
-  const monthLabel=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
-  const ok=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===true;});
-  const fail=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===false;});
-  let html=`<div class="g4" style="margin-bottom:12px">
-    <div class="met"><div class="met-lbl">With Anchor Site</div><div class="met-val">${drs.length}</div></div>
-    <div class="met"><div class="met-lbl">Compliant ≥${S.cfg.anchorPct}%</div><div class="met-val" style="color:var(--green)">${ok.length}</div></div>
-    <div class="met"><div class="met-lbl">Non-Compliant</div><div class="met-val" style="color:var(--red)">${fail.length}</div></div>
-    <div class="met"><div class="met-lbl">Compliance Rate</div><div class="met-val">${drs.length?Math.round(ok.length/drs.length*100):0}%</div></div>
+
+  // Read exactly what the picker says — never mutate it
+  const ym = moEl.value;
+  const [y, m] = ym.split('-').map(Number);
+  const monthLabel = new Date(y, m-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
+
+  // Only DR physicians (drFte > 0) with an anchor site — pure IR never have anchors
+  const drs = S.physicians.filter(p => p.drFte > 0 && p.anchorSite);
+
+  if(!drs.length){
+    el.innerHTML = '<div class="note ni">No physicians have anchor sites configured. Set an anchor site on each physician profile.</div>';
+    return;
+  }
+
+  // Compute compliance for this exact month — no fallback rerouting whatsoever
+  const results = drs.map(p => ({p, c: ancComp(p.id, ym)}));
+
+  const withData  = results.filter(r => r.c && !r.c.noData);
+  const compliant = withData.filter(r => r.c.ok);
+  const failing   = withData.filter(r => !r.c.ok);
+  const noData    = results.filter(r => !r.c || r.c.noData);
+
+  let html = '';
+
+  // Summary metrics
+  html += `<div class="g4" style="margin-bottom:12px">
+    <div class="met"><div class="met-lbl">DR w/ Anchor</div><div class="met-val">${drs.length}</div></div>
+    <div class="met"><div class="met-lbl">Compliant \u2265${S.cfg.anchorPct}%</div><div class="met-val" style="color:var(--green)">${compliant.length}</div></div>
+    <div class="met"><div class="met-lbl">Below Target</div><div class="met-val" style="color:var(--red)">${failing.length}</div></div>
+    <div class="met"><div class="met-lbl">Team Rate</div><div class="met-val">${withData.length ? Math.round(compliant.length/withData.length*100) : 0}%</div></div>
   </div>`;
-  if(fail.length) html+=`<div class="note ne" style="margin-bottom:12px">⚠ ${fail.length} physician(s) below the ${S.cfg.anchorPct}% anchor threshold: ${fail.map(p=>p.last).join(', ')}</div>`;
-  html+=`<div class="card"><div class="card-title">Physician Breakdown — ${monthLabel}</div><table><thead><tr><th>Physician</th><th>FTE</th><th>Anchor Site</th><th>Total Shifts</th><th>At Anchor</th><th>Compliance</th><th>Status</th></tr></thead><tbody>`;
-  drs.forEach(p=>{
-    const c=ancComp(p.id,ym);const pct=c?c.pct:0;
-    const scls=pct>=S.cfg.anchorPct?'ab-ok':pct>=40?'ab-lo':'ab-bad';
-    html+=`<tr><td>${pname(p.id)}</td><td>DR ${p.drFte}</td><td>${p.anchorSite}</td><td>${c?.tot||0}</td><td>${c?.atAnc||0}</td>
-    <td><div style="display:flex;align-items:center;gap:6px"><span style="min-width:32px;font-size:11px;font-weight:700">${pct}%</span><div class="anc-track" style="width:90px">${ancBar(pct).replace('<div class="anc-track">','').replace('</div>','')}</div></div></td>
-    <td><span class="anc-badge ${scls}">${scls==='ab-ok'?'Compliant':scls==='ab-lo'?'Below Target':'Non-Compliant'}</span></td></tr>`;
+
+  // Alert banner
+  if(failing.length){
+    html += `<div class="note ne" style="margin-bottom:12px">
+      \u26a0 ${failing.length} physician(s) below the ${S.cfg.anchorPct}% anchor target in ${monthLabel}:
+      ${failing.map(r => r.p.last).join(', ')}
+    </div>`;
+  }
+
+  // No DR data for this month — show empty state without redirecting
+  if(!withData.length){
+    html += `<div class="note ni">No DR shifts recorded for ${monthLabel}. Select a month that has assigned DR shifts to see compliance data.</div>`;
+    el.innerHTML = html;
+    return;
+  }
+
+  // Per-physician breakdown table
+  html += `<div class="card">
+    <div class="card-title">Physician Breakdown \u2014 ${monthLabel}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR shifts + weekend calls only \u00b7 auto-home fills excluded \u00b7 reporting only</span>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>DR FTE</th><th>Anchor</th>
+      <th>DR Shifts</th><th>Wknd Calls</th><th>Total</th><th>At Anchor</th>
+      <th>Compliance</th><th>Status</th>
+    </tr></thead><tbody>`;
+
+  results.forEach(({p, c}) => {
+    const pct   = c && !c.noData ? c.pct   : 0;
+    const tot   = c && !c.noData ? c.tot   : 0;
+    const atAnc = c && !c.noData ? c.atAnc : 0;
+    const drCount = S.drShifts.filter(s => s.physId===p.id && s.date.startsWith(ym) && !s.autoHome).length;
+    const wkCount = S.weekendCalls.filter(w => w.physId===p.id && (w.satDate||w.date||'').startsWith(ym)).length;
+    const scls    = !c || c.noData ? 'tgr' : c.ok ? 'ab-ok' : pct >= 40 ? 'ab-lo' : 'ab-bad';
+    const statusTxt = !c || c.noData ? 'No data' : c.ok ? 'Compliant' : pct >= 40 ? 'Below Target' : 'Non-Compliant';
+    html += `<tr>
+      <td style="font-weight:600">${pname(p.id)}</td>
+      <td style="text-align:center">${p.drFte}</td>
+      <td><span class="tag tb">${p.anchorSite}</span></td>
+      <td style="text-align:center">${drCount}</td>
+      <td style="text-align:center">${wkCount}</td>
+      <td style="text-align:center;font-weight:700">${tot}</td>
+      <td style="text-align:center">${atAnc}</td>
+      <td>${tot > 0
+        ? `<div style="display:flex;align-items:center;gap:6px">
+             <span style="min-width:34px;font-size:11px;font-weight:700">${pct}%</span>
+             <div class="anc-track" style="width:80px">${ancBar(pct).replace('<div class="anc-track">','').replace('</div>','')}</div>
+           </div>`
+        : '<span style="color:var(--txt3);font-size:11px">\u2014</span>'}</td>
+      <td><span class="anc-badge ${scls}">${statusTxt}</span></td>
+    </tr>`;
   });
-  html+='</tbody></table></div>';
-  document.getElementById('anc-content').innerHTML=html;
+
+  html += '</tbody></table></div></div>';
+
+  if(noData.length){
+    html += `<div class="note ni" style="margin-top:10px">
+      ${noData.length} physician(s) had no DR shifts in ${monthLabel} (excluded from rate):
+      ${noData.map(r => r.p.last).join(', ')}
+    </div>`;
+  }
+
+  el.innerHTML = html;
 }
 
 /* ─── HOLIDAYS ─── */
@@ -4085,6 +4186,8 @@ function addIRShift(){
   if(!site){alert('Select a site.');return;}
   const p=S.physicians.find(x=>x.id===pid);if(!p)return;
   if(!S.irShifts) S.irShifts=[];
+  // Block if physician has a 2nd or 3rd DR shift this date
+  if(_has2ndOr3rdShift(pid,date)){alert(`${p.last} has a 2nd/3rd shift on ${date} and cannot be assigned an IR shift.`);return;}
   // Warn if already assigned on this date
   if(S.irShifts.find(s=>s.physId===pid&&s.date===date)&&!confirm(`${p.last} already has an IR shift on ${date}. Add another?`))return;
   // Warn if site is outside physician's IR group
@@ -4192,6 +4295,8 @@ function previewIRShiftAA(){
               const vd=vacDays(p.id); if(vd.has(c.date)) return false;
               if(isSoldBackDate(p.id,c.date)) return false; // sold-back: DR only
               if(isAssignedOnDate(p.id,c.date)) return false;
+              // Block 2nd/3rd DR shift workers from IR shifts
+              if(_has2ndOr3rdShift(p.id,c.date)) return false;
               if(!siteRuleOk(p,st.name,ym,c.date,'ir'))return false;
               if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift'))return false;
               if(!sequenceOk(p,c.date,ym))return false;
