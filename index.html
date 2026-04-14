@@ -813,13 +813,18 @@ tbody tr:hover{background:var(--bg3)}
     <button class="br bsm" onclick="if(_adminOnly('reset DR auto-assign'))S.aaPreview=[],S.drShifts=S.drShifts.filter(s=>s.notes!='Auto'&&s.notes!='Auto-home'),triggerSave(),renderDRBuilder()" title="Clear all entries from this schedule">🗑 Reset All</button>
   </div>
 
-  <div class="note ni">Auto-assign respects: subspecialty qualifications, FTE caps, shift eligibility, vacation blackouts, rest days, and <strong>anchor site minimum (≥60%)</strong>. The engine prioritizes physicians for their anchor site first, only assigning them elsewhere if the anchor quota is met.</div>
-  <div class="g3" style="margin-bottom:10px">
-    <div class="fg"><label>Month</label><input id="aa-mo" type="month" value="2025-06"></div>
-    <div class="fg"><label>Type</label><select id="aa-type"><option value="both">Weekday + Weekend</option><option value="weekday">Weekday Only</option><option value="weekend">Weekend Only</option></select></div>
-    <div class="flexe" style="gap:6px"><button class="ba" onclick="previewAA()">Preview</button><button class="bp" id="aa-apply" style="display:none" onclick="applyAA()">Apply All</button></div>
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Month</label><input id="aa-mo" type="month" value="2025-06"></div>
+      <div class="fg"><label>Type</label><select id="aa-type"><option value="both">Weekday + Weekend</option><option value="weekday">Weekday Only</option><option value="weekend">Weekend Only</option></select></div>
+      <div class="flexe" style="gap:6px;align-items:flex-end;padding-bottom:1px">
+        <button class="ba" onclick="previewAA()">▶ Preview</button>
+        <button class="bp" id="aa-apply" style="display:none" onclick="applyAA()">✓ Apply All</button>
+      </div>
+    </div>
   </div>
-  <div class="card" id="aa-box"><p style="color:var(--txt3)">Configure options and click Preview.</p></div>
+  <div class="note ni" style="margin-bottom:8px">Respects FTE caps, shift eligibility, vacation blackouts, and anchor site rules (≥60% at anchor).</div>
+  <div class="card" id="aa-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
 </div>
 
 <!-- IR CALENDAR -->
@@ -921,7 +926,7 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR SCHEDULE BUILDER (redesigned) -->
 <div id="page-ir-builder" class="page">
   <div class="pg-title">IR Schedule Builder</div>
-  <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu nights. Weekend call: 1 physician per group covers Fri evening → Mon morning. Unscheduled IR physicians receive a diagnostic at-home shift.</div>
+  <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning.</div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
     <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>  <button class="br bsm" onclick="clearIRCalls('month')" title="Clear IR calls for selected month">🗑 Reset Month</button>
   </div>
@@ -944,10 +949,9 @@ tbody tr:hover{background:var(--bg3)}
             <option value="both">Both Groups</option>
           </select>
         </div>
-        <button class="bt bsm" onclick="autoFillIRHomeShifts()" style="align-self:flex-end;margin-bottom:1px">Fill Unscheduled IR → Home</button>
       </div>
       <div class="note ni" style="margin-bottom:0;font-size:11px">
-        IR call = 1 physician per group per day (weekdays). Weekend call: 1 physician per group covers Fri night → Mon morning. Unscheduled IR physicians receive a diagnostic at-home shift.
+        IR call = 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning. Physicians not on call have no automatic assignment.
       </div>
     </div>
     <div id="irb-week-content"></div>
@@ -996,16 +1000,13 @@ tbody tr:hover{background:var(--bg3)}
     <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
   </div>
 
-  <div class="note ni">Fills the IR daily procedure schedule (separate from call). Uses per-day-of-week slot requirements per site. IR physicians are assigned by group, load-balanced by shift count. Unscheduled IR physicians receive an at-home shift.</div>
   <div class="ibox">
     <div class="g3">
       <div class="fg"><label>Month</label><input id="irsa-mo" type="month" value="2025-06"></div>
       <div class="fg"><label>Shift Type</label>
         <select id="irsa-shift">
-          <option value="all">All Shifts (1st, 2nd, 3rd)</option>
+          <option value="all">All Shifts</option>
           <option value="1st">1st Shift Only</option>
-          <option value="2nd">2nd Shift Only</option>
-          <option value="3rd">3rd Shift Only</option>
         </select>
       </div>
       <div class="fg"><label>IR Group</label>
@@ -1016,12 +1017,13 @@ tbody tr:hover{background:var(--bg3)}
         </select>
       </div>
     </div>
-    <div class="flexe" style="gap:8px">
-      <button class="ba" onclick="previewIRShiftAA()">Preview</button>
-      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">Apply All</button>
+    <div class="flexe" style="gap:8px;margin-top:8px">
+      <button class="ba" onclick="previewIRShiftAA()">▶ Preview</button>
+      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">✓ Apply All</button>
     </div>
   </div>
-  <div class="card" id="irsa-box"><p style="color:var(--txt3)">Configure options and click Preview.</p></div>
+  <div class="note ni" style="margin-bottom:8px">Fills IR daily procedure schedule by site slots. Load-balanced by shift count per physician.</div>
+  <div class="card" id="irsa-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
 </div>
 
 <!-- IR AUTO-ASSIGN -->
@@ -1031,7 +1033,6 @@ tbody tr:hover{background:var(--bg3)}
     <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
   </div>
 
-  <div class="note ni">Assigns <strong>1 physician per group</strong> per day to cover all hospitals in that group. Weekend call (Fri→Mon) assigned each Friday. Unscheduled IR physicians receive a DR at-home shift automatically. IR-only physicians are <strong>never</strong> given hospital DR shifts.</div>
   <div class="ibox">
     <div class="g3">
       <div class="fg"><label>Month</label><input id="ira-mo" type="month" value="2025-06"></div>
@@ -1050,12 +1051,13 @@ tbody tr:hover{background:var(--bg3)}
         </select>
       </div>
     </div>
-    <div class="flexe" style="gap:8px">
-      <button class="ba" onclick="previewIRAA()">Preview</button>
-      <button class="bp" id="ira-apply" style="display:none" onclick="applyIRAA()">Apply All</button>
+    <div class="flexe" style="gap:8px;margin-top:8px">
+      <button class="ba" onclick="previewIRAA()">▶ Preview</button>
+      <button class="bp" id="ira-apply" style="display:none" onclick="applyIRAA()">✓ Apply All</button>
     </div>
   </div>
-  <div class="card" id="ira-box"><p style="color:var(--txt3)">Configure options and click Preview.</p></div>
+  <div class="note ni" style="margin-bottom:8px">1 physician per group covers Mon–Thu. Weekend call covers Fri→Mon. Physicians not on call are left unscheduled.</div>
+  <div class="card" id="ira-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
 </div>
 
 <!-- CHAT PAGE -->
@@ -3102,6 +3104,17 @@ function renderIRCal(){
 }
 
 
+function irBuilderTab(t,el){
+  ['weekly','manual','list'].forEach(x=>{
+    const e=document.getElementById('irbt-'+x);
+    if(e) e.style.display=x===t?'block':'none';
+  });
+  document.querySelectorAll('#page-ir-builder .tabs .tab').forEach(x=>x.classList.remove('on'));
+  if(el) el.classList.add('on');
+  if(t==='list') renderIRList();
+  if(t==='weekly') renderIRWeekBuilder();
+}
+
 function renderIRBuilder(){
   // Populate manual tab selects
   const irs=S.physicians.filter(p=>p.irFte>0);
@@ -3321,28 +3334,7 @@ function renderIRList(){
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 
-function autoFillIRHomeShifts(){
-  const mondayVal=document.getElementById('irb-week')?.value;if(!mondayVal){alert('Select a week first');return;}
-  const grp=document.getElementById('irb-grp')?.value||'North';
-  const weekDates=getWeekDates(mondayVal).slice(0,5);
-  const irPhys=S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
-  const vm=vacMap();let added=0;
-  weekDates.forEach(d=>{
-    const vacOnDate=new Set(vm[d]||[]);
-    irPhys.forEach(p=>{
-      if(vacOnDate.has(p.id))return;
-      const onIR=S.irCalls.find(ic=>ic.physId===p.id&&ic.date===d);
-      // Also check IR weekend coverage for this date
-      const onWknd=S.irCalls.find(ic=>ic.callType==='weekend'&&ic.physId===p.id&&d>=ic.date&&d<=addDays(ic.date,3));
-      const onDR=S.drShifts.find(s=>s.physId===p.id&&s.date===d);
-      if(!onIR&&!onWknd&&!onDR){
-        S.drShifts.push({id:S.nextId++,physId:p.id,date:d,shift:'Home',site:'At Home / Remote',sub:'General Procedures',notes:'IR unscheduled→DR home auto-fill',autoHome:true});
-        added++;
-      }
-    });
-  });
-  alert(`Added ${added} DR at-home shift(s) for unscheduled IR physicians.`);renderIRWeekBuilder();
-}
+// autoFillIRHomeShifts removed: IR physicians not assigned call are left unscheduled
 
 /* ─── IR AUTO ─── */
 function previewIRAA(){
