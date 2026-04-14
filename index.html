@@ -2214,6 +2214,46 @@ function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsW
 function irDailyCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='daily').length;}
 function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='weekend').length;}
 
+/* ─── IR CALL FAIR-SHARE TARGETS ───────────────────────────────────────────
+   Targets are computed from actual finite slots available in the period,
+   distributed proportionally by irFte across the physician's IR group.
+   This ensures utilisation% = 100% when a physician takes exactly their share.
+─────────────────────────────────────────────────────────────────────────── */
+
+// Sum of irFte for all physicians in an IR group
+function irGroupTotalFte(group){
+  return S.physicians.filter(p=>p.irFte>0&&p.irGroup===group)
+    .reduce((sum,p)=>sum+p.irFte, 0);
+}
+
+// Physician's fair-share target for IR DAILY calls in a given month.
+// = (Mon–Thu workdays in month, excl. holiday blackouts) × (p.irFte / group total irFte)
+function irDailyTargetMonth(p, ym){
+  if(!p.irGroup||p.irFte<=0) return 0;
+  const days=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)).length;
+  const gFte=irGroupTotalFte(p.irGroup);
+  return gFte>0 ? (days*p.irFte/gFte) : 0;
+}
+
+// Physician's fair-share target for IR WEEKEND calls in a given month.
+// = (Fridays in month) × (p.irFte / group total irFte)
+function irWkndTargetMonth(p, ym){
+  if(!p.irGroup||p.irFte<=0) return 0;
+  const fris=buildCal(ym).filter(c=>c.day&&c.dow===5).length;
+  const gFte=irGroupTotalFte(p.irGroup);
+  return gFte>0 ? (fris*p.irFte/gFte) : 0;
+}
+
+// Yearly targets — sum of monthly targets (accounts for varying days/month)
+function irDailyTargetYear(p, yr){
+  const months=Array.from({length:12},(_,i)=>`${yr}-${String(i+1).padStart(2,'0')}`);
+  return months.reduce((s,ym)=>s+irDailyTargetMonth(p,ym), 0);
+}
+function irWkndTargetYear(p, yr){
+  const months=Array.from({length:12},(_,i)=>`${yr}-${String(i+1).padStart(2,'0')}`);
+  return months.reduce((s,ym)=>s+irWkndTargetMonth(p,ym), 0);
+}
+
 /* ─── ANCHOR COMPLIANCE ─── */
 // Anchor compliance is a REPORTING tool only — not a scheduling constraint.
 // Data sources: S.drShifts (non-autoHome) + S.weekendCalls for the given month.
@@ -2887,7 +2927,9 @@ function renderFTE(){
   // ── IR physicians ──
   const irPs=S.physicians.filter(p=>p.irFte>0);
   if(irPs.length){
-    html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization</div>
+    html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">Targets = finite slots in month ÷ group FTE × physician FTE</span>
+    </div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
         <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
@@ -2895,16 +2937,16 @@ function renderFTE(){
         <th>IR Shifts</th><th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
-      const dailyCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length;
-      const wkndCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length;
-      const dailyMax=maxDR(p,'ir-daily');
-      const wkndMax=maxDR(p,'ir-wknd');
-      const dailyPct=dailyMax?Math.round(dailyCalls/dailyMax*100):0;
-      const wkndPct=wkndMax?Math.round(wkndCalls/wkndMax*100):0;
+      const dailyCalls=irDailyCnt(p.id,ym);
+      const wkndCalls=irWkndCnt(p.id,ym);
+      const dailyTgt=irDailyTargetMonth(p,ym);
+      const wkndTgt=irWkndTargetMonth(p,ym);
+      const dailyPct=dailyTgt>0?Math.round(dailyCalls/dailyTgt*100):0;
+      const wkndPct=wkndTgt>0?Math.round(wkndCalls/wkndTgt*100):0;
       const shiftUsed=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym)).length;
-      const dCls=dailyPct>105?'color:var(--red-t)':dailyPct>=90?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const wCls=wkndPct>105?'color:var(--red-t)':wkndPct>=90?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=dailyPct>110||wkndPct>110;
+      const dCls=dailyPct>110?'color:var(--red-t)':dailyPct>=90?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const wCls=wkndPct>110?'color:var(--red-t)':wkndPct>=90?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=dailyPct>115||wkndPct>115;
       const statusTxt=over?'⚠ Over':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
       const statusCls=over?'color:var(--red-t)':(dailyPct>=80&&wkndPct>=80)?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
@@ -2912,10 +2954,10 @@ function renderFTE(){
         <td style="text-align:center">${p.irFte}</td>
         <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
         <td style="text-align:center;font-weight:700">${dailyCalls}</td>
-        <td style="text-align:center;color:var(--txt3)">${dailyMax}</td>
+        <td style="text-align:center;color:var(--txt3)">${dailyTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
         <td style="text-align:center;font-weight:700">${wkndCalls}</td>
-        <td style="text-align:center;color:var(--txt3)">${wkndMax}</td>
+        <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td style="text-align:center">${shiftUsed}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
@@ -3049,16 +3091,16 @@ function renderFTEYear(){
         <th>IR Shifts</th><th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
-      const dailyTotal=months.reduce((s,ym)=>s+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length,0);
-      const wkndTotal=months.reduce((s,ym)=>s+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length,0);
-      const dailyTgt=yrTarget(p,'ir-daily');
-      const wkndTgt=yrTarget(p,'ir-wknd');
-      const dailyPct=dailyTgt?Math.round(dailyTotal/dailyTgt*100):0;
-      const wkndPct=wkndTgt?Math.round(wkndTotal/wkndTgt*100):0;
+      const dailyTotal=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
+      const wkndTotal=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+      const dailyTgt=irDailyTargetYear(p,yr);
+      const wkndTgt=irWkndTargetYear(p,yr);
+      const dailyPct=dailyTgt>0?Math.round(dailyTotal/dailyTgt*100):0;
+      const wkndPct=wkndTgt>0?Math.round(wkndTotal/wkndTgt*100):0;
       const shiftsTotal=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)).length,0);
-      const dCls=dailyPct>105?'color:var(--red-t)':dailyPct>=85?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const wCls=wkndPct>105?'color:var(--red-t)':wkndPct>=85?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=dailyPct>110||wkndPct>110;
+      const dCls=dailyPct>110?'color:var(--red-t)':dailyPct>=85?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const wCls=wkndPct>110?'color:var(--red-t)':wkndPct>=85?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=dailyPct>115||wkndPct>115;
       const low=dailyPct<50&&wkndPct<50;
       const statusTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
       const statusCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
@@ -3067,25 +3109,25 @@ function renderFTEYear(){
         <td style="text-align:center">${p.irFte}</td>
         <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
         <td style="text-align:center;font-weight:700">${dailyTotal}</td>
-        <td style="text-align:center;color:var(--txt3)">${dailyTgt}</td>
+        <td style="text-align:center;color:var(--txt3)">${dailyTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
         <td style="text-align:center;font-weight:700">${wkndTotal}</td>
-        <td style="text-align:center;color:var(--txt3)">${wkndTgt}</td>
+        <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td style="text-align:center">${shiftsTotal}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
     });
     // Totals row
-    const totDaily=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length,0),0);
-    const totWknd=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length,0),0);
+    const totDaily=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irDailyCnt(p.id,ym),0),0);
+    const totWknd=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irWkndCnt(p.id,ym),0),0);
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
       <td style="font-weight:800" colspan="3">Team Total</td>
       <td style="text-align:center;font-weight:800">${totDaily}</td>
-      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+yrTarget(p,'ir-daily'),0)}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irDailyTargetYear(p,yr),0).toFixed(1)}</td>
       <td></td>
       <td style="text-align:center;font-weight:800">${totWknd}</td>
-      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+yrTarget(p,'ir-wknd'),0)}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irWkndTargetYear(p,yr),0).toFixed(1)}</td>
       <td></td><td></td><td></td>
     </tr>`;
     html+=`</tbody></table></div></div>`;
@@ -3776,7 +3818,9 @@ function previewIRAA(){
   irPs.forEach(p=>{cntD[p.id]=irDailyCnt(p.id,ym);cntW[p.id]=irWkndCnt(p.id,ym);});
   const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
 
-  // ── Sorting helpers ─────────────────────────────────────────────────────────
+  // Finite-slot caps: physician can take at most ceil(their fair share) to avoid over-assignment
+  const dailyCapFn = p => Math.max(Math.ceil(irDailyTargetMonth(p,ym)), 1);
+  const wkndCapFn  = p => Math.max(Math.ceil(irWkndTargetMonth(p,ym)),  1);
   // FTE-normalized sort: physician with lowest (calls/cap) ratio goes first.
   // Tiebreaker: rotate first-pick priority so no single physician always wins ties.
   // Rotation offset advances with every assignment made, cycling through group positions.
@@ -3854,11 +3898,10 @@ function previewIRAA(){
           if(previewAdjacentToDaily(p.id,c.date)) return false;
           if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call')) return false;
           if(!sequenceOk(p,c.date,ym)) return false;
-          const mD=maxDR(p,'ir-daily');
-          return mD>0 && cntD[p.id]<mD;
+          return cntD[p.id]<dailyCapFn(p);
         });
 
-        const pool=_sortByFte(eligible,gPhys,cntD,p=>maxDR(p,'ir-daily'));
+        const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
         if(pool.length){
           const p=pool[0];
           const primarySite=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
@@ -3892,11 +3935,10 @@ function previewIRAA(){
           if(previewConflictsWeekend(p.id,c.date)) return false;
           // No 2nd/3rd shift on any day of the Fri→Mon span
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
-          const mW=maxDR(p,'ir-wknd');
-          return mW>0 && cntW[p.id]<mW;
+          return cntW[p.id]<wkndCapFn(p);
         });
 
-        const pool=_sortByFte(eligible,gPhys,cntW,p=>maxDR(p,'ir-wknd'));
+        const pool=_sortByFte(eligible,gPhys,cntW,wkndCapFn);
         if(pool.length){
           const p=pool[0];
           const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
@@ -3940,29 +3982,32 @@ function previewIRAA(){
     const newD=dailyPrev.filter(a=>a.physId===p.id).length;
     const newW=wkndPrev.filter(a=>a.physId===p.id).length;
     const totD=cntD[p.id]||0, totW=cntW[p.id]||0;
-    const mD=maxDR(p,'ir-daily'), mW=maxDR(p,'ir-wknd');
-    const pctD=mD?Math.round(totD/mD*100):0, pctW=mW?Math.round(totW/mW*100):0;
-    tally.push({p,newD,newW,totD,totW,mD,mW,pctD,pctW});
+    const tgtD=irDailyTargetMonth(p,ym), tgtW=irWkndTargetMonth(p,ym);
+    const pctD=tgtD>0?Math.round(totD/tgtD*100):0;
+    const pctW=tgtW>0?Math.round(totW/tgtW*100):0;
+    tally.push({p,newD,newW,totD,totW,tgtD,tgtW,pctD,pctW});
   });
   if(tally.length){
-    html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution Preview</div>
+    html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution Preview
+      <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Targets = finite slots ÷ group FTE × physician FTE</span>
+    </div>
       <table style="font-size:11px"><thead><tr><th>Physician</th><th>FTE</th>
-        <th>Daily (new)</th><th>Daily total</th><th>Daily cap</th><th>Daily %</th>
-        <th>Wknd (new)</th><th>Wknd total</th><th>Wknd cap</th><th>Wknd %</th>
+        <th>Daily +new</th><th>Daily total</th><th>Daily target</th><th>Daily %</th>
+        <th>Wknd +new</th><th>Wknd total</th><th>Wknd target</th><th>Wknd %</th>
       </tr></thead><tbody>`;
-    tally.forEach(({p,newD,newW,totD,totW,mD,mW,pctD,pctW})=>{
-      const dCls=pctD>105?'color:var(--red-t)':pctD>=80?'color:var(--green-t)':'color:var(--txt2)';
-      const wCls=pctW>105?'color:var(--red-t)':pctW>=80?'color:var(--green-t)':'color:var(--txt2)';
+    tally.forEach(({p,newD,newW,totD,totW,tgtD,tgtW,pctD,pctW})=>{
+      const dCls=pctD>110?'color:var(--red-t)':pctD>=80?'color:var(--green-t)':'color:var(--txt2)';
+      const wCls=pctW>110?'color:var(--red-t)':pctW>=80?'color:var(--green-t)':'color:var(--txt2)';
       html+=`<tr>
         <td style="font-weight:600">${p.last}</td>
         <td style="text-align:center">${p.irFte}</td>
         <td style="text-align:center;color:var(--teal-t)">+${newD}</td>
         <td style="text-align:center">${totD}</td>
-        <td style="text-align:center;color:var(--txt3)">${mD}</td>
+        <td style="text-align:center;color:var(--txt3)">${tgtD.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700;${dCls}">${pctD}%</td>
         <td style="text-align:center;color:var(--teal-t)">+${newW}</td>
         <td style="text-align:center">${totW}</td>
-        <td style="text-align:center;color:var(--txt3)">${mW}</td>
+        <td style="text-align:center;color:var(--txt3)">${tgtW.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700;${wCls}">${pctW}%</td>
       </tr>`;
     });
@@ -5667,8 +5712,9 @@ function previewPickImport(input){
 function _parsePickSheet(rows,prev){
   // Column layout: cols 1,3,5,7 (0-indexed) = week date headers / vacation names
   //                cols 2,4,6,8 = 2nd shift / 3rd shift / Off entries
-  const MAIN_COLS=[1,3,5,7];
-  const SIDE_COLS=[2,4,6,8];
+  // Some months have a 5th week at col 9 (side entries at col 10)
+  const MAIN_COLS=[1,3,5,7,9];
+  const SIDE_COLS=[2,4,6,8,10];
   const weeks=[];
   let curDates=null,curRows=[];
 
@@ -5678,9 +5724,9 @@ function _parsePickSheet(rows,prev){
     const s=v.trim();
     if(!s||s.match(/^\d+$/)|| s.toLowerCase().includes('picks max')||
        s.toLowerCase().includes('closed')||s.toLowerCase().includes('indicates'))return null;
-    // Remove pick number suffix: "Fisher - 1", "Brown- BB 1", "Mossa-Basha- 9"
-    // Strip trailing "- [optional letters] [number]" pattern
-    const cleaned=s.replace(/\s*-\s*(BB\s*)?\d+.*$/i,'').trim();
+    // Remove pick number suffix: "Fisher - 1", "Brown- BB 1", "Mossa-Basha- 9", "Dorantes- BB Extra"
+    // Strip trailing "- [optional BB] [number or Extra]" pattern
+    const cleaned=s.replace(/\s*-\s*(BB\s*)?(\d+|Extra)\b.*$/i,'').trim();
     return cleaned||null;
   }
 
