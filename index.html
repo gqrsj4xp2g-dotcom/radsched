@@ -652,37 +652,57 @@ tbody tr:hover{background:var(--bg3)}
 <!-- DR BUILDER -->
 <div id="page-dr-builder" class="page">
   <div class="pg-title">DR Schedule Builder</div>
-  <div class="tabs" style="margin-bottom:12px">
+  <div class="tabs" id="drb-tabs" style="margin-bottom:12px">
     <div class="tab on" onclick="drBuilderTab('1st',this)">1st Shift</div>
     <div class="tab" onclick="drBuilderTab('2nd',this)">2nd Shift</div>
     <div class="tab" onclick="drBuilderTab('3rd',this)">3rd Shift</div>
     <div class="tab" onclick="drBuilderTab('home',this)">At Home</div>
   </div>
 
-  <!-- Shared entry form — shift type driven by active tab -->
-  <div class="ibox">
-    <div class="g3">
-      <div class="fg"><label>Physician</label><select id="sb-phys" onchange="updateSbInfo()"></select></div>
-      <div class="fg"><label>Date</label><input id="sb-date" type="date" oninput="updateSbInfo()"></div>
-      <div class="fg"><label>Shift</label><select id="sb-shift"><option value="1st">1st Shift (Days)</option><option value="2nd">2nd Shift (Evenings)</option><option value="3rd">3rd Shift (Nights)</option><option value="Home">At Home</option></select></div>
+  <!-- 1ST SHIFT / HOME TAB: single-entry form -->
+  <div id="drbt-1st">
+    <div class="ibox">
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="sb-phys" onchange="updateSbInfo()"></select></div>
+        <div class="fg"><label>Date</label><input id="sb-date" type="date" oninput="updateSbInfo()"></div>
+        <div class="fg"><label>Shift</label><select id="sb-shift"><option value="1st">1st Shift (Days)</option><option value="2nd">2nd Shift (Evenings)</option><option value="3rd">3rd Shift (Nights)</option><option value="Home">At Home</option></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Site</label><select id="sb-site" onchange="updateSbInfo()"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="sb-sub"></select></div>
+        <div class="fg"><label>Notes</label><input id="sb-notes"></div>
+      </div>
+      <div id="sb-info" style="margin-bottom:8px"></div>
+      <button class="bp" onclick="addDRShift()">Assign Shift</button>
+      <button class="bt bsm" onclick="fillDRHomeShifts()" style="margin-left:6px" title="Auto-assign at-home shift to all unscheduled DR physicians for the selected date">Fill Unscheduled → Home</button>
     </div>
-    <div class="g3">
-      <div class="fg"><label>Site</label><select id="sb-site" onchange="updateSbInfo()"></select></div>
-      <div class="fg"><label>Subspecialty</label><select id="sb-sub"></select></div>
-      <div class="fg"><label>Notes</label><input id="sb-notes"></div>
-    </div>
-    <div id="sb-info" style="margin-bottom:8px"></div>
-    <button class="bp" onclick="addDRShift()">Assign Shift</button>
-    <button class="bt bsm" onclick="fillDRHomeShifts()" style="margin-left:6px" title="Auto-assign at-home shift to all unscheduled DR physicians for the selected date">Fill Unscheduled → Home</button>
   </div>
 
-  <!-- 2nd shift extra fields -->
-  <div id="drb-2nd-extra" class="ibox" style="display:none;background:var(--green-bg);border:1px solid var(--green)">
-    <div style="font-size:11px;font-weight:800;color:var(--green-t);margin-bottom:8px">2ND SHIFT — BULK ASSIGN</div>
-    <div class="g3">
-      <div class="fg"><label>Week Start (Monday)</label><input id="drb-2nd-week" type="date" oninput="update2ndPreview()"></div>
-      <div class="fg"><label>Days to Cover</label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+  <!-- 2ND SHIFT TAB -->
+  <div id="drbt-2nd" style="display:none">
+    <div class="ibox" style="border:2px solid var(--green);background:var(--green-bg)">
+      <div style="font-size:12px;font-weight:800;color:var(--green-t);margin-bottom:12px;display:flex;align-items:center;gap:8px">
+        <span style="background:var(--green);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">2nd Shift</span>
+        Evening coverage assignment — assign one physician across multiple weeks at once
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="drb-2nd-phys"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-2nd-site"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub"></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Start Date</label>
+          <input id="drb-2nd-start" type="date" oninput="updateMultiWeekPreview('2nd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">First day to assign</div>
+        </div>
+        <div class="fg"><label>End Date</label>
+          <input id="drb-2nd-end" type="date" oninput="updateMultiWeekPreview('2nd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Last day to assign (inclusive)</div>
+        </div>
+        <div class="fg"><label>Notes</label><input id="drb-2nd-notes" placeholder="Optional"></div>
+      </div>
+      <div class="fg"><label>Days of Week</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
           <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="1" checked> Mon</label>
           <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="2" checked> Tue</label>
           <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="3" checked> Wed</label>
@@ -692,24 +712,36 @@ tbody tr:hover{background:var(--bg3)}
           <label class="chk"><input type="checkbox" class="drb-2nd-dow" value="0"> Sun</label>
         </div>
       </div>
-      <div class="fg"><label>Site</label><select id="drb-2nd-site"></select></div>
+      <div id="drb-2nd-preview" style="margin:8px 0;font-size:12px;color:var(--green-t);font-weight:600;min-height:18px"></div>
+      <button class="bp" onclick="bulkAssignMultiWeek('2nd')" style="background:var(--green)">Assign 2nd Shift</button>
     </div>
-    <div class="g3">
-      <div class="fg"><label>Physician (2nd Shift)</label><select id="drb-2nd-phys"></select></div>
-      <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub"></select></div>
-      <div class="fg"><label>Notes</label><input id="drb-2nd-notes" placeholder="Optional"></div>
-    </div>
-    <div id="drb-2nd-preview" style="font-size:11px;color:var(--txt2);margin-bottom:8px"></div>
-    <button class="bp bsm" onclick="bulkAssign2nd3rd('2nd')">Assign 2nd Shift for Week</button>
   </div>
 
-  <!-- 3rd shift extra fields -->
-  <div id="drb-3rd-extra" class="ibox" style="display:none;background:var(--purple-bg,#f5f3ff);border:1px solid var(--purple,#7c3aed)">
-    <div style="font-size:11px;font-weight:800;color:var(--purple,#7c3aed);margin-bottom:8px">3RD SHIFT — BULK ASSIGN</div>
-    <div class="g3">
-      <div class="fg"><label>Week Start (Monday)</label><input id="drb-3rd-week" type="date" oninput="update3rdPreview()"></div>
-      <div class="fg"><label>Days to Cover</label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+  <!-- 3RD SHIFT TAB -->
+  <div id="drbt-3rd" style="display:none">
+    <div class="ibox" style="border:2px solid #7c3aed;background:#f5f3ff">
+      <div style="font-size:12px;font-weight:800;color:#7c3aed;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+        <span style="background:#7c3aed;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">3rd Shift</span>
+        Night/overnight coverage — assign one physician across multiple weeks at once
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="drb-3rd-phys"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-3rd-site"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub"></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Start Date</label>
+          <input id="drb-3rd-start" type="date" oninput="updateMultiWeekPreview('3rd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">First day to assign</div>
+        </div>
+        <div class="fg"><label>End Date</label>
+          <input id="drb-3rd-end" type="date" oninput="updateMultiWeekPreview('3rd')">
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Last day to assign (inclusive)</div>
+        </div>
+        <div class="fg"><label>Notes</label><input id="drb-3rd-notes" placeholder="Optional"></div>
+      </div>
+      <div class="fg"><label>Days of Week</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
           <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="1" checked> Mon</label>
           <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="2" checked> Tue</label>
           <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="3" checked> Wed</label>
@@ -719,18 +751,30 @@ tbody tr:hover{background:var(--bg3)}
           <label class="chk"><input type="checkbox" class="drb-3rd-dow" value="0"> Sun</label>
         </div>
       </div>
-      <div class="fg"><label>Site</label><select id="drb-3rd-site"></select></div>
+      <div id="drb-3rd-preview" style="margin:8px 0;font-size:12px;color:#7c3aed;font-weight:600;min-height:18px"></div>
+      <button class="bp" onclick="bulkAssignMultiWeek('3rd')" style="background:#7c3aed">Assign 3rd Shift</button>
     </div>
-    <div class="g3">
-      <div class="fg"><label>Physician (3rd Shift)</label><select id="drb-3rd-phys"></select></div>
-      <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub"></select></div>
-      <div class="fg"><label>Notes</label><input id="drb-3rd-notes" placeholder="Optional"></div>
-    </div>
-    <div id="drb-3rd-preview" style="font-size:11px;color:var(--txt2);margin-bottom:8px"></div>
-    <button class="bp bsm" onclick="bulkAssign2nd3rd('3rd')" style="background:var(--purple,#7c3aed)">Assign 3rd Shift for Week</button>
   </div>
 
-  <div class="card" style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>Anchor?</th><th>Sub</th><th>Notes</th><th></th></tr></thead><tbody id="drb-tbody"></tbody></table></div>
+  <!-- Shared shift table (all tabs) -->
+  <div class="card" style="overflow-x:auto;margin-top:12px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div class="fg" style="margin:0"><label>Filter Shift</label>
+        <select id="drb-filter-shift" onchange="renderDRBuilder()">
+          <option value="">All shifts</option>
+          <option value="1st">1st Only</option>
+          <option value="2nd">2nd Only</option>
+          <option value="3rd">3rd Only</option>
+          <option value="Home">Home Only</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0"><label>Filter Month</label>
+        <input id="drb-filter-mo" type="month" oninput="renderDRBuilder()">
+      </div>
+    </div>
+    <table><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>Anchor?</th><th>Sub</th><th>Notes</th><th></th></tr></thead>
+    <tbody id="drb-tbody"></tbody></table>
+  </div>
 </div>
 
 <!-- DR WEEKENDS -->
@@ -808,38 +852,43 @@ tbody tr:hover{background:var(--bg3)}
 
 <!-- IR SHIFT BUILDER -->
 <div id="page-ir-shifts" class="page">
-  <div class="pg-title">IR Daily Shift Builder</div>
-  <div class="pg-sub">Assign interventional radiology physicians to procedural shifts by date and site — separate from the on-call schedule.</div>
+  <div class="pg-title">IR Shift Builder</div>
+  <div class="pg-sub">Assign IR physicians to procedural shifts — separate from the on-call schedule.</div>
 
-  <div class="ibox">
-    <div class="g3">
-      <div class="fg"><label>Physician</label><select id="irs-phys" onchange="updateIRSbInfo()"></select></div>
-      <div class="fg"><label>Date</label><input id="irs-date" type="date" oninput="updateIRSbInfo()"></div>
-      <div class="fg"><label>Shift</label>
-        <select id="irs-shift">
-          <option value="1st">1st Shift (Days)</option>
-          <option value="2nd">2nd Shift (Evenings)</option>
-          <option value="3rd">3rd Shift (Nights)</option>
-          <option value="Home">At Home</option>
-        </select>
+
+
+      <div class="ibox">
+      <div class="g3">
+        <div class="fg"><label>Physician</label><select id="irs-phys" onchange="updateIRSbInfo()"></select></div>
+        <div class="fg"><label>Date</label><input id="irs-date" type="date" oninput="updateIRSbInfo()"></div>
+        <div class="fg"><label>Shift</label>
+          <select id="irs-shift">
+            <option value="1st">1st Shift (Days)</option>
+            <option value="Home">At Home</option>
+          </select>
+        </div>
       </div>
+      <div class="g3">
+        <div class="fg"><label>Site</label><select id="irs-site" onchange="updateIRSbInfo()"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="irs-sub"></select></div>
+        <div class="fg"><label>Notes</label><input id="irs-notes" placeholder="Optional notes"></div>
+      </div>
+      <div id="irs-info" style="margin-bottom:8px"></div>
+      <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
+      <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → Home</button>
     </div>
-    <div class="g3">
-      <div class="fg"><label>Site</label><select id="irs-site" onchange="updateIRSbInfo()"></select></div>
-      <div class="fg"><label>Subspecialty</label><select id="irs-sub"></select></div>
-      <div class="fg"><label>Notes</label><input id="irs-notes" placeholder="Optional notes"></div>
-    </div>
-    <div id="irs-info" style="margin-bottom:8px"></div>
-    <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
-    <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px" title="Add at-home shift to all unscheduled IR physicians for selected date">Fill Unscheduled → Home</button>
   </div>
 
-  <div class="flexe" style="margin-bottom:8px;gap:6px">
+  <!-- Shared table + filters -->
+  <div style="display:flex;align-items:center;gap:8px;margin:12px 0 6px">
     <div class="fg" style="margin:0"><label>Filter Month</label><input id="irsf-mo" type="month" value="2025-06" oninput="renderIRShiftTable()"></div>
     <div class="fg" style="margin:0"><label>Filter Physician</label><select id="irsf-phys" onchange="renderIRShiftTable()"><option value="">All</option></select></div>
-    <div class="fg" style="margin:0"><label>Filter Shift</label><select id="irsf-shift" onchange="renderIRShiftTable()"><option value="">All</option><option>1st</option><option>2nd</option><option>3rd</option><option>Home</option></select></div>
+    <div class="fg" style="margin:0"><label>Filter Shift</label>
+      <select id="irsf-shift" onchange="renderIRShiftTable()">
+        <option value="">All</option><option>1st</option><option>Home</option>
+      </select>
+    </div>
   </div>
-
   <div class="card" style="overflow-x:auto">
     <table>
       <thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>IR Group</th><th>Subspecialty</th><th>Notes</th><th></th></tr></thead>
@@ -2357,73 +2406,74 @@ function addVac(){
 }
 
 
-/* ─── DR BUILDER TABS: 2ND / 3RD SHIFT ─── */
+/* ─── DR BUILDER TABS ─── */
 function drBuilderTab(shift, el){
-  // Update active tab
-  document.querySelectorAll('#page-dr-builder .tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('#drb-tabs .tab').forEach(t=>t.classList.remove('on'));
   if(el) el.classList.add('on');
-  // Set the shift dropdown to match
+  // Show correct panel
+  document.getElementById('drbt-1st').style.display=(shift==='1st'||shift==='home')?'block':'none';
+  document.getElementById('drbt-2nd').style.display=shift==='2nd'?'block':'none';
+  document.getElementById('drbt-3rd').style.display=shift==='3rd'?'block':'none';
+  // Sync the single-entry shift dropdown
   const sd=document.getElementById('sb-shift');
-  if(sd){
-    const map={home:'Home'};
-    sd.value=map[shift]||shift;
-  }
-  // Show/hide bulk panels
-  document.getElementById('drb-2nd-extra').style.display=shift==='2nd'?'block':'none';
-  document.getElementById('drb-3rd-extra').style.display=shift==='3rd'?'block':'none';
-  // Populate bulk panel dropdowns when opening
-  if(shift==='2nd'||shift==='3rd'){
-    const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
-    const drs=S.physicians.filter(p=>p.drFte>0);
-    const physOpts=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
-    const siteOpts=siteNames.map(n=>`<option>${n}</option>`).join('');
-    const subOpts=S.drSubs.map(s=>`<option>${s}</option>`).join('');
-    [`drb-${shift}-phys`,`drb-${shift}-site`,`drb-${shift}-sub`].forEach((id,i)=>{
-      const el=document.getElementById(id);if(!el)return;
-      el.innerHTML=i===0?physOpts:i===1?siteOpts:subOpts;
-    });
-    if(shift==='2nd') update2ndPreview();
-    else update3rdPreview();
-  }
+  if(sd) sd.value=shift==='home'?'Home':shift==='2nd'?'2nd':shift==='3rd'?'3rd':'1st';
+  // Populate 2nd/3rd dropdowns when switching to those tabs
+  if(shift==='2nd'||shift==='3rd') _populateBulkDropdowns(shift);
+  // Update filter to match tab
+  const fsh=document.getElementById('drb-filter-shift');
+  if(fsh) fsh.value=(shift==='home'?'Home':shift==='1st'?'1st':shift);
+  renderDRBuilder();
 }
 
-function _weekDates(weekStartId, dowClass){
-  const weekEl=document.getElementById(weekStartId);
-  if(!weekEl||!weekEl.value) return [];
-  const mon=parseDateLocal(weekEl.value);
-  const checked=[...document.querySelectorAll('.'+dowClass+':checked')].map(cb=>parseInt(cb.value));
+function _populateBulkDropdowns(shift){
+  const drs=S.physicians.filter(p=>p.drFte>0);
+  const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
+  document.getElementById(`drb-${shift}-phys`).innerHTML=
+    drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  document.getElementById(`drb-${shift}-site`).innerHTML=
+    siteNames.map(n=>`<option>${n}</option>`).join('');
+  document.getElementById(`drb-${shift}-sub`).innerHTML=
+    S.drSubs.map(s=>`<option>${s}</option>`).join('');
+}
+
+function updateMultiWeekPreview(shift){
+  const start=document.getElementById(`drb-${shift}-start`)?.value;
+  const end=document.getElementById(`drb-${shift}-end`)?.value;
+  const prev=document.getElementById(`drb-${shift}-preview`);
+  if(!prev) return;
+  if(!start||!end||end<start){prev.textContent='Select start and end dates.';return;}
+  const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
+  if(!dates.length){prev.textContent='No matching days in range.';return;}
+  const weeks=Math.ceil(dates.length/5);
+  prev.textContent=`${dates.length} shifts across ~${weeks} week(s): ${dates[0]} → ${dates[dates.length-1]}`;
+}
+
+function _dateRangeFiltered(startDs, endDs, dowSel){
+  const checked=new Set([...document.querySelectorAll(dowSel+':checked')].map(cb=>parseInt(cb.value)));
   const dates=[];
-  for(let i=0;i<7;i++){
-    const d=new Date(mon); d.setDate(mon.getDate()+i);
-    if(checked.includes(d.getDay())) dates.push(fmtDate(d));
+  let cur=parseDateLocal(startDs);
+  const end=parseDateLocal(endDs);
+  while(cur<=end){
+    if(checked.has(cur.getDay())) dates.push(fmtDate(cur));
+    cur.setDate(cur.getDate()+1);
   }
   return dates;
 }
 
-function update2ndPreview(){
-  const dates=_weekDates('drb-2nd-week','drb-2nd-dow');
-  const el=document.getElementById('drb-2nd-preview');
-  if(el) el.textContent=dates.length?`Will assign 2nd shift on: ${dates.join(', ')}`:'Select a week start date.';
-}
-
-function update3rdPreview(){
-  const dates=_weekDates('drb-3rd-week','drb-3rd-dow');
-  const el=document.getElementById('drb-3rd-preview');
-  if(el) el.textContent=dates.length?`Will assign 3rd shift on: ${dates.join(', ')}`:'Select a week start date.';
-}
-
-function bulkAssign2nd3rd(shift){
-  const dates=_weekDates(`drb-${shift}-week`,`drb-${shift}-dow`);
-  if(!dates.length){alert('Select a week start date and at least one day.');return;}
+function bulkAssignMultiWeek(shift){
+  const start=document.getElementById(`drb-${shift}-start`)?.value;
+  const end=document.getElementById(`drb-${shift}-end`)?.value;
+  if(!start||!end||end<start){alert('Select a valid start and end date.');return;}
   const pid=parseInt(document.getElementById(`drb-${shift}-phys`).value);
   const site=document.getElementById(`drb-${shift}-site`).value;
   const sub=document.getElementById(`drb-${shift}-sub`).value;
   const notes=document.getElementById(`drb-${shift}-notes`).value;
   const p=S.physicians.find(x=>x.id===pid);
   if(!p){alert('Select a physician.');return;}
+  const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
+  if(!dates.length){alert('No days match the selected day-of-week filters in that date range.');return;}
   let added=0,skipped=0;
   dates.forEach(date=>{
-    // Skip if already assigned on this date+shift+site
     if(S.drShifts.find(s=>s.physId===pid&&s.date===date&&s.shift===shift&&s.site===site)){
       skipped++;return;
     }
@@ -2432,10 +2482,11 @@ function bulkAssign2nd3rd(shift){
   });
   triggerSave();
   renderDRBuilder();
-  const msg=`Assigned ${added} ${shift} shift(s) for ${p.last}${skipped?` (${skipped} already existed)`:''}`;
   const si=document.getElementById('save-indicator');
-  if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},4000);}
+  const msg=`✓ Assigned ${added} × ${shift} shift for ${p.last}${skipped?` (${skipped} duplicate${skipped>1?'s':''} skipped)`:''}`;
+  if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},5000);}
 }
+
 
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
@@ -2471,23 +2522,26 @@ function renderDRBuilder(){
   document.getElementById('sb-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   populateSel('sb-sub',S.drSubs,'— any —');populateSel('sb-site',S.sites.map(s=>s.name),'');
   // Keep bulk panel dropdowns fresh
-  const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
-  const physOpts=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
-  const siteOpts=siteNames.map(n=>`<option>${n}</option>`).join('');
-  const subOpts=S.drSubs.map(s=>`<option>${s}</option>`).join('');
   ['2nd','3rd'].forEach(sh=>{
-    const pe=document.getElementById(`drb-${sh}-phys`);if(pe)pe.innerHTML=physOpts;
-    const se=document.getElementById(`drb-${sh}-site`);if(se)se.innerHTML=siteOpts;
-    const ue=document.getElementById(`drb-${sh}-sub`);if(ue)ue.innerHTML=subOpts;
+    const pe=document.getElementById(`drb-${sh}-phys`);
+    if(pe) pe.innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+    const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
+    const se=document.getElementById(`drb-${sh}-site`);if(se)se.innerHTML=siteNames.map(n=>`<option>${n}</option>`).join('');
+    const ue=document.getElementById(`drb-${sh}-sub`);if(ue)ue.innerHTML=S.drSubs.map(s=>`<option>${s}</option>`).join('');
   });
-  document.getElementById('drb-tbody').innerHTML=S.drShifts.sort((a,b)=>a.date>b.date?1:-1).map(s=>{
+  // Apply filters
+  const fsh=document.getElementById('drb-filter-shift')?.value||'';
+  const fmo=document.getElementById('drb-filter-mo')?.value||'';
+  const rows=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)))
+    .sort((a,b)=>a.date>b.date?1:-1);
+  document.getElementById('drb-tbody').innerHTML=rows.map(s=>{
     const p=S.physicians.find(x=>x.id===s.physId);const isAnc=p?.anchorSite===s.site;
     const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
     return`<tr><td>${pname(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
     <td>${s.sub||'—'}</td><td>${s.notes||'—'}</td>
     <td><button class="br bxs" onclick="S.drShifts=S.drShifts.filter(x=>x.id!==${s.id});renderDRBuilder()">X</button></td></tr>`;
-  }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">None</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No shifts match filters</td></tr>';
 }
 function updateSbInfo(){
   const pid=+document.getElementById('sb-phys')?.value;
@@ -3308,6 +3362,7 @@ function renderIRSlots(){
     const el=document.getElementById(`ir-slots-${g}`);if(el)el.innerHTML=html;
   });
 }
+
 
 
 /* ─── IR SHIFT BUILDER ─── */
