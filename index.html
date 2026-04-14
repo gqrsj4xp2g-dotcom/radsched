@@ -758,7 +758,7 @@ tbody tr:hover{background:var(--bg3)}
 
   <!-- Shared shift table (all tabs) -->
   <div class="card" style="overflow-x:auto;margin-top:12px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       <div class="fg" style="margin:0"><label>Filter Shift</label>
         <select id="drb-filter-shift" onchange="renderDRBuilder()">
           <option value="">All shifts</option>
@@ -770,6 +770,10 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <div class="fg" style="margin:0"><label>Filter Month</label>
         <input id="drb-filter-mo" type="month" oninput="renderDRBuilder()">
+      </div>
+      <div style="margin-top:18px;display:flex;gap:6px">
+        <button class="br bsm" onclick="clearDRShifts('filtered')" title="Clear shifts matching current filters">🗑 Clear Filtered</button>
+        <button class="br bsm" onclick="clearDRShifts('all')" title="Clear ALL DR shifts" style="opacity:.7">🗑 Clear All DR</button>
       </div>
     </div>
     <table><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>Anchor?</th><th>Sub</th><th>Notes</th><th></th></tr></thead>
@@ -880,13 +884,17 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 
   <!-- Shared table + filters -->
-  <div style="display:flex;align-items:center;gap:8px;margin:12px 0 6px">
+  <div style="display:flex;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap">
     <div class="fg" style="margin:0"><label>Filter Month</label><input id="irsf-mo" type="month" value="2025-06" oninput="renderIRShiftTable()"></div>
     <div class="fg" style="margin:0"><label>Filter Physician</label><select id="irsf-phys" onchange="renderIRShiftTable()"><option value="">All</option></select></div>
     <div class="fg" style="margin:0"><label>Filter Shift</label>
       <select id="irsf-shift" onchange="renderIRShiftTable()">
         <option value="">All</option><option>1st</option><option>Home</option>
       </select>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:6px">
+      <button class="br bsm" onclick="clearIRShifts('filtered')" title="Clear IR shifts matching current filters">🗑 Clear Filtered</button>
+      <button class="br bsm" onclick="clearIRShifts('all')" title="Clear ALL IR shifts" style="opacity:.7">🗑 Clear All IR</button>
     </div>
   </div>
   <div class="card" style="overflow-x:auto">
@@ -2405,6 +2413,51 @@ function addVac(){
   renderVacations();
 }
 
+
+function clearDRShifts(mode){
+  const fsh=document.getElementById('drb-filter-shift')?.value||'';
+  const fmo=document.getElementById('drb-filter-mo')?.value||'';
+  let targets=S.drShifts;
+  let desc='all DR shifts';
+  if(mode==='filtered'){
+    targets=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)));
+    const parts=[];
+    if(fsh) parts.push(fsh+' shift');
+    if(fmo) parts.push(fmo);
+    desc=(parts.length?parts.join(' · ')+' DR shifts':'all DR shifts');
+  }
+  if(!targets.length){alert('No shifts match the current filters.');return;}
+  if(!confirm(`Delete ${targets.length} ${desc}? This cannot be undone.`))return;
+  const ids=new Set(targets.map(s=>s.id));
+  S.drShifts=S.drShifts.filter(s=>!ids.has(s.id));
+  triggerSave();renderDRBuilder();
+  const si=document.getElementById('save-indicator');
+  if(si){si.textContent=`✓ Cleared ${ids.size} DR shift(s)`;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},3000);}
+}
+
+function clearIRShifts(mode){
+  if(!S.irShifts?.length){alert('No IR shifts to clear.');return;}
+  const fmo=document.getElementById('irsf-mo')?.value||'';
+  const fpid=+document.getElementById('irsf-phys')?.value||0;
+  const fsh=document.getElementById('irsf-shift')?.value||'';
+  let targets=S.irShifts;
+  let desc='all IR shifts';
+  if(mode==='filtered'){
+    targets=S.irShifts.filter(s=>(!fmo||s.date.startsWith(fmo))&&(!fpid||s.physId===fpid)&&(!fsh||s.shift===fsh));
+    const parts=[];
+    if(fmo) parts.push(fmo);
+    if(fpid) parts.push(pname(fpid));
+    if(fsh) parts.push(fsh+' shift');
+    desc=(parts.length?parts.join(' · ')+' IR shifts':'all IR shifts');
+  }
+  if(!targets.length){alert('No IR shifts match the current filters.');return;}
+  if(!confirm(`Delete ${targets.length} ${desc}? This cannot be undone.`))return;
+  const ids=new Set(targets.map(s=>s.id));
+  S.irShifts=S.irShifts.filter(s=>!ids.has(s.id));
+  triggerSave();renderIRShiftTable();
+  const si=document.getElementById('save-indicator');
+  if(si){si.textContent=`✓ Cleared ${ids.size} IR shift(s)`;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},3000);}
+}
 
 /* ─── DR BUILDER TABS ─── */
 function drBuilderTab(shift, el){
