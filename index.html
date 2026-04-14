@@ -908,7 +908,7 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR SCHEDULE BUILDER (redesigned) -->
 <div id="page-ir-builder" class="page">
   <div class="pg-title">IR Schedule Builder</div>
-  <div class="pg-sub">Weekly view: 1 IR call physician per group per day covers all group hospitals. Weekend call covers Fri evening → Mon morning. Unscheduled IR physicians receive a diagnostic at-home shift.</div>
+  <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu nights. Weekend call: 1 physician per group covers Fri evening → Mon morning. Unscheduled IR physicians receive a diagnostic at-home shift.</div>
   <div class="tabs">
     <div class="tab on" onclick="irBuilderTab('weekly',this)">Weekly Builder</div>
     <div class="tab" onclick="irBuilderTab('manual',this)">Manual Entry</div>
@@ -1969,8 +1969,28 @@ S.sites.filter(s=>s.irGroup).forEach(st=>{
 });
 
 // Data is embedded directly in this file — no localStorage needed
-// After any changes, click 💾 Save to download an updated copy of this file
 _isRestoring=false;
+// Pre-load USERS from Supabase before login so newly created accounts work
+(async function _preloadUsers(){
+  try{
+    const raw=localStorage.getItem('radscheduler_sb_config');
+    if(!raw) return;
+    const c=JSON.parse(raw);
+    if(!c.url||!c.key) return;
+    const _sb=supabase.createClient(c.url,c.key);
+    const {data}=await _sb.from('radscheduler').select('data').eq('id','main').single();
+    if(data?.data){
+      const d=JSON.parse(data.data);
+      if(d.users&&Array.isArray(d.users)){
+        d.users.forEach(u=>{
+          const ex=USERS.find(x=>x.id===u.id);
+          if(ex)Object.assign(ex,u);
+          else USERS.push(u);
+        });
+      }
+    }
+  }catch(e){/* non-fatal */}
+})();
 
 
 /* ─── UTILS ─── */
@@ -2463,19 +2483,16 @@ function clearIRShifts(mode){
 function drBuilderTab(shift, el){
   document.querySelectorAll('#drb-tabs .tab').forEach(t=>t.classList.remove('on'));
   if(el) el.classList.add('on');
-  // Show correct panel
   document.getElementById('drbt-1st').style.display=(shift==='1st'||shift==='home')?'block':'none';
   document.getElementById('drbt-2nd').style.display=shift==='2nd'?'block':'none';
   document.getElementById('drbt-3rd').style.display=shift==='3rd'?'block':'none';
-  // Sync the single-entry shift dropdown
   const sd=document.getElementById('sb-shift');
   if(sd) sd.value=shift==='home'?'Home':shift==='2nd'?'2nd':shift==='3rd'?'3rd':'1st';
-  // Populate 2nd/3rd dropdowns when switching to those tabs
   if(shift==='2nd'||shift==='3rd') _populateBulkDropdowns(shift);
-  // Update filter to match tab
   const fsh=document.getElementById('drb-filter-shift');
   if(fsh) fsh.value=(shift==='home'?'Home':shift==='1st'?'1st':shift);
-  renderDRBuilder();
+  // Re-render table only (no recursive tab switch)
+  _renderDRTable();
 }
 
 function _populateBulkDropdowns(shift){
@@ -2570,6 +2587,12 @@ function renderDRCal(){
 
 /* ─── DR BUILDER ─── */
 function renderDRBuilder(){
+  // Init tab panels on first open (ensure 1st is visible)
+  if(document.getElementById('drbt-1st')?.style.display===''){
+    document.getElementById('drbt-1st').style.display='block';
+    document.getElementById('drbt-2nd').style.display='none';
+    document.getElementById('drbt-3rd').style.display='none';
+  }
   const drs=S.physicians.filter(p=>p.drFte>0);
   document.getElementById('sb-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   populateSel('sb-sub',S.drSubs,'— any —');populateSel('sb-site',S.sites.map(s=>s.name),'');
@@ -2581,18 +2604,21 @@ function renderDRBuilder(){
     const se=document.getElementById(`drb-${sh}-site`);if(se)se.innerHTML=siteNames.map(n=>`<option>${n}</option>`).join('');
     const ue=document.getElementById(`drb-${sh}-sub`);if(ue)ue.innerHTML=S.drSubs.map(s=>`<option>${s}</option>`).join('');
   });
-  // Apply filters
+  _renderDRTable();
+}
+function _renderDRTable(){
   const fsh=document.getElementById('drb-filter-shift')?.value||'';
   const fmo=document.getElementById('drb-filter-mo')?.value||'';
   const rows=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)))
     .sort((a,b)=>a.date>b.date?1:-1);
-  document.getElementById('drb-tbody').innerHTML=rows.map(s=>{
+  const el=document.getElementById('drb-tbody');if(!el)return;
+  el.innerHTML=rows.map(s=>{
     const p=S.physicians.find(x=>x.id===s.physId);const isAnc=p?.anchorSite===s.site;
     const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
     return`<tr><td>${pname(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
     <td>${s.sub||'—'}</td><td>${s.notes||'—'}</td>
-    <td><button class="br bxs" onclick="S.drShifts=S.drShifts.filter(x=>x.id!==${s.id});renderDRBuilder()">X</button></td></tr>`;
+    <td><button class="br bxs" onclick="S.drShifts=S.drShifts.filter(x=>x.id!==${s.id});_renderDRTable()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No shifts match filters</td></tr>';
 }
 function updateSbInfo(){
@@ -2952,7 +2978,7 @@ function renderIRWeekBuilder(){
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--navy)">
         <th style="padding:6px 10px;color:#fff;text-align:left;min-width:110px">Group / Shift</th>`;
-  weekDates.slice(0,5).forEach(d=>{const dow=parseDateLocal(d).getDay();html+=`<th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">${DOW_NAMES[dow]}<br><span style="font-weight:400;font-size:10px">${d.slice(5)}</span></th>`;});
+  weekDates.slice(0,4).forEach(d=>{const dow=parseDateLocal(d).getDay();html+=`<th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">${DOW_NAMES[dow]}<br><span style="font-weight:400;font-size:10px">${d.slice(5)}</span></th>`;});
   html+=`</tr></thead><tbody>`;
 
   groups.forEach(g=>{
@@ -3128,10 +3154,10 @@ function previewIRAA(){
   }
 
   if(typ==='daily'||typ==='both'){
-    cells.filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date)).forEach(c=>{
+    cells.filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)).forEach(c=>{
       groups.forEach(g=>{
         const gPhys=irPs.filter(p=>p.irGroup===g);
-        // One physician covers ALL hospitals in the group for this day
+        // One physician covers ALL hospitals in the group Mon-Thu; Fri starts weekend call
         const alreadyAssigned=S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='daily')
                              ||preview.find(a=>!a._drHome&&a.date===c.date&&a.irGroup===g&&a.callType==='daily');
         if(alreadyAssigned) return; // group already has a call physician today
@@ -3168,7 +3194,8 @@ function previewIRAA(){
   }
 
   if(typ==='weekend'||typ==='both'){
-    cells.filter(c=>c.day&&c.dow===5).forEach(c=>{
+    // Weekend call: Fri evening → Mon morning (triggered on Friday, covers Fri-Mon)
+  cells.filter(c=>c.day&&c.dow===5).forEach(c=>{
       groups.forEach(g=>{
         const gPhys=irPs.filter(p=>p.irGroup===g);
         const ex=S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='weekend')
@@ -3239,8 +3266,10 @@ function applyIRAA(){
 /* ─── ANCHOR REPORT ─── */
 function renderAnchorReport(){
   const ym=document.getElementById('anc-mo').value||'2025-06';
+  const el=document.getElementById('anc-content');
+  if(el) el.innerHTML=''; // clear before render
   const drs=S.physicians.filter(p=>p.drFte>0&&p.anchorSite);
-  if(!drs.length){document.getElementById('anc-content').innerHTML='<div class="note ni">No physicians have anchor sites configured.</div>';return;}
+  if(!drs.length){if(el)el.innerHTML='<div class="note ni">No physicians have anchor sites configured.</div>';return;}
   const ok=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;});
   const fail=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&!c.ok;});
   let html=`<div class="g4" style="margin-bottom:12px">
