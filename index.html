@@ -345,6 +345,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('holiday-auto',this)">Holiday Auto-Assign</div>
       <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
       <div class="snav-sect">System</div>
+      <div class="snav-item" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
       <div class="snav-item" onclick="nav('settings',document.querySelector('[onclick*=settings]'))">⚙ Settings</div>
       <div class="snav-sect admin-only">Admin</div>
       <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
@@ -784,6 +785,10 @@ tbody tr:hover{background:var(--bg3)}
 <!-- DR WEEKENDS -->
 <div id="page-dr-weekends" class="page">
   <div class="pg-title">DR Weekend Call</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearWkCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
   <div class="note ni">DR weekend call assigns the <strong>same physician for both Saturday and Sunday</strong>. Enter the Saturday date.</div>
   <div class="ibox">
     <div class="g3">
@@ -804,6 +809,10 @@ tbody tr:hover{background:var(--bg3)}
 <!-- AUTO-ASSIGN DR -->
 <div id="page-auto-assign" class="page">
   <div class="pg-title">DR Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="if(_adminOnly('reset DR auto-assign'))S.aaPreview=[],S.drShifts=S.drShifts.filter(s=>s.notes!='Auto'&&s.notes!='Auto-home'),triggerSave(),renderDRBuilder()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
   <div class="note ni">Auto-assign respects: subspecialty qualifications, FTE caps, shift eligibility, vacation blackouts, rest days, and <strong>anchor site minimum (≥60%)</strong>. The engine prioritizes physicians for their anchor site first, only assigning them elsewhere if the anchor quota is met.</div>
   <div class="g3" style="margin-bottom:10px">
     <div class="fg"><label>Month</label><input id="aa-mo" type="month" value="2025-06"></div>
@@ -858,6 +867,10 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-ir-shifts" class="page">
   <div class="pg-title">IR Shift Builder</div>
   <div class="pg-sub">Assign IR physicians to procedural shifts — separate from the on-call schedule.</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
 
 
 
@@ -909,6 +922,10 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-ir-builder" class="page">
   <div class="pg-title">IR Schedule Builder</div>
   <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu nights. Weekend call: 1 physician per group covers Fri evening → Mon morning. Unscheduled IR physicians receive a diagnostic at-home shift.</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>  <button class="br bsm" onclick="clearIRCalls('month')" title="Clear IR calls for selected month">🗑 Reset Month</button>
+  </div>
+
   <div class="tabs">
     <div class="tab on" onclick="irBuilderTab('weekly',this)">Weekly Builder</div>
     <div class="tab" onclick="irBuilderTab('manual',this)">Manual Entry</div>
@@ -975,6 +992,10 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR SHIFT AUTO-ASSIGN -->
 <div id="page-ir-shift-auto" class="page">
   <div class="pg-title">IR Shift Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
   <div class="note ni">Fills the IR daily procedure schedule (separate from call). Uses per-day-of-week slot requirements per site. IR physicians are assigned by group, load-balanced by shift count. Unscheduled IR physicians receive an at-home shift.</div>
   <div class="ibox">
     <div class="g3">
@@ -1006,6 +1027,10 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR AUTO-ASSIGN -->
 <div id="page-ir-auto" class="page">
   <div class="pg-title">IR Auto-Assign</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="clearIRCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
+  </div>
+
   <div class="note ni">Assigns <strong>1 physician per group</strong> per day to cover all hospitals in that group. Weekend call (Fri→Mon) assigned each Friday. Unscheduled IR physicians receive a DR at-home shift automatically. IR-only physicians are <strong>never</strong> given hospital DR shifts.</div>
   <div class="ibox">
     <div class="g3">
@@ -1156,6 +1181,10 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-anchor-report" class="page">
   <div class="pg-title">Anchor Site Compliance Report</div>
   <div class="pg-sub">Each physician with an anchor site must have ≥60% of all their shifts at that site. Physicians below this threshold are flagged.</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <button class="br bsm" onclick="renderAnchorReport()" title="Clear all entries from this schedule">🗑 Reset All</button>  <button class="bp bsm" onclick="renderAnchorReport()">↺ Refresh</button>
+  </div>
+
   <div class="flexe" style="margin-bottom:12px"><div class="fg" style="margin:0"><label>Month</label><input id="anc-mo" type="month" value="2025-06" oninput="renderAnchorReport()"></div></div>
   <div id="anc-content"></div>
 </div>
@@ -1307,6 +1336,19 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 
   <div id="user-mgmt-list"></div>
+</div>
+
+<!-- FTE MONITOR -->
+<div id="page-fte" class="page">
+  <div class="pg-title">📊 FTE Monitor</div>
+  <div class="pg-sub">Track assigned call and shifts against each physician's FTE targets. Updated in real time as schedules are built.</div>
+  <div class="g2" style="margin-bottom:10px">
+    <div class="fg"><label>Month</label><input id="fte-mo" type="month" oninput="renderFTE()"></div>
+    <div class="fg" style="display:flex;align-items:flex-end;gap:8px">
+      <button class="bp bsm" onclick="renderFTE()">↺ Refresh</button>
+    </div>
+  </div>
+  <div id="fte-content"></div>
 </div>
 
 <!-- SETTINGS -->
@@ -1548,6 +1590,39 @@ const _ROW_ID='main';        // single row stores all state
 // _SRC is set by a script block at the bottom of <body> once DOM is fully loaded
 
 // Supabase functions defined in SUPABASE SETTINGS section below
+
+function _adminOnly(action){
+  if(CU?.role!=='admin'){alert('Only administrators can '+action+'.');return false;}
+  return true;
+}
+
+
+/* ─── RESET / CLEAR FUNCTIONS ─── */
+function clearWkCalls(mode){
+  if(!_adminOnly('clear weekend calls')) return;
+  const ym = document.getElementById('wk-date')?.value?.slice(0,7)||'';
+  let targets = mode==='month'&&ym ? S.weekendCalls.filter(w=>(w.satDate||'').startsWith(ym)) : S.weekendCalls;
+  if(!targets.length){alert('No weekend calls to clear.');return;}
+  if(!confirm(`Delete ${targets.length} weekend call(s)? This cannot be undone.`))return;
+  const ids=new Set(targets.map(w=>w.id));
+  S.weekendCalls=S.weekendCalls.filter(w=>!ids.has(w.id));
+  triggerSave(); renderWkBuilder();
+  _updateSaveUI(`✓ Cleared ${ids.size} weekend call(s)`,'var(--green-t)');
+}
+
+function clearIRCalls(mode){
+  if(!_adminOnly('clear IR calls')) return;
+  const ym = document.getElementById('irl-mo')?.value || document.getElementById('irb-week')?.value?.slice(0,7) || '';
+  let targets = (mode==='month'&&ym) ? S.irCalls.filter(c=>c.date.startsWith(ym)) : S.irCalls;
+  if(!targets.length){alert('No IR calls to clear.');return;}
+  if(!confirm(`Delete ${targets.length} IR call(s)? This cannot be undone.`))return;
+  const ids=new Set(targets.map(c=>c.id));
+  S.irCalls=S.irCalls.filter(c=>!ids.has(c.id));
+  triggerSave();
+  if(typeof renderIRWeekBuilder==='function') renderIRWeekBuilder();
+  if(typeof renderIRList==='function') renderIRList();
+  _updateSaveUI(`✓ Cleared ${ids.size} IR call(s)`,'var(--green-t)');
+}
 
 function triggerSave(){
   if(_isRestoring)return;
@@ -2044,13 +2119,14 @@ function ancComp(physId,ym){
   if(!p||!p.anchorSite) return null;
   const all=[...S.drShifts.filter(s=>s.physId===physId&&s.date.startsWith(ym)&&!s.autoHome),...S.weekendCalls.filter(s=>s.physId===physId&&(s.satDate||s.date||'').startsWith(ym))];
   const tot=all.length;
-  if(!tot) return {tot:0,atAnc:0,pct:0,ok:true,anchor:p.anchorSite};
+  if(!tot) return {tot:0,atAnc:0,pct:0,ok:null,noData:true,anchor:p.anchorSite};
   const atAnc=all.filter(s=>s.site===p.anchorSite).length;
   const pct=Math.round(atAnc/tot*100);
   return{tot,atAnc,pct,ok:pct>=S.cfg.anchorPct,anchor:p.anchorSite};
 }
 function ancBadge(c){
   if(!c) return '';
+  if(c.noData) return '<span class="anc-badge" style="background:var(--bg3);color:var(--txt3)">No shifts</span>';
   const cls=c.ok?'ab-ok':c.pct<40?'ab-bad':'ab-lo';
   return `<span class="anc-badge ${cls}">${c.pct}% at anchor</span>`;
 }
@@ -2070,7 +2146,7 @@ function nav(pg,el){
     physicians:renderPhysicians,vacations:renderVacations,
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},
-    'anchor-report':renderAnchorReport,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
+    'anchor-report':renderAnchorReport,fte:renderFTE,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,
   };
   if(fns[pg]) fns[pg]();
@@ -2319,6 +2395,7 @@ function editPhys(id){
 }
 
 function _saveEditPhys(id){
+  if(!_adminOnly('edit physicians'))return;
   const p=S.physicians.find(x=>x.id===id);if(!p)return;
   const first=document.getElementById('p-first').value.trim();
   const last=document.getElementById('p-last').value.trim();
@@ -2374,6 +2451,7 @@ function cancelEditPhys(){
 }
 
 function addPhys(){
+  if(!_adminOnly('add physicians'))return;
   const first=document.getElementById('p-first').value.trim(),last=document.getElementById('p-last').value.trim();
   if(!first||!last){alert('Enter name');return;}
   const role=document.getElementById('p-role').value;
@@ -2397,17 +2475,18 @@ function addPhys(){
   // Refresh user mgmt so physician link dropdowns reflect the new physician
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
 }
-function removePhys(id){if(!confirm('Remove?'))return;S.physicians=S.physicians.filter(p=>p.id!==id);renderPhysicians();if(document.getElementById('page-user-mgmt')?.classList.contains('on'))renderUserMgmt();}
+function removePhys(id){if(!_adminOnly('remove physicians'))return;if(!confirm('Remove?'))return;S.physicians=S.physicians.filter(p=>p.id!==id);renderPhysicians();if(document.getElementById('page-user-mgmt')?.classList.contains('on'))renderUserMgmt();}
 
 /* ─── VACATIONS ─── */
 function renderVacations(){
   document.getElementById('v-phys').innerHTML=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   document.getElementById('vac-tbody').innerHTML=S.vacations.sort((a,b)=>a.start>b.start?1:-1).map(v=>{
     const d=Math.round((new Date(v.end)-new Date(v.start))/86400000)+1;
-    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="S.vacations=S.vacations.filter(x=>x.id!==${v.id});renderVacations()">X</button></td></tr>`;
+    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="if(_adminOnly('delete vacation'))S.vacations=S.vacations.filter(x=>x.id!==${v.id}),renderVacations()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addVac(){
+  if(!_adminOnly('add time off'))return;
   const pid=+document.getElementById('v-phys').value;
   const s=document.getElementById('v-start').value,e=document.getElementById('v-end').value;
   if(!s||!e||e<s){alert('Check dates');return;}
@@ -2435,6 +2514,7 @@ function addVac(){
 
 
 function clearDRShifts(mode){
+  if(!_adminOnly('clear DR shifts'))return;
   const fsh=document.getElementById('drb-filter-shift')?.value||'';
   const fmo=document.getElementById('drb-filter-mo')?.value||'';
   let targets=S.drShifts;
@@ -2456,6 +2536,7 @@ function clearDRShifts(mode){
 }
 
 function clearIRShifts(mode){
+  if(!_adminOnly('clear IR shifts'))return;
   if(!S.irShifts?.length){alert('No IR shifts to clear.');return;}
   const fmo=document.getElementById('irsf-mo')?.value||'';
   const fpid=+document.getElementById('irsf-phys')?.value||0;
@@ -2530,6 +2611,7 @@ function _dateRangeFiltered(startDs, endDs, dowSel){
 }
 
 function bulkAssignMultiWeek(shift){
+  if(!_adminOnly('bulk assign shifts'))return;
   const start=document.getElementById(`drb-${shift}-start`)?.value;
   const end=document.getElementById(`drb-${shift}-end`)?.value;
   if(!start||!end||end<start){alert('Select a valid start and end date.');return;}
@@ -2556,6 +2638,97 @@ function bulkAssignMultiWeek(shift){
   if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},5000);}
 }
 
+
+
+/* ─── FTE MONITOR ─── */
+function renderFTE(){
+  const mo=document.getElementById('fte-mo');
+  if(!mo) return;
+  if(!mo.value){const now=new Date();mo.value=fmtDate(new Date(now.getFullYear(),now.getMonth(),1)).slice(0,7);}
+  const ym=mo.value;
+  const [y,m]=ym.split('-').map(Number);
+  const monthLabel=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+  const wdDays=buildCal(ym).filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).length;
+  const wkWknd=buildCal(ym).filter(c=>c.day&&c.dow===6).length;
+
+  let html=`<div style="font-size:11px;color:var(--txt3);margin-bottom:10px">Showing ${monthLabel} · ${wdDays} weekdays · ${wkWknd} weekends</div>`;
+
+  // ── DR physicians ──
+  const drPs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
+  if(drPs.length){
+    html+=`<div class="card" style="margin-bottom:12px"><div class="card-title">Diagnostic Radiology — FTE Utilization</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>DR FTE</th>
+        <th>Weekday Shifts</th><th>Target</th><th>Utilization</th>
+        <th>Weekend Calls</th><th>Target</th><th>Utilization</th>
+        <th>Anchor %</th><th>Status</th>
+      </tr></thead><tbody>`;
+    drPs.forEach(p=>{
+      const wdUsed=drCnt(p.id,ym);
+      const wdMax=maxDR(p,'wd');
+      const wkUsed=wkCnt(p.id,ym);
+      const wkMax=maxDR(p,'wk');
+      const wdPct=wdMax?Math.round(wdUsed/wdMax*100):0;
+      const wkPct=wkMax?Math.round(wkUsed/wkMax*100):0;
+      const anc=ancComp(p.id,ym);
+      const ancTxt=anc&&!anc.noData?anc.pct+'%':'—';
+      const ancCls=anc&&!anc.noData?(anc.ok?'color:var(--green-t)':'color:var(--red-t)'):'color:var(--txt3)';
+      const wdCls=wdPct>105?'color:var(--red-t)':wdPct>=90?'color:var(--green-t)':wdPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const wkCls=wkPct>105?'color:var(--red-t)':wkPct>=90?'color:var(--green-t)':wkPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const overAll=wdPct>110||wkPct>110?'⚠ Over':'';
+      const underAll=wdPct<50&&wkPct<50?'Under-utilized':'';
+      const statusCls=overAll?'color:var(--red-t)':underAll?'color:var(--amber,#d97706)':'color:var(--green-t)';
+      const statusTxt=overAll||underAll||(wdPct>=80?'✓ On track':'Low');
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td style="text-align:center">${p.drFte}</td>
+        <td style="text-align:center">${wdUsed}</td>
+        <td style="text-align:center;color:var(--txt3)">${wdMax}</td>
+        <td style="text-align:center"><span style="${wdCls};font-weight:700">${wdPct}%</span></td>
+        <td style="text-align:center">${wkUsed}</td>
+        <td style="text-align:center;color:var(--txt3)">${wkMax}</td>
+        <td style="text-align:center"><span style="${wkCls};font-weight:700">${wkPct}%</span></td>
+        <td style="text-align:center;${ancCls};font-weight:700">${ancTxt}</td>
+        <td style="${statusCls};font-weight:700">${statusTxt}</td>
+      </tr>`;
+    });
+    html+=`</tbody></table></div></div>`;
+  }
+
+  // ── IR physicians ──
+  const irPs=S.physicians.filter(p=>p.irFte>0);
+  if(irPs.length){
+    html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>IR FTE</th><th>Group</th>
+        <th>IR Calls</th><th>Target</th><th>Utilization</th>
+        <th>IR Shifts</th><th>Status</th>
+      </tr></thead><tbody>`;
+    irPs.forEach(p=>{
+      const irUsed=irCnt(p.id,ym);
+      const irMax=maxDR(p,'ir');
+      const irPct=irMax?Math.round(irUsed/irMax*100):0;
+      const shiftUsed=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym)).length;
+      const cls=irPct>105?'color:var(--red-t)':irPct>=90?'color:var(--green-t)':irPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const statusTxt=irPct>110?'⚠ Over':irPct>=80?'✓ On track':'Low';
+      const statusCls=irPct>110?'color:var(--red-t)':irPct>=80?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
+        <td style="text-align:center">${irUsed}</td>
+        <td style="text-align:center;color:var(--txt3)">${irMax}</td>
+        <td style="text-align:center"><span style="${cls};font-weight:700">${irPct}%</span></td>
+        <td style="text-align:center">${shiftUsed}</td>
+        <td style="${statusCls};font-weight:700">${statusTxt}</td>
+      </tr>`;
+    });
+    html+=`</tbody></table></div></div>`;
+  }
+
+  const el=document.getElementById('fte-content');
+  if(el) el.innerHTML=html||'<div class="note ni">No physicians configured.</div>';
+}
 
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
@@ -2618,7 +2791,7 @@ function _renderDRTable(){
     return`<tr><td>${pname(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
     <td>${s.sub||'—'}</td><td>${s.notes||'—'}</td>
-    <td><button class="br bxs" onclick="S.drShifts=S.drShifts.filter(x=>x.id!==${s.id});_renderDRTable()">X</button></td></tr>`;
+    <td><button class="br bxs" onclick="if(_adminOnly('delete shifts'))S.drShifts=S.drShifts.filter(x=>x.id!==${s.id}),_renderDRTable()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No shifts match filters</td></tr>';
 }
 function updateSbInfo(){
@@ -2640,6 +2813,7 @@ function updateSbInfo(){
   </div>`;
 }
 function addDRShift(){
+  if(!_adminOnly('assign DR shifts'))return;
   const pid=+document.getElementById('sb-phys').value;
   const date=document.getElementById('sb-date').value;
   const shift=document.getElementById('sb-shift').value;
@@ -2683,10 +2857,11 @@ function renderWkBuilder(){
   populateSel('wk-sub',S.drSubs,'');populateSel('wk-site',S.sites.map(s=>s.name),'');
   document.getElementById('wk-tbody').innerHTML=S.weekendCalls.sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
-    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="S.weekendCalls=S.weekendCalls.filter(x=>x.id!==${w.id});renderWkBuilder()">X</button></td></tr>`;
+    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="if(_adminOnly('delete weekend call'))S.weekendCalls=S.weekendCalls.filter(x=>x.id!==${w.id}),renderWkBuilder()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addWkCall(){
+  if(!_adminOnly('assign weekend call'))return;
   const pid=+document.getElementById('wk-phys').value;const satDate=document.getElementById('wk-date').value;
   if(!satDate){alert('Select Saturday date');return;}
   if(parseDateLocal(satDate).getDay()!==6&&!confirm('Not a Saturday. Continue?'))return;
@@ -2695,6 +2870,7 @@ function addWkCall(){
   const sub=document.getElementById('wk-sub').value;const site=document.getElementById('wk-site').value;
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
   if(wkCnt(pid,satDate.slice(0,7))>=maxDR(p,'wk')&&!confirm('At weekend cap. Add anyway?'))return;
+  if(_hasAdjacentWeekend(pid,satDate)){alert('Back-to-back weekend call not allowed: '+p.last+' already covers an adjacent weekend.');return;}
   S.weekendCalls.push({id:S.nextId++,physId:pid,satDate,sunDate,sub,site,ctype:document.getElementById('wk-ctype').value,notes:document.getElementById('wk-notes').value});
   renderWkBuilder();
 }
@@ -2825,6 +3001,7 @@ function previewAA(){
   document.getElementById('aa-apply').style.display=preview.length?'inline-block':'none';
 }
 function applyAA(){
+  if(!_adminOnly('apply auto-assign'))return;
   S.aaPreview.forEach(a=>{
     if(a.type==='wk')
       S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',notes:'Auto'});
@@ -3000,7 +3177,7 @@ function renderIRWeekBuilder(){
         html+=`<td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top">`;
         existing.forEach(ic=>{const p=S.physicians.find(x=>x.id===ic.physId);
           html+=`<div style="display:flex;align-items:center;justify-content:space-between;background:${ctBg[ct]};border:1px solid ${ctColor[ct]};border-radius:4px;padding:2px 5px;margin-bottom:2px;font-size:11px;color:${ctColor[ct]}">
-            <span>${p?p.last:'?'}</span><span style="cursor:pointer;opacity:.6;font-size:10px" onclick="removeIRCall(${ic.id});renderIRWeekBuilder()">✕</span>
+            <span>${p?p.last:'?'}</span><span style="cursor:pointer;opacity:.6;font-size:10px" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRWeekBuilder()">✕</span>
           </div>`;});
         // Show dropdown if slot available (daily = 1 max per group per day)
         if(ct==='daily'&&existing.length<1||ct!=='daily'){
@@ -3066,25 +3243,58 @@ function renderIRWeekBuilder(){
   document.getElementById('irb-week-content').innerHTML=html;
 }
 
+function _hasAdjacentIRCall(physId, date){
+  // Blocks back-to-back: physician cannot work IR call on consecutive days
+  const prev=addDays(date,-1), next=addDays(date,1);
+  return S.irCalls.some(ic=>{
+    if(ic.physId!==physId) return false;
+    if(ic.callType==='daily') return ic.date===prev||ic.date===next;
+    // Weekend call spans date through date+3
+    const wEnd=addDays(ic.date,3);
+    return prev>=ic.date&&prev<=wEnd||next>=ic.date&&next<=wEnd||
+           date>=ic.date&&date<=wEnd;
+  });
+}
+
+function _hasAdjacentWeekend(physId, satDate){
+  // Blocks back-to-back weekends: no consecutive Saturday weekends
+  return S.weekendCalls.some(w=>{
+    if(w.physId!==physId) return false;
+    const wSat=w.satDate||w.date||'';
+    if(!wSat) return false;
+    // Adjacent = within 7 days of each other (consecutive weekends)
+    const diff=Math.abs(
+      parseDateLocal(satDate).getTime()-parseDateLocal(wSat).getTime()
+    )/(86400000);
+    return diff>0&&diff<=7;
+  });
+}
+
 function addIRCallFromGrid(sel,date,callType,group){
+  if(!_adminOnly('assign IR call')){sel.value='';return;}
   const physId=+sel.value;if(!physId){return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===group&&ic.callType==='daily')){
     alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
+  if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
+    alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');sel.value='';return;}
   const site=(S.sites.find(s=>s.irGroup===group)||{}).name||'';
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site,notes:''});
   sel.value='';renderIRWeekBuilder();
 }
 
 function addIRWeekend(group,fridayDate){
+  if(!_adminOnly('assign IR weekend call'))return;
   const physId=+document.getElementById(`irwk-phys-${group}`)?.value;
   const site=document.getElementById(`irwk-site-${group}`)?.value||'';
   if(!physId){alert('Select physician');return;}
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
+  if(_hasAdjacentIRCall(physId,fridayDate)){alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');return;}
   S.irCalls.push({id:S.nextId++,physId,date:fridayDate,callType:'weekend',irGroup:group,site,notes:''});
   renderIRWeekBuilder();
 }
 
 function addIRCallManual(){
+  if(!_adminOnly('add IR call'))return;
   const physId=+document.getElementById('ird-phys').value;const date=document.getElementById('ird-date').value;
   if(!date){alert('Select date');return;}
   const callType=document.getElementById('ird-ctype').value;
@@ -3092,6 +3302,7 @@ function addIRCallManual(){
   const irGroup=document.getElementById('ird-grp').value;const site=document.getElementById('ird-site').value;
   const p=S.physicians.find(x=>x.id===physId);
   if(p?.irGroup&&p.irGroup!==irGroup&&!confirm(`${p.last} is in ${p.irGroup} group. Assign to ${irGroup}?`))return;
+  if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site,notes:document.getElementById('ird-notes').value});
   alert('Added. Refresh the list tab to see all entries.');
@@ -3106,7 +3317,7 @@ function renderIRList(){
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
     return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${ic.irGroup==='North'?'tb':'tg'}">${ic.irGroup}</span></td>
     <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType}</span></td><td>${dates}</td><td>${ic.site}</td><td>${ic.notes||'—'}</td>
-    <td><button class="br bxs" onclick="removeIRCall(${ic.id});renderIRList()">X</button></td></tr>`;
+    <td><button class="br bxs" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRList()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 
@@ -3163,8 +3374,12 @@ function previewIRAA(){
         if(alreadyAssigned) return; // group already has a call physician today
         const pool=gPhys.filter(p=>{
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
-          if(isSoldBackDate(p.id,c.date))return false; // sold-back: DR only
+          if(isSoldBackDate(p.id,c.date))return false;
           if(irOnDate(p.id,c.date))return false;
+          // No back-to-back: check adjacent days in both existing calls and preview
+          const adjPrev=addDays(c.date,-1),adjNext=addDays(c.date,1);
+          if(S.irCalls.some(ic=>ic.physId===p.id&&(ic.date===adjPrev||ic.date===adjNext)))return false;
+          if(preview.some(a=>!a._drHome&&a.physId===p.id&&(a.date===adjPrev||a.date===adjNext)))return false;
           if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call'))return false;
           if(!sequenceOk(p,c.date,ym))return false;
           return cnt[p.id]<maxDR(p,'ir');
@@ -3181,15 +3396,7 @@ function previewIRAA(){
         }
       });
 
-      // Auto-home DR for any IR physician not on call this day
-      const vacOnDate=new Set(vm[c.date]||[]);
-      irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
-        if(vacOnDate.has(p.id))return;
-        if(irOnDate(p.id,c.date))return;
-        const onDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date)||preview.find(a=>a._drHome&&a.physId===p.id&&a.date===c.date);
-        if(!onDR)
-          preview.push({_drHome:true,physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:'General Procedures',notes:'IR unscheduled→home'});
-      });
+      // NOTE: unassigned IR physicians are intentionally left unscheduled (no auto-home)
     });
   }
 
@@ -3241,8 +3448,14 @@ function previewIRAA(){
     if(irPrev.length>30) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${irPrev.length-30} more</td></tr>`;
     html+='</tbody></table></div>';
   }
-  if(homePrev.length)
-    html+=`<div class="note ni" style="margin-top:8px">+ ${homePrev.length} DR at-home fills for unscheduled IR physicians.</div>`;
+  // Unassigned IR physicians shown separately
+  const unassigned=[];
+  S.physicians.filter(p=>p.irFte>0&&(grpFilter==='both'||p.irGroup===grpFilter)).forEach(p=>{
+    const assigned=irPrev.filter(a=>a.physId===p.id).length;
+    if(assigned<maxDR(p,'ir')) unassigned.push({name:pname(p.id),assigned,max:maxDR(p,'ir')});
+  });
+  if(unassigned.length)
+    html+=`<div class="note ni" style="margin-top:8px"><strong>Unassigned IR physicians</strong> (no auto-fill): ${unassigned.map(u=>`${u.name} (${u.assigned}/${u.max})`).join(', ')}</div>`;
   if(gaps.length)
     html+=`<div class="note nw" style="margin-top:8px">⚠ ${gaps.length} gap(s): ${gaps.slice(0,5).join(', ')}</div>`;
   if(!preview.length&&!gaps.length)
@@ -3253,10 +3466,9 @@ function previewIRAA(){
 }
 
 function applyIRAA(){
+  if(!_adminOnly('apply IR auto-assign'))return;
   S.iraPreview.forEach(a=>{
-    if(a._drHome)
-      S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'Home',site:'At Home / Remote',sub:'General Procedures',notes:a.notes,autoHome:true});
-    else
+    if(!a._drHome)
       S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:'Auto'});
   });
   triggerSave();document.getElementById('ira-box').innerHTML=`<div class="note ns">${S.iraPreview.length} entries applied.</div>`;
@@ -3265,13 +3477,15 @@ function applyIRAA(){
 
 /* ─── ANCHOR REPORT ─── */
 function renderAnchorReport(){
-  const ym=document.getElementById('anc-mo').value||'2025-06';
+  const moEl=document.getElementById('anc-mo');
+  if(moEl&&!moEl.value){const now=new Date();moEl.value=fmtDate(new Date(now.getFullYear(),now.getMonth(),1)).slice(0,7);}
+  const ym=(moEl?.value)||'2025-06';
   const el=document.getElementById('anc-content');
-  if(el) el.innerHTML=''; // clear before render
+  if(el) el.innerHTML='';
   const drs=S.physicians.filter(p=>p.drFte>0&&p.anchorSite);
   if(!drs.length){if(el)el.innerHTML='<div class="note ni">No physicians have anchor sites configured.</div>';return;}
-  const ok=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;});
-  const fail=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&!c.ok;});
+  const ok=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===true;});
+  const fail=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===false;});
   let html=`<div class="g4" style="margin-bottom:12px">
     <div class="met"><div class="met-lbl">With Anchor Site</div><div class="met-val">${drs.length}</div></div>
     <div class="met"><div class="met-lbl">Compliant ≥${S.cfg.anchorPct}%</div><div class="met-val" style="color:var(--green)">${ok.length}</div></div>
@@ -3297,6 +3511,7 @@ function renderHolidays(){
   triggerSave();renderHolTable();renderHolCounter();
 }
 function addHoliday(){
+  if(!_adminOnly('assign holiday call'))return;
   const pid=+document.getElementById('hol-phys').value,date=document.getElementById('hol-date').value;
   const grp=document.getElementById('hol-grp').value;
   if(!date){alert('Select date');return;}
@@ -3483,6 +3698,7 @@ function updateIRSbInfo(){
 }
 
 function addIRShift(){
+  if(!_adminOnly('assign IR shifts'))return;
   const pid=+document.getElementById('irs-phys').value;
   const date=document.getElementById('irs-date').value;
   const shift=document.getElementById('irs-shift').value;
@@ -3540,7 +3756,7 @@ function renderIRShiftTable(){
       <td><span class="tag ${(p?.irGroup||'')==='North'?'tb':'tg'}">${p?.irGroup||'—'}</span></td>
       <td>${s.sub||'—'}</td>
       <td>${s.notes||'—'}</td>
-      <td><button class="br bxs" onclick="S.irShifts=S.irShifts.filter(x=>x.id!==${s.id});renderIRShiftTable()">X</button></td>
+      <td><button class="br bxs" onclick="if(_adminOnly('delete IR shift'))S.irShifts=S.irShifts.filter(x=>x.id!==${s.id}),renderIRShiftTable()">X</button></td>
     </tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No IR shifts assigned this month.</td></tr>';
 }
@@ -3665,6 +3881,7 @@ function previewIRShiftAA(){
 }
 
 function applyIRShiftAA(){
+  if(!_adminOnly('apply IR shift auto-assign'))return;
   if(!S.irShifts) S.irShifts=[];
   (S.irsaPreview||[]).forEach(a=>{
     S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes,irGroup:a.irGroup});
@@ -3754,6 +3971,7 @@ function editHoliday(id){
   alert('Record removed for editing. Update fields above and click Add to save changes.');
 }
 function deleteHoliday(id){
+  if(!_adminOnly('delete holiday assignment'))return;
   if(!confirm('Delete this holiday assignment?'))return;
   S.holidays=S.holidays.filter(x=>x.id!==id);
   renderHolTable();renderHolCounter();
@@ -4557,6 +4775,7 @@ function previewHolidayAA(){
   document.getElementById('ha-apply').style.display=preview.length?'inline-block':'none';
 }
 function applyHolidayAA(){
+  if(!_adminOnly('apply holiday auto-assign'))return;
   (S.haPreview||[]).forEach(a=>{
     S.holidays.push({id:S.nextId++,name:a.name,date:a.date,year:a.year,physId:a.physId,group:a.group,notes:a.notes});
   });
