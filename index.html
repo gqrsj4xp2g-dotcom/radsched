@@ -693,7 +693,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="g3">
         <div class="fg"><label>Start Date</label>
           <input id="drb-2nd-start" type="date" oninput="updateMultiWeekPreview('2nd')">
-          <div style="font-size:10px;color:var(--txt3);margin-top:2px">First day to assign</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Any day — not limited to Monday</div>
         </div>
         <div class="fg"><label>End Date</label>
           <input id="drb-2nd-end" type="date" oninput="updateMultiWeekPreview('2nd')">
@@ -732,7 +732,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="g3">
         <div class="fg"><label>Start Date</label>
           <input id="drb-3rd-start" type="date" oninput="updateMultiWeekPreview('3rd')">
-          <div style="font-size:10px;color:var(--txt3);margin-top:2px">First day to assign</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">Any day — not limited to Monday</div>
         </div>
         <div class="fg"><label>End Date</label>
           <input id="drb-3rd-end" type="date" oninput="updateMultiWeekPreview('3rd')">
@@ -2441,11 +2441,10 @@ function updateMultiWeekPreview(shift){
   const end=document.getElementById(`drb-${shift}-end`)?.value;
   const prev=document.getElementById(`drb-${shift}-preview`);
   if(!prev) return;
-  if(!start||!end||end<start){prev.textContent='Select start and end dates.';return;}
+  if(!start||!end||end<start){prev.textContent='Select start and end dates — any day of the week works as a start.';return;}
   const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
-  if(!dates.length){prev.textContent='No matching days in range.';return;}
-  const weeks=Math.ceil(dates.length/5);
-  prev.textContent=`${dates.length} shifts across ~${weeks} week(s): ${dates[0]} → ${dates[dates.length-1]}`;
+  if(!dates.length){prev.textContent='No days match the selected day-of-week checkboxes in that range.';return;}
+  prev.textContent=`${dates.length} shift(s) will be assigned: ${dates[0]} → ${dates[dates.length-1]}`;
 }
 
 function _dateRangeFiltered(startDs, endDs, dowSel){
