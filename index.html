@@ -899,7 +899,6 @@ tbody tr:hover{background:var(--bg3)}
       <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
       <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → Home</button>
     </div>
-  </div>
 
   <!-- Shared table + filters -->
   <div class="admin-only" style="display:flex;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap">
@@ -1450,10 +1449,6 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
     <div id="ss-week-tabs" class="flex" style="flex-wrap:wrap;gap:3px"></div>
   </div>
   <div id="ss-content"></div>
-</div>
-
-    
-  </div>
 </div>
 
 
@@ -2839,11 +2834,13 @@ function renderFTE(){
     html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization</div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
-        <th>IR Calls</th><th>Target</th><th>Utilization</th>
+        <th>Daily Calls</th><th>Weekend Calls</th><th>Total Calls</th><th>Target</th><th>Utilization</th>
         <th>IR Shifts</th><th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
-      const irUsed=irCnt(p.id,ym);
+      const dailyCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='daily').length;
+      const wkndCalls=S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)&&c.callType==='weekend').length;
+      const irUsed=dailyCalls+wkndCalls;
       const irMax=maxDR(p,'ir');
       const irPct=irMax?Math.round(irUsed/irMax*100):0;
       const shiftUsed=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym)).length;
@@ -2854,7 +2851,9 @@ function renderFTE(){
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
         <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
-        <td style="text-align:center">${irUsed}</td>
+        <td style="text-align:center">${dailyCalls}</td>
+        <td style="text-align:center">${wkndCalls}</td>
+        <td style="text-align:center;font-weight:700">${irUsed}</td>
         <td style="text-align:center;color:var(--txt3)">${irMax}</td>
         <td style="text-align:center"><span style="${cls};font-weight:700">${irPct}%</span></td>
         <td style="text-align:center">${shiftUsed}</td>
@@ -3394,6 +3393,7 @@ function renderIRWeekBuilder(){
 
 function _hasAdjacentIRCall(physId, date){
   // Blocks back-to-back: no daily call immediately adjacent to another call
+  // Rule: no daily call on Thu (day before Fri weekend start) or Tue (day after Mon weekend end)
   return S.irCalls.some(ic=>{
     if(ic.physId!==physId) return false;
     if(ic.callType==='daily'){
@@ -3402,28 +3402,28 @@ function _hasAdjacentIRCall(physId, date){
       return ic.date===prev||ic.date===next;
     }
     if(ic.callType==='weekend'){
-      // Weekend spans Fri(ic.date)→Mon(ic.date+3)
-      // Block: proposed date falls inside span, or is Thu (day before Fri)
-      const wEnd=addDays(ic.date,3);
-      return (date>=ic.date&&date<=wEnd) || date===addDays(ic.date,-1);
+      // Weekend spans Fri(ic.date) → Mon(ic.date+3)
+      // Block: inside span, Thu before (ic.date-1), or Tue after (ic.date+4)
+      const wEnd=addDays(ic.date,3);   // Monday
+      const tue =addDays(ic.date,4);   // Tuesday — first safe day
+      return (date>=ic.date&&date<=wEnd) || date===addDays(ic.date,-1) || date===tue;
     }
     return false;
   });
 }
 
 function _hasIRCallNearWeekend(physId, fridayDate){
-  // Check if physician has daily call within 1 day of a weekend call start (Fri)
-  // Prevents: Thu daily → Fri weekend, or Fri weekend → Mon daily (Mon = wEnd+0 day)
-  const thu=addDays(fridayDate,-1);
-  const mon=addDays(fridayDate,3);
-  const tue=addDays(fridayDate,4);
+  // When assigning a weekend call starting fridayDate (Fri→Mon):
+  // Block if physician already has a daily call on Thu (day before) or Tue (day after Mon end).
+  // Mon itself is inside the weekend span and handled by _hasAdjacentIRCall.
+  const thu=addDays(fridayDate,-1);   // Thursday
+  const tue=addDays(fridayDate,4);    // Tuesday after Mon weekend end
   return S.irCalls.some(ic=>{
     if(ic.physId!==physId) return false;
     if(ic.callType==='daily'){
-      // Daily call on Thu before or Mon/Tue after weekend
-      return ic.date===thu||ic.date===mon||ic.date===tue;
+      return ic.date===thu||ic.date===tue;
     }
-    // Another weekend call within 7 days
+    // Another weekend call within 7 days = back-to-back weekends
     if(ic.callType==='weekend'){
       const diff=Math.abs(parseDateLocal(fridayDate).getTime()-parseDateLocal(ic.date).getTime())/86400000;
       return diff>0&&diff<=7;
@@ -3643,22 +3643,28 @@ function renderAnchorReport(){
   const moEl=document.getElementById('anc-mo');
   if(!moEl) return;
   if(!moEl.value){const now=new Date();moEl.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');}
-  const ym=moEl.value;
-  const [y,m]=ym.split('-').map(Number);
-  const monthLabel=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+  let ym=moEl.value;
   const el=document.getElementById('anc-content');
   if(el) el.innerHTML='';
   const drs=S.physicians.filter(p=>p.drFte>0&&p.anchorSite);
   if(!drs.length){if(el)el.innerHTML='<div class="note ni">No physicians have anchor sites configured. Set an anchor site on each physician profile.</div>';return;}
-  // Check if any shifts exist at all for this month
-  const anyShifts=S.drShifts.some(s=>s.date.startsWith(ym)&&!s.autoHome)||S.weekendCalls.some(s=>(s.satDate||s.date||'').startsWith(ym));
-  if(!anyShifts){
-    if(el)el.innerHTML=`<div class="note ni" style="padding:16px 18px">
-      <div style="font-weight:700;font-size:14px;margin-bottom:6px">No shifts scheduled for ${monthLabel}</div>
-      <div style="font-size:12px;color:var(--txt2)">Pick a month where shifts have been assigned to see anchor compliance. Anchor % is calculated from all DR weekday shifts and weekend calls assigned in the selected month.</div>
-    </div>`;
-    return;
+  // If no shifts in selected month, auto-fall back to the most recent month with shift data
+  const hasShifts=(ym2)=>S.drShifts.some(s=>s.date.startsWith(ym2)&&!s.autoHome)||S.weekendCalls.some(s=>(s.satDate||s.date||'').startsWith(ym2));
+  if(!hasShifts(ym)){
+    // Collect all months that have shifts, pick the most recent
+    const allMonths=new Set([
+      ...S.drShifts.filter(s=>!s.autoHome).map(s=>s.date.slice(0,7)),
+      ...S.weekendCalls.map(w=>(w.satDate||w.date||'').slice(0,7)).filter(Boolean),
+    ]);
+    const sorted=[...allMonths].filter(Boolean).sort().reverse();
+    if(sorted.length){ym=sorted[0];moEl.value=ym;}
+    else{
+      if(el)el.innerHTML='<div class="note ni">No shifts have been assigned yet. Assign shifts first, then return here to check compliance.</div>';
+      return;
+    }
   }
+  const [y,m]=ym.split('-').map(Number);
+  const monthLabel=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
   const ok=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===true;});
   const fail=drs.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok===false;});
   let html=`<div class="g4" style="margin-bottom:12px">
