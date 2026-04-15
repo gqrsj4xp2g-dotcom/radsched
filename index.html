@@ -4134,29 +4134,36 @@ function renderCommuteMatrix(){
   }
 
   // ── ROUND-TRIP TALLY ─────────────────────────────────────────────────────
-  // Tally: DR 1st shifts only (the only shift type with traffic data)
+  // Tally: DR 1st shifts + IR 1st shifts (no other shift types)
   const tallyData=physicians.map(p=>{
     const byHosp={};
     let totalBase=0,totalTraffic=0,totalShifts=0;
 
+    function countShift(site, date){
+      const entry=dt[`${p.id}|${site}`];
+      if(!entry||entry.mins===null) return;
+      const sv=entry.byShift?.['1st']||null;
+      const tr=sv?_trafficForShift(sv,date):null;
+      const outM=tr?.outMins??entry.mins;
+      const retM=tr?.retMins??entry.mins;
+      if(!byHosp[site]) byHosp[site]={shifts:0,base:0,traffic:0};
+      byHosp[site].shifts++;
+      byHosp[site].base+=entry.mins*2;
+      byHosp[site].traffic+=outM+retM;
+      totalBase+=entry.mins*2;
+      totalTraffic+=outM+retM;
+      totalShifts++;
+    }
+
+    // DR 1st shifts
     S.drShifts
       .filter(s=>s.physId===p.id&&s.shift==='1st'&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>{
-        const entry=dt[`${p.id}|${s.site}`];
-        if(!entry||entry.mins===null) return;
-        // Use DR 1st shift traffic, resolved for selected quarter
-        const sv=entry.byShift?.['1st']||null;
-        const tr=sv?_trafficForShift(sv,s.date):null;
-        const outM=tr?.outMins??entry.mins;
-        const retM=tr?.retMins??entry.mins;
-        if(!byHosp[s.site]) byHosp[s.site]={shifts:0,base:0,traffic:0};
-        byHosp[s.site].shifts++;
-        byHosp[s.site].base+=entry.mins*2;
-        byHosp[s.site].traffic+=outM+retM;
-        totalBase+=entry.mins*2;
-        totalTraffic+=outM+retM;
-        totalShifts++;
-      });
+      .forEach(s=>countShift(s.site, s.date));
+
+    // IR 1st shifts (procedure shifts, non-home)
+    (S.irShifts||[])
+      .filter(s=>s.physId===p.id&&s.shift==='1st'&&s.site!=='At Home / Remote'&&matchYear(s.date))
+      .forEach(s=>countShift(s.site, s.date));
 
     return{p,byHosp,totalBase,totalTraffic,totalShifts};
   }).filter(d=>d.totalShifts>0);
@@ -4171,7 +4178,7 @@ function renderCommuteMatrix(){
 
   html+=`<div class="card" style="margin-bottom:14px">
     <div class="card-title">Round-Trip Drive Tally \u2014 ${yrLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR 1st Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR + IR 1st Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
     </div>`;
 
   if(!sorted.length){
