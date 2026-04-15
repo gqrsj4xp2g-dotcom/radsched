@@ -4171,10 +4171,8 @@ function renderCommuteMatrix(){
       .forEach(s=>addShift(s.site, SHIFT_MAP[s.shift]||null, s.date));
     (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchYear(s.date))
       .forEach(s=>addShift(s.site,'ir-1st',s.date));
-    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-1st',c.date));
-    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-1st',c.date));
+    // IR daily calls excluded from drive time tally
+    // IR weekend calls excluded from drive time tally
 
     return{p,byHosp,totalBase,totalTraffic,totalShifts};
   }).filter(d=>d.totalShifts>0);
