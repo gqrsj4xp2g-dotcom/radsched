@@ -4362,6 +4362,7 @@ function previewIRRebalance(){
       if(!gShiftEntries.length) return;
 
       const cntS={};gPhys.forEach(p=>{cntS[p.id]=0;});
+      const ancS={};gPhys.forEach(p=>{ancS[p.id]=0;}); // anchor shifts in new plan
       const shiftQuotas=_irrQuotas(gPhys,gShiftEntries.length,p=>{
         // Use FTE-proportional share of ACTUAL existing shifts — not slot-config targets.
         // This guarantees redistribution reaches 100% regardless of how irShiftSlots is configured.
@@ -4385,27 +4386,26 @@ function previewIRRebalance(){
           if(eligible.length){
           const n=Math.max(gPhys.length,1);
           const off=Object.values(cntS).reduce((s,v)=>s+v,0)%n;
-          // Two-phase selection: prefer anchor-matching physicians, fall back to full eligible pool.
-          // Fallback guarantees no slot goes unfilled due to anchor constraints.
-          function _rebPickBest(candidates){
-            return candidates.slice().sort((a,b)=>{
-              const qA=shiftCapFn(a),qB=shiftCapFn(b);
-              const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
-              if(underA!==underB) return underA?-1:1;
-              const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
-              const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
-              if(Math.abs(defA-defB)>1e-9) return defB-defA;
-              const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
-              const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
-              return iA-iB;
-            })[0]||null;
-          }
-          const rebAnchorPool=eligible.filter(p=>p.anchorSite===entry.site);
-          const pickedElig=_rebPickBest(rebAnchorPool)||_rebPickBest(eligible);
-          eligible.sort((a,b)=>{ // keep eligible sorted for picked= assignment below
-            if(a===pickedElig) return -1;
-            if(b===pickedElig) return 1;
-            return 0;
+          // Sort: under-quota → anchor fit score → highest deficit → rotation tiebreak
+          eligible.sort((a,b)=>{
+            const qA=shiftCapFn(a),qB=shiftCapFn(b);
+            const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
+            if(underA!==underB) return underA?-1:1;
+            // Anchor fit: drives toward anchorPct% compliance without blocking slot coverage
+            const ancTgtA=a.anchorSite?Math.round(qA*S.cfg.anchorPct/100):0;
+            const ancTgtB=b.anchorSite?Math.round(qB*S.cfg.anchorPct/100):0;
+            const ancNeedA=Math.max(0,ancTgtA-(ancS[a.id]||0));
+            const ancNeedB=Math.max(0,ancTgtB-(ancS[b.id]||0));
+            const fitA=a.anchorSite===entry.site?ancNeedA:-ancNeedA;
+            const fitB=b.anchorSite===entry.site?ancNeedB:-ancNeedB;
+            if(fitA!==fitB) return fitB-fitA;
+            // Highest deficit first
+            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
+            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
+            if(Math.abs(defA-defB)>1e-9) return defB-defA;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
+            return iA-iB;
           });
           picked=eligible[0];
         }
@@ -4416,6 +4416,7 @@ function previewIRRebalance(){
             irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
             origPhysId:entry.physId,origId:entry.id,isSwap};
           plan.shifts.push(e);gSAsgn.push(e);cntS[picked.id]++;
+          if(picked.anchorSite===entry.site) ancS[picked.id]++;
           if(isSwap) plan.swapsS++;
         } else {
           plan.failedS.push(entry.date);
@@ -5401,6 +5402,19 @@ function previewIRShiftAA(){
   const cnt={};
   irPs.forEach(p=>{cnt[p.id]=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)&&sh.shift!=='Home').length,0);});
 
+  // Anchor site shift counts — track live to drive toward 70% compliance
+  const anchorCnt={};
+  irPs.forEach(p=>{anchorCnt[p.id]=p.anchorSite?months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)&&sh.shift!=='Home'&&sh.site===p.anchorSite).length,0):0;});
+
+  // Anchor fit score: +anchorNeed if slot is at physician's anchor site, −anchorNeed otherwise.
+  // Drives toward S.cfg.anchorPct% anchor compliance without ever blocking slot coverage.
+  function _anchorFit(p, siteName, quota){
+    if(!p.anchorSite) return 0;
+    const tgt=Math.round((quota||0)*S.cfg.anchorPct/100);
+    const need=Math.max(0,tgt-(anchorCnt[p.id]||0));
+    return p.anchorSite===siteName?need:-need;
+  }
+
   // FTE-proportional quotas per group so distribution reaches ~100%
   const shiftQuotas={};
   groups.forEach(g=>{
@@ -5445,23 +5459,24 @@ function previewIRShiftAA(){
               if(!sequenceOk(p,c.date,ym)) return false;
               return true;
             });
-            // Two-phase selection: anchor-matching physicians first, full pool as fallback.
-            // This maximises anchor compliance while guaranteeing slot coverage — the
-            // fallback ensures no slot goes unfilled due to anchor constraints.
-            function _pickBest(candidates){
-              return candidates.slice().sort((a,b)=>{
-                // Under-quota first, then FTE-normalised load balance
-                const underA=cnt[a.id]<(shiftQuotas[a.id]||0), underB=cnt[b.id]<(shiftQuotas[b.id]||0);
-                if(underA!==underB) return underA?-1:1;
-                const qA=shiftQuotas[a.id]||1, qB=shiftQuotas[b.id]||1;
-                return cnt[a.id]/qA - cnt[b.id]/qB;
-              })[0];
-            }
-            const anchorPool=pool.filter(p=>p.anchorSite===st.name);
-            const p=_pickBest(anchorPool)||_pickBest(pool);
+            // Sort: under-quota first → anchor fit score → FTE-load balance
+            // Anchor fit is positive when this slot helps compliance, negative when it hurts.
+            // Because the filter has no quota gate, every eligible physician can fill any slot —
+            // full coverage is always guaranteed regardless of anchor targets.
+            pool.sort((a,b)=>{
+              const underA=cnt[a.id]<(shiftQuotas[a.id]||0), underB=cnt[b.id]<(shiftQuotas[b.id]||0);
+              if(underA!==underB) return underA?-1:1;
+              const fitA=_anchorFit(a,st.name,shiftQuotas[a.id]||0);
+              const fitB=_anchorFit(b,st.name,shiftQuotas[b.id]||0);
+              if(fitA!==fitB) return fitB-fitA;
+              const qA=shiftQuotas[a.id]||1, qB=shiftQuotas[b.id]||1;
+              return cnt[a.id]/qA - cnt[b.id]/qB;
+            });
+            const p=pool[0];
             if(p){
               preview.push({physId:p.id,date:c.date,shift:sh,site:st.name,sub:p.irSubs[0]||'',irGroup:g,notes:'Auto'});
               cnt[p.id]++;
+              if(p.anchorSite===st.name) anchorCnt[p.id]++;
             } else {
               gaps.push(`${c.date} ${g} ${st.name} ${sh}`);
             }
