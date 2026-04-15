@@ -4251,7 +4251,7 @@ function renderIRRebalancePrep(){
   // Show current distribution across 6 months
   let html=`<div class="card" style="margin-bottom:12px">
     <div class="card-title">Current Distribution — ${label}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">6-month period · targets = actual slots ÷ group FTE × physician FTE</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">6-month period · fills gaps + redistributes · targets = actual slots ÷ group FTE × physician FTE</span>
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
@@ -4300,7 +4300,7 @@ function renderIRRebalancePrep(){
   html+='</tbody></table></div></div>';
 
   if(!anyData)
-    html+=`<div class="note ni" style="margin-bottom:10px">${isShifts?'No procedure shifts found for this period. Build the IR shift schedule first, then rebalance.':'No IR call assignments found in this period. Build the schedule first, then rebalance.'}</div>`;
+    html+=`<div class="note ni" style="margin-bottom:10px">${isShifts?'No procedure shifts found for this period. Build the IR shift schedule first, then rebalance.':'No IR calls assigned yet — the rebalancer will build the full schedule from scratch for this period. Assign IR shifts first so physicians qualify for daily call.'}</div>`;
 
   document.getElementById('irr-current').innerHTML=html;
   document.getElementById('irr-preview').innerHTML='';
@@ -4550,10 +4550,12 @@ function previewIRRebalance(){
     if(!gPhys.length) return;
 
     // ── Daily calls across all 6 months ──
+    // Use ALL eligible Mon-Thu dates in the period, not just currently-assigned ones.
+    // This lets the rebalancer fill gaps as well as redistribute existing calls.
     if(typ==='daily'||typ==='both'){
-      const dailyDates=S.irCalls
-        .filter(c=>inPeriod(c.date)&&c.irGroup===g&&c.callType==='daily')
-        .map(c=>c.date).sort();
+      const dailyDates=months.flatMap(ym=>
+        buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date))
+      ).map(c=>c.date).sort();
 
       const cntD={}; gPhys.forEach(p=>{cntD[p.id]=0;});
       // Largest-remainder quotas: each physician gets exactly floor or ceil of their
@@ -4618,10 +4620,11 @@ function previewIRRebalance(){
     }
 
     // ── Weekend calls across all 6 months ──
+    // Use ALL Fridays in the period — fills uncovered weekends as well as redistributing.
     if(typ==='weekend'||typ==='both'){
-      const wkndDates=S.irCalls
-        .filter(c=>inPeriod(c.date)&&c.irGroup===g&&c.callType==='weekend')
-        .map(c=>c.date).sort();
+      const wkndDates=months.flatMap(ym=>
+        buildCal(ym).filter(c=>c.day&&c.dow===5)
+      ).map(c=>c.date).sort();
 
       const cntW={}; gPhys.forEach(p=>{cntW[p.id]=0;});
       const wkndQuotas=_irrQuotas(gPhys,wkndDates.length,p=>irWkndTargetPeriod(p,months));
