@@ -1436,7 +1436,7 @@ tbody tr:hover{background:var(--bg3)}
         </select></div>
       <div class="fg" style="margin:0"><label>Year</label>
         <select id="hcy" onchange="renderHolCounter()">
-          <option value="all">All Years</option>
+          <option value="all">All Years (Career)</option>
           <option value="2024">2024</option><option value="2025">2025</option>
           <option value="2026">2026</option><option value="2027">2027</option>
         </select></div>
@@ -5221,6 +5221,341 @@ function applyIRShiftAA(){
   if(document.getElementById('irc-mo')) renderIRCal();
 }
 
+
+/* ─── IR SHIFT BUILDER (missing functions rebuilt) ─── */
+
+function renderIRShiftBuilder(){
+  // Populate physician selector
+  const physSel = document.getElementById('irs-phys');
+  if(physSel && physSel.options.length <= 1){
+    physSel.innerHTML = '<option value="">Select physician</option>' +
+      S.physicians.filter(p => p.irFte > 0)
+        .map(p => `<option value="${p.id}">${p.last}, ${p.first} [${p.irGroup||'—'}]</option>`)
+        .join('');
+  }
+  // Populate filter physician selector
+  const fPhys = document.getElementById('irsf-phys');
+  if(fPhys && fPhys.options.length <= 1){
+    fPhys.innerHTML = '<option value="">All</option>' +
+      S.physicians.filter(p => p.irFte > 0)
+        .map(p => `<option value="${p.id}">${p.last}, ${p.first}</option>`)
+        .join('');
+  }
+  // Set default month if empty
+  const moEl = document.getElementById('irsf-mo');
+  if(moEl && !moEl.value) moEl.value = new Date().toISOString().slice(0,7);
+  // Populate sites for selected physician
+  updateIRSbInfo();
+  renderIRShiftTable();
+}
+
+function updateIRSbInfo(){
+  const physId = +document.getElementById('irs-phys')?.value || 0;
+  const date   = document.getElementById('irs-date')?.value || '';
+  const siteSel = document.getElementById('irs-site');
+  const subSel  = document.getElementById('irs-sub');
+  if(!siteSel || !subSel) return;
+
+  const p = S.physicians.find(x => x.id === physId);
+  const irSites = p
+    ? S.sites.filter(s => (s.irGroup === p.irGroup || s.irGroup === 'Both') && s.name !== 'At Home / Remote')
+    : S.sites.filter(s => s.irGroup && s.name !== 'At Home / Remote');
+
+  const curSite = siteSel.value;
+  siteSel.innerHTML = irSites.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  if(curSite && irSites.find(s => s.name === curSite)) siteSel.value = curSite;
+
+  // Subspecialty from global irSubs
+  const subs = S.irSubs || [];
+  subSel.innerHTML = '<option value="">—</option>' + subs.map(s => `<option>${s}</option>`).join('');
+
+  // Info box: capacity check
+  const infoEl = document.getElementById('irs-info');
+  if(infoEl && p && date){
+    const existing = (S.irShifts||[]).filter(s => s.date === date && s.irGroup === p.irGroup && s.shift !== 'Home');
+    const vd = vacDays(p.id);
+    let msg = '';
+    if(vd.has(date)) msg = `<span style="color:var(--amber,#d97706)">⚠ ${p.last} is on vacation ${date}</span>`;
+    else if(existing.length) msg = `<span style="color:var(--txt3);font-size:11px">${existing.length} shift(s) already assigned on ${date} for ${p.irGroup}</span>`;
+    infoEl.innerHTML = msg;
+  }
+}
+
+function addIRShift(){
+  if(!_adminOnly('assign IR shift')) return;
+  const physId = +document.getElementById('irs-phys')?.value;
+  const date   = document.getElementById('irs-date')?.value;
+  const shift  = document.getElementById('irs-shift')?.value || '1st';
+  const site   = document.getElementById('irs-site')?.value;
+  const sub    = document.getElementById('irs-sub')?.value || '';
+  const notes  = document.getElementById('irs-notes')?.value || '';
+  if(!physId || !date){ alert('Select physician and date.'); return; }
+  const p = S.physicians.find(x => x.id === physId);
+  if(!p) return;
+
+  // Duplicate check
+  if((S.irShifts||[]).find(s => s.physId === physId && s.date === date && s.shift === shift && s.site === site)){
+    if(!confirm(`${p.last} already has a ${shift} shift at ${site} on ${date}. Add anyway?`)) return;
+  }
+
+  S.irShifts.push({id:S.nextId++, physId, date, shift, site, sub, notes, irGroup:p.irGroup||''});
+  triggerSave();
+  renderIRShiftTable();
+  // Clear date and notes
+  const dateEl = document.getElementById('irs-date');
+  const notesEl = document.getElementById('irs-notes');
+  if(dateEl) dateEl.value = '';
+  if(notesEl) notesEl.value = '';
+}
+
+function fillIRHomeShifts(){
+  if(!_adminOnly('fill IR home shifts')) return;
+  const moEl = document.getElementById('irsf-mo');
+  const ym = moEl?.value || new Date().toISOString().slice(0,7);
+  if(!ym){ alert('Set a filter month first.'); return; }
+
+  let added = 0;
+  const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
+  S.physicians.filter(p => p.irFte > 0 && p.irGroup).forEach(p => {
+    const vd = vacDays(p.id);
+    cells.forEach(c => {
+      if(vd.has(c.date)) return;
+      if((S.irShifts||[]).find(s => s.physId === p.id && s.date === c.date)) return; // already has a shift
+      const site = p.irSitePrim || S.sites.find(s => s.irGroup === p.irGroup)?.name || '';
+      S.irShifts.push({id:S.nextId++, physId:p.id, date:c.date, shift:'Home', site, sub:'', notes:'', irGroup:p.irGroup});
+      added++;
+    });
+  });
+  triggerSave();
+  renderIRShiftTable();
+  alert(`Added ${added} Home shift(s) for unscheduled days in ${ym}.`);
+}
+
+function renderIRShiftTable(){
+  const tbody = document.getElementById('irs-tbody');
+  if(!tbody) return;
+  const fmo  = document.getElementById('irsf-mo')?.value || '';
+  const fpid = +document.getElementById('irsf-phys')?.value || 0;
+  const fsh  = document.getElementById('irsf-shift')?.value || '';
+
+  const rows = (S.irShifts||[])
+    .filter(s => (!fmo || s.date.startsWith(fmo)) && (!fpid || s.physId === fpid) && (!fsh || s.shift === fsh))
+    .sort((a,b) => a.date > b.date ? 1 : a.date < b.date ? -1 : 0);
+
+  if(!rows.length){
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--txt3);text-align:center;padding:12px">
+      No IR shifts found${fmo?' for '+fmo:''}. Assign shifts above or run Auto-Assign.</td></tr>`;
+    return;
+  }
+
+  // Build physician options for inline reassign
+  const physOpts = S.physicians.filter(p => p.irFte > 0)
+    .map(p => `<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+
+  tbody.innerHTML = rows.map(s => {
+    const shiftLbl = s.shift === '1st' ? 'Day Shift' : s.shift;
+    return `<tr id="irs-row-${s.id}">
+      <td style="font-weight:600">${pname(s.physId)}
+        <div style="display:none" id="irs-reassign-${s.id}">
+          <select style="font-size:11px;width:140px" onchange="reassignIRShift(${s.id},+this.value)">
+            <option value="">— reassign to —</option>${physOpts}
+          </select>
+        </div>
+      </td>
+      <td>${s.date}</td>
+      <td><span class="tag ${s.shift==='Home'?'':'eir'}" style="font-size:10px">${shiftLbl}</span></td>
+      <td>${s.site||'—'}</td>
+      <td><span class="tag ${(s.irGroup||'')==='North'?'tb':'tg'}" style="font-size:10px">${s.irGroup||'—'}</span></td>
+      <td style="font-size:11px">${s.sub||'—'}</td>
+      <td style="font-size:11px">${s.notes||'—'}</td>
+      <td style="white-space:nowrap">
+        <button class="bsm bt" onclick="toggleIRShiftReassign(${s.id})" title="Reassign">✏</button>
+        <button class="br bxs" onclick="deleteIRShift(${s.id})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleIRShiftReassign(id){
+  const el = document.getElementById(`irs-reassign-${id}`);
+  if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function reassignIRShift(id, newPhysId){
+  if(!newPhysId) return;
+  if(!_adminOnly('reassign IR shift')) return;
+  const s = (S.irShifts||[]).find(x => x.id === id);
+  if(!s) return;
+  const p = S.physicians.find(x => x.id === newPhysId);
+  if(!p) return;
+  s.physId  = newPhysId;
+  s.irGroup = p.irGroup || s.irGroup;
+  triggerSave();
+  renderIRShiftTable();
+}
+
+function deleteIRShift(id){
+  if(!_adminOnly('delete IR shift')) return;
+  S.irShifts = (S.irShifts||[]).filter(s => s.id !== id);
+  triggerSave();
+  renderIRShiftTable();
+}
+
+/* ─── HOLIDAY COUNTER — MULTI-YEAR EQUITY ─── */
+
+function renderHolCounter(){
+  const grp = document.getElementById('hcg')?.value || 'ALL';
+  const yr  = document.getElementById('hcy')?.value || 'all';
+
+  // All years present in data
+  const allYears = [...new Set(S.holidays.map(h => h.year))].filter(Boolean).sort();
+  const filtered = S.holidays.filter(h =>
+    (grp === 'ALL' || h.group === grp) && (yr === 'all' || h.year === +yr));
+
+  if(!filtered.length){
+    document.getElementById('hol-counter').innerHTML =
+      '<p style="color:var(--txt3);font-size:12px">No holiday call assignments yet.</p>';
+    return;
+  }
+
+  // Per-physician totals + breakdown
+  const physicians = S.physicians.filter(p =>
+    (grp === 'ALL' ? (p.drFte > 0 || p.irFte > 0) :
+     grp === 'DR'  ?  p.drFte > 0 :
+                      p.irFte > 0));
+
+  // Build data: physId → {total, byYear:{yr:N}, byHol:{name:N}, byGroup:{DR:N,IR:N}}
+  const data = {};
+  physicians.forEach(p => {
+    data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
+  });
+  filtered.forEach(h => {
+    if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
+    const d = data[h.physId];
+    d.total++;
+    d.byYear[h.year] = (d.byYear[h.year]||0) + 1;
+    d.byHol[h.name]  = (d.byHol[h.name]||0) + 1;
+    d.byGroup[h.group] = (d.byGroup[h.group]||0) + 1;
+  });
+
+  // Sort by total desc
+  const sorted = Object.entries(data)
+    .filter(([,v]) => v.total > 0)
+    .sort((a,b) => b[1].total - a[1].total);
+
+  const showYears = yr === 'all' && allYears.length > 1;
+  const avgTotal  = sorted.length ? (sorted.reduce((s,[,v]) => s+v.total,0) / sorted.length).toFixed(1) : 0;
+  const maxTotal  = sorted.length ? Math.max(...sorted.map(([,v]) => v.total)) : 0;
+  const minTotal  = sorted.length ? Math.min(...sorted.map(([,v]) => v.total)) : 0;
+
+  let html = `<div class="g3" style="margin-bottom:12px">
+    <div class="met"><div class="met-lbl">Total Assignments</div>
+      <div class="met-val">${filtered.length}</div></div>
+    <div class="met"><div class="met-lbl">Avg per Physician</div>
+      <div class="met-val">${avgTotal}</div></div>
+    <div class="met"><div class="met-lbl">Range (min–max)</div>
+      <div class="met-val" style="font-size:16px">${minTotal}–${maxTotal}</div></div>
+  </div>`;
+
+  // Table view
+  html += `<div style="overflow-x:auto"><table><thead><tr>
+    <th>Physician</th>
+    ${grp === 'ALL' ? '<th>DR</th><th>IR</th>' : ''}
+    ${showYears ? allYears.map(y => `<th style="text-align:center">${y}</th>`).join('') : ''}
+    <th style="text-align:center;border-left:2px solid var(--bdr)">Total</th>
+    <th style="min-width:200px">Holiday Breakdown</th>
+  </tr></thead><tbody>`;
+
+  sorted.forEach(([id, v]) => {
+    const p = S.physicians.find(x => x.id === +id);
+    const barW = maxTotal > 0 ? Math.round(v.total / maxTotal * 100) : 0;
+    const barCol = v.total > avgTotal * 1.2 ? 'var(--amber,#d97706)' :
+                   v.total < avgTotal * 0.8 ? 'var(--blue-t)' : 'var(--green-t)';
+    const breakdown = Object.entries(v.byHol)
+      .sort((a,b) => b[1]-a[1])
+      .map(([n,c]) => `<span class="tag ta" style="font-size:9px">${n.split(' ')[0]}×${c}</span>`)
+      .join(' ');
+
+    html += `<tr>
+      <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
+      ${grp === 'ALL' ? `<td style="text-align:center">${v.byGroup.DR||0}</td><td style="text-align:center">${v.byGroup.IR||0}</td>` : ''}
+      ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
+      <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;min-width:60px">
+            <div style="width:${barW}%;height:100%;background:${barCol};border-radius:3px"></div>
+          </div>
+          <div style="flex-shrink:0">${breakdown}</div>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  // Add physicians with zero assignments
+  const zeroes = physicians.filter(p => !(data[p.id]?.total > 0));
+  if(zeroes.length){
+    zeroes.forEach(p => {
+      html += `<tr style="opacity:.5">
+        <td style="font-weight:600">${pname(p.id)}</td>
+        ${grp === 'ALL' ? '<td style="text-align:center">—</td><td style="text-align:center">—</td>' : ''}
+        ${showYears ? allYears.map(() => '<td>—</td>').join('') : ''}
+        <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);color:var(--txt3)">0</td>
+        <td style="color:var(--txt3);font-size:11px">No assignments</td>
+      </tr>`;
+    });
+  }
+
+  html += `</tbody></table></div>`;
+
+  if(showYears){
+    html += `<div style="font-size:10px;color:var(--txt3);margin-top:8px">
+      🟡 Above average &nbsp; 🔵 Below average &nbsp; 🟢 Near average
+    </div>`;
+  }
+
+  document.getElementById('hol-counter').innerHTML = html;
+}
+
+/* ─── HOLIDAY MANUAL REASSIGNMENT ─── */
+
+function reassignHoliday(id){
+  if(!_adminOnly('reassign holiday call')) return;
+  const h = S.holidays.find(x => x.id === id);
+  if(!h) return;
+  const physOpts = S.physicians
+    .filter(p => h.group === 'DR' ? p.drFte > 0 : p.irFte > 0)
+    .map(p => `<option value="${p.id}"${p.id === h.physId?' selected':''}>${p.last}, ${p.first}</option>`)
+    .join('');
+  document.getElementById('link-modal-title').textContent =
+    `Reassign Holiday — ${h.name} (${h.date})`;
+  document.getElementById('link-modal-body').innerHTML =
+    `<div class="fg"><label>Reassign to</label>
+      <select id="hol-reassign-sel" style="width:100%">
+        <option value="">— select physician —</option>${physOpts}
+      </select>
+    </div>
+    <button class="bp" style="margin-top:8px" onclick="doReassignHoliday(${id})">Save</button>`;
+  document.getElementById('link-modal').classList.add('open');
+}
+
+function doReassignHoliday(id){
+  const newPhysId = +document.getElementById('hol-reassign-sel')?.value;
+  if(!newPhysId){ alert('Select a physician.'); return; }
+  const h = S.holidays.find(x => x.id === id);
+  if(!h) return;
+  // Remove old IR call if group is IR
+  if(h.group === 'IR') _removeHolidayIRCall(h.physId, h.date);
+  h.physId = newPhysId;
+  // Re-sync IR call with new physician
+  if(h.group === 'IR') _syncHolidayToIRCall(h.physId, h.date, h.name);
+  triggerSave();
+  closeModal('link-modal');
+  renderHolTable();
+  renderHolCounter();
+}
+
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
@@ -7866,7 +8201,10 @@ function renderHolTable(){
       <td>${h.name}</td><td>${h.date}</td><td>${h.year}</td><td>${pname(h.physId)}</td>
       <td><span class="tag ${h.group==='DR'?'tb':'tt'}">${h.group}</span></td>
       <td>${h.notes||'—'}</td>
-      <td><button class="bsm" onclick="startEditHoliday(${h.id})">✏</button></td>
+      <td style="white-space:nowrap">
+        <button class="bsm" onclick="startEditHoliday(${h.id})">✏</button>
+        <button class="bsm bt" onclick="reassignHoliday(${h.id})">↔</button>
+      </td>
       <td><button class="br bxs" onclick="deleteHoliday(${h.id})">X</button></td>
     </tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No assignments yet.</td></tr>';
