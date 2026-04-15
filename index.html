@@ -269,7 +269,6 @@ tbody tr:hover{background:var(--bg3)}
         <div class="afield"><label>Email</label><input id="li-email" type="email" placeholder="you@hospital.org"></div>
         <div class="afield"><label>Password</label><input id="li-pw" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
         <button class="abtn" onclick="doLogin()">Sign In</button>
-        <p class="anote">Demo: <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d5b4b1b8bcbb95a7b4b1fbb6bab8">[email&#160;protected]</a> / admin123 · <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7a1e085419121f143a081b1e54191517">[email&#160;protected]</a> / user123</p><p class="anote" style="margin-top:4px;background:var(--amber-bg);padding:5px 8px;border-radius:4px;color:var(--amber-t)">Admin code: <strong>RAD2025</strong></p>
       </div>
 
       <div id="af-reg" style="display:none">
@@ -1793,11 +1792,11 @@ function clearAllData(){
   S.swapRequests=[];S.nextId=200;
   USERS.length=0;
   USERS.push(
-    {id:'u1',email:'admin@rad.com',pw:'admin123',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
-    {id:'u2',email:'dr.chen@rad.com',pw:'user123',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
-    {id:'u3',email:'dr.patel@rad.com',pw:'user123',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
-    {id:'u4',email:'dr.torres@rad.com',pw:'user123',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
-    {id:'u5',email:'dr.lee@rad.com',pw:'user123',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'}
+    {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
+    {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
+    {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
+    {id:'u4',email:'dr.torres@rad.com',pw:'',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
+    {id:'u5',email:'dr.lee@rad.com',pw:'',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'}
   );
   try{
     const freshHTML=_buildSaveHTML();
@@ -1823,11 +1822,11 @@ const ADMIN_CODE = 'RAD2025';
 let _regRole = 'user';
 
 let USERS = /*USERS_START*/[
-  {id:'u1',email:'admin@rad.com',pw:'admin123',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
-  {id:'u2',email:'dr.chen@rad.com',pw:'user123',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
-  {id:'u3',email:'dr.patel@rad.com',pw:'user123',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
-  {id:'u4',email:'dr.torres@rad.com',pw:'user123',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
-  {id:'u5',email:'dr.lee@rad.com',pw:'user123',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'},
+  {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
+  {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
+  {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
+  {id:'u4',email:'dr.torres@rad.com',pw:'',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
+  {id:'u5',email:'dr.lee@rad.com',pw:'',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'},
 ]/*USERS_END*/;
 let CU = null; // current user
 
@@ -1846,17 +1845,76 @@ function setRegRole(r){
   document.getElementById('rrole-admin').classList.toggle('on', r==='admin');
   document.getElementById('rf-code-wrap').style.display = r==='admin'?'block':'none';
 }
-function showErr(msg){const e=document.getElementById('aerr');e.textContent=msg;e.style.display='block';}
+function showErr(msg){const e=document.getElementById('aerr');e.textContent=msg;e.style.display=msg?'block':'none';}
 
-function doLogin(){
-  const email=document.getElementById('li-email').value.trim().toLowerCase();
-  const pw=document.getElementById('li-pw').value;
-  const u=USERS.find(x=>x.email===email&&x.pw===pw);
-  if(!u){showErr('Invalid email or password.');return;}
-  CU=u; launchApp();
+// ── Supabase Auth: initialize client early so login/register work ──
+function _initAuthClient(){
+  if(_supabase) return _supabase;
+  const url=_SUPABASE_URL, key=_SUPABASE_KEY;
+  if(!url||!key) return null;
+  try{ _supabase=supabase.createClient(url,key); }catch(e){ console.warn('[RS] Auth client init failed:',e); }
+  return _supabase;
 }
 
-function doRegister(){
+// On page load: check for an existing Supabase session — auto-login returning users
+(async function _checkSession(){
+  const sb=_initAuthClient();
+  if(!sb) return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(session?.user){
+      _hydrateUserFromSession(session.user);
+      if(CU) launchApp();
+    }
+  }catch(e){ console.warn('[RS] Session check failed:',e); }
+})();
+
+function _hydrateUserFromSession(sbUser){
+  if(!sbUser) return;
+  const meta=sbUser.user_metadata||{};
+  const email=sbUser.email;
+  let u=USERS.find(x=>x.email===email);
+  if(!u){
+    u={id:sbUser.id,email,pw:'',role:meta.role||'user',
+      first:meta.first||email.split('@')[0],last:meta.last||'',
+      physId:meta.physId!=null?meta.physId:null,
+      joined:meta.joined||new Date().toISOString().slice(0,10)};
+    USERS.push(u);
+  } else {
+    // Sync authoritative role from Supabase metadata
+    if(meta.role) u.role=meta.role;
+    if(meta.physId!=null) u.physId=meta.physId;
+  }
+  CU=u;
+}
+
+async function doLogin(){
+  const email=document.getElementById('li-email').value.trim().toLowerCase();
+  const pw=document.getElementById('li-pw').value;
+  if(!email||!pw){showErr('Enter email and password.');return;}
+  const btn=document.querySelector('#af-login .abtn');
+  if(btn) btn.textContent='Signing in…';
+  showErr('');
+  const sb=_initAuthClient();
+  if(!sb){
+    // Fallback: local auth if Supabase not configured
+    const u=USERS.find(x=>x.email===email&&x.pw===pw);
+    if(!u){showErr('Invalid email or password.');if(btn)btn.textContent='Sign In';return;}
+    CU=u; launchApp(); return;
+  }
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({email,password:pw});
+    if(error) throw error;
+    _hydrateUserFromSession(data.user);
+    if(btn) btn.textContent='Sign In';
+    launchApp();
+  }catch(e){
+    showErr(e.message||'Invalid email or password.');
+    if(btn) btn.textContent='Sign In';
+  }
+}
+
+async function doRegister(){
   const first=document.getElementById('rf-first').value.trim();
   const last=document.getElementById('rf-last').value.trim();
   const email=document.getElementById('rf-email').value.trim().toLowerCase();
@@ -1865,14 +1923,40 @@ function doRegister(){
   if(!first||!last||!email||!pw){showErr('All fields are required.');return;}
   if(pw.length<8){showErr('Password must be at least 8 characters.');return;}
   if(pw!==pw2){showErr('Passwords do not match.');return;}
-  if(USERS.find(x=>x.email===email)){showErr('An account with this email already exists.');return;}
   if(_regRole==='admin'&&document.getElementById('rf-code').value!==ADMIN_CODE){showErr('Invalid admin access code.');return;}
-  const nu={id:'u'+Date.now(),email,pw,role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10)};
-  USERS.push(nu);
-  CU=nu; launchApp();
+  const btn=document.querySelector('#af-reg .abtn');
+  if(btn) btn.textContent='Creating account…';
+  showErr('');
+  const sb=_initAuthClient();
+  if(!sb){
+    // Fallback: local registration
+    if(USERS.find(x=>x.email===email)){showErr('An account with this email already exists.');if(btn)btn.textContent='Create Account';return;}
+    const nu={id:'u'+Date.now(),email,pw,role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10)};
+    USERS.push(nu); CU=nu; if(btn)btn.textContent='Create Account'; launchApp(); return;
+  }
+  try{
+    const {data,error}=await sb.auth.signUp({
+      email, password:pw,
+      options:{data:{role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10)}}
+    });
+    if(error) throw error;
+    if(data.user){
+      _hydrateUserFromSession(data.user);
+      if(btn) btn.textContent='Create Account';
+      launchApp();
+    } else {
+      showErr('Account created — check your email to confirm, then sign in.');
+      if(btn) btn.textContent='Create Account';
+    }
+  }catch(e){
+    showErr(e.message||'Registration failed.');
+    if(btn) btn.textContent='Create Account';
+  }
 }
 
-function doLogout(){
+async function doLogout(){
+  const sb=_initAuthClient();
+  if(sb) try{ await sb.auth.signOut(); }catch(e){}
   CU=null;
   document.getElementById('app').style.display='none';
   document.getElementById('auth').style.display='flex';
@@ -4360,17 +4444,28 @@ function previewIRRebalance(){
   });
   html+='</tbody></table></div></div>';
 
-  // ── Reassignment detail table ──
+  // ── Reassignment detail table — with per-row checkboxes ──
   const allSwaps=[...plan.daily,...plan.weekend].filter(a=>a.isSwap).sort((a,b)=>a.date>b.date?1:-1);
+  // Tag each swap with its checkbox index so applyIRRebalance can look it up
+  allSwaps.forEach((a,i)=>{ a._swapIdx=i; });
+
   if(allSwaps.length){
     html+=`<div class="card" style="margin-bottom:12px">
-      <div class="card-title">Reassignments (${allSwaps.length})</div>
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+        <span>Proposed Reassignments — review and uncheck any you want to keep as-is</span>
+        <label style="font-size:12px;font-weight:400;cursor:pointer;display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
+        </label>
+      </div>
       <div style="overflow-x:auto"><table><thead><tr>
-        <th>Date</th><th>Type</th><th>Group</th><th>From</th><th>→ To</th>
+        <th style="width:28px;text-align:center">✓</th>
+        <th>Date</th><th>Type</th><th>Group</th><th>From (current)</th><th>→ Proposed</th>
       </tr></thead><tbody>`;
-    allSwaps.forEach(a=>{
-      const dates=a.callType==='weekend'?`${a.date} → ${addDays(a.date,3)}`:a.date;
-      html+=`<tr>
+    allSwaps.forEach((a,i)=>{
+      const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
+      html+=`<tr id="irr-swap-row-${i}" style="transition:opacity .15s">
+        <td style="text-align:center"><input type="checkbox" id="irr-swap-${i}" checked
+          onchange="_irrUpdateBtn()" style="cursor:pointer;width:15px;height:15px"></td>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
@@ -4390,9 +4485,42 @@ function previewIRRebalance(){
   }
 
   document.getElementById('irr-preview').innerHTML=html;
-  document.getElementById('irr-apply').style.display=totalSwaps>0?'inline-block':'none';
-  document.getElementById('irr-apply-note').textContent=totalSwaps>0
-    ?`Will make ${totalSwaps} reassignment(s) across ${months[0].slice(0,7)} – ${months[5].slice(0,7)}.`:'';
+  if(totalSwaps>0) _irrUpdateBtn();
+  else{
+    document.getElementById('irr-apply').style.display='none';
+    document.getElementById('irr-apply-note').textContent='';
+  }
+}
+
+// ── IR Rebalancer checkbox helpers ──
+function _irrToggleAll(checked){
+  document.querySelectorAll('[id^="irr-swap-"]:not(#irr-select-all)').forEach(cb=>cb.checked=checked);
+  _irrUpdateBtn();
+}
+
+function _irrUpdateBtn(){
+  const all=document.querySelectorAll('[id^="irr-swap-"]:not(#irr-select-all)');
+  const checked=[...all].filter(cb=>cb.checked).length;
+  const total=all.length;
+  const btn=document.getElementById('irr-apply');
+  const note=document.getElementById('irr-apply-note');
+  const allCb=document.getElementById('irr-select-all');
+  if(!btn) return;
+  btn.style.display=total>0?'inline-block':'none';
+  btn.disabled=checked===0;
+  btn.style.opacity=checked===0?'0.5':'1';
+  if(note) note.textContent=checked===0
+    ?'Select at least one reassignment to apply.'
+    :`Apply ${checked} of ${total} selected reassignment(s).`;
+  if(allCb){
+    allCb.checked=checked===total;
+    allCb.indeterminate=checked>0&&checked<total;
+  }
+  // Dim unchecked rows
+  [...all].forEach(cb=>{
+    const row=document.getElementById('irr-swap-row-'+cb.id.replace('irr-swap-',''));
+    if(row) row.style.opacity=cb.checked?'1':'0.4';
+  });
 }
 
 function applyIRRebalance(){
@@ -4415,21 +4543,35 @@ function applyIRRebalance(){
     return false;
   });
 
-  // Insert the new plan
+  // Insert plan entries — for swaps, respect checkbox state; unchecked reverts to original
+  let appliedSwaps=0, revertedSwaps=0;
   const toAdd=[..._irrPlan.daily,..._irrPlan.weekend];
   toAdd.forEach(a=>{
-    S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,
-      irGroup:a.irGroup,site:a.site,notes:a.notes||'Rebalanced'});
+    let physId=a.physId;
+    let note=a.notes||'';
+    if(a.isSwap && a._swapIdx!==undefined){
+      const cb=document.getElementById(`irr-swap-${a._swapIdx}`);
+      if(cb&&!cb.checked){
+        physId=a.origPhysId; // revert to original
+        note=a.notes||'';
+        revertedSwaps++;
+      } else {
+        note='Rebalanced';
+        appliedSwaps++;
+      }
+    }
+    S.irCalls.push({id:S.nextId++,physId,date:a.date,callType:a.callType,
+      irGroup:a.irGroup,site:a.site,notes:note});
   });
 
   triggerSave();
   _irrPlan=null;
   document.getElementById('irr-apply').style.display='none';
   document.getElementById('irr-apply-note').textContent='';
-  _updateSaveUI(`✓ Rebalanced — ${toAdd.length} IR call(s) updated`,'var(--green-t)');
+  _updateSaveUI(`✓ Rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original`,'var(--green-t)');
   renderIRRebalancePrep();
   document.getElementById('irr-preview').innerHTML=
-    `<div class="note ns">✓ Rebalance applied. ${toAdd.length} IR call assignment(s) updated.</div>`;
+    `<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied, ${revertedSwaps} kept with original physician.</div>`;
 }
 
 
