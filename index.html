@@ -432,8 +432,14 @@ tbody tr:hover{background:var(--bg3)}
 <!-- MY SCHEDULE -->
 <div id="page-my-schedule" class="page">
   <div class="pg-title">My Schedule</div>
-  <div class="pg-sub">Your assigned shifts, calls, and time off.</div>
-  <div class="flexe" style="margin-bottom:10px"><div class="fg" style="margin:0"><label>Month</label><input id="my-mo" type="month" oninput="renderMySched()"></div></div>
+  <div class="tabs" id="mysched-tabs" style="margin-bottom:10px">
+    <div class="tab on" onclick="mySchedTab('shifts',this)">📋 My Shifts</div>
+    <div class="tab" onclick="mySchedTab('vacation',this)">🌴 Vacation Picks</div>
+  </div>
+  <div id="mysched-shifts-ctrl" style="margin-bottom:10px">
+    <div class="flexe"><div class="fg" style="margin:0"><label>Month</label><input id="my-mo" type="month" oninput="renderMySched()"></div></div>
+  </div>
+  <div id="mysched-vacation-ctrl" style="display:none;margin-bottom:10px"></div>
   <div id="my-content"></div>
 </div>
 
@@ -4808,6 +4814,204 @@ function renderVacCalendar(){
 }
 
 
+
+/* ─── MY VACATION PICKS (physician self-service) ─── */
+
+function mySchedTab(t, el){
+  document.querySelectorAll('#mysched-tabs .tab').forEach(x=>x.classList.remove('on'));
+  if(el) el.classList.add('on');
+  const shCtrl=document.getElementById('mysched-shifts-ctrl');
+  const vCtrl=document.getElementById('mysched-vacation-ctrl');
+  if(shCtrl) shCtrl.style.display=t==='shifts'?'block':'none';
+  if(vCtrl)  vCtrl.style.display=t==='vacation'?'block':'none';
+  if(t==='shifts') renderMySched();
+  else renderMyVacPicks();
+}
+
+function renderMyVacPicks(){
+  const el=document.getElementById('my-content');
+  if(!el) return;
+  if(!CU?.physId){
+    el.innerHTML='<div class="note ni">No physician profile linked to your account. Contact an administrator.</div>';
+    return;
+  }
+  const physId=CU.physId;
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const openRound=vp.roundOpen||1;
+  const weeks=_vacWeeks(year);
+  const maxRounds=vp.physRounds?.[physId]??vp.defaultRounds??12;
+  const senIdx=(vp.seniority||[]).indexOf(physId);
+
+  // ── Header cards ─────────────────────────────────────────────────────────
+  let html=`<div class="g4" style="margin-bottom:14px">
+    <div class="met"><div class="met-lbl">Year</div><div class="met-val">${year}</div></div>
+    <div class="met"><div class="met-lbl">Open Round</div><div class="met-val">${openRound}</div></div>
+    <div class="met"><div class="met-lbl">Your Rounds</div><div class="met-val">${maxRounds}</div></div>
+    <div class="met"><div class="met-lbl">Seniority Rank</div><div class="met-val">${senIdx>=0?senIdx+1:'—'}</div></div>
+  </div>`;
+
+  // ── All assigned weeks (across all rounds) ────────────────────────────────
+  const allAssigned=Object.entries(vp.assignments?.[physId]||{})
+    .filter(([,wn])=>wn!=null)
+    .sort(([a],[b])=>+a-+b)
+    .map(([round,wn])=>({round:+round,wn,week:weeks.find(w=>w.week===wn)}));
+
+  if(allAssigned.length){
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Your Assigned Vacation Weeks</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    allAssigned.forEach(({round,wn,week})=>{
+      if(!week) return;
+      // Compute actual vacation dates (Sat before + Sun after)
+      const s=parseDateLocal(week.start); s.setDate(s.getDate()-1);
+      const e=parseDateLocal(week.end);   e.setDate(e.getDate()+1);
+      html+=`<div style="border:1px solid var(--bdr);border-left:4px solid var(--green);border-radius:var(--rl);padding:10px 14px;min-width:220px">
+        <div style="font-weight:700;font-size:13px">${week.label}</div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:2px">
+          Vacation: ${fmtDate(s)} → ${fmtDate(e)}<br>
+          <span class="tag tg" style="font-size:9px;margin-top:3px">Round ${round}</span>
+        </div>
+      </div>`;
+    });
+    html+=`</div></div>`;
+  }
+
+  // ── Current round pick panel ──────────────────────────────────────────────
+  const myPicks=(vp.picks?.[physId]?.[openRound]||[]).filter(n=>n!=null);
+  const myAssignedThisRound=vp.assignments?.[physId]?.[openRound];
+  const participating=openRound<=maxRounds;
+  const alreadyAssigned=myAssignedThisRound!=null;
+
+  html+=`<div class="card" style="margin-bottom:14px">
+    <div class="card-title">Round ${openRound} — Submit Your Choices</div>`;
+
+  if(!participating){
+    html+=`<div class="note ni">You have ${maxRounds} rounds — Round ${openRound} is beyond your allocation.</div>`;
+  } else if(alreadyAssigned){
+    const assignedWk=weeks.find(w=>w.week===myAssignedThisRound);
+    html+=`<div class="note ns">✓ Assigned for Round ${openRound}: <strong>${assignedWk?.label||`Week ${myAssignedThisRound}`}</strong></div>`;
+  } else {
+    html+=`<div class="note ni" style="font-size:12px;margin-bottom:10px">
+      Rank your 3 preferred weeks. During processing, you'll be assigned your highest available choice in seniority order.
+      <strong>Save your picks</strong> before the admin processes the round.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:12px">`;
+
+    [0,1,2].forEach(ci=>{
+      const cv=myPicks[ci];
+      const label=['1st Choice','2nd Choice','3rd Choice'][ci];
+      const borderCol=ci===0?'var(--green)':ci===1?'var(--blue)':'var(--txt3)';
+      html+=`<div style="border:2px solid ${borderCol};border-radius:var(--rl);padding:12px">
+        <div style="font-weight:700;font-size:12px;margin-bottom:6px;color:${borderCol}">${label}</div>
+        <select id="myp-c${ci}" style="width:100%;font-size:12px" onchange="saveMyVacPick(${ci})">
+          <option value="">— choose a week —</option>
+          ${weeks.map(w=>{
+            const av=_vacWeekAvail(w.week,physId,year);
+            const alreadyMine=allAssigned.some(a=>a.wn===w.week);
+            const isSelected=cv===w.week;
+            const disabled=!isSelected&&(!av.ok||alreadyMine);
+            return `<option value="${w.week}"${isSelected?' selected':''}${disabled?' disabled':''} title="${av.reason||''}">${w.label}${!av.ok&&!alreadyMine?' ('+av.reason+')':alreadyMine?' (your week)':''}</option>`;
+          }).join('')}
+        </select>
+      </div>`;
+    });
+
+    html+=`</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="bp" onclick="saveAllMyVacPicks()">💾 Save My Picks for Round ${openRound}</button>
+      <span id="myvac-save-msg" style="font-size:12px;color:var(--green-t)"></span>
+    </div>`;
+  }
+  html+=`</div>`;
+
+  // ── Week availability overview ─────────────────────────────────────────────
+  // Build per-week counts for display
+  const weekTotals={};
+  const physSec=vp.physSection?.[physId]||null;
+  const secLim=physSec?vp.sectionLimits?.[physSec]:null;
+  const totLim=vp.totalWeekLimit?.default;
+
+  Object.entries(vp.assignments||{}).forEach(([pid,rds])=>{
+    Object.values(rds).forEach(wn=>{
+      if(wn==null) return;
+      if(!weekTotals[wn]) weekTotals[wn]={total:0,mySection:0};
+      weekTotals[wn].total++;
+      if(vp.physSection?.[+pid]===physSec&&physSec) weekTotals[wn].mySection++;
+    });
+  });
+
+  html+=`<div class="card">
+    <div class="card-title">${year} Week Availability
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+        ${totLim?`Max ${totLim} total/wk`:'No total cap'}
+        ${secLim&&physSec?` · ${physSec} max ${secLim}/wk`:''}
+      </span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:5px">`;
+
+  weeks.forEach(w=>{
+    const wt=weekTotals[w.week]||{total:0,mySection:0};
+    const av=_vacWeekAvail(w.week,physId,year);
+    const myAssigned=allAssigned.some(a=>a.wn===w.week);
+    const isChoice=myPicks.includes(w.week);
+    let bg='var(--bg2)', border='var(--bdr)', txtCol='var(--txt)';
+    if(myAssigned){bg='var(--green-bg)';border='var(--green)';txtCol='var(--green-t)';}
+    else if(isChoice){bg='var(--blue-bg)';border='var(--blue)';txtCol='var(--blue-t)';}
+    else if(!av.ok){bg='var(--bg3)';txtCol='var(--txt3)';}
+    const capLine=totLim!=null?`${wt.total}/${totLim}`:`${wt.total} off`;
+    html+=`<div style="border:1px solid ${border};background:${bg};border-radius:var(--r);padding:7px 9px">
+      <div style="font-weight:700;font-size:11px;color:${txtCol}">Wk ${w.week}
+        ${myAssigned?'✓':''}${isChoice?'★':''}</div>
+      <div style="font-size:10px;color:var(--txt3)">${w.start.slice(5)} – ${w.end.slice(5)}</div>
+      <div style="font-size:10px;margin-top:2px;color:${!av.ok?'var(--red-t)':txtCol}">${!av.ok?av.reason:capLine}</div>
+    </div>`;
+  });
+
+  html+=`</div>
+    <div style="font-size:10px;color:var(--txt3);margin-top:8px;display:flex;gap:12px;flex-wrap:wrap">
+      <span>✓ = your assigned week</span>
+      <span style="color:var(--blue-t)">★ = your current choice</span>
+      <span style="color:var(--red-t)">Red = unavailable (full)</span>
+    </div>
+  </div>`;
+
+  el.innerHTML=html;
+}
+
+function saveMyVacPick(ci){
+  const physId=CU?.physId; if(!physId) return;
+  const vp=S.vacPicking;
+  const openRound=vp.roundOpen||1;
+  const wn=+document.getElementById(`myp-c${ci}`)?.value||null;
+  // Deduplicate — can't pick same week twice
+  const current=(vp.picks?.[physId]?.[openRound]||[]).slice();
+  if(wn&&current.some((v,i)=>v===wn&&i!==ci)){
+    alert('You already have that week as another choice. Pick a different week.');
+    const el=document.getElementById(`myp-c${ci}`);
+    if(el) el.value=current[ci]||'';
+    return;
+  }
+  setVacPick(physId,openRound,ci,wn);
+}
+
+function saveAllMyVacPicks(){
+  const physId=CU?.physId; if(!physId) return;
+  const vp=S.vacPicking;
+  const openRound=vp.roundOpen||1;
+  // Read all 3 selects and save
+  const vals=[0,1,2].map(ci=>+document.getElementById(`myp-c${ci}`)?.value||null);
+  // Check duplicates
+  const nonNull=vals.filter(v=>v!=null);
+  if(new Set(nonNull).size!==nonNull.length){
+    alert('You have duplicate week selections. Each choice must be a different week.');
+    return;
+  }
+  vals.forEach((wn,ci)=>setVacPick(physId,openRound,ci,wn));
+  const msg=document.getElementById('myvac-save-msg');
+  if(msg){msg.textContent='\u2713 Picks saved!';setTimeout(()=>{msg.textContent='';},3000);}
+}
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
@@ -6706,25 +6910,34 @@ function renderAnchorReport(){
 function _syncHolidayToIRCall(physId, date, holName){
   const p=S.physicians.find(x=>x.id===physId);
   if(!p||!p.irGroup||!(p.irFte>0)) return; // only IR physicians
-  const dow=parseDateLocal(date).getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+  const dow=parseDateLocal(date).getDay();
   let callType,callDate;
-  // Mon–Fri holiday: weekends are Fri-Mon spans so map accordingly
-  if(dow===5){callType='weekend';callDate=date;}           // Friday → start weekend
-  else if(dow===6){callType='weekend';callDate=addDays(date,-1);} // Sat → prev Fri
-  else if(dow===0){callType='weekend';callDate=addDays(date,-2);} // Sun → prev Fri
-  else if(dow===1){callType='weekend';callDate=addDays(date,-3);} // Mon → prev Fri (holiday weekend)
-  else {callType='daily';callDate=date;}                   // Tue/Wed/Thu → daily
+  if(dow===5){callType='weekend';callDate=date;}
+  else if(dow===6){callType='weekend';callDate=addDays(date,-1);}
+  else if(dow===0){callType='weekend';callDate=addDays(date,-2);}
+  else if(dow===1){callType='weekend';callDate=addDays(date,-3);}
+  else{callType='daily';callDate=date;}
   const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===p.irGroup)?.name||'');
-  if(callType==='weekend'){
-    // One weekend call per group per Friday — don't duplicate
-    if(!S.irCalls.find(c=>c.irGroup===p.irGroup&&c.callType==='weekend'&&c.date===callDate))
-      S.irCalls.push({id:S.nextId++,physId,date:callDate,callType:'weekend',
-        irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
-  } else {
-    if(!S.irCalls.find(c=>c.physId===physId&&c.date===callDate&&c.callType==='daily'))
-      S.irCalls.push({id:S.nextId++,physId,date:callDate,callType:'daily',
-        irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
-  }
+  // Remove any existing call for this group/date/type — holiday physician takes priority
+  S.irCalls=S.irCalls.filter(c=>
+    !(c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
+  S.irCalls.push({id:S.nextId++,physId,date:callDate,callType,
+    irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
+}
+
+// Remove the IR call that was synced from a holiday assignment
+function _removeHolidayIRCall(physId, date){
+  const p=S.physicians.find(x=>x.id===physId);
+  if(!p||!p.irGroup||!(p.irFte>0)) return;
+  const dow=parseDateLocal(date).getDay();
+  let callType,callDate;
+  if(dow===5){callType='weekend';callDate=date;}
+  else if(dow===6){callType='weekend';callDate=addDays(date,-1);}
+  else if(dow===0){callType='weekend';callDate=addDays(date,-2);}
+  else if(dow===1){callType='weekend';callDate=addDays(date,-3);}
+  else{callType='daily';callDate=date;}
+  S.irCalls=S.irCalls.filter(c=>
+    !(c.physId===physId&&c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
 }
 
 // Return the IR call physician(s) covering a given date (daily exact or within weekend span)
@@ -7099,6 +7312,9 @@ function applyHolRandom(){
   document.getElementById('haa-apply-wrap').style.display='none';
   renderHolCareerTally();
   renderHolCounter();
+  renderHolTable();
+  // Refresh IR calendar if open
+  if(document.getElementById('irc-mo')) renderIRCal();
 }
 
 /* ─── HOLIDAYS ─── */
@@ -7115,8 +7331,9 @@ function addHoliday(){
   if(grp==='DR'&&p.role==='IR'){alert('IR-only physicians cannot take DR holiday call.');return;}
   const holName=document.getElementById('hol-name').value;
   S.holidays.push({id:S.nextId++,name:holName,date,year:+document.getElementById('hol-yr').value||2025,physId:pid,group:grp,notes:document.getElementById('hol-notes').value});
-  if(grp==='IR') _syncHolidayToIRCall(pid,date,holName); // mirror to IR call schedule
-  triggerSave();renderHolTable();renderHolCounter();
+  if(grp==='IR') _syncHolidayToIRCall(pid,date,holName);
+  triggerSave(); renderHolTable(); renderHolCounter();
+  if(document.getElementById('irc-mo')) renderIRCal();
 }
 /* renderHolTable — defined below with filter support */
 function renderHolCounter(){
@@ -7743,12 +7960,16 @@ function saveEditHoliday(id){
   const grpEl =document.getElementById(`hol-edit-grp-${id}`);
   const notEl =document.getElementById(`hol-edit-notes-${id}`);
   if(!dateEl?.value){alert('Date is required.');return;}
+  // Remove old IR call before making changes
+  if(h.group==='IR') _removeHolidayIRCall(h.physId, h.date);
   h.name  = nameEl?.value||h.name;
   h.date  = dateEl.value;
   h.year  = +yrEl?.value||h.year;
   h.physId= +physEl?.value||h.physId;
   h.group = grpEl?.value||h.group;
   h.notes = notEl?.value||'';
+  // Re-sync with updated values
+  if(h.group==='IR') _syncHolidayToIRCall(h.physId, h.date, h.name);
   _editingHolId=null;
   triggerSave(); renderHolTable(); renderHolCounter();
 }
@@ -7760,8 +7981,10 @@ function cancelEditHoliday(){
 function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
   if(!confirm('Delete this holiday assignment?'))return;
+  const h=S.holidays.find(x=>x.id===id);
+  if(h&&h.group==='IR') _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
-  renderHolTable();renderHolCounter();
+  triggerSave(); renderHolTable(); renderHolCounter();
 }
 function renderHolSchedule(){
   const yr=+document.getElementById('holsched-yr')?.value||2025;
