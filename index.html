@@ -1976,7 +1976,7 @@ function _buildSaveHTML(){
     vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
+    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,holidayDefs:S.holidayDefs||[],driveTimes:S.driveTimes||{},
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
@@ -5429,7 +5429,12 @@ function renderHolCounter(){
   physicians.forEach(p => {
     data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
   });
+  // Deduplicate to blocks: name+year+group+physId = 1 assignment regardless of dates
+  const seen=new Set();
   filtered.forEach(h => {
+    const key=`${h.physId}|${h.name}|${h.year}|${h.group}`;
+    if(seen.has(key)) return; // already counted this block
+    seen.add(key);
     if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
     const d = data[h.physId];
     d.total++;
@@ -7881,8 +7886,8 @@ function _holCareerData(group){
     let cumBalance=0;
     const byYear=allYears.map(yr=>{
       const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
-      const act=S.holidays.filter(h=>h.physId===p.id&&String(h.year)===yr&&(group==='both'||h.group===group)).length;
-      const totalSlots=S.holidays.filter(h=>String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const act=_holBlockCount(p.id,group==='both'?'both':grp,+yr);
+      const totalSlots=_holBlockTotal(group==='both'?'both':grp,+yr);
       const fs=fteProp(p,grp)*totalSlots;
       const bal=act-fs;
       cumBalance+=bal;
@@ -7914,8 +7919,8 @@ function _holCareerDataBeforeYear(group,beforeYear){
     let cumBalance=0;
     const byYear=allYears.map(yr=>{
       const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
-      const act=S.holidays.filter(h=>h.physId===p.id&&String(h.year)===yr&&(group==='both'||h.group===group)).length;
-      const totalSlots=S.holidays.filter(h=>String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const act=_holBlockCount(p.id,group==='both'?'both':grp,+yr);
+      const totalSlots=_holBlockTotal(group==='both'?'both':grp,+yr);
       const fs=fteProp(p,grp)*totalSlots;
       cumBalance+=act-fs;
       return{yr,act,fairShare:fs,balance:act-fs};
@@ -7993,6 +7998,29 @@ function renderHolCareerTally(){
     html+=`</div>`;
   });
   el.innerHTML=html||'<div class="note ni">No physicians configured.</div>';
+}
+
+
+// Count distinct holiday BLOCKS assigned to a physician (name+year+group = 1 block, not per date)
+function _holBlockCount(physId, group, year){
+  const seen=new Set();
+  S.holidays.filter(h=>
+    h.physId===physId&&
+    (group==='both'||h.group===group)&&
+    (year==null||h.year===+year)
+  ).forEach(h=>seen.add(`${h.name}|${h.year}|${h.group}`));
+  return seen.size;
+}
+
+// Count total distinct holiday blocks assigned to ANY physician for a group+year
+// (used as denominator for fair-share calculation)
+function _holBlockTotal(group, year){
+  const seen=new Set();
+  S.holidays.filter(h=>
+    (group==='both'||h.group===group)&&
+    (year==null||h.year===+year)
+  ).forEach(h=>seen.add(`${h.name}|${h.year}|${h.group}`));
+  return seen.size;
 }
 
 
@@ -8565,6 +8593,7 @@ async function _pushToSupabase(){
         holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,irSlots:S.irSlots,
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
+        holidayDefs:S.holidayDefs||[],
         driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
       })
