@@ -326,6 +326,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-sect">People</div>
       <div class="snav-item admin-only" onclick="nav('physicians',this)">Physician Roster</div>
       <div class="snav-item admin-only" onclick="nav('vacations',this)">Vacations & Time Off</div>
+      <div class="snav-item admin-only" onclick="nav('vac-pick',this)">📅 Vacation Picking</div>
       <div class="snav-item" onclick="nav('profiles',this)">User Profiles</div>
       <div class="snav-sect">Diagnostic Rad</div>
       <div class="snav-item" onclick="nav('dr-cal',this)">DR Calendar</div>
@@ -509,6 +510,7 @@ tbody tr:hover{background:var(--bg3)}
         <div class="tab" onclick="srTab('day',this)">Day Conditions</div>
         <div class="tab" onclick="srTab('shift',this)">Shift Type Rules</div>
         <div class="tab" onclick="srTab('seq',this)">Sequence Rules</div>
+        <div class="tab" onclick="srTab('irblk',this)">🚫 IR Blackouts</div>
       </div>
 
       <!-- SITE LIMITS TAB -->
@@ -609,6 +611,24 @@ tbody tr:hover{background:var(--bg3)}
       </div>
 
       <div id="sr-list" style="margin-top:12px"></div>
+
+      <!-- IR CALL BLACKOUTS TAB -->
+      <div id="srt-irblk" class="ibox" style="display:none;margin-top:8px">
+        <div class="note ni" style="font-size:12px;margin-bottom:10px">
+          Date ranges when this physician <strong>cannot be assigned IR call</strong> (daily or weekend).
+          Respected by auto-assign, rebalancer, and manual assignment.
+          Use for planned unavailability not covered by vacation (e.g. conferences, board exams).
+        </div>
+        <div class="flex" style="gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="fg" style="margin:0"><label>Start</label><input id="irblk-start" type="date" style="width:140px"></div>
+          <div class="fg" style="margin:0"><label>End</label><input id="irblk-end" type="date" style="width:140px"></div>
+          <div class="fg" style="flex:1;margin:0"><label>Reason (optional)</label>
+            <input id="irblk-reason" placeholder="e.g. Board exam, conference" style="width:100%"></div>
+          <button class="bp bsm" style="margin-bottom:2px" onclick="addIRCallBlackout()">Add</button>
+        </div>
+        <div id="irblk-list"></div>
+      </div>
+
       <button class="bsm" onclick="closePhysSiteRules()" style="margin-top:8px">← Back to Roster</button>
     </div>
   </div>
@@ -634,6 +654,21 @@ tbody tr:hover{background:var(--bg3)}
   </div>
   <div class="card"><table><thead><tr><th>Physician</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Notes</th><th></th></tr></thead><tbody id="vac-tbody"></tbody></table></div>
 </div>
+
+<!-- VACATION PICKING -->
+<div id="page-vac-pick" class="page">
+  <div class="pg-title">📅 Vacation Picking</div>
+  <div class="pg-sub">Annual 52-week vacation lottery. Physicians submit ranked preferences each round; 
+    assignments follow seniority order. Assigned weeks sync automatically to the vacation schedule.</div>
+  <div class="tabs" id="vacp-tabs" style="margin-bottom:10px">
+    <div class="tab on" onclick="vacpTab('setup',this)">⚙ Setup</div>
+    <div class="tab" onclick="vacpTab('seniority',this)">🏅 Seniority</div>
+    <div class="tab" onclick="vacpTab('rounds',this)">🎯 Rounds</div>
+    <div class="tab" onclick="vacpTab('calendar',this)">📆 Calendar</div>
+  </div>
+  <div id="vacp-content"></div>
+</div>
+
 
 <!-- DR CALENDAR -->
 <div id="page-dr-cal" class="page">
@@ -2427,6 +2462,9 @@ let S=/*S_START*/{
   driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
+  vacPicking:{year:new Date().getFullYear(),defaultRounds:12,roundOpen:1,viewRound:1,
+    seniority:[],physRounds:{},physSection:{},sectionLimits:{},totalWeekLimit:{},
+    picks:{},assignments:{}},
   // Chat messages
   chatMessages:[
     {id:1,userId:'u1',text:'Welcome to RadScheduler! Use the Chat tab to coordinate with colleagues.',ts:'2025-06-01T09:00:00',channel:'general'},
@@ -2709,7 +2747,7 @@ function nav(pg,el){
   });
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
-    physicians:renderPhysicians,vacations:renderVacations,
+    physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
@@ -4289,6 +4327,487 @@ function renderCommuteMatrix(){
   el.innerHTML=html;
 }
 
+
+/* ─── VACATION PICKING SYSTEM ─── */
+
+// Generate 52 week objects for a year (Sunday–Saturday)
+function _vacWeeks(year){
+  const jan1=new Date(year,0,1);
+  const dow=jan1.getDay();
+  const weekStart=new Date(jan1);
+  weekStart.setDate(jan1.getDate()-dow);
+  return Array.from({length:52},(_,i)=>{
+    const s=new Date(weekStart); s.setDate(weekStart.getDate()+i*7);
+    const e=new Date(s); e.setDate(s.getDate()+6);
+    const lbl=n=>n.toLocaleDateString('default',{month:'short',day:'numeric'});
+    return{week:i+1,start:fmtDate(s),end:fmtDate(e),
+      label:`Wk ${i+1}: ${lbl(s)}\u2013${lbl(e)}`};
+  });
+}
+
+// Check if a week is available for a physician (returns {ok,reason})
+function _vacWeekAvail(wn, physId, year){
+  const vp=S.vacPicking;
+  // Already assigned to this physician
+  if(Object.values(vp.assignments?.[physId]||{}).includes(wn))
+    return{ok:false,reason:'Already your week'};
+  // Count who has this week assigned
+  let total=0; const secCnt={};
+  Object.entries(vp.assignments||{}).forEach(([pid,rds])=>{
+    Object.values(rds).forEach(aw=>{
+      if(aw===wn){
+        total++;
+        const sec=vp.physSection?.[+pid]||null;
+        if(sec) secCnt[sec]=(secCnt[sec]||0)+1;
+      }
+    });
+  });
+  // Total limit
+  const totLim=vp.totalWeekLimit?.default;
+  if(totLim!=null&&total>=totLim) return{ok:false,reason:`Full (${total}/${totLim})`};
+  // Section limit
+  const mySec=vp.physSection?.[physId]||null;
+  if(mySec){
+    const secLim=vp.sectionLimits?.[mySec];
+    if(secLim!=null&&(secCnt[mySec]||0)>=secLim)
+      return{ok:false,reason:`${mySec} full (${secCnt[mySec]||0}/${secLim})`};
+  }
+  return{ok:true};
+}
+
+// Sync an assigned week to S.vacations (includes Sat before + Sun after)
+function _vacSyncWeek(physId, weekNum, year){
+  const week=_vacWeeks(year).find(w=>w.week===weekNum);
+  if(!week) return;
+  const s=parseDateLocal(week.start); s.setDate(s.getDate()-1); // Sat before
+  const e=parseDateLocal(week.end);   e.setDate(e.getDate()+1); // Sun after
+  // Remove existing pick entry for this physician+week
+  S.vacations=S.vacations.filter(v=>
+    !(v.physId===physId&&v.notes?.startsWith(`VP|${year}|${weekNum}|`)));
+  S.vacations.push({id:S.nextId++,physId,start:fmtDate(s),end:fmtDate(e),
+    type:'Vacation',notes:`VP|${year}|${weekNum}|Wk${weekNum}`});
+  _wrapArray(S.vacations);
+}
+
+function _vacRemoveWeek(physId, weekNum, year){
+  S.vacations=S.vacations.filter(v=>
+    !(v.physId===physId&&v.notes?.startsWith(`VP|${year}|${weekNum}|`)));
+  _wrapArray(S.vacations);
+}
+
+// Core assign (no admin check — callers handle that)
+function _doAssignVacWeek(physId, round, weekNum){
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  if(!vp.assignments) vp.assignments={};
+  if(!vp.assignments[physId]) vp.assignments[physId]={};
+  const old=vp.assignments[physId][round];
+  if(old) _vacRemoveWeek(physId,old,year);
+  vp.assignments[physId][round]=weekNum;
+  _vacSyncWeek(physId,weekNum,year);
+}
+
+function assignVacWeek(physId, round, weekNum){
+  if(!_adminOnly('assign vacation week')) return;
+  _doAssignVacWeek(physId,round,weekNum);
+  triggerSave();
+  renderVacRounds();
+}
+
+function unassignVacWeek(physId, round){
+  if(!_adminOnly('unassign vacation week')) return;
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const old=vp.assignments?.[physId]?.[round];
+  if(old!=null){_vacRemoveWeek(physId,old,year);delete vp.assignments[physId][round];}
+  triggerSave();
+  renderVacRounds();
+}
+
+// Auto-process a full round in seniority order
+function processVacRound(round){
+  if(!_adminOnly('process vacation round')) return;
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const weeks=_vacWeeks(year);
+  const seniority=vp.seniority||S.physicians.map(p=>p.id);
+  let assigned=0,skipped=0;
+  seniority.forEach(physId=>{
+    const maxRd=vp.physRounds?.[physId]??vp.defaultRounds??12;
+    if(round>maxRd){return;}
+    if(vp.assignments?.[physId]?.[round]!=null){assigned++;return;}
+    const choices=(vp.picks?.[physId]?.[round]||[]).filter(n=>n!=null);
+    let placed=false;
+    for(const wn of choices){
+      const av=_vacWeekAvail(wn,physId,year);
+      if(av.ok){_doAssignVacWeek(physId,round,wn);assigned++;placed=true;break;}
+    }
+    if(!placed) skipped++;
+  });
+  triggerSave();
+  alert(`Round ${round} processed: ${assigned} assigned, ${skipped} skipped (no available choice).`);
+  renderVacRounds();
+}
+
+// Save a single pick choice
+function setVacPick(physId, round, ci, wn){
+  const vp=S.vacPicking;
+  if(!vp.picks) vp.picks={};
+  if(!vp.picks[physId]) vp.picks[physId]={};
+  if(!vp.picks[physId][round]) vp.picks[physId][round]=[];
+  vp.picks[physId][round][ci]=wn||null;
+  triggerSave();
+}
+
+// Auto-assign one physician's best available pick
+function autoAssignVacPhys(physId, round){
+  if(!_adminOnly('assign vacation')) return;
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const choices=(vp.picks?.[physId]?.[round]||[]).filter(n=>n!=null);
+  for(const wn of choices){
+    const av=_vacWeekAvail(wn,physId,year);
+    if(av.ok){_doAssignVacWeek(physId,round,wn);triggerSave();renderVacRounds();return;}
+  }
+  alert(`No available choice found for ${pname(physId)} in Round ${round}.`);
+}
+
+// Tab navigation
+function vacpTab(t,el){
+  document.querySelectorAll('#vacp-tabs .tab').forEach(x=>x.classList.remove('on'));
+  if(el) el.classList.add('on');
+  if(t==='setup') renderVacSetup();
+  else if(t==='seniority') renderVacSeniority();
+  else if(t==='rounds') renderVacRounds();
+  else renderVacCalendar();
+}
+
+function renderVacPick(){
+  vacpTab('setup',document.querySelector('#vacp-tabs .tab'));
+}
+
+// ── SETUP TAB ──────────────────────────────────────────────────────────────
+function renderVacSetup(){
+  const vp=S.vacPicking;
+  const physicians=S.physicians;
+  let html=`<div class="g2" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-title">Year & Defaults</div>
+      <div class="flex" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="fg" style="margin:0"><label>Calendar Year</label>
+          <select id="vacp-year" style="width:100px">
+            ${[2024,2025,2026,2027,2028].map(y=>`<option${(vp.year||2026)===y?' selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg" style="margin:0"><label>Default Rounds</label>
+          <input id="vacp-def-rounds" type="number" min="1" max="52" value="${vp.defaultRounds??12}" style="width:75px">
+        </div>
+        <div class="fg" style="margin:0"><label>Open Round</label>
+          <input id="vacp-open-round" type="number" min="1" max="52" value="${vp.roundOpen??1}" style="width:75px">
+        </div>
+        <button class="bp bsm" onclick="saveVacSetup()">💾 Save</button>
+        <span id="vacp-save-msg" style="font-size:12px;color:var(--green-t)"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Total Week Cap
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Max physicians off per week (all sections)</span>
+      </div>
+      <div class="flex" style="gap:8px;align-items:flex-end">
+        <div class="fg" style="margin:0"><label>Max per week</label>
+          <input id="vacp-total-lim" type="number" min="0" max="50" placeholder="No limit"
+            value="${vp.totalWeekLimit?.default??''}" style="width:90px">
+        </div>
+        <button class="bt bsm" onclick="saveVacSetup()">Save</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Section Limits
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Max per section per week (e.g. Mammo: 1, IR: 2)</span>
+    </div>
+    <div class="flex" style="gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="margin:0"><label>Section</label>
+        <input id="vacp-new-sec" placeholder="e.g. Mammo" style="width:110px"></div>
+      <div class="fg" style="margin:0"><label>Max/week</label>
+        <input id="vacp-new-sec-lim" type="number" min="0" max="20" value="1" style="width:65px"></div>
+      <button class="bp bsm" onclick="addVacSection()">Add</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${Object.entries(vp.sectionLimits||{}).map(([sec,lim])=>`
+        <div style="display:flex;align-items:center;gap:5px;background:var(--bg3);border-radius:var(--r);padding:5px 9px">
+          <span class="tag tt" style="font-size:10px">${sec}</span>
+          <span style="font-size:12px">max ${lim}/wk</span>
+          <button class="br bxs" onclick="removeVacSection('${sec}')">✕</button>
+        </div>`).join('')||'<p style="color:var(--txt3);font-size:12px">No section limits — all weeks open to any count.</p>'}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Per-Physician Settings</div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Role</th><th>Section (for limits)</th><th>Rounds Override</th>
+    </tr></thead><tbody>`;
+  const secOptions=['Mammo','IR','Body','Neuro','MSK','Emergency','Breast','NM','Other'];
+  physicians.forEach(p=>{
+    const sec=vp.physSection?.[p.id]||'';
+    const rds=vp.physRounds?.[p.id]??'';
+    const opts=`<option value="">— default (${vp.defaultRounds??12}) —</option>`+
+      secOptions.map(s=>`<option${sec===s?' selected':''}>${s}</option>`).join('');
+    html+=`<tr>
+      <td style="font-weight:600">${pname(p.id)}</td>
+      <td><span class="tag ${p.role==='IR'?'tt':p.role==='MIXED'?'ta':'tb'}">${p.role}</span></td>
+      <td><select style="font-size:11px" onchange="setPhysVacSection(${p.id},this.value)">
+        ${opts}</select></td>
+      <td><input type="number" min="0" max="52" placeholder="${vp.defaultRounds??12}"
+        value="${rds}" style="width:60px;font-size:11px"
+        onchange="setPhysVacRounds(${p.id},this.value)"></td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('vacp-content').innerHTML=html;
+}
+
+function saveVacSetup(){
+  const vp=S.vacPicking;
+  vp.year=+document.getElementById('vacp-year')?.value||2026;
+  vp.defaultRounds=+document.getElementById('vacp-def-rounds')?.value||12;
+  vp.roundOpen=+document.getElementById('vacp-open-round')?.value||1;
+  const tl=document.getElementById('vacp-total-lim')?.value;
+  if(!vp.totalWeekLimit) vp.totalWeekLimit={};
+  vp.totalWeekLimit.default=tl?+tl:null;
+  triggerSave();
+  const msg=document.getElementById('vacp-save-msg');
+  if(msg){msg.textContent='\u2713 Saved';setTimeout(()=>{msg.textContent='';},2500);}
+}
+function addVacSection(){
+  const sec=document.getElementById('vacp-new-sec')?.value.trim();
+  const lim=+document.getElementById('vacp-new-sec-lim')?.value||1;
+  if(!sec) return;
+  if(!S.vacPicking.sectionLimits) S.vacPicking.sectionLimits={};
+  S.vacPicking.sectionLimits[sec]=lim;
+  triggerSave(); renderVacSetup();
+}
+function removeVacSection(sec){
+  delete S.vacPicking.sectionLimits?.[sec];
+  triggerSave(); renderVacSetup();
+}
+function setPhysVacSection(physId,sec){
+  if(!S.vacPicking.physSection) S.vacPicking.physSection={};
+  S.vacPicking.physSection[physId]=sec||'';
+  triggerSave();
+}
+function setPhysVacRounds(physId,val){
+  if(!S.vacPicking.physRounds) S.vacPicking.physRounds={};
+  S.vacPicking.physRounds[physId]=val!==''?+val:null;
+  triggerSave();
+}
+
+// ── SENIORITY TAB ──────────────────────────────────────────────────────────
+function renderVacSeniority(){
+  const vp=S.vacPicking;
+  const seniority=vp.seniority||[];
+  const unranked=S.physicians.filter(p=>!seniority.includes(p.id));
+  let html=`<div class="card" style="margin-bottom:12px">
+    <div class="card-title">Seniority Order
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">Rank 1 = most senior (picks first each round)</span>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th style="width:50px;text-align:center">Rank</th><th>Physician</th><th>Role</th><th>Section</th><th style="width:90px">Reorder</th>
+    </tr></thead><tbody>`;
+  seniority.forEach((physId,i)=>{
+    const p=S.physicians.find(x=>x.id===physId);if(!p)return;
+    html+=`<tr>
+      <td style="text-align:center;font-weight:800;font-size:18px;color:var(--txt3)">${i+1}</td>
+      <td style="font-weight:600">${pname(physId)}</td>
+      <td><span class="tag ${p.role==='IR'?'tt':p.role==='MIXED'?'ta':'tb'}">${p.role}</span></td>
+      <td style="font-size:12px">${vp.physSection?.[physId]||'—'}</td>
+      <td style="white-space:nowrap">
+        ${i>0?`<button class="bsm" onclick="moveVacSen(${i},-1)">▲</button> `:''}
+        ${i<seniority.length-1?`<button class="bsm" onclick="moveVacSen(${i},1)">▼</button>`:''}
+        <button class="br bxs" style="margin-left:4px" onclick="removeVacSen(${physId})">✕</button>
+      </td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div></div>`;
+  if(unranked.length){
+    html+=`<div class="card"><div class="card-title">Add to Seniority List</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${unranked.map(p=>`<button class="bsm bt" onclick="addVacSen(${p.id})">${pname(p.id)}</button>`).join('')}
+      </div></div>`;
+  }
+  document.getElementById('vacp-content').innerHTML=html;
+}
+function addVacSen(physId){
+  if(!S.vacPicking.seniority) S.vacPicking.seniority=[];
+  if(!S.vacPicking.seniority.includes(physId)) S.vacPicking.seniority.push(physId);
+  triggerSave(); renderVacSeniority();
+}
+function removeVacSen(physId){
+  S.vacPicking.seniority=(S.vacPicking.seniority||[]).filter(id=>id!==physId);
+  triggerSave(); renderVacSeniority();
+}
+function moveVacSen(idx,dir){
+  const arr=S.vacPicking.seniority;
+  const ni=idx+dir;
+  if(ni<0||ni>=arr.length) return;
+  [arr[idx],arr[ni]]=[arr[ni],arr[idx]];
+  triggerSave(); renderVacSeniority();
+}
+
+// ── ROUNDS TAB ─────────────────────────────────────────────────────────────
+function renderVacRounds(){
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const weeks=_vacWeeks(year);
+  const seniority=(vp.seniority||[]).length?vp.seniority:S.physicians.map(p=>p.id);
+  const openRound=vp.roundOpen||1;
+  let maxRound=vp.defaultRounds||12;
+  Object.values(vp.physRounds||{}).forEach(n=>{if(n&&n>maxRound)maxRound=n;});
+
+  const round=vp.viewRound||openRound;
+
+  let html=`<div class="flex" style="gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap">
+    <div class="fg" style="margin:0"><label>View Round</label>
+      <select id="vacp-round-sel" style="width:130px" onchange="S.vacPicking.viewRound=+this.value;renderVacRounds()">
+        ${Array.from({length:maxRound},(_,i)=>`<option value="${i+1}"${round===i+1?' selected':''}>Round ${i+1}${i+1===openRound?' (open)':''}</option>`).join('')}
+      </select>
+    </div>
+    <button class="bp" onclick="processVacRound(${round})">⚡ Auto-Process Round ${round}</button>
+    <button class="bt bsm" onclick="S.vacPicking.roundOpen=${round+1};S.vacPicking.viewRound=${round+1};saveVacSetup();renderVacRounds()">→ Advance to Round ${round+1}</button>
+  </div>
+  <div class="note ni" style="margin-bottom:10px;font-size:12px">
+    <strong>How it works:</strong> Each physician submits 3 ranked week choices below. 
+    Click <strong>⚡ Auto-Process</strong> to assign everyone in seniority order — each physician gets their highest available choice.
+    Or click <strong>⚡ Assign</strong> on an individual row to assign manually.
+  </div>
+  <div class="card"><div class="card-title">Round ${round} — ${year} Picks &amp; Assignments</div>
+  <div style="overflow-x:auto"><table><thead><tr>
+    <th style="width:40px">Rank</th><th>Physician</th><th>Section</th>
+    <th>1st Choice</th><th>2nd Choice</th><th>3rd Choice</th>
+    <th>Assigned</th><th></th>
+  </tr></thead><tbody>`;
+
+  // Build weekOpts once
+  function weekOptsFn(physId){
+    return `<option value="">— none —</option>`+weeks.map(w=>{
+      const av=_vacWeekAvail(w.week,physId,year);
+      return `<option value="${w.week}"${!av.ok?' style="color:var(--txt3)"':''} title="${av.reason||''}">
+        ${w.label}${!av.ok?' ⚠':''}</option>`;
+    }).join('');
+  }
+
+  seniority.forEach((physId,rank)=>{
+    const p=S.physicians.find(x=>x.id===physId);if(!p)return;
+    const maxRd=vp.physRounds?.[physId]??vp.defaultRounds??12;
+    const participates=round<=maxRd;
+    const picks=(vp.picks?.[physId]?.[round])||[];
+    const assigned=vp.assignments?.[physId]?.[round];
+    const assignedWeek=assigned!=null?weeks.find(w=>w.week===assigned):null;
+    const isAdmin=CU?.role==='admin';
+    const isMe=CU?.physId===physId;
+    const canEdit=isAdmin||isMe;
+    const rowBg=assigned!=null?'background:var(--green-bg)':!participates?'opacity:0.5':'';
+
+    html+=`<tr style="${rowBg}">
+      <td style="text-align:center;font-weight:800;color:var(--txt3)">${rank+1}</td>
+      <td style="font-weight:600">${pname(physId)}</td>
+      <td style="font-size:11px">${vp.physSection?.[physId]||'—'}</td>`;
+
+    if(!participates){
+      html+=`<td colspan="5" style="color:var(--txt3);font-size:11px;text-align:center">
+        Not in round ${round} (max ${maxRd} rounds)</td>`;
+    } else if(canEdit){
+      const opts=weekOptsFn(physId);
+      [0,1,2].forEach(ci=>{
+        const cv=picks[ci];
+        const cvOpts=opts.replace(`value="${cv||''}"`,`value="${cv||''}" selected`);
+        html+=`<td><select style="font-size:10px;width:100%;max-width:170px"
+          onchange="setVacPick(${physId},${round},${ci},+this.value||null)">${cvOpts}</select></td>`;
+      });
+      html+=`<td style="font-weight:700;color:${assignedWeek?'var(--green-t)':'var(--txt3);font-size:11px'}">
+        ${assignedWeek?assignedWeek.label:'—'}</td>`;
+      html+=`<td style="white-space:nowrap">
+        ${!assignedWeek?`<button class="bg bsm" onclick="autoAssignVacPhys(${physId},${round})">⚡</button>`:''}
+        ${assignedWeek?`<button class="br bsm" onclick="unassignVacWeek(${physId},${round})">✕</button>`:''}
+      </td>`;
+    } else {
+      // Read-only view for other physicians
+      const wLbls=[0,1,2].map(ci=>picks[ci]?weeks.find(w=>w.week===picks[ci])?.label||`Wk ${picks[ci]}`:'—');
+      wLbls.forEach(lb=>{ html+=`<td style="font-size:11px;color:var(--txt3)">${lb}</td>`; });
+      html+=`<td style="font-weight:700;color:${assignedWeek?'var(--green-t)':'var(--txt3)'}">
+        ${assignedWeek?assignedWeek.label:'—'}</td><td></td>`;
+    }
+    html+=`</tr>`;
+  });
+
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('vacp-content').innerHTML=html;
+}
+
+// ── CALENDAR TAB ───────────────────────────────────────────────────────────
+function renderVacCalendar(){
+  const vp=S.vacPicking;
+  const year=vp.year||new Date().getFullYear();
+  const weeks=_vacWeeks(year);
+  // Build weekNum → [physId] map
+  const weekPhys={};
+  Object.entries(vp.assignments||{}).forEach(([pid,rds])=>{
+    Object.values(rds).forEach(wn=>{
+      if(wn==null) return;
+      if(!weekPhys[wn]) weekPhys[wn]=[];
+      weekPhys[wn].push(+pid);
+    });
+  });
+  const totLim=vp.totalWeekLimit?.default;
+  const secLims=vp.sectionLimits||{};
+
+  let html=`<div style="overflow-x:auto"><table style="font-size:11px;min-width:400px">
+    <thead><tr style="background:var(--navy)">
+      <th style="color:#fff;padding:6px 8px;min-width:50px">Wk</th>
+      <th style="color:#fff;padding:6px 8px;min-width:140px">Dates (incl. weekends)</th>
+      <th style="color:#fff;padding:6px 8px">Physicians Off</th>
+      <th style="color:#fff;padding:6px 8px;min-width:80px">Capacity</th>
+    </tr></thead><tbody>`;
+
+  weeks.forEach(w=>{
+    const onVac=weekPhys[w.week]||[];
+    const isFull=totLim!=null&&onVac.length>=totLim;
+    // Vacation dates including flanking weekends
+    const s=parseDateLocal(w.start); s.setDate(s.getDate()-1);
+    const e=parseDateLocal(w.end);   e.setDate(e.getDate()+1);
+    const dateRange=`${fmtDate(s).slice(5)} \u2013 ${fmtDate(e).slice(5)}`;
+    const rowBg=isFull?'background:var(--amber-bg,#fffbeb)':onVac.length>0?'background:var(--green-bg)':'';
+    html+=`<tr style="${rowBg};border-bottom:1px solid var(--bdr)">
+      <td style="padding:5px 8px;font-weight:800">Wk ${w.week}</td>
+      <td style="padding:5px 8px;color:var(--txt3);font-size:10px">${dateRange}</td>
+      <td style="padding:5px 8px">
+        ${onVac.length
+          ?onVac.map(pid=>{
+              const sec=vp.physSection?.[pid];
+              const cls=sec==='IR'?'tt':sec==='Mammo'?'ta':'tg';
+              return `<span class="tag ${cls}" style="font-size:9px">${pname(pid)}</span>`;
+            }).join(' ')
+          :'<span style="color:var(--txt3)">\u2014</span>'}
+      </td>
+      <td style="padding:5px 8px;text-align:center">
+        ${totLim!=null
+          ?`<span style="font-weight:700;color:${isFull?'var(--red-t)':'var(--green-t)'}">${onVac.length}/${totLim}</span>`
+          :`<span style="color:var(--txt3)">${onVac.length} off</span>`}
+      </td>
+    </tr>`;
+  });
+
+  html+=`</tbody></table></div>`;
+  // Summary
+  const totalAssigned=Object.values(vp.assignments||{}).reduce((s,rds)=>s+Object.values(rds).filter(v=>v!=null).length,0);
+  html=`<div class="note ni" style="margin-bottom:10px;font-size:12px">
+    ${year} · <strong>${totalAssigned}</strong> vacation week(s) assigned across all rounds ·
+    Green = at least 1 physician off · Amber = at capacity
+  </div>`+html;
+  document.getElementById('vacp-content').innerHTML=html;
+}
+
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
@@ -4879,6 +5398,8 @@ function addIRCallFromGrid(sel,date,callType,group){
     alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
     alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');sel.value='';return;}
+  if(callType==='daily'&&isIRCallBlackout(physId,date)){
+    alert(pname(physId)+' has an IR call blackout on '+date+'.');sel.value='';return;}
   if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){
     alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');sel.value='';return;}
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){
@@ -4894,6 +5415,7 @@ function addIRWeekend(group,fridayDate){
   const site=document.getElementById(`irwk-site-${group}`)?.value||'';
   if(!physId){alert('Select physician');return;}
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
+  if(isIRCallBlackout(physId,fridayDate)){alert(pname(physId)+' has an IR call blackout covering this weekend.');return;}
   if(_hasAdjacentIRCall(physId,fridayDate)||_hasIRCallNearWeekend(physId,fridayDate)){alert('Back-to-back call not allowed: '+pname(physId)+' has daily call adjacent to this weekend.');return;}
   // Block if physician has a 2nd/3rd shift on any day of the weekend span (Fri→Mon)
   const _wkSpan=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),addDays(fridayDate,3)];
@@ -4912,6 +5434,7 @@ function addIRCallManual(){
   const irGroup=document.getElementById('ird-grp').value;const site=document.getElementById('ird-site').value;
   const p=S.physicians.find(x=>x.id===physId);
   if(p?.irGroup&&p.irGroup!==irGroup&&!confirm(`${p.last} is in ${p.irGroup} group. Assign to ${irGroup}?`))return;
+  if(isIRCallBlackout(physId,date)){alert(pname(physId)+' has an IR call blackout on '+date+'.');return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');return;}
   if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');return;}
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');return;}
@@ -5056,6 +5579,7 @@ function previewIRAA(){
             const vd=vacDays(p.id);
             if(vd.has(date)) return false;
             if(isSoldBackDate(p.id,date)) return false;
+            if(isIRCallBlackout(p.id,date)) return false;
             if(irOnDate(p.id,date)) return false;
             if(_has2ndOr3rdShift(p.id,date)) return false;
             if(!_hasIRShiftOnDate(p.id,date)) return false;
@@ -5121,6 +5645,7 @@ function previewIRAA(){
             const vd=vacDays(p.id);
             if(vd.has(friday)||vd.has(mon)) return false;
             if(isSoldBackDate(p.id,friday)) return false;
+            if(isIRCallBlackout(p.id,friday)) return false;
             if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
             if(pass===0){
               if(_hasAdjacentIRCall(p.id,friday)) return false;
@@ -5242,6 +5767,60 @@ function applyIRAA(){
   S.iraPreview=[];document.getElementById('ira-apply').style.display='none';
 }
 
+
+/* ─── IR CALL BLACKOUTS ─── */
+
+// Returns true if physId has an IR call blackout covering date
+function isIRCallBlackout(physId, date){
+  const p=S.physicians.find(x=>x.id===physId);
+  if(!p||!p.irCallBlackouts?.length) return false;
+  return p.irCallBlackouts.some(b=>date>=b.start&&date<=b.end);
+}
+
+function renderIRBlackoutList(physId){
+  const el=document.getElementById('irblk-list');
+  if(!el) return;
+  const p=S.physicians.find(x=>x.id===physId);
+  const list=p?.irCallBlackouts||[];
+  if(!list.length){
+    el.innerHTML='<p style="color:var(--txt3);font-size:12px">No IR call blackout dates set.</p>';
+    return;
+  }
+  el.innerHTML=list.map((b,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border-radius:var(--r);margin-bottom:5px">
+      <span class="tag tr" style="flex-shrink:0;font-size:9px">IR blackout</span>
+      <span style="flex:1;font-size:12px"><strong>${b.start}</strong> → <strong>${b.end}</strong>
+        ${b.reason?`<span style="color:var(--txt3);font-size:10px;margin-left:4px">${b.reason}</span>`:''}
+      </span>
+      <button class="br bxs" onclick="removeIRCallBlackout(${physId},${i})">✕</button>
+    </div>`).join('');
+}
+
+function addIRCallBlackout(){
+  if(!_adminOnly('add IR call blackout')) return;
+  const start=document.getElementById('irblk-start')?.value;
+  const end=document.getElementById('irblk-end')?.value;
+  const reason=document.getElementById('irblk-reason')?.value.trim()||'';
+  if(!start||!end){alert('Select start and end dates.');return;}
+  if(end<start){alert('End date must be on or after start date.');return;}
+  const p=S.physicians.find(x=>x.id===_srPhysId);
+  if(!p) return;
+  if(!p.irCallBlackouts) p.irCallBlackouts=[];
+  p.irCallBlackouts.push({id:S.nextId++,start,end,reason});
+  // Clear inputs
+  ['irblk-start','irblk-end','irblk-reason'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  triggerSave();
+  renderIRBlackoutList(_srPhysId);
+}
+
+function removeIRCallBlackout(physId, idx){
+  if(!_adminOnly('remove IR call blackout')) return;
+  const p=S.physicians.find(x=>x.id===physId);
+  if(!p||!p.irCallBlackouts) return;
+  p.irCallBlackouts.splice(idx,1);
+  triggerSave();
+  renderIRBlackoutList(physId);
+}
 
 /* ─── IR CALL REBALANCER ─── */
 
@@ -5605,6 +6184,7 @@ function previewIRRebalance(){
 
         const eligible=gPhys.filter(p=>{
           if(vacDays(p.id).has(date)) return false;
+          if(isIRCallBlackout(p.id,date)) return false;
           if(_has2ndOr3rdShift(p.id,date)) return false;
           if(!_hasIRShiftOnDate(p.id,date)) return false;
           if(outsideAdjacent(p.id,date,'daily')) return false;
@@ -5674,6 +6254,7 @@ function previewIRRebalance(){
         const eligible=gPhys.filter(p=>{
           const vd=vacDays(p.id);
           if(vd.has(fridayDate)||vd.has(mon)) return false;
+          if(isIRCallBlackout(p.id,fridayDate)) return false;
           // ── Adjacency checks ──
           // Do NOT use _hasAdjacentIRCall / _hasIRCallNearWeekend here — those check
           // S.irCalls including in-period weekend calls that this rebalancer is replacing.
@@ -7233,7 +7814,7 @@ function renderHolSchedule(){
 let _srPhysId=null;
 
 function srTab(t,el){
-  ['site','day','shift','seq'].forEach(x=>{
+  ['site','day','shift','seq','irblk'].forEach(x=>{
     const e=document.getElementById('srt-'+x);
     if(e) e.style.display=x===t?'block':'none';
   });
@@ -7253,6 +7834,7 @@ function openPhysSiteRules(physId){
   populateSel('sr-st-site',sites,'');
   srTab('site',document.querySelector('#phys-site-rules-wrap .tab'));
   renderConditionsList();
+  renderIRBlackoutList(_srPhysId);
 }
 
 function closePhysSiteRules(){
