@@ -3686,16 +3686,11 @@ async function testMapsKey(){
 }
 
 async function _mapsProxyCall(origins, destinations){
-  const sb=_initAuthClient();
-  if(!sb) throw new Error('Not connected to Supabase.');
-  const {data:{session}}=await sb.auth.getSession();
-  const jwt=session?.access_token;
-  if(!jwt) throw new Error('Not authenticated.');
   const key=_getGMapsKey();
-  if(!key) throw new Error('No Google Maps API key. Add it in Settings under Drive Times.');
+  if(!key) throw new Error('No Google Maps API key. Add it in Settings → Drive Times.');
   const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
     method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
+    headers:{'Content-Type':'application/json'},
     body:JSON.stringify({origins,destinations,mapsKey:key})
   });
   const data=await res.json();
