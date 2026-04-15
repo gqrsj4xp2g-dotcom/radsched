@@ -2096,7 +2096,7 @@ function _refreshCurrentPage(){
     'dr-cal':()=>renderDRCal(),'dr-builder':()=>renderDRBuilder(),
     'dr-weekends':()=>renderWkBuilder(),'ir-cal':()=>renderIRCal(),
     'ir-shifts':()=>renderIRShiftBuilder(),'ir-builder':()=>renderIRWeekBuilder(),
-    'anchor-report':()=>renderAnchorReport(),'fte':()=>renderFTE(),
+    'anchor-report':()=>renderAnchorReport(),'fte':_renderFTECurrent,
     'open-shifts':()=>renderOpenShifts(),
   };
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
@@ -2472,7 +2472,7 @@ function nav(pg,el){
     physicians:renderPhysicians,vacations:renderVacations,
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
-    'anchor-report':renderAnchorReport,fte:renderFTE,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
+    'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,
   };
   if(fns[pg]) fns[pg]();
@@ -3024,7 +3024,13 @@ function bulkAssignMultiWeek(shift){
 
 
 
-/* ─── FTE MONITOR ─── */
+// Render whichever FTE tab is currently active (avoids clobbering period view with monthly render)
+function _renderFTECurrent(){
+  const periodCtrl=document.getElementById('fte-period-ctrl');
+  if(periodCtrl&&periodCtrl.style.display!=='none') renderFTEPeriod();
+  else renderFTE();
+}
+
 function renderFTE(){
   const mo=document.getElementById('fte-mo');
   if(!mo) return;
@@ -4274,12 +4280,24 @@ function _irrQuotas(gPhys, slots, targetFn){
   if(!slots||!gPhys.length) return {};
   const items=gPhys.map(p=>{
     const t=Math.max(0,targetFn(p));
-    return {id:p.id, t, floor:Math.floor(t), frac:t%1};
+    return {id:p.id, t, floor:0, frac:0};
   });
-  let remaining=Math.max(0,slots-items.reduce((s,x)=>s+x.floor,0));
-  // Assign leftover slots to physicians with highest fractional remainders
-  items.sort((a,b)=>b.frac-a.frac||a.id-b.id);
-  for(let i=0;i<Math.min(remaining,items.length);i++) items[i].floor++;
+  const totalT=items.reduce((s,x)=>s+x.t,0);
+
+  if(totalT<=0){
+    // No targets configured — distribute evenly across all physicians
+    const base=Math.floor(slots/gPhys.length);
+    const extra=slots%gPhys.length;
+    items.forEach((x,i)=>{ x.floor=base+(i<extra?1:0); });
+  } else {
+    // Scale targets so they sum exactly to slots, then apply largest-remainder
+    const scale=slots/totalT;
+    items.forEach(x=>{ const sc=x.t*scale; x.floor=Math.floor(sc); x.frac=sc%1; });
+    let remaining=Math.max(0,slots-items.reduce((s,x)=>s+x.floor,0));
+    items.sort((a,b)=>b.frac-a.frac||a.id-b.id);
+    for(let i=0;i<Math.min(remaining,items.length);i++) items[i].floor++;
+  }
+
   const q={};
   items.forEach(x=>{q[x.id]=x.floor;});
   return q;
@@ -4308,7 +4326,12 @@ function previewIRRebalance(){
       if(!gShiftEntries.length) return;
 
       const cntS={};gPhys.forEach(p=>{cntS[p.id]=0;});
-      const shiftQuotas=_irrQuotas(gPhys,gShiftEntries.length,p=>irShiftTargetPeriod(p,months));
+      const shiftQuotas=_irrQuotas(gPhys,gShiftEntries.length,p=>{
+        // Use FTE-proportional share of ACTUAL existing shifts — not slot-config targets.
+        // This guarantees redistribution reaches 100% regardless of how irShiftSlots is configured.
+        const gFteTot=gPhys.reduce((s,x)=>s+x.irFte,0)||1;
+        return gShiftEntries.length*(p.irFte/gFteTot);
+      });
       const shiftCapFn=p=>shiftQuotas[p.id]??Math.max(Math.ceil(irShiftTargetPeriod(p,months)),1);
       const gSAsgn=[];
 
