@@ -1664,7 +1664,9 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div id="gmaps-key-msg" style="font-size:12px;margin-top:2px;margin-bottom:8px"></div>
         <div class="note ni" style="font-size:11px;margin-bottom:8px">
           Calculates both legs of the DR 1st shift with actual traffic at departure time.<br>
-          <strong>DR 1st Shift</strong>: depart home → hospital at shift start, return hospital → home at shift end.<br>
+          Drive times calculated for <strong>1st shifts only</strong> (DR + IR). Both legs use real traffic:<br>
+          <strong>DR 1st Shift</strong> — configures when DR physicians commute &nbsp;&middot;&nbsp;
+          <strong>IR 1st Shift</strong> — configures when IR physicians commute<br>
           Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
         </div>
         <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
@@ -1678,6 +1680,9 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
             <span>DR 1st Shift</span>
             <input id="st-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
+            <span>IR 1st Shift</span>
+            <input id="st-ir-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-ir-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
           </div>
           <button class="bt bsm" style="margin-top:6px" onclick="saveShiftTimes()">💾 Save Times</button>
           <span id="shift-times-msg" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
@@ -2412,7 +2417,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'},'ir-1st':{dep:'06:30',ret:'15:00'}}},
   driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
@@ -3771,21 +3776,28 @@ function _trafficForShift(shiftEntry, qtrSel){
 /* ─── SHIFT TIME SETTINGS ─── */
 function saveShiftTimes(){
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
-  const depEl=document.getElementById('st-1st-dep');
-  const retEl=document.getElementById('st-1st-ret');
-  if(depEl&&retEl) S.cfg.shiftTimes['1st']={dep:depEl.value||'06:30',ret:retEl.value||'15:00'};
+  const types=['1st','ir-1st'];
+  types.forEach(t=>{
+    const depEl=document.getElementById(`st-${t}-dep`);
+    const retEl=document.getElementById(`st-${t}-ret`);
+    if(depEl&&retEl) S.cfg.shiftTimes[t]={dep:depEl.value||S.cfg.shiftTimes[t]?.dep||'06:30',ret:retEl.value||S.cfg.shiftTimes[t]?.ret||'15:00'};
+  });
   triggerSave();
   const msg=document.getElementById('shift-times-msg');
-  if(msg){msg.textContent='✓ Saved. Run \u201cUpdate All Shift Traffic\u201d to recalculate with new times.';
+  if(msg){msg.textContent='\u2713 Saved. Run \u201cUpdate All Shift Traffic\u201d to recalculate.';
     setTimeout(()=>{msg.textContent='';},4000);}
 }
 
 function _loadShiftTimesUI(){
-  const v=S.cfg.shiftTimes?.['1st']||{dep:'06:30',ret:'15:00'};
-  const depEl=document.getElementById('st-1st-dep');
-  const retEl=document.getElementById('st-1st-ret');
-  if(depEl) depEl.value=v.dep||'06:30';
-  if(retEl) retEl.value=v.ret||'15:00';
+  const defaults={'1st':{dep:'06:30',ret:'15:00'},'ir-1st':{dep:'06:30',ret:'15:00'}};
+  const times=S.cfg.shiftTimes||defaults;
+  ['1st','ir-1st'].forEach(t=>{
+    const v=times[t]||defaults[t];
+    const depEl=document.getElementById(`st-${t}-dep`);
+    const retEl=document.getElementById(`st-${t}-ret`);
+    if(depEl) depEl.value=v.dep||'06:30';
+    if(retEl) retEl.value=v.ret||'15:00';
+  });
 }
 
 /* ─── GOOGLE MAPS / DRIVE TIMES ─── */
@@ -3902,8 +3914,10 @@ async function updateTrafficTimes(){
   // Read shift times from S.cfg — user-configurable in Settings → Drive Times
   const _st=S.cfg.shiftTimes||{};
   const SHIFTS=[
-    {type:'1st', depTime:_st['1st']?.dep||'06:30', retTime:_st['1st']?.ret||'15:00',
+    {type:'1st',    depTime:_st['1st']?.dep||'06:30',    retTime:_st['1st']?.ret||'15:00',
      label:`DR 1st Shift (out ${_st['1st']?.dep||'06:30'} \u2192 back ${_st['1st']?.ret||'15:00'})`},
+    {type:'ir-1st', depTime:_st['ir-1st']?.dep||'06:30', retTime:_st['ir-1st']?.ret||'15:00',
+     label:`IR 1st Shift (out ${_st['ir-1st']?.dep||'06:30'} \u2192 back ${_st['ir-1st']?.ret||'15:00'})`},
   ];
 
   const hospAddrs=sitesWithAddr.map(s=>s.address.trim());
@@ -4017,8 +4031,9 @@ function _driveTimeBadge(physId,siteName,shiftType){
   if(!S.driveTimes) return '';
   const dt=S.driveTimes[`${physId}|${siteName}`];
   if(!dt||dt.mins===null) return '';
-  const shiftMap={'1st':'1st','2nd':'2nd','3rd':'3rd','Home':null,
-    'daily':'ir-daily','weekend':'ir-weekend','ir-daily':'ir-daily','ir-weekend':'ir-weekend'};
+  // Only 1st shifts have traffic data; other shifts fall back to base time
+  const shiftMap={'1st':'1st','Home':null,'2nd':'1st','3rd':'1st',
+    'daily':'ir-1st','weekend':'ir-1st','ir-daily':'ir-1st','ir-1st':'ir-1st'};
   const sk=shiftMap[shiftType]||null;
   const traffic=sk&&dt.byShift?.[sk];
   // Use outbound leg for the badge (commute TO work)
@@ -4078,8 +4093,8 @@ function renderCommuteMatrix(){
 
   // ── ONE-WAY BASE MATRIX ───────────────────────────────────────────────────
   if(physWithAddr.length&&hospitals.length){
-    const SHIFT_KEYS=['1st','2nd','3rd','ir-daily','ir-weekend'];
-    const SHIFT_SHORT={'1st':'1st','2nd':'2nd','3rd':'3rd','ir-daily':'IR','ir-weekend':'IR Wk'};
+    const SHIFT_KEYS=['1st','ir-1st'];
+    const SHIFT_SHORT={'1st':'DR 1st','ir-1st':'IR 1st'};
 
     html+=`<div class="card" style="margin-bottom:14px">
       <div class="card-title">Commute Matrix — Base &amp; Per-Shift Traffic
@@ -4155,11 +4170,11 @@ function renderCommuteMatrix(){
     S.drShifts.filter(s=>s.physId===p.id&&!s.autoHome&&s.site!=='At Home / Remote'&&matchYear(s.date))
       .forEach(s=>addShift(s.site, SHIFT_MAP[s.shift]||null, s.date));
     (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>addShift(s.site,'ir-daily',s.date));
+      .forEach(s=>addShift(s.site,'ir-1st',s.date));
     S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-daily',c.date));
+      .forEach(c=>addShift(c.site,'ir-1st',c.date));
     S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-weekend',c.date));
+      .forEach(c=>addShift(c.site,'ir-1st',c.date));
 
     return{p,byHosp,totalBase,totalTraffic,totalShifts};
   }).filter(d=>d.totalShifts>0);
