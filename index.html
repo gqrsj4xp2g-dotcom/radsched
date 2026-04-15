@@ -456,6 +456,10 @@ tbody tr:hover{background:var(--bg3)}
       <div class="fg"><label>Last Name</label><input id="p-last" placeholder="Smith"></div>
       <div class="fg"><label>Degree</label><select id="p-deg"><option>MD</option><option>DO</option><option>MD PhD</option><option>MD MBA</option></select></div>
     </div>
+    <div class="fg">
+      <label>🏠 Home Address <span style="font-size:10px;font-weight:400;color:var(--txt3)">(used for drive-time calculations)</span></label>
+      <input id="p-address" placeholder="123 Main St, City, State ZIP" style="width:100%">
+    </div>
     <div class="g3">
       <div class="fg"><label>Primary Role</label>
         <select id="p-role" onchange="roleUI()">
@@ -1274,6 +1278,7 @@ tbody tr:hover{background:var(--bg3)}
     <div class="tab on" onclick="holTab('assign',this)">Assign / Edit</div>
     <div class="tab" onclick="holTab('counter',this)">Counter</div>
     <div class="tab" onclick="holTab('schedule',this)">Schedule View</div>
+    <div class="tab" onclick="holTab('autoassign',this)">🎲 Auto-Assign</div>
   </div>
 
   <!-- ASSIGN / EDIT TAB -->
@@ -1302,6 +1307,60 @@ tbody tr:hover{background:var(--bg3)}
     <div class="card" style="overflow-x:auto">
       <table><thead><tr><th>Holiday</th><th>Date</th><th>Year</th><th>Physician</th><th>Group</th><th>Notes</th><th>Edit</th><th>Del</th></tr></thead>
       <tbody id="hol-tbody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- AUTO-ASSIGN TAB -->
+  <div id="holt-autoassign" style="display:none">
+    <div class="note ni" style="margin-bottom:10px">
+      FTE-weighted random lottery for holiday call. Physicians with a negative career balance
+      (owed more calls) get proportionally higher draw weight. Randomness is preserved — no one is
+      ever guaranteed or excluded — but the lottery self-corrects over years.
+    </div>
+
+    <div class="ibox" style="margin-bottom:10px">
+      <div class="card-title">Configure Assignment</div>
+      <div class="flexe" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="fg" style="margin:0"><label>Year</label>
+          <input id="haa-year" type="number" value="2026" min="2020" max="2035" style="width:90px"
+            oninput="renderHolCareerTally()">
+        </div>
+        <div class="fg" style="margin:0"><label>Group</label>
+          <select id="haa-grp" onchange="renderHolCareerTally()" style="width:110px">
+            <option value="both">Both DR + IR</option>
+            <option value="DR">DR only</option>
+            <option value="IR">IR only</option>
+          </select>
+        </div>
+        <div class="fg" style="margin:0"><label>Randomness</label>
+          <select id="haa-mode" style="width:160px">
+            <option value="weighted">Weighted (balances over years)</option>
+            <option value="pure">Pure FTE proportion</option>
+          </select>
+        </div>
+        <button class="bp bsm" onclick="renderHolCareerTally()" style="margin-bottom:2px">↺ Refresh Tally</button>
+      </div>
+    </div>
+
+    <!-- Career tally -->
+    <div id="haa-tally"></div>
+
+    <!-- Lottery controls -->
+    <div class="ibox" style="margin-top:10px;margin-bottom:10px" id="haa-lottery-ctrl">
+      <div class="card-title">Run Lottery</div>
+      <div class="note nw" style="margin-bottom:8px;font-size:12px">
+        Only unassigned holiday slots for the selected year will be filled.
+        Slots already assigned are skipped.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="bp" onclick="previewHolRandom()">🎲 Generate Random Assignment</button>
+      </div>
+    </div>
+
+    <div id="haa-box"></div>
+    <div style="margin-top:10px;display:none" id="haa-apply-wrap">
+      <button class="bg" onclick="applyHolRandom()">✓ Apply Holiday Assignments</button>
+      <span id="haa-apply-note" style="font-size:12px;color:var(--txt2);margin-left:10px"></span>
     </div>
   </div>
 
@@ -1423,10 +1482,36 @@ tbody tr:hover{background:var(--bg3)}
   <div class="tabs" id="fte-tabs" style="margin-bottom:10px">
     <div class="tab on" onclick="fteTab('month',this)">Monthly</div>
     <div class="tab" onclick="fteTab('period',this)">6-Month Period</div>
+    <div class="tab" onclick="fteTab('career',this)">📈 Career Tally</div>
+    <div class="tab" onclick="fteTab('commute',this)">🗺 Commute Times</div>
   </div>
   <div id="fte-month-ctrl" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px">
     <div class="fg" style="margin:0"><label>Month</label><input id="fte-mo" type="month" oninput="renderFTE()"></div>
     <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTE()">↺ Refresh</button>
+  </div>
+  <div id="fte-commute-ctrl" style="display:none;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="fte-commute-grp" onchange="renderCommuteMatrix()" style="width:130px">
+        <option value="all">All Physicians</option>
+        <option value="DR">DR only</option>
+        <option value="IR">IR only</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="calcAllDriveTimes()">🔄 Recalculate</button>
+    <button class="bt bsm" style="margin-bottom:2px" onclick="renderCommuteMatrix()">↺ Refresh</button>
+  </div>
+  <div id="fte-career-ctrl" style="display:none;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="fte-career-grp" onchange="renderFTECareer()" style="width:110px">
+        <option value="both">Both</option>
+        <option value="North">North</option>
+        <option value="South">South</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTECareer()">↺ Refresh</button>
+    <div style="font-size:11px;color:var(--txt3);align-self:center;max-width:460px">
+      Running balance = cumulative (actual calls − FTE-proportional share). Positive = physician has done more than fair share; negative = owed calls. Used to equalize future scheduling.
+    </div>
   </div>
   <div id="fte-period-ctrl" style="display:none;align-items:flex-end;gap:10px;margin-bottom:12px">
     <div class="fg" style="margin:0"><label>Year</label>
@@ -1506,12 +1591,34 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
       </div>
     </div>
     <div>
+      <!-- DRIVE TIMES CONFIG -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">🗺 Drive Times — Google Maps</div>
+        <div class="note ni" style="font-size:11px;margin-bottom:8px">
+          Enter your Google Maps API key to calculate commute times. The key is stored in your browser only — never synced to the shared database. Calculated times are cached and shared.
+        </div>
+        <div class="flex" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">
+          <div class="fg" style="flex:1;min-width:200px;margin:0">
+            <label>Google Maps API Key</label>
+            <input id="gmaps-key" type="password" placeholder="AIza..." style="width:100%;font-family:monospace;font-size:12px">
+          </div>
+          <button class="bsm bt" style="margin-bottom:2px" onclick="saveGMapsKey()">Save Key</button>
+          <button class="bsm bp" style="margin-bottom:2px" onclick="testMapsKey()">Test</button>
+        </div>
+        <div id="gmaps-key-msg" style="font-size:12px;margin-top:2px;margin-bottom:8px"></div>
+        <button class="bt" onclick="calcAllDriveTimes()">🔄 Calculate All Drive Times</button>
+        <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:10px"></span>
+      </div>
+
       <div class="card">
         <div class="card-title">Hospital Sites</div>
-        <div class="flex" style="margin-bottom:6px;flex-wrap:wrap;gap:4px">
+        <div class="flex" style="margin-bottom:4px;flex-wrap:wrap;gap:4px">
           <input id="new-site" placeholder="Site name..." style="flex:1;min-width:120px">
           <select id="new-site-irg" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Both">IR Both</option></select>
           <button class="bp bsm" onclick="addSite()">Add</button>
+        </div>
+        <div class="flex" style="margin-bottom:6px;gap:4px">
+          <input id="new-site-address" placeholder="🏠 Hospital address (for drive times)..." style="flex:1;font-size:12px">
         </div>
         <div id="sites-list"></div>
       </div>
@@ -1751,7 +1858,7 @@ function _buildSaveHTML(){
     vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
+    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,
@@ -1864,7 +1971,7 @@ function showErr(msg){const e=document.getElementById('aerr');e.textContent=msg;
 // ── Supabase Auth: initialize client early so login/register work ──
 function _initAuthClient(){
   if(_supabase) return _supabase;
-  const url=_SUPABASE_URL, key=_SUPABASE_KEY;
+  const url=_getUrl(), key=_getKey();
   if(!url||!key) return null;
   try{ _supabase=supabase.createClient(url,key); }catch(e){ console.warn('[RS] Auth client init failed:',e); }
   return _supabase;
@@ -1927,7 +2034,11 @@ async function doLogin(){
     if(btn) btn.textContent='Sign In';
     launchApp();
   }catch(e){
-    showErr(e.message||'Invalid email or password.');
+    const msg=e.message||'';
+    if(msg.toLowerCase().includes('fetch')||msg.toLowerCase().includes('network'))
+      showErr('Cannot reach auth server. Check your connection.');
+    else
+      showErr('Invalid email or password.');
     if(btn) btn.textContent='Sign In';
   }
 }
@@ -2042,6 +2153,7 @@ function _applyRemoteData(d){
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
   if(d.cfg)Object.assign(S.cfg,d.cfg);
+  if(d.driveTimes) S.driveTimes=d.driveTimes;
   if(d.nextId>S.nextId)S.nextId=d.nextId;
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
@@ -2220,6 +2332,7 @@ let S=/*S_START*/{
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70},
+  driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
   // Chat messages
@@ -2810,6 +2923,8 @@ function editPhys(id){
     if(el) el.checked=!!se[k];
   });
   // Scroll form into view
+  const paddrEl=document.getElementById('p-address');
+  if(paddrEl) paddrEl.value=p.address||'';
   document.querySelector('#page-physicians .ibox')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -2844,6 +2959,7 @@ function _saveEditPhys(id){
     wknd:!!document.getElementById('pe-wknd')?.checked&&role!=='IR',
   };
   p.drSite=anchor||allowed[0]||S.sites[0]?.name||'';
+  p.address=document.getElementById('p-address')?.value.trim()||'';
   triggerSave();
   cancelEditPhys();
   renderPhysicians();
@@ -2857,7 +2973,7 @@ function cancelEditPhys(){
   document.getElementById('phys-submit-btn').className='bp';
   document.getElementById('phys-cancel-btn').style.display='none';
   // Reset all fields
-  ['p-first','p-last'].forEach(id=>document.getElementById(id).value='');
+  ['p-first','p-last','p-address'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('p-deg').value='MD';
   document.getElementById('p-role').value='DR';
   roleUI();
@@ -2888,6 +3004,7 @@ function addPhys(){
     irSubs:[...document.querySelectorAll('[name="irs"]:checked')].map(c=>c.value),
     shiftElig:{s1:document.getElementById('pe-s1').checked&&role!=='IR',s2:document.getElementById('pe-s2').checked,s3:document.getElementById('pe-s3').checked,home:document.getElementById('pe-home').checked&&role!=='IR',wknd:document.getElementById('pe-wknd').checked&&role!=='IR'},
     drSite:anchor||S.sites[0]?.name||'',
+    address:document.getElementById('p-address')?.value.trim()||'',
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
   renderPhysicians();
@@ -3179,10 +3296,16 @@ function fteTab(t,tabEl){
   if(tabEl) tabEl.classList.add('on');
   const monthCtrl=document.getElementById('fte-month-ctrl');
   const periodCtrl=document.getElementById('fte-period-ctrl');
-  if(monthCtrl) monthCtrl.style.display=t==='month'?'flex':'none';
+  const careerCtrl=document.getElementById('fte-career-ctrl');
+  if(monthCtrl)  monthCtrl.style.display =t==='month' ?'flex':'none';
   if(periodCtrl) periodCtrl.style.display=t==='period'?'flex':'none';
-  if(t==='month') renderFTE();
-  else renderFTEPeriod();
+  if(careerCtrl) careerCtrl.style.display=t==='career'?'flex':'none';
+  const commuteCtrl=document.getElementById('fte-commute-ctrl');
+  if(commuteCtrl) commuteCtrl.style.display=t==='commute'?'flex':'none';
+  if(t==='month')  renderFTE();
+  else if(t==='period') renderFTEPeriod();
+  else if(t==='career') renderFTECareer();
+  else renderCommuteMatrix();
 }
 
 function renderFTEPeriod(){
@@ -3323,6 +3446,384 @@ function renderFTEPeriod(){
   el.innerHTML=html||'<div class="note ni">No physicians configured.</div>';
 }
 
+/* ─── FTE CAREER TALLY ─── */
+// Tracks cumulative IR daily calls and weekend calls across all recorded years.
+// "Running balance" = cumulative (actual - FTE-proportional fair share).
+//   Positive balance  → physician has done MORE than their fair share (should get fewer next period)
+//   Negative balance  → physician has done LESS than their fair share (should get more next period)
+// This feeds forward into scheduling decisions for equalization across years.
+
+function renderFTECareer(){
+  const el=document.getElementById('fte-content');
+  if(!el) return;
+  const grpFilter=document.getElementById('fte-career-grp')?.value||'both';
+  const irPs=S.physicians.filter(p=>p.irFte>0&&(grpFilter==='both'||p.irGroup===grpFilter));
+  if(!irPs.length){el.innerHTML='<div class="note ni">No IR physicians configured.</div>';return;}
+
+  // Gather all years present in irCalls
+  const allYears=[...new Set(S.irCalls.map(c=>c.date.slice(0,4)))].sort();
+  if(!allYears.length){el.innerHTML='<div class="note ni">No IR call data recorded yet. Assign and apply IR calls to start building the career tally.</div>';return;}
+
+  // Per-year, per-group totals
+  function yearGroupTotals(yr,g,callType){
+    return S.irCalls.filter(c=>c.date.startsWith(yr)&&c.irGroup===g&&c.callType===callType).length;
+  }
+
+  // For each physician, per-year counts
+  function physYearCnt(pid,yr,callType){
+    return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(yr)&&c.callType===callType).length;
+  }
+
+  // FTE-proportional fair share: physician's share = (their irFte / group total irFte) × group total calls
+  function fairShare(p,yr,callType){
+    const gPhys=irPs.filter(x=>x.irGroup===p.irGroup);
+    const gFte=gPhys.reduce((s,x)=>s+x.irFte,0)||1;
+    const gTotal=yearGroupTotals(yr,p.irGroup,callType);
+    return gTotal*(p.irFte/gFte);
+  }
+
+  // Build per-physician career data
+  const physData=irPs.map(p=>{
+    let runD=0,runW=0;
+    const years=allYears.map(yr=>{
+      const actD=physYearCnt(p.id,yr,'daily');
+      const actW=physYearCnt(p.id,yr,'weekend');
+      const fsD=fairShare(p,yr,'daily');
+      const fsW=fairShare(p,yr,'weekend');
+      const balD=actD-fsD;
+      const balW=actW-fsW;
+      runD+=balD;
+      runW+=balW;
+      return{yr,actD,actW,fsD,fsW,balD,balW,snapRunD:runD,snapRunW:runW};
+    });
+    const totActD=years.reduce((s,r)=>s+r.actD,0);
+    const totActW=years.reduce((s,r)=>s+r.actW,0);
+    const totFsD=years.reduce((s,r)=>s+r.fsD,0);
+    const totFsW=years.reduce((s,r)=>s+r.fsW,0);
+    return{p,years,totActD,totActW,totFsD,totFsW,runD,runW};
+  });
+
+  // ── Summary balance leaderboard ─────────────────────────────────────────
+  const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
+  let html='';
+
+  // Balance bar helper: -ve = owes calls (green bar on left), +ve = ahead (red bar on right)
+  function balBar(val,scale){
+    const pct=Math.min(100,Math.abs(val)/scale*50); // 50% width = "scale" calls off
+    if(Math.abs(val)<0.5) return `<div style="display:flex;align-items:center;height:14px;gap:2px"><div style="width:50%;height:6px;background:var(--bdr2);border-radius:3px;position:relative"><div style="position:absolute;left:50%;width:1px;height:10px;top:-2px;background:var(--bdr)"></div></div><span style="font-size:10px;color:var(--txt3)">±0</span></div>`;
+    const color=val>0?'var(--amber,#d97706)':'var(--green-t)';
+    const dir=val>0?'right':'left';
+    return `<div style="display:flex;align-items:center;height:14px;gap:4px">
+      <div style="width:100px;height:6px;background:var(--bdr2);border-radius:3px;position:relative;overflow:hidden">
+        <div style="position:absolute;${dir}:50%;width:${pct/2}%;height:6px;background:${color};border-radius:3px"></div>
+        <div style="position:absolute;left:50%;width:1px;height:10px;top:-2px;background:var(--bdr)"></div>
+      </div>
+      <span style="font-size:10px;font-weight:700;color:${color}">${val>0?'+':''}${val.toFixed(1)}</span>
+    </div>`;
+  }
+
+  groups.forEach(g=>{
+    const gData=physData.filter(d=>d.p.irGroup===g);
+    if(!gData.length) return;
+    // Scale for bar = max absolute balance in group (min 5 for readability)
+    const maxBal=Math.max(5,...gData.map(d=>Math.abs(d.runD)),...gData.map(d=>Math.abs(d.runW)));
+
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">${g} Group — Career IR Call Balance
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+          all-time · amber = ahead of fair share · green = owed calls
+        </span>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>IR FTE</th>
+        <th>Total Daily</th><th>Daily Fair Share</th><th>Daily Balance</th>
+        <th>Total Wknd</th><th>Wknd Fair Share</th><th>Wknd Balance</th>
+        <th>Combined Score</th>
+      </tr></thead><tbody>`;
+
+    // Sort by combined running balance (most indebted first = will be prioritised)
+    gData.slice().sort((a,b)=>(a.runD+a.runW)-(b.runD+b.runW)).forEach(({p,totActD,totActW,totFsD,totFsW,runD,runW})=>{
+      const combined=runD+runW;
+      const combCls=combined>3?'color:var(--amber,#d97706)':combined<-3?'color:var(--green-t)':'color:var(--txt2)';
+      const rowBg=combined>5?'background:var(--amber-bg,#fffbeb)':combined<-5?'background:#f0fdf4':'';
+      html+=`<tr style="${rowBg}">
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center;font-weight:700">${totActD}</td>
+        <td style="text-align:center;color:var(--txt3)">${totFsD.toFixed(1)}</td>
+        <td>${balBar(runD,maxBal)}</td>
+        <td style="text-align:center;font-weight:700">${totActW}</td>
+        <td style="text-align:center;color:var(--txt3)">${totFsW.toFixed(1)}</td>
+        <td>${balBar(runW,maxBal)}</td>
+        <td><span style="font-weight:800;font-size:13px;${combCls}">${combined>0?'+':''}${combined.toFixed(1)}</span></td>
+      </tr>`;
+    });
+
+    html+=`</tbody></table></div></div>`;
+  });
+
+  // ── Year-by-year breakdown ───────────────────────────────────────────────
+  groups.forEach(g=>{
+    const gData=physData.filter(d=>d.p.irGroup===g);
+    if(!gData.length) return;
+
+    // Daily call breakdown
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">${g} Group — Daily IR Calls by Year</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>FTE</th>
+        ${allYears.map(yr=>`<th colspan="2" style="text-align:center;border-left:1px solid var(--bdr)">${yr}<br><span style="font-weight:400;font-size:9px">actual / share</span></th>`).join('')}
+        <th style="border-left:2px solid var(--bdr)">Running Balance</th>
+      </tr></thead><tbody>`;
+
+    gData.forEach(({p,years,runD})=>{
+      const balCls=runD>3?'color:var(--amber,#d97706)':runD<-3?'color:var(--green-t)':'color:var(--txt2)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td style="text-align:center">${p.irFte}</td>
+        ${years.map(r=>{
+          const diff=r.actD-r.fsD;
+          const cls=diff>2?'color:var(--amber,#d97706)':diff<-2?'color:var(--green-t)':'color:var(--txt2)';
+          return `<td style="text-align:center;border-left:1px solid var(--bdr2);font-weight:700">${r.actD}</td>
+                  <td style="text-align:center;font-size:10px;${cls}">${r.fsD.toFixed(1)}</td>`;
+        }).join('')}
+        <td style="border-left:2px solid var(--bdr);font-weight:800;${balCls}">${runD>0?'+':''}${runD.toFixed(1)}</td>
+      </tr>`;
+    });
+
+    // Group totals row
+    html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
+      <td style="font-weight:800" colspan="2">Group Total</td>
+      ${allYears.map(yr=>{
+        const tot=yearGroupTotals(yr,g,'daily');
+        return `<td colspan="2" style="text-align:center;font-weight:800;border-left:1px solid var(--bdr2)">${tot}</td>`;
+      }).join('')}
+      <td style="border-left:2px solid var(--bdr)"></td>
+    </tr>`;
+
+    html+=`</tbody></table></div></div>`;
+
+    // Weekend call breakdown
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">${g} Group — Weekend IR Calls by Year</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>FTE</th>
+        ${allYears.map(yr=>`<th colspan="2" style="text-align:center;border-left:1px solid var(--bdr)">${yr}<br><span style="font-weight:400;font-size:9px">actual / share</span></th>`).join('')}
+        <th style="border-left:2px solid var(--bdr)">Running Balance</th>
+      </tr></thead><tbody>`;
+
+    gData.forEach(({p,years,runW})=>{
+      const balCls=runW>2?'color:var(--amber,#d97706)':runW<-2?'color:var(--green-t)':'color:var(--txt2)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td style="text-align:center">${p.irFte}</td>
+        ${years.map(r=>{
+          const diff=r.actW-r.fsW;
+          const cls=diff>1?'color:var(--amber,#d97706)':diff<-1?'color:var(--green-t)':'color:var(--txt2)';
+          return `<td style="text-align:center;border-left:1px solid var(--bdr2);font-weight:700">${r.actW}</td>
+                  <td style="text-align:center;font-size:10px;${cls}">${r.fsW.toFixed(1)}</td>`;
+        }).join('')}
+        <td style="border-left:2px solid var(--bdr);font-weight:800;${balCls}">${runW>0?'+':''}${runW.toFixed(1)}</td>
+      </tr>`;
+    });
+
+    html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
+      <td style="font-weight:800" colspan="2">Group Total</td>
+      ${allYears.map(yr=>{
+        const tot=yearGroupTotals(yr,g,'weekend');
+        return `<td colspan="2" style="text-align:center;font-weight:800;border-left:1px solid var(--bdr2)">${tot}</td>`;
+      }).join('')}
+      <td style="border-left:2px solid var(--bdr)"></td>
+    </tr>`;
+
+    html+=`</tbody></table></div></div>`;
+  });
+
+  // ── Legend ───────────────────────────────────────────────────────────────
+  html+=`<div class="note ni" style="font-size:11px">
+    <strong>How to read this:</strong> Each year's "fair share" = (physician irFTE ÷ group total irFTE) × total group calls that year.
+    "Running balance" accumulates (actual − fair share) across all years.
+    <strong>Amber (+positive)</strong> = physician has done more than their proportional share — should receive fewer calls in the next scheduling period to compensate.
+    <strong>Green (−negative)</strong> = physician is owed calls — should be prioritised in upcoming scheduling.
+    The scheduler's FTE-proportional distribution already uses this logic within each period; this tally makes it visible across years so you can manually correct long-term drift.
+  </div>`;
+
+  el.innerHTML=html;
+}
+/* ─── GOOGLE MAPS / DRIVE TIMES ─── */
+
+const _GMAPS_KEY_LS = 'radscheduler_gmaps_key';
+function _getGMapsKey(){ return localStorage.getItem(_GMAPS_KEY_LS)||''; }
+function _setGMapsKey(k){ if(k) localStorage.setItem(_GMAPS_KEY_LS,k); else localStorage.removeItem(_GMAPS_KEY_LS); }
+
+function saveGMapsKey(){
+  const k=document.getElementById('gmaps-key')?.value.trim()||'';
+  _setGMapsKey(k);
+  const msg=document.getElementById('gmaps-key-msg');
+  if(msg) msg.innerHTML=k?'<span style="color:var(--green-t)">✓ Key saved to browser.</span>':'<span style="color:var(--txt3)">Key cleared.</span>';
+}
+
+function _restoreGMapsKeyField(){
+  const el=document.getElementById('gmaps-key');
+  if(el) el.value=_getGMapsKey();
+}
+
+async function testMapsKey(){
+  const key=document.getElementById('gmaps-key')?.value.trim()||_getGMapsKey();
+  const msg=document.getElementById('gmaps-key-msg');
+  if(!key){if(msg)msg.innerHTML='<span style="color:var(--red-t)">Enter API key first.</span>';return;}
+  _setGMapsKey(key);
+  if(msg)msg.innerHTML='<span style="color:var(--txt2)">Testing…</span>';
+  try{
+    const res=await _mapsProxyCall(['Chicago, IL'],['New York, NY']);
+    if(res?.rows?.[0]?.elements?.[0]?.status==='OK')
+      {if(msg)msg.innerHTML='<span style="color:var(--green-t)">✓ API key works!</span>';}
+    else
+      {if(msg)msg.innerHTML=`<span style="color:var(--red-t)">Maps returned: ${res?.rows?.[0]?.elements?.[0]?.status}</span>`;}
+  }catch(e){
+    if(msg)msg.innerHTML=`<span style="color:var(--red-t)">Error: ${e.message}</span>`;
+  }
+}
+
+async function _mapsProxyCall(origins, destinations){
+  const sb=_initAuthClient();
+  if(!sb) throw new Error('Not connected to Supabase.');
+  const {data:{session}}=await sb.auth.getSession();
+  const jwt=session?.access_token;
+  if(!jwt) throw new Error('Not authenticated.');
+  const key=_getGMapsKey();
+  if(!key) throw new Error('No Google Maps API key. Add it in Settings under Drive Times.');
+  const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
+    body:JSON.stringify({origins,destinations,mapsKey:key})
+  });
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+  return data;
+}
+
+async function calcAllDriveTimes(){
+  const statusEl=document.getElementById('gmaps-calc-status');
+  const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
+  const physWithAddr=S.physicians.filter(p=>p.address?.trim());
+  const sitesWithAddr=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
+  if(!physWithAddr.length){setStatus('\u26a0 No physician addresses configured.');return;}
+  if(!sitesWithAddr.length){setStatus('\u26a0 No hospital addresses configured.');return;}
+  setStatus(`Calculating ${physWithAddr.length} \u00d7 ${sitesWithAddr.length} pairs\u2026`);
+  if(!S.driveTimes) S.driveTimes={};
+  const today=fmtDate(new Date());
+  let done=0, errors=0;
+  const BATCH=10;
+  for(let i=0;i<physWithAddr.length;i+=BATCH){
+    const batch=physWithAddr.slice(i,i+BATCH);
+    const origins=batch.map(p=>p.address.trim());
+    const destinations=sitesWithAddr.map(s=>s.address.trim());
+    try{
+      const result=await _mapsProxyCall(origins,destinations);
+      result.rows.forEach((row,ri)=>{
+        const p=batch[ri];
+        row.elements.forEach((el,ci)=>{
+          const site=sitesWithAddr[ci];
+          const key=`${p.id}|${site.name}`;
+          if(el.status==='OK'){
+            S.driveTimes[key]={mins:Math.round(el.duration.value/60),text:el.duration.text,dist:el.distance?.text||'',updated:today};
+            done++;
+          } else {
+            S.driveTimes[key]={mins:null,text:'N/A',dist:'',updated:today};
+            errors++;
+          }
+        });
+      });
+      setStatus(`Calculated ${Math.min(i+BATCH,physWithAddr.length)}/${physWithAddr.length} physicians\u2026`);
+      if(i+BATCH<physWithAddr.length) await new Promise(r=>setTimeout(r,600));
+    }catch(e){
+      setStatus(`Error: ${e.message}`);
+      return;
+    }
+  }
+  triggerSave();
+  setStatus(`\u2713 Done \u2014 ${done} times calculated${errors?`, ${errors} unreachable`:'.'}`);
+  if(_fteActiveTab==='commute') renderCommuteMatrix();
+}
+
+function _driveTimeBadge(physId,siteName){
+  if(!S.driveTimes) return '';
+  const dt=S.driveTimes[`${physId}|${siteName}`];
+  if(!dt||dt.mins===null) return '';
+  const col=dt.mins<=20?'var(--green-t)':dt.mins<=40?'var(--txt3)':'var(--amber,#d97706)';
+  return `<span style="font-size:9px;color:${col};margin-left:2px" title="Drive to ${siteName}: ${dt.text}">🚗${dt.text}</span>`;
+}
+
+function renderCommuteMatrix(){
+  const el=document.getElementById('fte-content');
+  if(!el) return;
+  const grpFilter=document.getElementById('fte-commute-grp')?.value||'all';
+  const physicians=S.physicians.filter(p=>{
+    if(grpFilter==='DR') return p.drFte>0&&p.role!=='IR';
+    if(grpFilter==='IR') return p.irFte>0;
+    return true;
+  });
+  const hospitals=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
+  const physWithAddr=physicians.filter(p=>p.address?.trim());
+
+  if(!S.driveTimes||!Object.keys(S.driveTimes).length){
+    el.innerHTML=`<div class="note ni">No drive times calculated yet.<br><br>
+      <strong>Setup:</strong><ol style="margin:8px 0 0 16px;font-size:12px">
+        <li>Add home addresses to physicians (Physician Roster \u2192 Edit)</li>
+        <li>Add addresses to hospitals (Settings \u2192 Hospital Sites)</li>
+        <li>Enter Google Maps API key (Settings \u2192 Drive Times)</li>
+        <li>Click \u201cCalculate All Drive Times\u201d</li>
+      </ol></div>`;
+    return;
+  }
+
+  let html='';
+
+  if(physWithAddr.length&&hospitals.length){
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Commute Time Matrix
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">driving \u00b7 green \u226420 min \u00b7 amber \u226440 min \u00b7 red >40 min</span>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th>
+        ${hospitals.map(s=>`<th style="text-align:center;min-width:90px;font-size:11px">${s.name}</th>`).join('')}
+      </tr></thead><tbody>`;
+
+    physWithAddr.forEach(p=>{
+      html+=`<tr>
+        <td style="font-weight:600;white-space:nowrap">
+          ${pname(p.id)}
+          <div style="font-size:9px;color:var(--txt3);font-weight:400;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.address}</div>
+        </td>
+        ${hospitals.map(s=>{
+          const dt=S.driveTimes?.[`${p.id}|${s.name}`];
+          if(!dt) return `<td style="text-align:center;color:var(--txt3);font-size:11px">—</td>`;
+          if(dt.mins===null) return `<td style="text-align:center;color:var(--txt3);font-size:11px">N/A</td>`;
+          const bg=dt.mins<=20?'var(--green-bg)':dt.mins<=40?'transparent':'var(--amber-bg,#fffbeb)';
+          const col=dt.mins<=20?'var(--green-t)':dt.mins<=40?'var(--txt)':'var(--amber,#d97706)';
+          return `<td style="text-align:center;background:${bg};padding:6px 4px">
+            <div style="font-weight:800;font-size:14px;color:${col}">${dt.mins}</div>
+            <div style="font-size:9px;color:var(--txt3)">min</div>
+            ${dt.dist?`<div style="font-size:9px;color:var(--txt3)">${dt.dist}</div>`:''}
+          </td>`;
+        }).join('')}
+      </tr>`;
+    });
+    html+=`</tbody></table></div></div>`;
+  }
+
+  const noAddrPhys=physicians.filter(p=>!p.address?.trim());
+  const noAddrSites=S.sites.filter(s=>!s.address?.trim()&&s.name!=='At Home / Remote');
+  if(noAddrPhys.length) html+=`<div class="note nw" style="font-size:12px">${noAddrPhys.length} physician(s) missing address: ${noAddrPhys.map(p=>p.last).join(', ')}. Edit in Physician Roster.</div>`;
+  if(noAddrSites.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrSites.length} hospital(s) missing address: ${noAddrSites.map(s=>s.name).join(', ')}. Edit in Settings \u2192 Hospital Sites.</div>`;
+
+  const updated=[...new Set(Object.values(S.driveTimes||{}).map(d=>d.updated).filter(Boolean))].sort().pop();
+  if(updated) html+=`<div style="font-size:10px;color:var(--txt3);margin-top:8px">Last calculated: ${updated}</div>`;
+
+  el.innerHTML=html||'<div class="note ni">Configure addresses and calculate to see commute times.</div>';
+}
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
@@ -3340,7 +3841,7 @@ function renderDRCal(){
       const cls=s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':s.autoHome?'e-home-auto':'ehome';
       const p=S.physicians.find(x=>x.id===s.physId);
       const nonAnc=p?.anchorSite&&s.site!==p.anchorSite?' eanc':'';
-      evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} @ ${s.site}">${pshort(s.physId)} ${s.sub?s.sub.slice(0,4):''}</div>`;
+      evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} @ ${s.site}">${pshort(s.physId)} ${s.sub?s.sub.slice(0,4):''}${_driveTimeBadge(s.physId,s.site)}</div>`;
     });
     if(!fsh||fsh==='Weekend') S.weekendCalls.filter(w=>((w.satDate||w.date)===c.date||(w.sunDate)===c.date)&&(!fpid||w.physId===fpid)).forEach(w=>{evs+=`<div class="ev ewk">${pshort(w.physId)} wk</div>`;});
     if(!fsh||fsh==='Holiday') S.holidays.filter(h=>h.date===c.date&&h.group==='DR').forEach(h=>{evs+=`<div class="ev ehol">${pshort(h.physId)} HOL</div>`;});
@@ -3640,7 +4141,7 @@ function renderIRCal(){
           ev=`<div class="ev" style="background:#d1fae5;color:#065f46;border:1px solid #86efac" title="${pname(ic.physId)} — Weekend Call">${pshort(ic.physId)} [${ic.irGroup[0]}] ${isStart?'▶':''}Wk</div>`;
         } else {
           const cls=ic.irGroup==='North'?'eir':'eirs';
-          ev=`<div class="ev ${cls}" title="${pname(ic.physId)} — Daily Call @ ${ic.site}">${pshort(ic.physId)} [${ic.irGroup[0]}]</div>`;
+          ev=`<div class="ev ${cls}" title="${pname(ic.physId)} — Daily Call @ ${ic.site}">${pshort(ic.physId)} [${ic.irGroup[0]}]${_driveTimeBadge(ic.physId,ic.site)}</div>`;
         }
         callEvs+=ev;
       });
@@ -3990,33 +4491,26 @@ function previewIRAA(){
   const typ      = document.getElementById('ira-type').value;
   const grpFilter= document.getElementById('ira-grp')?.value||'both';
   const preview  = [], gaps = [];
-  const inPeriod = date => months.some(ym=>date.startsWith(ym));
 
-  // Build flat list of all calendar cells across 6 months
   const allCells = months.flatMap(ym=>buildCal(ym).filter(c=>c.day));
-
   const irPs = S.physicians.filter(p=>p.irFte>0);
 
-  // Track daily and weekend counts SEPARATELY — FTE-normalized distribution
   const cntD={}, cntW={};
   irPs.forEach(p=>{
     cntD[p.id]=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
     cntW[p.id]=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
   });
 
-  // Period-based caps from finite slots
-  const dailyCapFn = p => Math.max(Math.ceil(irDailyTargetPeriod(p,months)),1);
-  const wkndCapFn  = p => Math.max(Math.ceil(irWkndTargetPeriod(p,months)),1);
-
+  const dailyCapFn = p=>Math.max(Math.ceil(irDailyTargetPeriod(p,months)),1);
+  const wkndCapFn  = p=>Math.max(Math.ceil(irWkndTargetPeriod(p,months)),1);
   const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
 
-  // Helpers — same as before but scoped to period
   function _sortByFte(pool,gPhys,cntMap,capFn){
     const n=Math.max(gPhys.length,1);
     const offset=Object.values(cntMap).reduce((s,v)=>s+v,0)%n;
     return pool.slice().sort((a,b)=>{
-      const mA=capFn(a)||1, mB=capFn(b)||1;
-      const rA=cntMap[a.id]/mA, rB=cntMap[b.id]/mB;
+      const mA=capFn(a)||1,mB=capFn(b)||1;
+      const rA=cntMap[a.id]/mA,rB=cntMap[b.id]/mB;
       if(Math.abs(rA-rB)>1e-9) return rA-rB;
       const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
       const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
@@ -4024,26 +4518,29 @@ function previewIRAA(){
     });
   }
 
+  // irOnDate: checks S.irCalls + preview (including preview weekend span Fri-Mon)
   function irOnDate(pid,date){
     if(S.irCalls.find(ic=>ic.physId===pid&&ic.date===date)) return true;
     if(S.irCalls.find(ic=>ic.physId===pid&&ic.callType==='weekend'&&date>=ic.date&&date<=addDays(ic.date,3))) return true;
     if(preview.find(a=>a.physId===pid&&a.date===date)) return true;
+    if(preview.find(a=>a.physId===pid&&a.callType==='weekend'&&date>=a.date&&date<=addDays(a.date,3))) return true;
     return false;
   }
 
+  // Adjacency checks used only in pass 0 (daily) or passes 0-1 (weekend)
   function previewAdjacentToDaily(pid,date){
     const prev=addDays(date,-1),next=addDays(date,1);
     return preview.some(a=>a.physId===pid&&(
       (a.callType==='daily'&&(a.date===prev||a.date===next))||
       (a.callType==='weekend'&&(
-        (date>=a.date&&date<=addDays(a.date,4))|| // Fri→Tue span
-        date===addDays(a.date,-1)                  // Thu before Friday
+        (date>=a.date&&date<=addDays(a.date,4))||
+        date===addDays(a.date,-1)
       ))
     ));
   }
 
   function previewConflictsWeekend(pid,fridayDate){
-    const thu=addDays(fridayDate,-1), mon=addDays(fridayDate,3), tue=addDays(fridayDate,4);
+    const thu=addDays(fridayDate,-1),mon=addDays(fridayDate,3),tue=addDays(fridayDate,4);
     return preview.some(a=>a.physId===pid&&(
       (a.callType==='daily'&&(a.date===thu||a.date===mon||a.date===tue))||
       (a.callType==='weekend'&&a.date!==fridayDate&&
@@ -4051,123 +4548,188 @@ function previewIRAA(){
     ));
   }
 
-  // ── Daily calls (Mon–Thu across all 6 months) ──
-  if(typ==='daily'||typ==='both'){
-    allCells.filter(c=>c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)).forEach(c=>{
-      groups.forEach(g=>{
-        const gPhys=irPs.filter(p=>p.irGroup===g);
-        const alreadyAssigned=
-          S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='daily')||
-          preview.find(a=>a.date===c.date&&a.irGroup===g&&a.callType==='daily');
-        if(alreadyAssigned) return;
+  let relaxedFills=0;
 
-        const adjPrev=addDays(c.date,-1), adjNext=addDays(c.date,1);
-        const eligible=gPhys.filter(p=>{
-          const vd=vacDays(p.id); if(vd.has(c.date)) return false;
-          if(isSoldBackDate(p.id,c.date)) return false;
-          if(irOnDate(p.id,c.date)) return false;
-          if(_has2ndOr3rdShift(p.id,c.date)) return false;
-          if(!_hasIRShiftOnDate(p.id,c.date)) return false;
-          if(S.irCalls.some(ic=>ic.physId===p.id&&(
-            ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext)||
-            ic.callType==='weekend'&&(
-              (c.date>=ic.date&&c.date<=addDays(ic.date,4))|| // Fri→Tue span + Tue
-              c.date===addDays(ic.date,-1)                     // Thu before Friday
-            )
-          ))) return false;
-          if(previewAdjacentToDaily(p.id,c.date)) return false;
-          if(preview.some(a=>a.physId===p.id&&a.callType==='weekend'&&
-            (c.date>=a.date&&c.date<=addDays(a.date,4)))) return false;
-          if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call')) return false;
-          if(!sequenceOk(p,c.date,c.date.slice(0,7))) return false;
-          return true; // quota handled by sort (_sortByFte), not filter — ensures all slots can be filled
-        });
+  groups.forEach(g=>{
+    const gPhys=irPs.filter(p=>p.irGroup===g);
+    if(!gPhys.length) return;
 
-        const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
-        if(pool.length){
-          const p=pool[0];
-          const primarySite=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
-          preview.push({physId:p.id,date:c.date,callType:'daily',irGroup:g,site:primarySite,notes:'Auto'});
-          cntD[p.id]++;
-        } else {
-          gaps.push(`${c.date} ${g}`);
-        }
+    // ── DAILY CALLS — Mon-Thu, holidays auto-blocked ─────────────────────
+    // Three passes with progressively relaxed back-to-back constraints.
+    // Dates are sorted most-constrained-first (fewest base-eligible physicians)
+    // to maximise coverage before adjacency conflicts cascade.
+    // Pass 0: full constraints   Pass 1: relax preview adj   Pass 2: relax all adj
+    if(typ==='daily'||typ==='both'){
+      const dailyDates=allCells
+        .filter(c=>c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date))
+        .map(c=>c.date);
+
+      const baseElig={};
+      dailyDates.forEach(date=>{
+        baseElig[date]=gPhys.filter(p=>
+          !vacDays(p.id).has(date)&&!isSoldBackDate(p.id,date)&&
+          !_has2ndOr3rdShift(p.id,date)&&_hasIRShiftOnDate(p.id,date)&&
+          dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')&&
+          sequenceOk(p,date,date.slice(0,7))
+        ).length;
       });
-    });
-  }
 
-  // ── Weekend calls (Fridays across all 6 months) ──
-  if(typ==='weekend'||typ==='both'){
-    allCells.filter(c=>c.dow===5).forEach(c=>{
-      groups.forEach(g=>{
-        const gPhys=irPs.filter(p=>p.irGroup===g);
-        const ex=
-          S.irCalls.find(ic=>ic.date===c.date&&ic.irGroup===g&&ic.callType==='weekend')||
-          preview.find(a=>a.date===c.date&&a.irGroup===g&&a.callType==='weekend');
-        if(ex) return;
-        const mon=addDays(c.date,3);
-        const span=[c.date,addDays(c.date,1),addDays(c.date,2),mon];
+      let remaining=dailyDates
+        .filter(d=>!S.irCalls.find(ic=>ic.date===d&&ic.irGroup===g&&ic.callType==='daily'))
+        .sort((a,b)=>baseElig[a]-baseElig[b]);
 
-        const eligible=gPhys.filter(p=>{
-          const vd=vacDays(p.id); if(vd.has(c.date)||vd.has(mon)) return false;
-          if(isSoldBackDate(p.id,c.date)) return false;
-          if(_hasAdjacentIRCall(p.id,c.date)||_hasIRCallNearWeekend(p.id,c.date)) return false;
-          if(previewConflictsWeekend(p.id,c.date)) return false;
-          if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
-          return true; // quota handled by sort (_sortByFte), not filter
-        });
+      for(let pass=0;pass<3&&remaining.length>0;pass++){
+        const stillUnfilled=[];
+        for(const date of remaining){
+          if(preview.find(a=>a.date===date&&a.irGroup===g&&a.callType==='daily')) continue;
+          const adjPrev=addDays(date,-1),adjNext=addDays(date,1);
 
-        const pool=_sortByFte(eligible,gPhys,cntW,wkndCapFn);
-        if(pool.length){
-          const p=pool[0];
-          const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
-          preview.push({physId:p.id,date:c.date,callType:'weekend',irGroup:g,site,notes:'Auto'});
-          cntW[p.id]++;
-        } else {
-          gaps.push(`Wknd ${c.date} ${g}`);
+          const eligible=gPhys.filter(p=>{
+            const vd=vacDays(p.id);
+            if(vd.has(date)) return false;
+            if(isSoldBackDate(p.id,date)) return false;
+            if(irOnDate(p.id,date)) return false;
+            if(_has2ndOr3rdShift(p.id,date)) return false;
+            if(!_hasIRShiftOnDate(p.id,date)) return false;
+            if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')) return false;
+            if(!sequenceOk(p,date,date.slice(0,7))) return false;
+            if(pass<=1){
+              if(S.irCalls.some(ic=>ic.physId===p.id&&(
+                (ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext))||
+                (ic.callType==='weekend'&&(
+                  (date>=ic.date&&date<=addDays(ic.date,4))||
+                  date===addDays(ic.date,-1)
+                ))
+              ))) return false;
+            }
+            if(pass===0){
+              if(previewAdjacentToDaily(p.id,date)) return false;
+            }
+            return true;
+          });
+
+          const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
+          if(pool.length){
+            const p=pool[0];
+            const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
+            const note=pass===0?'Auto':pass===1?'Auto (back-to-back waived)':'Auto (all adj. waived)';
+            preview.push({physId:p.id,date,callType:'daily',irGroup:g,site,notes:note,_pass:pass});
+            cntD[p.id]++;
+            if(pass>0) relaxedFills++;
+          } else {
+            stillUnfilled.push(date);
+          }
         }
+        remaining=stillUnfilled;
+      }
+      remaining.forEach(date=>gaps.push(`${date} ${g}`));
+    }
+
+    // ── WEEKEND CALLS — all Fridays ───────────────────────────────────────
+    // Pass 0: full   Pass 1: relax preview conflicts   Pass 2: relax all adj
+    if(typ==='weekend'||typ==='both'){
+      const wkndDates=allCells.filter(c=>c.dow===5).map(c=>c.date);
+
+      const baseEligW={};
+      wkndDates.forEach(fri=>{
+        const mon=addDays(fri,3);
+        baseEligW[fri]=gPhys.filter(p=>
+          !vacDays(p.id).has(fri)&&!vacDays(p.id).has(mon)&&!isSoldBackDate(p.id,fri)
+        ).length;
       });
-    });
-  }
+
+      let remaining=wkndDates
+        .filter(fri=>!S.irCalls.find(ic=>ic.date===fri&&ic.irGroup===g&&ic.callType==='weekend'))
+        .sort((a,b)=>baseEligW[a]-baseEligW[b]);
+
+      for(let pass=0;pass<3&&remaining.length>0;pass++){
+        const stillUnfilled=[];
+        for(const friday of remaining){
+          if(preview.find(a=>a.date===friday&&a.irGroup===g&&a.callType==='weekend')) continue;
+          const mon=addDays(friday,3);
+          const span=[friday,addDays(friday,1),addDays(friday,2),mon];
+
+          const eligible=gPhys.filter(p=>{
+            const vd=vacDays(p.id);
+            if(vd.has(friday)||vd.has(mon)) return false;
+            if(isSoldBackDate(p.id,friday)) return false;
+            if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+            if(pass===0){
+              if(_hasAdjacentIRCall(p.id,friday)) return false;
+              if(_hasIRCallNearWeekend(p.id,friday)) return false;
+              if(previewConflictsWeekend(p.id,friday)) return false;
+            } else if(pass===1){
+              if(_hasAdjacentIRCall(p.id,friday)) return false;
+              if(_hasIRCallNearWeekend(p.id,friday)) return false;
+            }
+            return true;
+          });
+
+          const pool=_sortByFte(eligible,gPhys,cntW,wkndCapFn);
+          if(pool.length){
+            const p=pool[0];
+            const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
+            const note=pass===0?'Auto':pass===1?'Auto (preview adj. waived)':'Auto (all adj. waived)';
+            preview.push({physId:p.id,date:friday,callType:'weekend',irGroup:g,site,notes:note,_pass:pass});
+            cntW[p.id]++;
+            if(pass>0) relaxedFills++;
+          } else {
+            stillUnfilled.push(friday);
+          }
+        }
+        remaining=stillUnfilled;
+      }
+      remaining.forEach(fri=>gaps.push(`Wknd ${fri} ${g}`));
+    }
+  });
 
   S.iraPreview=preview;
   const dailyPrev=preview.filter(a=>a.callType==='daily');
   const wkndPrev=preview.filter(a=>a.callType==='weekend');
+  const pass1fills=preview.filter(a=>a._pass===1).length;
+  const pass2fills=preview.filter(a=>a._pass===2).length;
 
-  let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} call assignments — ${gaps.length} gap(s) — ${label}<br>
-    <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily · ${wkndPrev.length} weekend</span></div>`;
+  let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} call assignments \u2014 ${gaps.length} gap(s) \u2014 ${label}<br>
+    <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily \u00b7 ${wkndPrev.length} weekend`;
+  if(pass1fills>0) html+=` \u00b7 <span style="color:var(--amber,#d97706)">${pass1fills} back-to-back waived</span>`;
+  if(pass2fills>0) html+=` \u00b7 <span style="color:var(--red-t)">${pass2fills} all-adj waived</span>`;
+  html+=`</span></div>`;
+
+  if(relaxedFills>0)
+    html+=`<div class="note nw" style="margin-bottom:8px">&#9888; ${relaxedFills} slot(s) could only be filled by waiving back-to-back rest rules (highlighted below). Review before applying.</div>`;
 
   if(preview.length){
     html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Group</th><th>Date</th><th>Type</th><th>Covers</th></tr></thead><tbody>';
-    preview.slice(0,50).forEach(a=>{
+    preview.slice(0,60).forEach(a=>{
       const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
       const gSites=S.sites.filter(s=>s.irGroup===a.irGroup||s.irGroup==='Both').map(s=>s.name.split(' ')[0]).join(', ');
       const coverLbl=a.callType==='daily'?`All ${a.irGroup} sites (${gSites})`:a.site;
-      html+=`<tr>
-        <td>${pname(a.physId)}</td>
+      const rowStyle=a._pass===2?'background:var(--red-bg,#fef2f2)':a._pass===1?'background:var(--amber-bg,#fffbeb)':'';
+      const passBadge=a._pass>0?`<span class="tag ta" style="font-size:9px;margin-left:4px">pass ${a._pass+1}</span>`:'';
+      html+=`<tr style="${rowStyle}">
+        <td>${pname(a.physId)}${passBadge}</td>
         <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td style="font-size:11px;color:var(--txt2)">${coverLbl}</td></tr>`;
     });
-    if(preview.length>50) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${preview.length-50} more</td></tr>`;
+    if(preview.length>60) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${preview.length-60} more</td></tr>`;
     html+='</tbody></table></div>';
   }
 
-  // FTE distribution tally
   const tally=[];
   irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
     const newD=dailyPrev.filter(a=>a.physId===p.id).length;
     const newW=wkndPrev.filter(a=>a.physId===p.id).length;
-    const totD=cntD[p.id]||0, totW=cntW[p.id]||0;
-    const tgtD=irDailyTargetPeriod(p,months), tgtW=irWkndTargetPeriod(p,months);
+    const totD=cntD[p.id]||0,totW=cntW[p.id]||0;
+    const tgtD=irDailyTargetPeriod(p,months),tgtW=irWkndTargetPeriod(p,months);
     const pctD=tgtD>0?Math.round(totD/tgtD*100):0;
     const pctW=tgtW>0?Math.round(totW/tgtW*100):0;
     tally.push({p,newD,newW,totD,totW,tgtD,tgtW,pctD,pctW});
   });
   if(tally.length){
-    html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution — ${label}
-      <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Targets = finite slots ÷ group FTE × physician FTE</span>
+    html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution \u2014 ${label}
+      <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Targets = finite slots \u00f7 group FTE \u00d7 physician FTE</span>
     </div>
       <table style="font-size:11px"><thead><tr><th>Physician</th><th>FTE</th>
         <th>Daily +new</th><th>Daily total</th><th>6-mo target</th><th>Daily %</th>
@@ -4193,7 +4755,7 @@ function previewIRAA(){
   }
 
   if(gaps.length)
-    html+=`<div class="note nw" style="margin-top:8px">\u26a0 ${gaps.length} gap(s): ${gaps.slice(0,5).join(', ')}${gaps.length>5?'...':''}</div>`;
+    html+=`<div class="note nw" style="margin-top:8px">\u26a0 ${gaps.length} truly uncoverable gap(s) (vacation, no IR shift, or no physician available even with relaxed rules): ${gaps.slice(0,5).join(', ')}${gaps.length>5?'...':''}</div>`;
   if(!preview.length&&!gaps.length)
     html='<div class="note ns">All IR call slots already filled for this period.</div>';
 
@@ -5089,6 +5651,293 @@ function renderAnchorReport(){
   el.innerHTML = html;
 }
 
+/* ─── HOLIDAY ↔ IR CALL SYNC ─── */
+// When an IR physician is assigned holiday call, mirror it into S.irCalls
+// so the IR calendar reflects holiday coverage automatically.
+function _syncHolidayToIRCall(physId, date, holName){
+  const p=S.physicians.find(x=>x.id===physId);
+  if(!p||!p.irGroup||!(p.irFte>0)) return; // only IR physicians
+  const dow=parseDateLocal(date).getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+  let callType,callDate;
+  // Mon–Fri holiday: weekends are Fri-Mon spans so map accordingly
+  if(dow===5){callType='weekend';callDate=date;}           // Friday → start weekend
+  else if(dow===6){callType='weekend';callDate=addDays(date,-1);} // Sat → prev Fri
+  else if(dow===0){callType='weekend';callDate=addDays(date,-2);} // Sun → prev Fri
+  else if(dow===1){callType='weekend';callDate=addDays(date,-3);} // Mon → prev Fri (holiday weekend)
+  else {callType='daily';callDate=date;}                   // Tue/Wed/Thu → daily
+  const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===p.irGroup)?.name||'');
+  if(callType==='weekend'){
+    // One weekend call per group per Friday — don't duplicate
+    if(!S.irCalls.find(c=>c.irGroup===p.irGroup&&c.callType==='weekend'&&c.date===callDate))
+      S.irCalls.push({id:S.nextId++,physId,date:callDate,callType:'weekend',
+        irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
+  } else {
+    if(!S.irCalls.find(c=>c.physId===physId&&c.date===callDate&&c.callType==='daily'))
+      S.irCalls.push({id:S.nextId++,physId,date:callDate,callType:'daily',
+        irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
+  }
+}
+
+// Return the IR call physician(s) covering a given date (daily exact or within weekend span)
+function _irCallPhysOnDate(date,irGroup){
+  return S.irCalls.filter(c=>{
+    if(irGroup&&c.irGroup!==irGroup) return false;
+    if(c.callType==='daily') return c.date===date;
+    if(c.callType==='weekend'){
+      const wEnd=addDays(c.date,3); // Fri+3 = Mon
+      return date>=c.date&&date<=wEnd;
+    }
+    return false;
+  });
+}
+
+
+/* ─── HOLIDAY AUTO-ASSIGN (FTE-weighted random lottery) ─── */
+
+// Returns per-physician career tally for holiday calls for a given group.
+function _holCareerData(group){
+  const physicians=S.physicians.filter(p=>{
+    if(group==='DR') return p.drFte>0&&p.role!=='IR';
+    if(group==='IR') return p.irFte>0;
+    return p.drFte>0||p.irFte>0;
+  });
+  if(!physicians.length) return [];
+  const allYears=[...new Set(
+    S.holidays.filter(h=>group==='both'||h.group===group).map(h=>String(h.year))
+  )].sort();
+  function fteProp(p,grp){
+    const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
+    const tot=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
+    const my=grp==='DR'?(p.drFte||0):(p.irFte||0);
+    return my/tot;
+  }
+  return physicians.map(p=>{
+    let cumBalance=0;
+    const byYear=allYears.map(yr=>{
+      const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
+      const act=S.holidays.filter(h=>h.physId===p.id&&String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const totalSlots=S.holidays.filter(h=>String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const fs=fteProp(p,grp)*totalSlots;
+      const bal=act-fs;
+      cumBalance+=bal;
+      return{yr,act,fairShare:fs,balance:bal,snapBalance:cumBalance};
+    });
+    const actTot=byYear.reduce((s,r)=>s+r.act,0);
+    const fairTot=byYear.reduce((s,r)=>s+r.fairShare,0);
+    return{p,actTot,fairTot,balance:cumBalance,byYear};
+  });
+}
+
+// Career data excluding a given year (weights use only prior history)
+function _holCareerDataBeforeYear(group,beforeYear){
+  const physicians=S.physicians.filter(p=>{
+    if(group==='DR') return p.drFte>0&&p.role!=='IR';
+    if(group==='IR') return p.irFte>0;
+    return p.drFte>0||p.irFte>0;
+  });
+  const allYears=[...new Set(
+    S.holidays.filter(h=>(group==='both'||h.group===group)&&h.year<beforeYear).map(h=>String(h.year))
+  )].sort();
+  function fteProp(p,grp){
+    const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
+    const tot=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
+    const my=grp==='DR'?(p.drFte||0):(p.irFte||0);
+    return my/tot;
+  }
+  return physicians.map(p=>{
+    let cumBalance=0;
+    const byYear=allYears.map(yr=>{
+      const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
+      const act=S.holidays.filter(h=>h.physId===p.id&&String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const totalSlots=S.holidays.filter(h=>String(h.year)===yr&&(group==='both'||h.group===group)).length;
+      const fs=fteProp(p,grp)*totalSlots;
+      cumBalance+=act-fs;
+      return{yr,act,fairShare:fs,balance:act-fs};
+    });
+    return{p,actTot:byYear.reduce((s,r)=>s+r.act,0),fairTot:byYear.reduce((s,r)=>s+r.fairShare,0),balance:cumBalance,byYear};
+  });
+}
+
+// Lottery weight for one physician.
+// Weighted mode: adjusts FTE proportion by career balance so owed physicians draw higher.
+function _holLotteryWeight(careerDatum,grp,mode){
+  const p=careerDatum.p;
+  const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
+  const totalFte=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
+  const myFte=grp==='DR'?(p.drFte||0):(p.irFte||0);
+  const fteProp=myFte/totalFte;
+  if(mode==='pure') return fteProp;
+  const scale=Math.max(5,Math.abs(careerDatum.balance)*2+1);
+  const adj=careerDatum.balance/scale;
+  return Math.max(0.05,fteProp-adj);
+}
+
+// Render career tally on the Auto-Assign tab
+function renderHolCareerTally(){
+  const year=+document.getElementById('haa-year')?.value||new Date().getFullYear();
+  const group=document.getElementById('haa-grp')?.value||'both';
+  const el=document.getElementById('haa-tally');
+  if(!el) return;
+  const groups=group==='both'?['DR','IR']:[group];
+  let html='';
+  groups.forEach(grp=>{
+    const data=_holCareerData(grp);
+    if(!data.length){html+=`<div class="note ni">No ${grp} physicians configured.</div>`;return;}
+    const allYears=[...new Set(S.holidays.filter(h=>h.group===grp).map(h=>String(h.year)))].sort();
+    html+=`<div class="card" style="margin-bottom:12px">
+      <div class="card-title">${grp} Holiday Call — Career Balance
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+          amber = ahead of fair share &nbsp;·&nbsp; green = owed &nbsp;·&nbsp; % = lottery draw weight for ${year}
+        </span>
+      </div>`;
+    if(!allYears.length){
+      html+=`<div style="font-size:12px;color:var(--txt3);padding:8px">No holiday call history yet — all start at balance 0.</div>`;
+    } else {
+      html+=`<div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>FTE</th>
+        ${allYears.map(yr=>`<th colspan="2" style="text-align:center;border-left:1px solid var(--bdr)">${yr}<br><span style="font-weight:400;font-size:9px">actual / share</span></th>`).join('')}
+        <th style="border-left:2px solid var(--bdr)">Balance</th>
+        <th>${year} Weight</th>
+      </tr></thead><tbody>`;
+      const mode=document.getElementById('haa-mode')?.value||'weighted';
+      data.slice().sort((a,b)=>a.balance-b.balance).forEach(d=>{
+        const fte=grp==='DR'?(d.p.drFte||0):(d.p.irFte||0);
+        const balCls=d.balance>2?'color:var(--amber,#d97706)':d.balance<-2?'color:var(--green-t)':'color:var(--txt2)';
+        const rowBg=d.balance>3?'background:var(--amber-bg,#fffbeb)':d.balance<-3?'background:#f0fdf4':'';
+        // Compute normalised weight across the group
+        const allW=data.map(x=>_holLotteryWeight(x,grp,mode));
+        const totW=allW.reduce((s,w)=>s+w,0)||1;
+        const myW=_holLotteryWeight(d,grp,mode);
+        const wPct=(myW/totW*100).toFixed(0)+'%';
+        html+=`<tr style="${rowBg}">
+          <td style="font-weight:600">${pname(d.p.id)}</td>
+          <td style="text-align:center">${fte}</td>
+          ${allYears.map(yr=>{
+            const r=d.byYear.find(x=>x.yr===yr)||{act:0,fairShare:0};
+            const cls=r.act-r.fairShare>0.5?'color:var(--amber,#d97706)':r.act-r.fairShare<-0.5?'color:var(--green-t)':'color:var(--txt3)';
+            return`<td style="text-align:center;border-left:1px solid var(--bdr2);font-weight:700">${r.act}</td>
+                   <td style="text-align:center;font-size:10px;${cls}">${r.fairShare.toFixed(1)}</td>`;
+          }).join('')}
+          <td style="border-left:2px solid var(--bdr);font-weight:800;${balCls}">${d.balance>0?'+':''}${d.balance.toFixed(1)}</td>
+          <td style="text-align:center;font-size:11px;font-weight:700;color:var(--blue-t)">${wPct}</td>
+        </tr>`;
+      });
+      html+=`</tbody></table></div>`;
+    }
+    html+=`</div>`;
+  });
+  el.innerHTML=html||'<div class="note ni">No physicians configured.</div>';
+}
+
+// ── Preview: weighted lottery for all unassigned slots in selected year ──────
+let _holRandomPreview=[];
+
+function previewHolRandom(){
+  if(!_adminOnly('preview holiday auto-assign')) return;
+  const year=+document.getElementById('haa-year')?.value||new Date().getFullYear();
+  const group=document.getElementById('haa-grp')?.value||'both';
+  const mode=document.getElementById('haa-mode')?.value||'weighted';
+  if(!S.holidayBlackouts?.length||!S.holidayNeeds?.length){
+    document.getElementById('haa-box').innerHTML=
+      '<div class="note nw">Configure holiday blackout dates and staffing needs first (Blackout Dates and Holiday Needs config).</div>';
+    return;
+  }
+  const preview=[],gaps=[];
+  const groups=group==='both'?['DR','IR']:[group];
+  // Build career data from years BEFORE the target year so weights are clean
+  const careerCache={};
+  groups.forEach(grp=>{careerCache[grp]=_holCareerDataBeforeYear(grp,year);});
+  const runCnt={};
+  const blackouts=(S.holidayBlackouts||[]).filter(b=>b.date.startsWith(String(year))).sort((a,b)=>a.date>b.date?1:-1);
+  blackouts.forEach(bl=>{
+    const needs=(S.holidayNeeds||[]).filter(n=>n.name.toLowerCase()===bl.name.toLowerCase());
+    if(!needs.length) return;
+    needs.forEach(need=>{
+      if(group!=='both'&&need.group!==group) return;
+      const grp=need.group;
+      if(!groups.includes(grp)) return;
+      const alreadyFilled=S.holidays.filter(h=>h.date===bl.date&&h.group===grp).length
+                         +preview.filter(a=>a.date===bl.date&&a.group===grp).length;
+      const irCoverage=grp==='IR'?_irCallPhysOnDate(bl.date).length:0;
+      const toFill=Math.max(0,need.slots-alreadyFilled-irCoverage);
+      if(!toFill) return;
+      const data=careerCache[grp]||[];
+      for(let slot=0;slot<toFill;slot++){
+        const eligible=data.filter(d=>{
+          const p=d.p;
+          if(grp==='DR'&&(p.drFte===0||p.role==='IR')) return false;
+          if(grp==='IR'&&p.irFte===0) return false;
+          if(vacDays(p.id).has(bl.date)) return false;
+          if(S.holidays.find(h=>h.physId===p.id&&h.date===bl.date&&h.group===grp)) return false;
+          if(preview.find(a=>a.physId===p.id&&a.date===bl.date&&a.group===grp)) return false;
+          return true;
+        });
+        if(!eligible.length){gaps.push(`${bl.date} ${bl.name} ${grp}`);break;}
+        // Compute normalised weights
+        const wList=eligible.map(d=>{
+          const base=_holLotteryWeight(d,grp,mode);
+          const extra=(runCnt[d.p.id]||0)*0.25;
+          return{d,w:Math.max(0.01,base-extra)};
+        });
+        const totW=wList.reduce((s,x)=>s+x.w,0);
+        let rand=Math.random()*totW, chosen=wList[wList.length-1].d;
+        for(const {d,w} of wList){rand-=w;if(rand<=0){chosen=d;break;}}
+        const myW=wList.find(x=>x.d===chosen)?.w||0;
+        preview.push({physId:chosen.p.id,date:bl.date,name:bl.name,year,group:grp,
+          notes:`Auto-lottery (${mode})`,
+          weight:(myW/totW*100).toFixed(0)+'%',
+          balance:chosen.balance.toFixed(1)});
+        runCnt[chosen.p.id]=(runCnt[chosen.p.id]||0)+1;
+      }
+    });
+  });
+  _holRandomPreview=preview;
+  let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} assignment(s) — ${gaps.length} gap(s)</div>`;
+  if(preview.length){
+    html+=`<div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Holiday</th><th>Date</th><th>Group</th>
+      <th title="Career balance before this lottery (−=owed, +=ahead)">Prior Balance</th>
+      <th title="Normalised draw weight in this lottery">Draw Weight</th>
+    </tr></thead><tbody>`;
+    preview.forEach(a=>{
+      const balCls=+a.balance<-0.5?'color:var(--green-t)':+a.balance>0.5?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(a.physId)}</td>
+        <td>${a.name}</td><td>${a.date}</td>
+        <td><span class="tag ${a.group==='DR'?'tb':'tt'}">${a.group}</span></td>
+        <td style="${balCls};font-weight:700">${+a.balance>0?'+':''}${a.balance}</td>
+        <td style="color:var(--blue-t);font-weight:700">${a.weight}</td>
+      </tr>`;
+    });
+    html+=`</tbody></table></div>`;
+    html+=`<div class="note ni" style="margin-top:6px;font-size:11px">Not happy with this draw? Click Generate again for a fresh random result.</div>`;
+  }
+  if(gaps.length) html+=`<div class="note nw" style="margin-top:8px">⚠ ${gaps.length} gap(s) — no eligible physician: ${gaps.join(', ')}</div>`;
+  if(!preview.length&&!gaps.length) html='<div class="note ns">All holiday slots for this year are already assigned.</div>';
+  document.getElementById('haa-box').innerHTML=html;
+  const wrap=document.getElementById('haa-apply-wrap');
+  if(wrap) wrap.style.display=preview.length?'block':'none';
+  const note=document.getElementById('haa-apply-note');
+  if(note) note.textContent=`${preview.length} assignment(s) ready — re-roll anytime before applying.`;
+}
+
+// Apply the lottery preview
+function applyHolRandom(){
+  if(!_adminOnly('apply holiday auto-assign')) return;
+  if(!_holRandomPreview.length) return;
+  _holRandomPreview.forEach(a=>{
+    S.holidays.push({id:S.nextId++,name:a.name,date:a.date,year:a.year,physId:a.physId,group:a.group,notes:a.notes});
+    if(a.group==='IR') _syncHolidayToIRCall(a.physId,a.date,a.name);
+  });
+  const n=_holRandomPreview.length;
+  _holRandomPreview=[];
+  triggerSave();
+  document.getElementById('haa-box').innerHTML=`<div class="note ns">✓ ${n} holiday assignment(s) applied.</div>`;
+  document.getElementById('haa-apply-wrap').style.display='none';
+  renderHolCareerTally();
+  renderHolCounter();
+}
+
 /* ─── HOLIDAYS ─── */
 function renderHolidays(){
   document.getElementById('hol-phys').innerHTML=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
@@ -5101,8 +5950,10 @@ function addHoliday(){
   if(!date){alert('Select date');return;}
   const p=S.physicians.find(x=>x.id===pid);
   if(grp==='DR'&&p.role==='IR'){alert('IR-only physicians cannot take DR holiday call.');return;}
-  S.holidays.push({id:S.nextId++,name:document.getElementById('hol-name').value,date,year:+document.getElementById('hol-yr').value||2025,physId:pid,group:grp,notes:document.getElementById('hol-notes').value});
-  renderHolTable();renderHolCounter();
+  const holName=document.getElementById('hol-name').value;
+  S.holidays.push({id:S.nextId++,name:holName,date,year:+document.getElementById('hol-yr').value||2025,physId:pid,group:grp,notes:document.getElementById('hol-notes').value});
+  if(grp==='IR') _syncHolidayToIRCall(pid,date,holName); // mirror to IR call schedule
+  triggerSave();renderHolTable();renderHolCounter();
 }
 function renderHolTable(){
   document.getElementById('hol-tbody').innerHTML=S.holidays.sort((a,b)=>a.date>b.date?1:-1).map(h=>`<tr><td>${h.name}</td><td>${h.date}</td><td>${h.year}</td><td>${pname(h.physId)}</td><td><span class="tag ${h.group==='DR'?'tb':'tt'}">${h.group}</span></td><td>${h.notes||'—'}</td><td><button class="br bxs" onclick="S.holidays=S.holidays.filter(x=>x.id!==${h.id});renderHolTable();renderHolCounter()">X</button></td></tr>`).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
@@ -5162,7 +6013,7 @@ function unclaimShift(oid){
 }
 
 /* ─── SETTINGS ─── */
-function renderSettings(){renderSettingsSupabaseStatus();
+function renderSettings(){renderSettingsSupabaseStatus();_restoreGMapsKeyField();
   document.getElementById('cfg-wd').value=S.cfg.wdMax;document.getElementById('cfg-wk').value=S.cfg.wkMax;
   document.getElementById('cfg-ir-daily').value=S.cfg.irDailyMax||S.cfg.irMax||20;
   document.getElementById('cfg-ir-wknd').value=S.cfg.irWkndMax||4;
@@ -5181,14 +6032,53 @@ function saveCfg(){
 }
 function renderDRSList(){document.getElementById('drs-list').innerHTML=S.drSubs.map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="S.drSubs.splice(${i},1);renderDRSList()">X</button></div>`).join('');}
 function renderIRSList(){document.getElementById('irs-list').innerHTML=S.irSubs.map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="S.irSubs.splice(${i},1);renderIRSList()">X</button></div>`).join('');}
-function renderSitesList(){document.getElementById('sites-list').innerHTML=S.sites.map((s,i)=>{const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';return`<div class="row"><span style="font-size:12px;flex:1">${s.name}</span>${g}<button class="br bxs" onclick="S.sites.splice(${i},1);renderSitesList()">X</button></div>`;}).join('');}
+function renderSitesList(){
+  document.getElementById('sites-list').innerHTML=S.sites.map((s,i)=>{
+    const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';
+    const addrDisplay=s.address?`<div style="font-size:10px;color:var(--txt3);margin-top:1px">📍 ${s.address}</div>`:'';
+    return`<div style="border:1px solid var(--bdr);border-radius:var(--r);padding:7px 10px;margin-bottom:4px">
+      <div class="row" style="margin:0">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;font-weight:600">${s.name}</span>${g}
+          </div>
+          ${addrDisplay}
+        </div>
+        <button class="bsm bt" onclick="editSiteAddress(${i})" style="margin-right:4px">✏</button>
+        <button class="br bxs" onclick="S.sites.splice(${i},1);renderSitesList()">X</button>
+      </div>
+      <div id="site-addr-edit-${i}" style="display:none;margin-top:6px">
+        <div class="flex" style="gap:6px">
+          <input id="site-addr-input-${i}" value="${s.address||''}" placeholder="Hospital address..." style="flex:1;font-size:12px">
+          <button class="bsm bg" onclick="saveSiteAddress(${i})">Save</button>
+          <button class="bsm" onclick="document.getElementById('site-addr-edit-${i}').style.display='none'">✕</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function editSiteAddress(i){
+  const ed=document.getElementById(`site-addr-edit-${i}`);
+  if(ed) ed.style.display=ed.style.display==='none'?'block':'none';
+}
+function saveSiteAddress(i){
+  const inp=document.getElementById(`site-addr-input-${i}`);
+  if(!inp) return;
+  S.sites[i].address=inp.value.trim();
+  triggerSave();
+  renderSitesList();
+}
 function renderWkndNeeds(){document.getElementById('wknd-needs').innerHTML=S.drSubs.map(s=>`<div class="row"><span style="font-size:12px;min-width:140px">${s}</span><input type="number" min="0" max="10" value="${S.wkndNeeds[s]||0}" style="width:55px" onchange="S.wkndNeeds['${s}']=parseInt(this.value)||0"></div>`).join('');}
 function addDRSub(){const v=document.getElementById('new-drs').value.trim();if(!v||S.drSubs.includes(v))return;S.drSubs.push(v);document.getElementById('new-drs').value='';renderDRSList();}
 function addIRSub(){const v=document.getElementById('new-irs').value.trim();if(!v||S.irSubs.includes(v))return;S.irSubs.push(v);document.getElementById('new-irs').value='';renderIRSList();}
 function addSite(){
   const name=document.getElementById('new-site').value.trim(),grp=document.getElementById('new-site-irg').value;
   if(!name||S.sites.find(s=>s.name===name))return;
-  S.sites.push({name,irGroup:grp||null});document.getElementById('new-site').value='';triggerSave();renderSitesList();
+  const siteAddr=document.getElementById('new-site-address')?.value.trim()||'';
+  S.sites.push({name,irGroup:grp||null,address:siteAddr});
+  document.getElementById('new-site').value='';
+  const nsaEl=document.getElementById('new-site-address');if(nsaEl)nsaEl.value='';
+  triggerSave();renderSitesList();
   S.sites.forEach(st=>{["1st","2nd","3rd","Home"].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
 }
 
@@ -5622,14 +6512,15 @@ function renderIRShiftSlots(){
 
 /* ─── HOLIDAYS (enhanced) ─── */
 function holTab(t,el){
-  ['assign','counter','schedule'].forEach(x=>{
+  ['assign','counter','schedule','autoassign'].forEach(x=>{
     const e=document.getElementById('holt-'+x);
     if(e) e.style.display=x===t?'block':'none';
   });
   document.querySelectorAll('#page-holidays .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
-  if(t==='counter') renderHolCounter();
-  if(t==='schedule') renderHolSchedule();
+  if(t==='counter')    renderHolCounter();
+  if(t==='schedule')   renderHolSchedule();
+  if(t==='autoassign') renderHolCareerTally();
 }
 function renderHolTable(){
   const fyr=document.getElementById('holf-yr')?.value||'';
@@ -5670,10 +6561,22 @@ function deleteHoliday(id){
 function renderHolSchedule(){
   const yr=+document.getElementById('holsched-yr')?.value||2025;
   const byDate={};
+  // Build from holiday records
   S.holidays.filter(h=>h.year===yr).forEach(h=>{
     if(!byDate[h.date]) byDate[h.date]={date:h.date,name:h.name,dr:[],ir:[]};
-    if(h.group==='DR') byDate[h.date].dr.push(h);
-    else byDate[h.date].ir.push(h);
+    if(h.group==='DR') byDate[h.date].dr.push({type:'hol',h});
+    else byDate[h.date].ir.push({type:'hol',h});
+  });
+  // Also surface existing IR call assignments on blackout dates (may have been
+  // assigned via the IR Call schedule rather than the holiday form)
+  (S.holidayBlackouts||[]).filter(b=>b.date.startsWith(String(yr))).forEach(bl=>{
+    if(!byDate[bl.date]) byDate[bl.date]={date:bl.date,name:bl.name,dr:[],ir:[]};
+    const irOnDay=_irCallPhysOnDate(bl.date);
+    irOnDay.forEach(ic=>{
+      // Only add if not already shown via a holiday record
+      const already=byDate[bl.date].ir.some(e=>e.h?.physId===ic.physId);
+      if(!already) byDate[bl.date].ir.push({type:'ircall',ic});
+    });
   });
   const sorted=Object.values(byDate).sort((a,b)=>a.date>b.date?1:-1);
   const el=document.getElementById('hol-schedule-content');if(!el)return;
@@ -5689,11 +6592,14 @@ function renderHolSchedule(){
       <div class="g2">
         <div>
           <div style="font-size:10px;font-weight:800;color:var(--blue-t);text-transform:uppercase;margin-bottom:4px">DR Call</div>
-          ${d.dr.length?d.dr.map(h=>`<div class="row" style="padding:3px 0"><span class="tag tb" style="font-size:10px">${pname(h.physId)}</span>${h.notes?`<span style="font-size:10px;color:var(--txt3)">${h.notes}</span>`:''}<button class="br bxs" onclick="deleteHoliday(${h.id});renderHolSchedule()">✕</button></div>`).join(''):'<span style="font-size:11px;color:var(--red-t)">⚠ Unassigned</span>'}
+          ${d.dr.length?d.dr.map(e=>{const h=e.h;return`<div class="row" style="padding:3px 0"><span class="tag tb" style="font-size:10px">${pname(h.physId)}</span>${h.notes?`<span style="font-size:10px;color:var(--txt3)">${h.notes}</span>`:''}<button class="br bxs" onclick="deleteHoliday(${h.id});renderHolSchedule()">✕</button></div>`;}).join(''):'<span style="font-size:11px;color:var(--red-t)">⚠ Unassigned</span>'}
         </div>
         <div>
           <div style="font-size:10px;font-weight:800;color:var(--teal-t);text-transform:uppercase;margin-bottom:4px">IR Call</div>
-          ${d.ir.length?d.ir.map(h=>`<div class="row" style="padding:3px 0"><span class="tag tt" style="font-size:10px">${pname(h.physId)}</span>${h.notes?`<span style="font-size:10px;color:var(--txt3)">${h.notes}</span>`:''}<button class="br bxs" onclick="deleteHoliday(${h.id});renderHolSchedule()">✕</button></div>`).join(''):'<span style="font-size:11px;color:var(--red-t)">⚠ Unassigned</span>'}
+          ${d.ir.length?d.ir.map(e=>{
+            if(e.type==='hol'){const h=e.h;return`<div class="row" style="padding:3px 0"><span class="tag tt" style="font-size:10px">${pname(h.physId)}</span>${h.notes?`<span style="font-size:10px;color:var(--txt3)">${h.notes}</span>`:''}<button class="br bxs" onclick="deleteHoliday(${h.id});renderHolSchedule()">✕</button></div>`;}
+            const ic=e.ic;return`<div class="row" style="padding:3px 0"><span class="tag tt" style="font-size:10px">${pname(ic.physId)}</span><span class="tag tgr" style="font-size:9px">${ic.callType==='weekend'?'Weekend Call':'IR Call'}</span></div>`;
+          }).join(''):'<span style="font-size:11px;color:var(--red-t)">⚠ Unassigned</span>'}
         </div>
       </div>
     </div>`).join('');
@@ -6435,10 +7341,20 @@ function previewHolidayAA(){
         if(S.holidays.find(h=>h.physId===p.id&&h.date===bl.date&&h.group===need.group)) return false;
         if(preview.find(a=>a.physId===p.id&&a.date===bl.date&&a.group===need.group)) return false;
         return true;
-      }).sort((a,b)=>holCnt[a.id]-holCnt[b.id]); // load balance
+      }).sort((a,b)=>{
+        // For IR group: prefer the physician already on IR call that date
+        if(need.group==='IR'){
+          const aOnCall=_irCallPhysOnDate(bl.date).some(c=>c.physId===a.id);
+          const bOnCall=_irCallPhysOnDate(bl.date).some(c=>c.physId===b.id);
+          if(aOnCall!==bOnCall) return aOnCall?-1:1;
+        }
+        return holCnt[a.id]-holCnt[b.id]; // then load balance
+      }); // prefer IR call coverage, then even distribution
       const ex=S.holidays.filter(h=>h.date===bl.date&&h.group===need.group).length
               +preview.filter(a=>a.date===bl.date&&a.group===need.group).length;
-      const toFill=Math.max(0,need.slots-ex);
+      // For IR: physicians already on an IR call covering this date count as covered
+      const irCoverage=need.group==='IR'?_irCallPhysOnDate(bl.date).length:0;
+      const toFill=Math.max(0,need.slots-ex-irCoverage);
       for(let i=0;i<toFill;i++){
         const p=pool.shift();
         if(!p){gaps.push(`${bl.date} ${bl.name} ${need.group}`);continue;}
@@ -6468,9 +7384,11 @@ function applyHolidayAA(){
   if(!_adminOnly('apply holiday auto-assign'))return;
   (S.haPreview||[]).forEach(a=>{
     S.holidays.push({id:S.nextId++,name:a.name,date:a.date,year:a.year,physId:a.physId,group:a.group,notes:a.notes});
+    if(a.group==='IR') _syncHolidayToIRCall(a.physId,a.date,a.name); // mirror to IR call schedule
   });
   document.getElementById('ha-box').innerHTML=`<div class="note ns">${(S.haPreview||[]).length} holiday assignments applied.</div>`;
   S.haPreview=[];document.getElementById('ha-apply').style.display='none';
+  triggerSave();
 }
 
 
@@ -6513,14 +7431,14 @@ async function adminCreateAccount(){
       const {data:{session}}=await sb.auth.getSession();
       const jwt=session?.access_token;
       if(!jwt) throw new Error('Not authenticated — sign in first.');
-      const fnUrl=`${_SUPABASE_URL}/functions/v1/create-user`;
+      const fnUrl=`${_getUrl()}/functions/v1/create-user`;
       const res=await fetch(fnUrl,{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
         body:JSON.stringify({email,password:pw,role,first,last,physId})
       });
       const result=await res.json();
-      if(!res.ok) throw new Error(result.error||'Edge function error');
+      if(!res.ok) throw new Error(result.error||`Edge function error (${res.status})`);
       // Add to local USERS directory (no password stored)
       const nu={id:result.id||('u'+Date.now()),email,pw:'',role,first,last,physId,joined:fmtDate(new Date())};
       if(!USERS.find(u=>u.email===email)) USERS.push(nu);
