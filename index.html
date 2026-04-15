@@ -2409,6 +2409,30 @@ function irWkndTargetYear(p, yr){
   return months.reduce((s,ym)=>s+irWkndTargetMonth(p,ym), 0);
 }
 
+/* ─── IR PROCEDURE SHIFT TARGETS ─── */
+// Count non-Home IR procedure shifts for a physician in a month
+function irProcShiftCnt(pid, ym){
+  return (S.irShifts||[]).filter(s=>s.physId===pid&&s.date.startsWith(ym)&&s.shift!=='Home').length;
+}
+
+// Physician's fair-share target for IR procedure shifts in a month.
+// = (total non-Home 1st-shift slots across group sites for that month) × (p.irFte / group irFte)
+function irShiftTargetMonth(p, ym){
+  if(!p.irGroup||p.irFte<=0) return 0;
+  const cells=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
+  let slots=0;
+  S.sites.filter(s=>s.irGroup===p.irGroup).forEach(st=>{
+    cells.forEach(c=>{ slots+=(S.irShiftSlots||{})[`${st.name}|${c.dow}|1st`]||0; });
+  });
+  const gFte=S.physicians.filter(q=>q.irFte>0&&q.irGroup===p.irGroup).reduce((s,q)=>s+q.irFte,0);
+  return gFte>0 ? slots*p.irFte/gFte : 0;
+}
+
+// 6-month target — sum of monthly targets
+function irShiftTargetPeriod(p, months){
+  return months.reduce((s,ym)=>s+irShiftTargetMonth(p,ym),0);
+}
+
 /* ─── ANCHOR COMPLIANCE ─── */
 // Anchor compliance is a REPORTING tool only — not a scheduling constraint.
 // Data source: S.irShifts (non-Home IR procedure shifts) for the given month.
@@ -3016,10 +3040,11 @@ function bulkAssignMultiWeek(shift){
 
 
 
-// Render whichever FTE tab is currently active (avoids clobbering period view with monthly render)
+// Track active FTE tab explicitly — CSS display state is unreliable
+let _fteActiveTab='month';
+
 function _renderFTECurrent(){
-  const periodCtrl=document.getElementById('fte-period-ctrl');
-  if(periodCtrl&&periodCtrl.style.display!=='none') renderFTEPeriod();
+  if(_fteActiveTab==='period') renderFTEPeriod();
   else renderFTE();
 }
 
@@ -3130,6 +3155,7 @@ function renderFTE(){
 }
 
 function fteTab(t,tabEl){
+  _fteActiveTab=t;
   document.querySelectorAll('#fte-tabs .tab').forEach(x=>x.classList.remove('on'));
   if(tabEl) tabEl.classList.add('on');
   const monthCtrl=document.getElementById('fte-month-ctrl');
@@ -4338,13 +4364,16 @@ function previewIRRebalance(){
         });
 
         let picked=null;
-        if(eligible.length){
+          if(eligible.length){
           const n=Math.max(gPhys.length,1);
           const off=Object.values(cntS).reduce((s,v)=>s+v,0)%n;
           eligible.sort((a,b)=>{
             const qA=shiftCapFn(a),qB=shiftCapFn(b);
             const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
             if(underA!==underB) return underA?-1:1;
+            // Prefer anchor site match
+            const ancA=a.anchorSite===entry.site?-1:0,ancB=b.anchorSite===entry.site?-1:0;
+            if(ancA!==ancB) return ancA-ancB;
             const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
             const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
             if(Math.abs(defA-defB)>1e-9) return defB-defA;
@@ -4572,9 +4601,24 @@ function previewIRRebalance(){
         const eligible=gPhys.filter(p=>{
           const vd=vacDays(p.id);
           if(vd.has(fridayDate)||vd.has(mon)) return false;
-          if(_hasAdjacentIRCall(p.id,fridayDate)||_hasIRCallNearWeekend(p.id,fridayDate)) return false;
+          // ── Adjacency checks ──
+          // Do NOT use _hasAdjacentIRCall / _hasIRCallNearWeekend here — those check
+          // S.irCalls including in-period weekend calls that this rebalancer is replacing.
+          // Using them blocks redistribution, preventing 100% utilisation.
+          //
+          // Instead: check adjacency only from (a) calls outside the period and
+          // (b) the new assignments already placed in this plan.
           if(outsideAdjacent(p.id,fridayDate,'weekend')) return false;
           if(inPlanAdjacent(p.id,fridayDate,gWAsgn,'weekend')) return false;
+          // Thu / Tue daily-call adjacency:
+          //   typ='weekend' → daily calls are untouched, so check S.irCalls
+          //   typ='both'    → daily calls are being replaced too; check plan.daily
+          const thu=addDays(fridayDate,-1), tue=addDays(fridayDate,4);
+          if(typ==='weekend'){
+            if(S.irCalls.some(c=>c.physId===p.id&&c.callType==='daily'&&(c.date===thu||c.date===tue))) return false;
+          } else {
+            if(plan.daily.some(a=>a.physId===p.id&&(a.date===thu||a.date===tue))) return false;
+          }
           const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
           return true;
@@ -5331,7 +5375,12 @@ function previewIRShiftAA(){
               if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift'))return false;
               if(!sequenceOk(p,c.date,ym))return false;
               return true;
-            }).sort((a,b)=>cnt[a.id]-cnt[b.id]);
+            }).sort((a,b)=>{
+              // Anchor site match first, then by shift count (load balance)
+              const aA=a.anchorSite===st.name?-1:0,bA=b.anchorSite===st.name?-1:0;
+              if(aA!==bA) return aA-bA;
+              return cnt[a.id]-cnt[b.id];
+            });
             if(pool.length){
               const p=pool[0];
               preview.push({physId:p.id,date:c.date,shift:sh,site:st.name,sub:p.irSubs[0]||'',irGroup:g,notes:'Auto'});
