@@ -711,7 +711,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="g3">
         <div class="fg"><label>Physician</label><select id="sb-phys" onchange="updateSbInfo()"></select></div>
         <div class="fg"><label>Date</label><input id="sb-date" type="date" oninput="updateSbInfo()"></div>
-        <div class="fg"><label>Shift</label><select id="sb-shift"><option value="1st">1st Shift (Days)</option><option value="2nd">2nd Shift (Evenings)</option><option value="3rd">3rd Shift (Nights)</option><option value="Home">At Home</option></select></div>
+        <div class="fg"><label>Shift</label><select id="sb-shift"><option value="1st">Day Shift</option><option value="2nd">2nd Shift (Evenings)</option><option value="3rd">3rd Shift (Nights)</option><option value="Home">At Home</option></select></div>
       </div>
       <div class="g3">
         <div class="fg"><label>Site</label><select id="sb-site" onchange="updateSbInfo()"></select></div>
@@ -1324,7 +1324,7 @@ id="page-holidays" class="page">
   </div>
 
   <!-- DEFINE HOLIDAYS TAB -->
-  <div id="holt-define">
+  <div id="holt-define" style="display:none">
     <div class="ibox" style="margin-bottom:10px">
       <div class="card-title" id="holdef-form-title">Create New Holiday</div>
       <div class="g3">
@@ -2900,10 +2900,11 @@ function renderMySched(){
           <div style="font-size:9px;opacity:.7">IR · ${siteSh}</div>
         </div>`;
       } else {
-        evs+=`<div class="ev ${shCls}" title="IR ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">
-          <div style="font-weight:700;font-size:11px">${s.shift} Shift</div>
-          <div style="font-size:9px;opacity:.85">IR</div>
-          <div style="font-size:9px;opacity:.7">${siteSh}${s.sub?' · '+s.sub.slice(0,6):''}</div>
+        const irShLbl=s.shift==='1st'?'Day Shift':s.shift+' Shift';
+        evs+=`<div class="ev ${shCls}" title="IR ${irShLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+          <div style="font-weight:700;font-size:11px">${irShLbl}</div>
+          <div style="font-size:9px;opacity:.85">IR · ${siteSh}</div>
+          <div style="font-size:9px;opacity:.7">${s.sub?s.sub.slice(0,6):''}</div>
         </div>`;
       }
     });
@@ -2918,7 +2919,7 @@ function renderMySched(){
     ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:s.sub||'—',col:'tb'})),
     ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
     ...ir.map(i=>({date:i.date,type:'IR '+i.callType+(i.callType==='weekend'?' (Fri→Mon)':''),site:i.site,detail:i.irGroup||'—',col:'tt'})),
-    ...irSh.map(s=>({date:s.date,type:'IR '+s.shift+' Shift',site:s.site,detail:s.sub||s.irGroup||'—',col:'tt'})),
+    ...irSh.map(s=>({date:s.date,type:'IR '+(s.shift==='1st'?'Day':s.shift)+' Shift',site:s.site,detail:s.sub||s.irGroup||'—',col:'tt'})),
     ...hols.map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
@@ -4274,7 +4275,7 @@ function renderCommuteMatrix(){
 
   html+=`<div class="card" style="margin-bottom:14px">
     <div class="card-title">Round-Trip Drive Tally \u2014 ${yrLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR + IR 1st Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; round trips \u226530 min only &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR + IR Day Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; round trips \u226530 min only &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
     </div>`;
 
   if(!sorted.length){
@@ -5411,16 +5412,31 @@ function renderIRCal(){
         else if(s.shift==='1st')    style='background:#eff6ff;color:#1e40af;border:1px solid #93c5fd';
         else if(s.shift==='2nd')    style='background:#f0fdf4;color:#166534;border:1px solid #86efac';
         else                        style='background:#fefce8;color:#713f12;border:1px solid #fcd34d';
-        const grpTag=s.irGroup?` [${s.irGroup[0]}]`:'';
-        const lbl=s.shift==='Home'?'🏠':s.shift;
-        shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">${pshort(s.physId)}${grpTag} ${lbl}</div>`;
+        const siteSh=(s.site||'').split(' ')[0];
+        const subLbl=s.sub?` · ${s.sub.slice(0,6)}`:'';
+        const shiftLbl=s.shift==='1st'?'Day Shift':s.shift==='Home'?'Home':s.shift+' Shift';
+        if(s.shift==='Home'){
+          shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — Home @ ${s.site}">
+            <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
+            <div style="font-size:9px;opacity:.8">Home</div>
+          </div>`;
+        } else {
+          shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — ${shiftLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+            <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
+            <div style="font-size:9px;opacity:.85">${shiftLbl}</div>
+            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}</div>
+          </div>`;
+        }
       });
       // Auto-home DR shifts for IR physicians
       S.drShifts.filter(s=>s.date===c.date&&s.autoHome&&(!fpid||s.physId===fpid)).forEach(s=>{
         const p=S.physicians.find(x=>x.id===s.physId);
         if(!p||p.irFte===0)return;
         if(fg&&p.irGroup!==fg)return;
-        shiftEvs+=`<div class="ev e-home-auto" title="${pname(s.physId)} — Auto-Home (DR)">${pshort(s.physId)} 🏠DR</div>`;
+        shiftEvs+=`<div class="ev e-home-auto" title="${pname(s.physId)} — Auto-Home (DR)">
+          <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
+          <div style="font-size:9px;opacity:.8">Auto-Home</div>
+        </div>`;
       });
     }
 
@@ -5683,8 +5699,8 @@ function addIRCallFromGrid(sel,date,callType,group){
     alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');sel.value='';return;}
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){
     alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');sel.value='';return;}
-  const site=(S.sites.find(s=>s.irGroup===group)||{}).name||'';
-  S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site,notes:''});
+  // Daily call covers the entire group — no single hospital site
+  S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site:'',notes:''});
   sel.value='';renderIRWeekBuilder();
 }
 
@@ -5731,7 +5747,7 @@ function renderIRList(){
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
     const dt=ic.site&&ic.site!=='At Home / Remote'?_driveTimeCell(ic.physId,ic.site):'';
     return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${ic.irGroup==='North'?'tb':'tg'}">${ic.irGroup}</span></td>
-    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType}</span></td><td>${dates}</td><td>${ic.site}</td>
+    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}</td>
     <td style="text-align:center">${dt||'—'}</td>
     <td>${ic.notes||'—'}</td>
     <td><button class="br bxs" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRList()">X</button></td></tr>`;
@@ -5882,7 +5898,7 @@ function previewIRAA(){
           const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
           if(pool.length){
             const p=pool[0];
-            const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
+            const site='';
             const note=pass===0?'Auto':pass===1?'Auto (back-to-back waived)':'Auto (all adj. waived)';
             preview.push({physId:p.id,date,callType:'daily',irGroup:g,site,notes:note,_pass:pass});
             cntD[p.id]++;
@@ -5940,7 +5956,7 @@ function previewIRAA(){
           const pool=_sortByFte(eligible,gPhys,cntW,wkndCapFn);
           if(pool.length){
             const p=pool[0];
-            const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===g)?.name||'');
+            const site='';
             const note=pass===0?'Auto':pass===1?'Auto (preview adj. waived)':'Auto (all adj. waived)';
             preview.push({physId:p.id,date:friday,callType:'weekend',irGroup:g,site,notes:note,_pass:pass});
             cntW[p.id]++;
@@ -6498,7 +6514,7 @@ function previewIRRebalance(){
 
         if(picked){
           const isSwap=!!(orig&&orig.physId!==picked.id);
-          const site=orig?.site||(S.sites.find(s=>s.irGroup===g)?.name||'');
+          const site='';
           const e={physId:picked.id,date,callType:'daily',irGroup:g,site,notes:orig?.notes||'',
             origPhysId:orig?.physId||null,origId:orig?.id||null,isSwap};
           plan.daily.push(e); gAsgn.push(e); cntD[picked.id]++;
@@ -7001,7 +7017,8 @@ function _syncHolidayToIRCall(physId, date, holName){
   else if(dow===0){callType='weekend';callDate=addDays(date,-2);}
   else if(dow===1){callType='weekend';callDate=addDays(date,-3);}
   else{callType='daily';callDate=date;}
-  const site=p.irSitePrim||(S.sites.find(s=>s.irGroup===p.irGroup)?.name||'');
+  // Daily call is group-wide (no single site); weekend call can reference primary site
+  const site=callType==='weekend'?(p.irSitePrim||(S.sites.find(s=>s.irGroup===p.irGroup)?.name||'')):'';
   // Remove any existing call for this group/date/type — holiday physician takes priority
   S.irCalls=S.irCalls.filter(c=>
     !(c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
@@ -7284,12 +7301,17 @@ function holTab(t,el){
   else if(t==='assignments'){ _populateHolFilterName(); renderHolTable(); }
   else if(t==='counter')    renderHolCounter();
   else if(t==='schedule')   renderHolSchedule();
-  else if(t==='autoassign') { renderHolCareerTally(); renderHaaBlackoutList(); renderHaaNeedsList(); }
+  else if(t==='autoassign') renderHolCareerTally();
 }
 
 // Entry from nav
 function renderHolidays(){
   _populateHolPhysSel();
+  // Force reset all tabs then open define
+  ['define','assignments','autoassign','counter','schedule'].forEach(x=>{
+    const e=document.getElementById('holt-'+x);
+    if(e) e.style.display='none';
+  });
   holTab('define', document.querySelector('#hol-tabs .tab'));
 }
 
