@@ -5040,6 +5040,187 @@ function saveAllMyVacPicks(){
   if(msg){msg.textContent='\u2713 Picks saved!';setTimeout(()=>{msg.textContent='';},3000);}
 }
 
+
+/* ─── IR SHIFT AUTO-ASSIGN ─── */
+
+let _irsaPreview = [];
+
+function renderIRShiftAutoPage(){
+  // Just ensure the box has default content if nothing previewed yet
+  const box = document.getElementById('irsa-box');
+  if(box && box.children.length === 0)
+    box.innerHTML = '<p style="color:var(--txt3)">Configure and click Preview.</p>';
+}
+
+function previewIRShiftAA(){
+  if(!_adminOnly('preview IR shift auto-assign')) return;
+
+  const yr     = +document.getElementById('irsa-yr')?.value || new Date().getFullYear();
+  const period = document.getElementById('irsa-period')?.value || 'H1';
+  const grp    = document.getElementById('irsa-grp')?.value || 'both';
+  const startM = period === 'H1' ? 1 : 7;
+  const months = Array.from({length:6}, (_,i) => `${yr}-${String(startM+i).padStart(2,'0')}`);
+  const groups = ['North','South'].filter(g => grp === 'both' || g === grp);
+
+  _irsaPreview = [];
+  const errors = [];
+  let totalFilled = 0, totalUnfilled = 0;
+
+  groups.forEach(g => {
+    const gPhys = S.physicians.filter(p => p.irFte > 0 && p.irGroup === g);
+    if(!gPhys.length){ errors.push(`No IR physicians in ${g} group.`); return; }
+    const gFteTot = gPhys.reduce((s,p) => s + p.irFte, 0) || 1;
+
+    // Enumerate all Day Shift slots for this group across the period
+    const slots = [];
+    months.forEach(ym => {
+      const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
+      S.sites.filter(s => s.irGroup === g || s.irGroup === 'Both').forEach(site => {
+        cells.forEach(c => {
+          const need = (S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`] || 0;
+          for(let i = 0; i < need; i++) slots.push({date:c.date, site:site.name, irGroup:g});
+        });
+      });
+    });
+    slots.sort((a,b) => a.date > b.date ? 1 : -1);
+    if(!slots.length){ errors.push(`No shift slots configured for ${g} group.`); return; }
+
+    // FTE-proportional quotas
+    const quotas = _irrQuotas(gPhys, slots.length, p => slots.length * (p.irFte / gFteTot));
+
+    const cnt = {};
+    gPhys.forEach(p => { cnt[p.id] = 0; });
+    const vacCache = {};
+    const vd = pid => { if(!vacCache[pid]) vacCache[pid] = vacDays(pid); return vacCache[pid]; };
+    const assignedOnDate = {};
+
+    slots.forEach(slot => {
+      const eligible = gPhys.filter(p => {
+        if(vd(p.id).has(slot.date)) return false;
+        if(_has2ndOr3rdShift(p.id, slot.date)) return false;
+        if(p.allowedSites?.length && !p.allowedSites.includes(slot.site)) return false;
+        if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
+        return true;
+      });
+
+      if(!eligible.length){ totalUnfilled++; return; }
+
+      eligible.sort((a,b) => {
+        const defA = (quotas[a.id]||0) - cnt[a.id];
+        const defB = (quotas[b.id]||0) - cnt[b.id];
+        if(defA !== defB) return defB - defA;
+        return b.irFte - a.irFte;
+      });
+
+      const picked = eligible[0];
+      cnt[picked.id]++;
+      if(!assignedOnDate[slot.date]) assignedOnDate[slot.date] = new Set();
+      assignedOnDate[slot.date].add(picked.id);
+      _irsaPreview.push({physId:picked.id, date:slot.date, site:slot.site,
+        irGroup:g, shift:'1st', sub:'', notes:'Auto-assign'});
+      totalFilled++;
+    });
+
+    // Append per-physician summary
+    gPhys.forEach(p => {
+      p._irsaAftCnt = cnt[p.id] || 0;
+      p._irsaTgt    = (quotas[p.id] || 0);
+    });
+  });
+
+  // Build preview HTML
+  const box = document.getElementById('irsa-box');
+  const applyBtn = document.getElementById('irsa-apply');
+  if(!_irsaPreview.length){
+    box.innerHTML = `<div class="note nw">${errors.join('<br>') || 'No shifts could be generated. Check irShiftSlots configuration.'}</div>`;
+    if(applyBtn) applyBtn.style.display = 'none';
+    return;
+  }
+
+  let html = `<div class="card" style="margin-bottom:10px">
+    <div class="card-title">Preview — ${period} ${yr}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+        ${totalFilled} shifts · ${totalUnfilled} unfillable
+      </span>
+    </div>
+    <div class="g3" style="margin-bottom:10px">
+      <div class="met"><div class="met-lbl">Shifts Generated</div>
+        <div class="met-val" style="color:var(--green-t)">${totalFilled}</div></div>
+      <div class="met"><div class="met-lbl">Unfillable Slots</div>
+        <div class="met-val" style="color:${totalUnfilled?'var(--amber,#d97706)':'var(--txt3)'}">
+          ${totalUnfilled}</div></div>
+      <div class="met"><div class="met-lbl">Physicians Used</div>
+        <div class="met-val">${[...new Set(_irsaPreview.map(s=>s.physId))].length}</div></div>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Group</th><th>IR FTE</th>
+      <th>Target</th><th>Assigned</th><th>% of Target</th>
+    </tr></thead><tbody>`;
+
+  groups.forEach(g => {
+    S.physicians.filter(p => p.irFte > 0 && p.irGroup === g).forEach(p => {
+      const after = _irsaPreview.filter(s => s.physId === p.id).length;
+      const tgt   = p._irsaTgt || 0;
+      const pct   = tgt > 0 ? Math.round(after / tgt * 100) : 0;
+      const col   = pct >= 95 ? 'var(--green-t)' : pct >= 80 ? 'var(--amber,#d97706)' : 'var(--red-t)';
+      html += `<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center">${tgt.toFixed(1)}</td>
+        <td style="text-align:center;font-weight:700">${after}</td>
+        <td style="text-align:center;font-weight:700;color:${col}">${pct}%</td>
+      </tr>`;
+    });
+  });
+
+  html += `</tbody></table></div></div>`;
+  if(errors.length) html += `<div class="note nw" style="font-size:12px">${errors.join('<br>')}</div>`;
+  if(totalUnfilled) html += `<div class="note nw" style="font-size:12px;margin-top:4px">
+    ⚠ ${totalUnfilled} slot(s) could not be filled due to vacation or conflicts.</div>`;
+
+  box.innerHTML = html;
+  if(applyBtn) applyBtn.style.display = 'inline-block';
+}
+
+function applyIRShiftAA(){
+  if(!_adminOnly('apply IR shift auto-assign')) return;
+  if(!_irsaPreview.length){ alert('Nothing to apply — run Preview first.'); return; }
+  if(!confirm(`Apply ${_irsaPreview.length} shift assignments? This will replace all existing non-Home Day Shifts for the selected period and groups.`)) return;
+
+  const yr     = +document.getElementById('irsa-yr')?.value || new Date().getFullYear();
+  const period = document.getElementById('irsa-period')?.value || 'H1';
+  const grp    = document.getElementById('irsa-grp')?.value || 'both';
+  const startM = period === 'H1' ? 1 : 7;
+  const months = Array.from({length:6}, (_,i) => `${yr}-${String(startM+i).padStart(2,'0')}`);
+  const groups = ['North','South'].filter(g => grp === 'both' || g === grp);
+  const inPeriod = date => months.some(ym => date.startsWith(ym));
+
+  // Remove existing non-Home Day Shifts for these groups in this period
+  S.irShifts = S.irShifts.filter(s => {
+    if(!inPeriod(s.date)) return true;
+    if(!groups.includes(s.irGroup)) return true;
+    if(s.shift === 'Home') return true; // keep Home fills
+    return false; // remove existing 1st shifts
+  });
+
+  // Add new assignments
+  _irsaPreview.forEach(a => {
+    S.irShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
+      shift:'1st', site:a.site, sub:a.sub||'', notes:a.notes||'', irGroup:a.irGroup});
+  });
+
+  const n = _irsaPreview.length;
+  _irsaPreview = [];
+  triggerSave();
+
+  const box = document.getElementById('irsa-box');
+  const applyBtn = document.getElementById('irsa-apply');
+  if(box) box.innerHTML = `<div class="note ns">✓ ${n} IR Day Shift(s) assigned. Calendars updated.</div>`;
+  if(applyBtn) applyBtn.style.display = 'none';
+  if(document.getElementById('irc-mo')) renderIRCal();
+}
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
