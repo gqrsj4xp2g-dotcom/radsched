@@ -1543,6 +1543,16 @@ tbody tr:hover{background:var(--bg3)}
         <option value="2027">2027</option>
       </select>
     </div>
+    <div class="fg" style="margin:0"><label>Traffic Quarter</label>
+      <select id="fte-commute-qtr" onchange="renderCommuteMatrix()" style="width:120px">
+        <option value="current">Current Quarter</option>
+        <option value="Q1">Q1 — Jan–Mar</option>
+        <option value="Q2">Q2 — Apr–Jun</option>
+        <option value="Q3">Q3 — Jul–Sep</option>
+        <option value="Q4">Q4 — Oct–Dec</option>
+        <option value="all">All (avg)</option>
+      </select>
+    </div>
     <button class="bp bsm" style="margin-bottom:2px" onclick="calcAllDriveTimes()">🔄 Recalculate</button>
     <button class="bt bsm" style="margin-bottom:2px" onclick="renderCommuteMatrix()">↺ Refresh</button>
   </div>
@@ -1653,12 +1663,8 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         </div>
         <div id="gmaps-key-msg" style="font-size:12px;margin-top:2px;margin-bottom:8px"></div>
         <div class="note ni" style="font-size:11px;margin-bottom:8px">
-          Both legs of each shift are calculated with actual traffic at that time of day:<br>
-          <strong>1st</strong> out 6:30 AM / back 3:00 PM &nbsp;·&nbsp;
-          <strong>2nd</strong> out 2:30 PM / back 11:00 PM &nbsp;·&nbsp;
-          <strong>3rd</strong> out 10:30 PM / back 7:00 AM &nbsp;·&nbsp;
-          <strong>IR Call</strong> out 6:30 AM / back 5:00 PM &nbsp;·&nbsp;
-          <strong>IR Weekend</strong> out 5:00 PM Fri / back 7:30 AM Mon<br>
+          Calculates both legs of the DR 1st shift with actual traffic at departure time.<br>
+          <strong>DR 1st Shift</strong>: depart home → hospital at shift start, return hospital → home at shift end.<br>
           Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
         </div>
         <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
@@ -1669,21 +1675,9 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
             <span style="font-weight:700;color:var(--txt3)">Shift</span>
             <span style="font-weight:700;color:var(--txt3)">Depart (home→hospital)</span>
             <span style="font-weight:700;color:var(--txt3)">Return (hospital→home)</span>
-            <span>1st Shift</span>
+            <span>DR 1st Shift</span>
             <input id="st-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
-            <span>2nd Shift</span>
-            <input id="st-2nd-dep" type="time" value="14:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-2nd-ret" type="time" value="23:00" style="font-size:11px;padding:2px 4px">
-            <span>3rd Shift</span>
-            <input id="st-3rd-dep" type="time" value="22:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-3rd-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
-            <span>IR Call</span>
-            <input id="st-ir-daily-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-ir-daily-ret" type="time" value="17:00" style="font-size:11px;padding:2px 4px">
-            <span>IR Weekend</span>
-            <input id="st-ir-weekend-dep" type="time" value="17:00" style="font-size:11px;padding:2px 4px">
-            <input id="st-ir-weekend-ret" type="time" value="07:30" style="font-size:11px;padding:2px 4px">
           </div>
           <button class="bt bsm" style="margin-top:6px" onclick="saveShiftTimes()">💾 Save Times</button>
           <span id="shift-times-msg" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
@@ -2418,7 +2412,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'},'2nd':{dep:'14:30',ret:'23:00'},'3rd':{dep:'22:30',ret:'07:00'},'ir-daily':{dep:'06:30',ret:'17:00'},'ir-weekend':{dep:'17:00',ret:'07:30'}}},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
   driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
@@ -3737,15 +3731,49 @@ function renderFTECareer(){
 
   el.innerHTML=html;
 }
+/* ─── QUARTERLY TRAFFIC HELPERS ─── */
+function _currentQuarter(){
+  return 'Q'+(Math.floor(new Date().getMonth()/3)+1);
+}
+
+function _dateToQuarter(dateStr){
+  if(!dateStr) return _currentQuarter();
+  const m=new Date(dateStr.slice(0,10)+'T12:00:00').getMonth();
+  return 'Q'+(Math.floor(m/3)+1);
+}
+
+// Resolve outMins/retMins for a shiftEntry (byShift[type]) for a given quarter or strategy.
+// qtrSel: 'current' | 'Q1'|'Q2'|'Q3'|'Q4' | 'all' | a date string (uses that date's quarter)
+function _trafficForShift(shiftEntry, qtrSel){
+  if(!shiftEntry) return null;
+  // Determine which quarter to use
+  let qtr;
+  if(!qtrSel||qtrSel==='current') qtr=_currentQuarter();
+  else if(qtrSel==='all'){
+    // Average all available quarters
+    const qtrs=Object.values(shiftEntry.quarters||{}).filter(q=>q.outMins!=null);
+    if(!qtrs.length) return {outMins:shiftEntry.outMins,retMins:shiftEntry.retMins};
+    return {
+      outMins:Math.round(qtrs.reduce((s,q)=>s+q.outMins,0)/qtrs.length),
+      retMins:Math.round(qtrs.reduce((s,q)=>s+q.retMins,0)/qtrs.length),
+    };
+  } else if(qtrSel.length===2&&qtrSel[0]==='Q'){
+    qtr=qtrSel; // 'Q1'–'Q4'
+  } else {
+    qtr=_dateToQuarter(qtrSel); // date string
+  }
+  // Try the specific quarter first; fall back to top-level (latest) reading
+  const snap=shiftEntry.quarters?.[qtr];
+  if(snap&&snap.outMins!=null) return snap;
+  return {outMins:shiftEntry.outMins,retMins:shiftEntry.retMins};
+}
+
 /* ─── SHIFT TIME SETTINGS ─── */
 function saveShiftTimes(){
-  const types=['1st','2nd','3rd','ir-daily','ir-weekend'];
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
-  types.forEach(t=>{
-    const depEl=document.getElementById(`st-${t}-dep`);
-    const retEl=document.getElementById(`st-${t}-ret`);
-    if(depEl&&retEl) S.cfg.shiftTimes[t]={dep:depEl.value||S.cfg.shiftTimes[t]?.dep,ret:retEl.value||S.cfg.shiftTimes[t]?.ret};
-  });
+  const depEl=document.getElementById('st-1st-dep');
+  const retEl=document.getElementById('st-1st-ret');
+  if(depEl&&retEl) S.cfg.shiftTimes['1st']={dep:depEl.value||'06:30',ret:retEl.value||'15:00'};
   triggerSave();
   const msg=document.getElementById('shift-times-msg');
   if(msg){msg.textContent='✓ Saved. Run \u201cUpdate All Shift Traffic\u201d to recalculate with new times.';
@@ -3753,15 +3781,11 @@ function saveShiftTimes(){
 }
 
 function _loadShiftTimesUI(){
-  const defaults={'1st':{dep:'06:30',ret:'15:00'},'2nd':{dep:'14:30',ret:'23:00'},
-    '3rd':{dep:'22:30',ret:'07:00'},'ir-daily':{dep:'06:30',ret:'17:00'},'ir-weekend':{dep:'17:00',ret:'07:30'}};
-  const times=S.cfg.shiftTimes||defaults;
-  Object.entries(times).forEach(([t,v])=>{
-    const depEl=document.getElementById(`st-${t}-dep`);
-    const retEl=document.getElementById(`st-${t}-ret`);
-    if(depEl) depEl.value=v.dep||defaults[t]?.dep||'';
-    if(retEl) retEl.value=v.ret||defaults[t]?.ret||'';
-  });
+  const v=S.cfg.shiftTimes?.['1st']||{dep:'06:30',ret:'15:00'};
+  const depEl=document.getElementById('st-1st-dep');
+  const retEl=document.getElementById('st-1st-ret');
+  if(depEl) depEl.value=v.dep||'06:30';
+  if(retEl) retEl.value=v.ret||'15:00';
 }
 
 /* ─── GOOGLE MAPS / DRIVE TIMES ─── */
@@ -3878,11 +3902,8 @@ async function updateTrafficTimes(){
   // Read shift times from S.cfg — user-configurable in Settings → Drive Times
   const _st=S.cfg.shiftTimes||{};
   const SHIFTS=[
-    {type:'1st',        depTime:_st['1st']?.dep||'06:30',       retTime:_st['1st']?.ret||'15:00',       label:`1st Shift (out ${_st['1st']?.dep||'06:30'} \u2192 back ${_st['1st']?.ret||'15:00'})`},
-    {type:'2nd',        depTime:_st['2nd']?.dep||'14:30',       retTime:_st['2nd']?.ret||'23:00',       label:`2nd Shift (out ${_st['2nd']?.dep||'14:30'} \u2192 back ${_st['2nd']?.ret||'23:00'})`},
-    {type:'3rd',        depTime:_st['3rd']?.dep||'22:30',       retTime:_st['3rd']?.ret||'07:00',       label:`3rd Shift (out ${_st['3rd']?.dep||'22:30'} \u2192 back ${_st['3rd']?.ret||'07:00'})`},
-    {type:'ir-daily',   depTime:_st['ir-daily']?.dep||'06:30',  retTime:_st['ir-daily']?.ret||'17:00',  label:`IR Call (out ${_st['ir-daily']?.dep||'06:30'} \u2192 back ${_st['ir-daily']?.ret||'17:00'})`},
-    {type:'ir-weekend', depTime:_st['ir-weekend']?.dep||'17:00',retTime:_st['ir-weekend']?.ret||'07:30',label:`IR Weekend (out ${_st['ir-weekend']?.dep||'17:00'} \u2192 back ${_st['ir-weekend']?.ret||'07:30'})`},
+    {type:'1st', depTime:_st['1st']?.dep||'06:30', retTime:_st['1st']?.ret||'15:00',
+     label:`DR 1st Shift (out ${_st['1st']?.dep||'06:30'} \u2192 back ${_st['1st']?.ret||'15:00'})`},
   ];
 
   const hospAddrs=sitesWithAddr.map(s=>s.address.trim());
@@ -3913,13 +3934,17 @@ async function updateTrafficTimes(){
               const retTraffic=retEl?.status==='OK'
                 ?(retEl.duration_in_traffic||retEl.duration)
                 :outEl; // fallback to outbound time if return unavailable
+              const outM=Math.round(outEl.value/60);
+              const retM=Math.round(retTraffic.value/60);
+              const qtr=_currentQuarter();
+              // Always update the top-level (latest) reading
               S.driveTimes[key].byShift[shift.type]={
-                outMins:Math.round(outEl.value/60),
-                outText:outEl.text,
-                retMins:Math.round(retTraffic.value/60),
-                retText:retTraffic.text,
-                label:shift.label,
-                updated:now,
+                outMins:outM,outText:outEl.text,
+                retMins:retM,retText:retTraffic.text,
+                label:shift.label,updated:now,
+                // Also store in per-quarter snapshot
+                quarters:{...((S.driveTimes[key].byShift[shift.type]||{}).quarters||{}),
+                  [qtr]:{outMins:outM,retMins:retM,updated:now}}
               };
               done++;
             } else { errors++; }
@@ -4013,6 +4038,9 @@ function renderCommuteMatrix(){
 
   const grpFilter=document.getElementById('fte-commute-grp')?.value||'all';
   const yrFilter =document.getElementById('fte-commute-yr')?.value||'all';
+  const qtrSel   =document.getElementById('fte-commute-qtr')?.value||'current';
+  const curQtr   =_currentQuarter();
+  const qtrLabel =qtrSel==='current'?`${curQtr} (current)`:qtrSel==='all'?'All quarters avg':qtrSel;
 
   function matchYear(date){ return yrFilter==='all'||date.startsWith(yrFilter); }
 
@@ -4077,12 +4105,15 @@ function renderCommuteMatrix(){
           // Per-shift traffic rows
           const shiftRows=SHIFT_KEYS.map(k=>{
             const sv=entry.byShift?.[k];
-            if(!sv||sv.outMins==null) return '';
-            const rt=sv.outMins+sv.retMins;
+            if(!sv) return '';
+            const tr=_trafficForShift(sv,qtrSel);
+            if(!tr||tr.outMins==null) return '';
+            const rt=tr.outMins+tr.retMins;
             const rtCol=rt<=40?'var(--green-t)':rt<=80?'var(--txt2)':'var(--amber,#d97706)';
+            const qtrs=sv.quarters?Object.keys(sv.quarters):[];
             return `<div style="font-size:9px;border-top:1px solid var(--bdr2);padding-top:2px;margin-top:1px">
-              <span style="color:var(--txt3)">${SHIFT_SHORT[k]}</span>
-              <span style="color:${rtCol};font-weight:700"> ${sv.outMins}+${sv.retMins}=${rt}m</span>
+              <span style="color:var(--txt3)">${SHIFT_SHORT[k]} ${qtrs.length?'['+qtrs.join(',')+']':''}</span>
+              <span style="color:${rtCol};font-weight:700"> ${tr.outMins}+${tr.retMins}=${rt}m</span>
             </div>`;
           }).join('');
           return `<td style="text-align:center;background:${bg};padding:5px 4px;vertical-align:top">
@@ -4104,12 +4135,14 @@ function renderCommuteMatrix(){
     const byHosp={};
     let totalBase=0,totalTraffic=0,totalShifts=0;
 
-    function addShift(site,shiftKey){
+    function addShift(site,shiftKey,shiftDate){
       const entry=dt[`${p.id}|${site}`];
       if(!entry||entry.mins===null) return;
       const sv=shiftKey?entry.byShift?.[shiftKey]:null;
-      const outM=sv?.outMins??entry.mins;
-      const retM=sv?.retMins??entry.mins;
+      // Use the shift's own date to pick the matching quarter's traffic
+      const tr=sv?_trafficForShift(sv,shiftDate||qtrSel):null;
+      const outM=tr?.outMins??entry.mins;
+      const retM=tr?.retMins??entry.mins;
       if(!byHosp[site]) byHosp[site]={shifts:0,base:0,traffic:0};
       byHosp[site].shifts++;
       byHosp[site].base+=entry.mins*2;
@@ -4120,13 +4153,13 @@ function renderCommuteMatrix(){
     }
 
     S.drShifts.filter(s=>s.physId===p.id&&!s.autoHome&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>addShift(s.site, SHIFT_MAP[s.shift]||null));
+      .forEach(s=>addShift(s.site, SHIFT_MAP[s.shift]||null, s.date));
     (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>addShift(s.site,'ir-daily'));
+      .forEach(s=>addShift(s.site,'ir-daily',s.date));
     S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-daily'));
+      .forEach(c=>addShift(c.site,'ir-daily',c.date));
     S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
-      .forEach(c=>addShift(c.site,'ir-weekend'));
+      .forEach(c=>addShift(c.site,'ir-weekend',c.date));
 
     return{p,byHosp,totalBase,totalTraffic,totalShifts};
   }).filter(d=>d.totalShifts>0);
@@ -4141,7 +4174,7 @@ function renderCommuteMatrix(){
 
   html+=`<div class="card" style="margin-bottom:14px">
     <div class="card-title">Round-Trip Drive Tally \u2014 ${yrLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; DR + IR shifts + IR calls</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; DR + IR shifts + IR calls &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
     </div>`;
 
   if(!sorted.length){
