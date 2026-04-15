@@ -1406,25 +1406,31 @@ tbody tr:hover{background:var(--bg3)}
 <!-- FTE MONITOR -->
 <div id="page-fte" class="page">
   <div class="pg-title">📊 FTE Monitor</div>
-  <div class="pg-sub">Track assigned call and shifts against each physician's FTE targets. Switch between monthly detail and yearly totals.</div>
+  <div class="pg-sub">Track assigned call and shifts against each physician's FTE targets. IR call targets use finite-slot math (actual available slots ÷ group FTE × physician FTE) over 6-month periods.</div>
   <div class="tabs" id="fte-tabs" style="margin-bottom:10px">
     <div class="tab on" onclick="fteTab('month',this)">Monthly</div>
-    <div class="tab" onclick="fteTab('year',this)">Yearly Totals</div>
+    <div class="tab" onclick="fteTab('period',this)">6-Month Period</div>
   </div>
   <div id="fte-month-ctrl" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px">
     <div class="fg" style="margin:0"><label>Month</label><input id="fte-mo" type="month" oninput="renderFTE()"></div>
     <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTE()">↺ Refresh</button>
   </div>
-  <div id="fte-year-ctrl" style="display:none;align-items:flex-end;gap:10px;margin-bottom:12px">
+  <div id="fte-period-ctrl" style="display:none;align-items:flex-end;gap:10px;margin-bottom:12px">
     <div class="fg" style="margin:0"><label>Year</label>
-      <select id="fte-yr" onchange="renderFTEYear()" style="width:110px">
+      <select id="fte-yr" onchange="renderFTEPeriod()" style="width:90px">
         <option value="2024">2024</option>
         <option value="2025">2025</option>
         <option value="2026" selected>2026</option>
         <option value="2027">2027</option>
       </select>
     </div>
-    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTEYear()">↺ Refresh</button>
+    <div class="fg" style="margin:0"><label>Period</label>
+      <select id="fte-period" onchange="renderFTEPeriod()" style="width:175px">
+        <option value="H1">H1 — Jan through Jun</option>
+        <option value="H2">H2 — Jul through Dec</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTEPeriod()">↺ Refresh</button>
   </div>
   <div id="fte-content"></div>
 </div>
@@ -3038,69 +3044,66 @@ function fteTab(t,tabEl){
   document.querySelectorAll('#fte-tabs .tab').forEach(x=>x.classList.remove('on'));
   if(tabEl) tabEl.classList.add('on');
   const monthCtrl=document.getElementById('fte-month-ctrl');
-  const yearCtrl=document.getElementById('fte-year-ctrl');
+  const periodCtrl=document.getElementById('fte-period-ctrl');
   if(monthCtrl) monthCtrl.style.display=t==='month'?'flex':'none';
-  if(yearCtrl)  yearCtrl.style.display=t==='year'?'flex':'none';
+  if(periodCtrl) periodCtrl.style.display=t==='period'?'flex':'none';
   if(t==='month') renderFTE();
-  else renderFTEYear();
+  else renderFTEPeriod();
 }
 
-function renderFTEYear(){
+function renderFTEPeriod(){
   const yrEl=document.getElementById('fte-yr');
+  const periodEl=document.getElementById('fte-period');
   if(!yrEl) return;
-  // Default year selector to current year
-  if(!yrEl.value){yrEl.value=String(new Date().getFullYear());}
+  if(!yrEl.value) yrEl.value=String(new Date().getFullYear());
   const yr=parseInt(yrEl.value);
-  const months=Array.from({length:12},(_,i)=>`${yr}-${String(i+1).padStart(2,'0')}`);
+  const period=periodEl?.value||'H1';
+  const startM=period==='H1'?1:7;
+  const months=Array.from({length:6},(_,i)=>`${yr}-${String(startM+i).padStart(2,'0')}`);
+  const [,m0]=months[0].split('-').map(Number);
+  const [,m1]=months[5].split('-').map(Number);
+  const fmt=m=>new Date(yr,m-1,1).toLocaleString('default',{month:'short'});
+  const periodLabel=`${period}: ${fmt(m0)}–${fmt(m1)} ${yr}`;
+
   const el=document.getElementById('fte-content');
   if(!el) return;
+  let html='';
 
-  // Annual FTE targets: monthly target × 12
-  function yrTarget(p,type){return Math.round(maxDR(p,type)*12);}
-
-  let html=`<div style="font-size:11px;color:var(--txt3);margin-bottom:12px">Full-year totals for ${yr} — targets are monthly FTE cap × 12 months</div>`;
-
-  // ── DR yearly ──
-  const drPs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
+  // ── DR physicians — 6-month period ──
+  const drPs=S.physicians.filter(p=>p.drFte>0);
   if(drPs.length){
+    // 6-month cap = monthly cap × 6
+    const wdTgt=p=>maxDR(p,'wd')*6;
+    const wkTgt=p=>maxDR(p,'wk')*6;
     html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">Diagnostic Radiology — ${yr} Yearly Totals</div>
+      <div class="card-title">Diagnostic Radiology — ${periodLabel}</div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>DR FTE</th>
-        <th>Wkdy Shifts</th><th>Target</th><th>Util%</th>
-        <th>Wknd Calls</th><th>Target</th><th>Util%</th>
-        <th>Avg Anchor %</th><th>Status</th>
+        <th>WD Shifts</th><th>WD Target</th><th>WD Util%</th>
+        <th>Wknd Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
+        <th>Status</th>
       </tr></thead><tbody>`;
     drPs.forEach(p=>{
-      const wdUsed=months.reduce((sum,ym)=>sum+drCnt(p.id,ym),0);
-      const wkUsed=months.reduce((sum,ym)=>sum+wkCnt(p.id,ym),0);
-      const wdTgt=yrTarget(p,'wd');
-      const wkTgt=yrTarget(p,'wk');
-      const wdPct=wdTgt?Math.round(wdUsed/wdTgt*100):0;
-      const wkPct=wkTgt?Math.round(wkUsed/wkTgt*100):0;
-      // Average anchor % across months that have shifts
-      const ancData=months.map(ym=>ancComp(p.id,ym)).filter(c=>c&&!c.noData);
-      const avgAnc=ancData.length?Math.round(ancData.reduce((s,c)=>s+c.pct,0)/ancData.length):null;
-      const ancTxt=avgAnc!=null?avgAnc+'%':'—';
-      const ancOk=avgAnc!=null&&avgAnc>=S.cfg.anchorPct;
-      const ancCls=avgAnc!=null?(ancOk?'color:var(--green-t)':'color:var(--red-t)'):'color:var(--txt3)';
-      const wdCls=wdPct>105?'color:var(--red-t)':wdPct>=85?'color:var(--green-t)':wdPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const wkCls=wkPct>105?'color:var(--red-t)':wkPct>=85?'color:var(--green-t)':wkPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=wdPct>110||wkPct>110;
-      const low=wdPct<50&&wkPct<50;
-      const statusTxt=over?'⚠ Over':low?'Under':wdPct>=80&&wkPct>=70?'✓ On track':'Low';
-      const statusCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
+      const wdUsed=months.reduce((s,ym)=>s+drCnt(p.id,ym),0);
+      const wkUsed=months.reduce((s,ym)=>s+wkCnt(p.id,ym),0);
+      const mWd=wdTgt(p),mWk=wkTgt(p);
+      const pWd=mWd?Math.round(wdUsed/mWd*100):0;
+      const pWk=mWk?Math.round(wkUsed/mWk*100):0;
+      const clsWd=pWd>110?'color:var(--red-t)':pWd>=85?'color:var(--green-t)':pWd>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const clsWk=pWk>110?'color:var(--red-t)':pWk>=85?'color:var(--green-t)':pWk>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=pWd>110||pWk>110,low=pWd<40&&pWk<40;
+      const stTxt=over?'⚠ Over':low?'Under':(pWd>=80&&pWk>=80)?'✓ On track':'Low';
+      const stCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.drFte}</td>
         <td style="text-align:center;font-weight:700">${wdUsed}</td>
-        <td style="text-align:center;color:var(--txt3)">${wdTgt}</td>
-        <td style="text-align:center"><span style="${wdCls};font-weight:700">${wdPct}%</span></td>
+        <td style="text-align:center;color:var(--txt3)">${mWd}</td>
+        <td style="text-align:center"><span style="${clsWd};font-weight:700">${pWd}%</span></td>
         <td style="text-align:center;font-weight:700">${wkUsed}</td>
-        <td style="text-align:center;color:var(--txt3)">${wkTgt}</td>
-        <td style="text-align:center"><span style="${wkCls};font-weight:700">${wkPct}%</span></td>
-        <td style="text-align:center;${ancCls};font-weight:700">${ancTxt}</td>
-        <td style="${statusCls};font-weight:700">${statusTxt}</td>
+        <td style="text-align:center;color:var(--txt3)">${mWk}</td>
+        <td style="text-align:center"><span style="${clsWk};font-weight:700">${pWk}%</span></td>
+        <td style="${stCls};font-weight:700">${stTxt}</td>
       </tr>`;
     });
     // Totals row
@@ -3109,45 +3112,22 @@ function renderFTEYear(){
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
       <td style="font-weight:800" colspan="2">Team Total</td>
       <td style="text-align:center;font-weight:800">${totWd}</td>
-      <td style="text-align:center;color:var(--txt3)">${drPs.reduce((s,p)=>s+yrTarget(p,'wd'),0)}</td>
+      <td style="text-align:center;color:var(--txt3)">${drPs.reduce((s,p)=>s+wdTgt(p),0)}</td>
       <td></td>
       <td style="text-align:center;font-weight:800">${totWk}</td>
-      <td style="text-align:center;color:var(--txt3)">${drPs.reduce((s,p)=>s+yrTarget(p,'wk'),0)}</td>
-      <td></td><td></td><td></td>
+      <td style="text-align:center;color:var(--txt3)">${drPs.reduce((s,p)=>s+wkTgt(p),0)}</td>
+      <td></td><td></td>
     </tr>`;
     html+=`</tbody></table></div></div>`;
   }
 
-  // ── Monthly breakdown bar chart (DR) ──
-  if(drPs.length){
-    html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">DR Shifts by Month — ${yr}</div>
-      <div style="overflow-x:auto"><table><thead><tr>
-        <th>Physician</th>${months.map(ym=>{const[,m]=ym.split('-');return`<th style="font-size:10px;text-align:center">${new Date(yr,parseInt(m)-1,1).toLocaleString('default',{month:'short'})}</th>`;}).join('')}<th style="font-weight:800;background:var(--bg3)">Total</th>
-      </tr></thead><tbody>`;
-    drPs.forEach(p=>{
-      const mCounts=months.map(ym=>drCnt(p.id,ym));
-      const total=mCounts.reduce((s,c)=>s+c,0);
-      const peak=Math.max(...mCounts,1);
-      html+=`<tr><td style="font-weight:600">${pname(p.id)}</td>`;
-      mCounts.forEach(c=>{
-        const pct=Math.round(c/peak*100);
-        const clr=c===0?'var(--bg3)':c===peak?'var(--blue)':'var(--blue-bg)';
-        const txt=c===0?'<span style="color:var(--txt3)">—</span>':`<span style="font-weight:700;color:${c===peak?'#fff':'var(--blue-t)'}">${c}</span>`;
-        html+=`<td style="text-align:center;padding:3px 6px">
-          <div style="background:${clr};border-radius:3px;padding:2px 4px;font-size:11px">${txt}</div>
-        </td>`;
-      });
-      html+=`<td style="text-align:center;font-weight:800;background:var(--bg3)">${total}</td></tr>`;
-    });
-    html+=`</tbody></table></div></div>`;
-  }
-
-  // ── IR yearly ──
+  // ── IR physicians — 6-month period with FINITE-SLOT targets ──
   const irPs=S.physicians.filter(p=>p.irFte>0);
   if(irPs.length){
     html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">Interventional Radiology — ${yr} Yearly Totals</div>
+      <div class="card-title">Interventional Radiology — ${periodLabel}
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">Targets = finite slots in period ÷ group FTE × physician FTE</span>
+      </div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
         <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
@@ -3157,17 +3137,16 @@ function renderFTEYear(){
     irPs.forEach(p=>{
       const dailyTotal=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
       const wkndTotal=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
-      const dailyTgt=irDailyTargetYear(p,yr);
-      const wkndTgt=irWkndTargetYear(p,yr);
+      const dailyTgt=irDailyTargetPeriod(p,months);
+      const wkndTgt=irWkndTargetPeriod(p,months);
       const dailyPct=dailyTgt>0?Math.round(dailyTotal/dailyTgt*100):0;
       const wkndPct=wkndTgt>0?Math.round(wkndTotal/wkndTgt*100):0;
       const shiftsTotal=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)).length,0);
       const dCls=dailyPct>110?'color:var(--red-t)':dailyPct>=85?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
       const wCls=wkndPct>110?'color:var(--red-t)':wkndPct>=85?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=dailyPct>115||wkndPct>115;
-      const low=dailyPct<50&&wkndPct<50;
-      const statusTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
-      const statusCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
+      const over=dailyPct>115||wkndPct>115,low=dailyPct<50&&wkndPct<50;
+      const stTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
+      const stCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
@@ -3179,43 +3158,21 @@ function renderFTEYear(){
         <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td style="text-align:center">${shiftsTotal}</td>
-        <td style="${statusCls};font-weight:700">${statusTxt}</td>
+        <td style="${stCls};font-weight:700">${stTxt}</td>
       </tr>`;
     });
-    // Totals row
-    const totDaily=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irDailyCnt(p.id,ym),0),0);
-    const totWknd=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irWkndCnt(p.id,ym),0),0);
+    // Team total row
+    const totD=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irDailyCnt(p.id,ym),0),0);
+    const totW=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irWkndCnt(p.id,ym),0),0);
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
       <td style="font-weight:800" colspan="3">Team Total</td>
-      <td style="text-align:center;font-weight:800">${totDaily}</td>
-      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irDailyTargetYear(p,yr),0).toFixed(1)}</td>
+      <td style="text-align:center;font-weight:800">${totD}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irDailyTargetPeriod(p,months),0).toFixed(1)}</td>
       <td></td>
-      <td style="text-align:center;font-weight:800">${totWknd}</td>
-      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irWkndTargetYear(p,yr),0).toFixed(1)}</td>
+      <td style="text-align:center;font-weight:800">${totW}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irWkndTargetPeriod(p,months),0).toFixed(1)}</td>
       <td></td><td></td><td></td>
     </tr>`;
-    html+=`</tbody></table></div></div>`;
-
-    // IR monthly call breakdown
-    html+=`<div class="card">
-      <div class="card-title">IR Calls by Month — ${yr}</div>
-      <div style="overflow-x:auto"><table><thead><tr>
-        <th>Physician</th>${months.map(ym=>{const[,m]=ym.split('-');return`<th style="font-size:10px;text-align:center">${new Date(yr,parseInt(m)-1,1).toLocaleString('default',{month:'short'})}</th>`;}).join('')}<th style="font-weight:800;background:var(--bg3)">Total</th>
-      </tr></thead><tbody>`;
-    irPs.forEach(p=>{
-      const mCounts=months.map(ym=>S.irCalls.filter(c=>c.physId===p.id&&c.date.startsWith(ym)).length);
-      const total=mCounts.reduce((s,c)=>s+c,0);
-      const peak=Math.max(...mCounts,1);
-      html+=`<tr><td style="font-weight:600">${pname(p.id)}</td>`;
-      mCounts.forEach(c=>{
-        const clr=c===0?'var(--bg3)':c===peak?'var(--teal)':'var(--teal-bg)';
-        const txt=c===0?'<span style="color:var(--txt3)">—</span>':`<span style="font-weight:700;color:${c===peak?'#fff':'var(--teal-t)'}">${c}</span>`;
-        html+=`<td style="text-align:center;padding:3px 6px">
-          <div style="background:${clr};border-radius:3px;padding:2px 4px;font-size:11px">${txt}</div>
-        </td>`;
-      });
-      html+=`<td style="text-align:center;font-weight:800;background:var(--bg3)">${total}</td></tr>`;
-    });
     html+=`</tbody></table></div></div>`;
   }
 
