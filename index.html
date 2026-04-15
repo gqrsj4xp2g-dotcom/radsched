@@ -4385,19 +4385,27 @@ function previewIRRebalance(){
           if(eligible.length){
           const n=Math.max(gPhys.length,1);
           const off=Object.values(cntS).reduce((s,v)=>s+v,0)%n;
-          eligible.sort((a,b)=>{
-            const qA=shiftCapFn(a),qB=shiftCapFn(b);
-            const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
-            if(underA!==underB) return underA?-1:1;
-            // Quota deficit first (most under-target wins), then rotation tiebreak
-            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
-            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
-            if(Math.abs(defA-defB)>1e-9) return defB-defA;
-            const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
-            const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
-            if(iA!==iB) return iA-iB;
-            // Anchor match is last — never prevents full slot coverage
-            return (b.anchorSite===entry.site?1:0)-(a.anchorSite===entry.site?1:0);
+          // Two-phase selection: prefer anchor-matching physicians, fall back to full eligible pool.
+          // Fallback guarantees no slot goes unfilled due to anchor constraints.
+          function _rebPickBest(candidates){
+            return candidates.slice().sort((a,b)=>{
+              const qA=shiftCapFn(a),qB=shiftCapFn(b);
+              const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
+              if(underA!==underB) return underA?-1:1;
+              const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
+              const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
+              if(Math.abs(defA-defB)>1e-9) return defB-defA;
+              const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
+              const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
+              return iA-iB;
+            })[0]||null;
+          }
+          const rebAnchorPool=eligible.filter(p=>p.anchorSite===entry.site);
+          const pickedElig=_rebPickBest(rebAnchorPool)||_rebPickBest(eligible);
+          eligible.sort((a,b)=>{ // keep eligible sorted for picked= assignment below
+            if(a===pickedElig) return -1;
+            if(b===pickedElig) return 1;
+            return 0;
           });
           picked=eligible[0];
         }
@@ -5436,18 +5444,22 @@ function previewIRShiftAA(){
               if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift')) return false;
               if(!sequenceOk(p,c.date,ym)) return false;
               return true;
-            }).sort((a,b)=>{
-              // Quota fulfillment first → FTE-load balance → anchor as tiebreaker only
-              const underA=cnt[a.id]<(shiftQuotas[a.id]||0), underB=cnt[b.id]<(shiftQuotas[b.id]||0);
-              if(underA!==underB) return underA?-1:1;
-              const qA=shiftQuotas[a.id]||1, qB=shiftQuotas[b.id]||1;
-              const loadDiff=cnt[a.id]/qA - cnt[b.id]/qB;
-              if(Math.abs(loadDiff)>1e-9) return loadDiff;
-              // Anchor match is last — never blocks a slot from being filled
-              return (b.anchorSite===st.name?1:0)-(a.anchorSite===st.name?1:0);
             });
-            if(pool.length){
-              const p=pool[0];
+            // Two-phase selection: anchor-matching physicians first, full pool as fallback.
+            // This maximises anchor compliance while guaranteeing slot coverage — the
+            // fallback ensures no slot goes unfilled due to anchor constraints.
+            function _pickBest(candidates){
+              return candidates.slice().sort((a,b)=>{
+                // Under-quota first, then FTE-normalised load balance
+                const underA=cnt[a.id]<(shiftQuotas[a.id]||0), underB=cnt[b.id]<(shiftQuotas[b.id]||0);
+                if(underA!==underB) return underA?-1:1;
+                const qA=shiftQuotas[a.id]||1, qB=shiftQuotas[b.id]||1;
+                return cnt[a.id]/qA - cnt[b.id]/qB;
+              })[0];
+            }
+            const anchorPool=pool.filter(p=>p.anchorSite===st.name);
+            const p=_pickBest(anchorPool)||_pickBest(pool);
+            if(p){
               preview.push({physId:p.id,date:c.date,shift:sh,site:st.name,sub:p.irSubs[0]||'',irGroup:g,notes:'Auto'});
               cnt[p.id]++;
             } else {
