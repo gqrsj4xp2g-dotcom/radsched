@@ -1219,10 +1219,11 @@ tbody tr:hover{background:var(--bg3)}
       </select>
     </div>
     <div class="fg" style="margin:0"><label>Call Type</label>
-      <select id="irr-type" onchange="renderIRRebalancePrep()" style="width:150px">
-        <option value="both">Daily + Weekend</option>
-        <option value="daily">Daily Only</option>
-        <option value="weekend">Weekend Only</option>
+      <select id="irr-type" onchange="renderIRRebalancePrep()" style="width:175px">
+        <option value="both">Daily + Weekend Calls</option>
+        <option value="daily">Daily Calls Only</option>
+        <option value="weekend">Weekend Calls Only</option>
+        <option value="shifts">Procedure Shifts</option>
       </select>
     </div>
     <button class="bp" onclick="previewIRRebalance()" style="margin-bottom:2px">⚖ Preview Rebalance</button>
@@ -3088,21 +3089,25 @@ function renderFTE(){
         <th>Physician</th><th>IR FTE</th><th>Group</th>
         <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
         <th>Weekend Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
-        <th>IR Shifts</th><th>Status</th>
+        <th>Proc Shifts</th><th>Shift Target</th><th>Shift Util%</th>
+        <th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
       const dailyCalls=irDailyCnt(p.id,ym);
       const wkndCalls=irWkndCnt(p.id,ym);
+      const procShifts=irProcShiftCnt(p.id,ym);
       const dailyTgt=irDailyTargetMonth(p,ym);
       const wkndTgt=irWkndTargetMonth(p,ym);
+      const shiftTgt=irShiftTargetMonth(p,ym);
       const dailyPct=dailyTgt>0?Math.round(dailyCalls/dailyTgt*100):0;
       const wkndPct=wkndTgt>0?Math.round(wkndCalls/wkndTgt*100):0;
-      const shiftUsed=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym)).length;
+      const shiftPct=shiftTgt>0?Math.round(procShifts/shiftTgt*100):0;
       const dCls=dailyPct>110?'color:var(--red-t)':dailyPct>=90?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
       const wCls=wkndPct>110?'color:var(--red-t)':wkndPct>=90?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=dailyPct>115||wkndPct>115;
-      const statusTxt=over?'⚠ Over':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
-      const statusCls=over?'color:var(--red-t)':(dailyPct>=80&&wkndPct>=80)?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const sCls=shiftPct>110?'color:var(--red-t)':shiftPct>=90?'color:var(--green-t)':shiftPct>=60?'color:var(--amber,#d97706)':shiftTgt>0?'color:var(--txt3)':'color:var(--txt3)';
+      const over=dailyPct>115||wkndPct>115||shiftPct>115;
+      const statusTxt=over?'⚠ Over':(dailyPct>=80&&wkndPct>=80&&(shiftTgt===0||shiftPct>=80))?'✓ On track':'Low';
+      const statusCls=over?'color:var(--red-t)':(dailyPct>=80&&wkndPct>=80&&(shiftTgt===0||shiftPct>=80))?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
@@ -3113,7 +3118,9 @@ function renderFTE(){
         <td style="text-align:center;font-weight:700">${wkndCalls}</td>
         <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
-        <td style="text-align:center">${shiftUsed}</td>
+        <td style="text-align:center;font-weight:700">${procShifts}</td>
+        <td style="text-align:center;color:var(--txt3)">${shiftTgt>0?shiftTgt.toFixed(1):'—'}</td>
+        <td style="text-align:center">${shiftTgt>0?`<span style="${sCls};font-weight:700">${shiftPct}%</span>`:'—'}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
     });
@@ -3216,20 +3223,24 @@ function renderFTEPeriod(){
         <th>Physician</th><th>IR FTE</th><th>Group</th>
         <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
         <th>Wknd Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
-        <th>IR Shifts</th><th>Status</th>
+        <th>Proc Shifts</th><th>Shift Target</th><th>Shift Util%</th>
+        <th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
       const dailyTotal=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
       const wkndTotal=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+      const shiftTotal=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
       const dailyTgt=irDailyTargetPeriod(p,months);
       const wkndTgt=irWkndTargetPeriod(p,months);
+      const shiftTgt=irShiftTargetPeriod(p,months);
       const dailyPct=dailyTgt>0?Math.round(dailyTotal/dailyTgt*100):0;
       const wkndPct=wkndTgt>0?Math.round(wkndTotal/wkndTgt*100):0;
-      const shiftsTotal=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)).length,0);
+      const shiftPct=shiftTgt>0?Math.round(shiftTotal/shiftTgt*100):0;
       const dCls=dailyPct>110?'color:var(--red-t)':dailyPct>=85?'color:var(--green-t)':dailyPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
       const wCls=wkndPct>110?'color:var(--red-t)':wkndPct>=85?'color:var(--green-t)':wkndPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const over=dailyPct>115||wkndPct>115,low=dailyPct<50&&wkndPct<50;
-      const stTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80)?'✓ On track':'Low';
+      const sCls=shiftPct>110?'color:var(--red-t)':shiftPct>=85?'color:var(--green-t)':shiftPct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const over=dailyPct>115||wkndPct>115||shiftPct>115,low=dailyPct<50&&wkndPct<50;
+      const stTxt=over?'⚠ Over':low?'Under':(dailyPct>=80&&wkndPct>=80&&(shiftTgt===0||shiftPct>=80))?'✓ On track':'Low';
       const stCls=over?'color:var(--red-t)':low?'color:var(--amber,#d97706)':'color:var(--green-t)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
@@ -3241,13 +3252,16 @@ function renderFTEPeriod(){
         <td style="text-align:center;font-weight:700">${wkndTotal}</td>
         <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
-        <td style="text-align:center">${shiftsTotal}</td>
+        <td style="text-align:center;font-weight:700">${shiftTotal}</td>
+        <td style="text-align:center;color:var(--txt3)">${shiftTgt>0?shiftTgt.toFixed(1):'—'}</td>
+        <td style="text-align:center">${shiftTgt>0?`<span style="${sCls};font-weight:700">${shiftPct}%</span>`:'—'}</td>
         <td style="${stCls};font-weight:700">${stTxt}</td>
       </tr>`;
     });
     // Team total row
     const totD=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irDailyCnt(p.id,ym),0),0);
     const totW=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irWkndCnt(p.id,ym),0),0);
+    const totS=irPs.reduce((s,p)=>s+months.reduce((ms,ym)=>ms+irProcShiftCnt(p.id,ym),0),0);
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
       <td style="font-weight:800" colspan="3">Team Total</td>
       <td style="text-align:center;font-weight:800">${totD}</td>
@@ -3255,7 +3269,10 @@ function renderFTEPeriod(){
       <td></td>
       <td style="text-align:center;font-weight:800">${totW}</td>
       <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irWkndTargetPeriod(p,months),0).toFixed(1)}</td>
-      <td></td><td></td><td></td>
+      <td></td>
+      <td style="text-align:center;font-weight:800">${totS}</td>
+      <td style="text-align:center;color:var(--txt3)">${irPs.reduce((s,p)=>s+irShiftTargetPeriod(p,months),0).toFixed(1)}</td>
+      <td></td><td></td>
     </tr>`;
     html+=`</tbody></table></div></div>`;
   }
@@ -4187,6 +4204,8 @@ function renderIRRebalancePrep(){
     return;
   }
 
+  const isShifts = typ==='shifts';
+
   // Show current distribution across 6 months
   let html=`<div class="card" style="margin-bottom:12px">
     <div class="card-title">Current Distribution — ${label}
@@ -4194,41 +4213,76 @@ function renderIRRebalancePrep(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${typ!=='weekend'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
-      ${typ!=='daily'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
+      ${!isShifts&&typ!=='weekend'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
+      ${!isShifts&&typ!=='daily'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
+      ${isShifts?'<th>Proc Shifts</th><th>6-Mo Target</th><th>Shift %</th>':''}
     </tr></thead><tbody>`;
 
-  let anyCall=false;
+  let anyData=false;
   irPs.forEach(p=>{
-    const d=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
-    const w=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
-    if(d>0||w>0) anyCall=true;
-    const td=irDailyTargetPeriod(p,months), tw=irWkndTargetPeriod(p,months);
-    const pd=td>0?Math.round(d/td*100):0, pw=tw>0?Math.round(w/tw*100):0;
-    const dCls=pd>110?'color:var(--red-t)':pd>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
-    const wCls=pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
-    html+=`<tr>
-      <td style="font-weight:600">${pname(p.id)}</td>
-      <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
-      <td style="text-align:center">${p.irFte}</td>
-      ${typ!=='weekend'?`<td style="text-align:center;font-weight:700">${d}</td>
-        <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
-        <td style="text-align:center;font-weight:700;${dCls}">${pd}%</td>`:''}
-      ${typ!=='daily'?`<td style="text-align:center;font-weight:700">${w}</td>
-        <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
-        <td style="text-align:center;font-weight:700;${wCls}">${pw}%</td>`:''}
-    </tr>`;
+    if(isShifts){
+      const s=months.reduce((acc,ym)=>acc+irProcShiftCnt(p.id,ym),0);
+      const ts=irShiftTargetPeriod(p,months);
+      if(s>0) anyData=true;
+      const ps=ts>0?Math.round(s/ts*100):0;
+      const sCls=ps>110?'color:var(--red-t)':ps>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center;font-weight:700">${s}</td>
+        <td style="text-align:center;color:var(--txt3)">${ts>0?ts.toFixed(1):'—'}</td>
+        <td style="text-align:center;font-weight:700;${sCls}">${ts>0?ps+'%':'—'}</td>
+      </tr>`;
+    } else {
+      const d=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
+      const w=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+      if(d>0||w>0) anyData=true;
+      const td=irDailyTargetPeriod(p,months), tw=irWkndTargetPeriod(p,months);
+      const pd=td>0?Math.round(d/td*100):0, pw=tw>0?Math.round(w/tw*100):0;
+      const dCls=pd>110?'color:var(--red-t)':pd>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const wCls=pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td style="text-align:center">${p.irFte}</td>
+        ${typ!=='weekend'?`<td style="text-align:center;font-weight:700">${d}</td>
+          <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
+          <td style="text-align:center;font-weight:700;${dCls}">${pd}%</td>`:''}
+        ${typ!=='daily'?`<td style="text-align:center;font-weight:700">${w}</td>
+          <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
+          <td style="text-align:center;font-weight:700;${wCls}">${pw}%</td>`:''}
+      </tr>`;
+    }
   });
   html+='</tbody></table></div></div>';
 
-  if(!anyCall)
-    html+='<div class="note ni" style="margin-bottom:10px">No IR call assignments found in this period. Build the schedule first, then rebalance.</div>';
+  if(!anyData)
+    html+=`<div class="note ni" style="margin-bottom:10px">${isShifts?'No procedure shifts found for this period. Build the IR shift schedule first, then rebalance.':'No IR call assignments found in this period. Build the schedule first, then rebalance.'}</div>`;
 
   document.getElementById('irr-current').innerHTML=html;
   document.getElementById('irr-preview').innerHTML='';
   document.getElementById('irr-apply').style.display='none';
   document.getElementById('irr-apply-note').textContent='';
   _irrPlan=null;
+}
+
+// Largest-remainder integer allocation.
+// Distributes `slots` across `physicians` so each gets floor or ceil of their
+// proportional share — this minimises the total squared deviation from 100%.
+function _irrQuotas(gPhys, slots, targetFn){
+  if(!slots||!gPhys.length) return {};
+  const items=gPhys.map(p=>{
+    const t=Math.max(0,targetFn(p));
+    return {id:p.id, t, floor:Math.floor(t), frac:t%1};
+  });
+  let remaining=Math.max(0,slots-items.reduce((s,x)=>s+x.floor,0));
+  // Assign leftover slots to physicians with highest fractional remainders
+  items.sort((a,b)=>b.frac-a.frac||a.id-b.id);
+  for(let i=0;i<Math.min(remaining,items.length);i++) items[i].floor++;
+  const q={};
+  items.forEach(x=>{q[x.id]=x.floor;});
+  return q;
 }
 
 function previewIRRebalance(){
@@ -4238,6 +4292,147 @@ function previewIRRebalance(){
   const typ     = document.getElementById('irr-type')?.value||'both';
   const groups  = ['North','South'].filter(g=>grp==='both'||g===grp);
   const inPeriod= (date)=>months.some(ym=>date.startsWith(ym));
+
+  // ── Procedure Shifts rebalancer (separate path) ──────────────────────────
+  if(typ==='shifts'){
+    const plan={shifts:[],swapsS:0,failedS:[]};
+
+    groups.forEach(g=>{
+      const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
+      if(!gPhys.length) return;
+
+      // Collect all non-Home irShifts in period for this group, sorted by date
+      const gShiftEntries=S.irShifts
+        .filter(s=>inPeriod(s.date)&&s.irGroup===g&&s.shift!=='Home')
+        .sort((a,b)=>a.date>b.date?1:-1);
+      if(!gShiftEntries.length) return;
+
+      const cntS={};gPhys.forEach(p=>{cntS[p.id]=0;});
+      const shiftQuotas=_irrQuotas(gPhys,gShiftEntries.length,p=>irShiftTargetPeriod(p,months));
+      const shiftCapFn=p=>shiftQuotas[p.id]??Math.max(Math.ceil(irShiftTargetPeriod(p,months)),1);
+      const gSAsgn=[];
+
+      gShiftEntries.forEach(entry=>{
+        const eligible=gPhys.filter(p=>{
+          if(vacDays(p.id).has(entry.date)) return false;
+          if(_has2ndOr3rdShift(p.id,entry.date)) return false;
+          if(p.allowedSites?.length&&!p.allowedSites.includes(entry.site)) return false;
+          // No two shifts same physician same date
+          if(gSAsgn.some(a=>a.physId===p.id&&a.date===entry.date)) return false;
+          return true;
+        });
+
+        let picked=null;
+        if(eligible.length){
+          const n=Math.max(gPhys.length,1);
+          const off=Object.values(cntS).reduce((s,v)=>s+v,0)%n;
+          eligible.sort((a,b)=>{
+            const qA=shiftCapFn(a),qB=shiftCapFn(b);
+            const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
+            if(underA!==underB) return underA?-1:1;
+            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
+            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
+            if(Math.abs(defA-defB)>1e-9) return defB-defA;
+            const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
+            const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
+            return iA-iB;
+          });
+          picked=eligible[0];
+        }
+
+        if(picked){
+          const isSwap=entry.physId!==picked.id;
+          const e={physId:picked.id,date:entry.date,site:entry.site,shift:'1st',
+            irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
+            origPhysId:entry.physId,origId:entry.id,isSwap};
+          plan.shifts.push(e);gSAsgn.push(e);cntS[picked.id]++;
+          if(isSwap) plan.swapsS++;
+        } else {
+          plan.failedS.push(entry.date);
+          const e={physId:entry.physId,date:entry.date,site:entry.site,shift:'1st',
+            irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
+            origPhysId:entry.physId,origId:entry.id,isSwap:false,constrained:true};
+          plan.shifts.push(e);gSAsgn.push(e);cntS[entry.physId]=(cntS[entry.physId]||0)+1;
+        }
+      });
+    });
+
+    _irrPlan=plan;
+    const irPs=S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
+    let html='';
+
+    // Proposed distribution table for shifts
+    html+=`<div class="card" style="margin-bottom:12px">
+      <div class="card-title">Proposed Shift Distribution — ${label}
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">${plan.swapsS} reassignment(s) · ${plan.failedS.length} constrained</span>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>Group</th><th>IR FTE</th>
+        <th>Shifts (was)</th><th id="irrd-sh-hd">Shifts (new)</th><th>6-Mo Target</th><th id="irrd-sp-hd">Shift %</th>
+      </tr></thead><tbody>`;
+    irPs.forEach(p=>{
+      const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
+      const newS=plan.shifts.filter(a=>a.physId===p.id).length;
+      const ts=irShiftTargetPeriod(p,months);
+      const pct=ts>0?Math.round(newS/ts*100):0;
+      const chg=newS-oldS;
+      const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
+      const sCls=pct>110?'color:var(--red-t)':pct>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center;color:var(--txt3)">${oldS}</td>
+        <td id="irrd-sn-${p.id}" style="text-align:center;font-weight:700">${newS}${arrow}</td>
+        <td style="text-align:center;color:var(--txt3)">${ts>0?ts.toFixed(1):'—'}</td>
+        <td id="irrd-sp-${p.id}" style="text-align:center;font-weight:700;${sCls}">${ts>0?pct+'%':'—'}</td>
+      </tr>`;
+    });
+    html+='</tbody></table></div></div>';
+
+    // Shift swap review table
+    const allShiftSwaps=plan.shifts.filter(a=>a.isSwap).sort((a,b)=>a.date>b.date?1:-1);
+    allShiftSwaps.forEach((a,i)=>{a._swapIdx=i;});
+
+    if(allShiftSwaps.length){
+      html+=`<div class="card" style="margin-bottom:12px">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+          <span>Proposed Reassignments — review and uncheck any to keep as-is</span>
+          <label style="font-size:12px;font-weight:400;cursor:pointer;display:flex;align-items:center;gap:5px">
+            <input type="checkbox" id="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
+          </label>
+        </div>
+        <div style="overflow-x:auto"><table><thead><tr>
+          <th style="width:28px;text-align:center">✓</th>
+          <th>Date</th><th>Site</th><th>Group</th><th>From (current)</th><th>→ Proposed</th>
+        </tr></thead><tbody>`;
+      allShiftSwaps.forEach((a,i)=>{
+        html+=`<tr id="irr-swap-row-${i}" style="transition:opacity .15s">
+          <td style="text-align:center"><input type="checkbox" id="irr-swap-${i}" checked
+            onchange="_irrUpdateBtn()" style="cursor:pointer;width:15px;height:15px"></td>
+          <td>${a.date}</td>
+          <td>${a.site}</td>
+          <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
+          <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
+          <td style="font-weight:600;color:var(--green-t)">${pname(a.physId)}</td>
+        </tr>`;
+      });
+      html+='</tbody></table></div></div>';
+    } else {
+      html+='<div class="note ns" style="margin-bottom:12px">✓ Shift distribution is already optimal — no reassignments needed.</div>';
+    }
+
+    if(plan.failedS.length){
+      html+=`<div class="note nw" style="margin-bottom:12px">⚠ ${plan.failedS.length} shift(s) kept with original physician (vacation or site constraint):<br>
+        <span style="font-size:11px">${plan.failedS.join(', ')}</span></div>`;
+    }
+
+    document.getElementById('irr-preview').innerHTML=html;
+    if(plan.swapsS>0) _irrUpdateBtn();
+    else{document.getElementById('irr-apply').style.display='none';document.getElementById('irr-apply-note').textContent='';}
+    return; // exit — shift path handled completely
+  }
+  // ── END Procedure Shifts path ─────────────────────────────────────────────
 
   const plan={daily:[],weekend:[],swapsD:0,swapsW:0,failedD:[],failedW:[]};
 
@@ -4290,7 +4485,10 @@ function previewIRRebalance(){
         .map(c=>c.date).sort();
 
       const cntD={}; gPhys.forEach(p=>{cntD[p.id]=0;});
-      const dailyCapFn=p=>Math.max(Math.ceil(irDailyTargetPeriod(p,months)),1);
+      // Largest-remainder quotas: each physician gets exactly floor or ceil of their
+      // proportional share so totals match exactly and everyone is as close to 100% as possible
+      const dailyQuotas=_irrQuotas(gPhys,dailyDates.length,p=>irDailyTargetPeriod(p,months));
+      const dailyCapFn=p=>dailyQuotas[p.id]??Math.max(Math.ceil(irDailyTargetPeriod(p,months)),1);
       const gAsgn=[];
 
       dailyDates.forEach(date=>{
@@ -4302,7 +4500,7 @@ function previewIRRebalance(){
           if(!_hasIRShiftOnDate(p.id,date)) return false;
           if(outsideAdjacent(p.id,date,'daily')) return false;
           if(inPlanAdjacent(p.id,date,gAsgn,'daily')) return false;
-          return dailyCapFn(p)>0;
+          return true;
         });
 
         let picked=null;
@@ -4310,9 +4508,12 @@ function previewIRRebalance(){
           const n=Math.max(gPhys.length,1);
           const off=Object.values(cntD).reduce((s,v)=>s+v,0)%n;
           eligible.sort((a,b)=>{
-            const mA=dailyCapFn(a)||1,mB=dailyCapFn(b)||1;
-            const rA=cntD[a.id]/mA,rB=cntD[b.id]/mB;
-            if(Math.abs(rA-rB)>1e-9) return rA-rB;
+            const qA=dailyCapFn(a),qB=dailyCapFn(b);
+            const underA=cntD[a.id]<qA,underB=cntD[b.id]<qB;
+            if(underA!==underB) return underA?-1:1; // under-quota always wins
+            const defA=irDailyTargetPeriod(a,months)-cntD[a.id];
+            const defB=irDailyTargetPeriod(b,months)-cntD[b.id];
+            if(Math.abs(defA-defB)>1e-9) return defB-defA; // highest deficit first
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
             return iA-iB;
@@ -4345,7 +4546,8 @@ function previewIRRebalance(){
         .map(c=>c.date).sort();
 
       const cntW={}; gPhys.forEach(p=>{cntW[p.id]=0;});
-      const wkndCapFn=p=>Math.max(Math.ceil(irWkndTargetPeriod(p,months)),1);
+      const wkndQuotas=_irrQuotas(gPhys,wkndDates.length,p=>irWkndTargetPeriod(p,months));
+      const wkndCapFn=p=>wkndQuotas[p.id]??Math.max(Math.ceil(irWkndTargetPeriod(p,months)),1);
       const gWAsgn=[];
 
       wkndDates.forEach(fridayDate=>{
@@ -4360,7 +4562,7 @@ function previewIRRebalance(){
           if(inPlanAdjacent(p.id,fridayDate,gWAsgn,'weekend')) return false;
           const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
-          return wkndCapFn(p)>0;
+          return true;
         });
 
         let picked=null;
@@ -4368,9 +4570,12 @@ function previewIRRebalance(){
           const n=Math.max(gPhys.length,1);
           const off=Object.values(cntW).reduce((s,v)=>s+v,0)%n;
           eligible.sort((a,b)=>{
-            const mA=wkndCapFn(a)||1,mB=wkndCapFn(b)||1;
-            const rA=cntW[a.id]/mA,rB=cntW[b.id]/mB;
-            if(Math.abs(rA-rB)>1e-9) return rA-rB;
+            const qA=wkndCapFn(a),qB=wkndCapFn(b);
+            const underA=cntW[a.id]<qA,underB=cntW[b.id]<qB;
+            if(underA!==underB) return underA?-1:1;
+            const defA=irWkndTargetPeriod(a,months)-cntW[a.id];
+            const defB=irWkndTargetPeriod(b,months)-cntW[b.id];
+            if(Math.abs(defA-defB)>1e-9) return defB-defA;
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
             return iA-iB;
@@ -4433,13 +4638,13 @@ function previewIRRebalance(){
       <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
       <td style="text-align:center">${p.irFte}</td>
       ${typ!=='weekend'?`<td style="text-align:center;color:var(--txt3)">${oldD}</td>
-        <td style="text-align:center;font-weight:700">${newD}${dArrow}</td>
+        <td id="irrd-dn-${p.id}" style="text-align:center;font-weight:700">${newD}${dArrow}</td>
         <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
-        <td style="text-align:center;font-weight:700;${dCls}">${pdNew}%</td>`:''}
+        <td id="irrd-dp-${p.id}" style="text-align:center;font-weight:700;${dCls}">${pdNew}%</td>`:''}
       ${typ!=='daily'?`<td style="text-align:center;color:var(--txt3)">${oldW}</td>
-        <td style="text-align:center;font-weight:700">${newW}${wArrow}</td>
+        <td id="irrd-wn-${p.id}" style="text-align:center;font-weight:700">${newW}${wArrow}</td>
         <td style="text-align:center;color:var(--txt3)">${tw.toFixed(1)}</td>
-        <td style="text-align:center;font-weight:700;${wCls}">${pwNew}%</td>`:''}
+        <td id="irrd-wp-${p.id}" style="text-align:center;font-weight:700;${wCls}">${pwNew}%</td>`:''}
     </tr>`;
   });
   html+='</tbody></table></div></div>';
@@ -4521,6 +4726,74 @@ function _irrUpdateBtn(){
     const row=document.getElementById('irr-swap-row-'+cb.id.replace('irr-swap-',''));
     if(row) row.style.opacity=cb.checked?'1':'0.4';
   });
+  // Live-update the proposed distribution table
+  _irrUpdateDistribution();
+}
+
+// Recompute proposed new counts / % for each physician based on current checkbox state
+function _irrUpdateDistribution(){
+  if(!_irrPlan) return;
+  const months=_irrMonths();
+  const grp=document.getElementById('irr-grp')?.value||'both';
+  const typ=document.getElementById('irr-type')?.value||'both';
+  const irPs=S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
+
+  // Helper: resolve the effective physId for a plan entry given current checkbox state
+  function effectivePid(a){
+    if(a.isSwap&&a._swapIdx!==undefined){
+      const cb=document.getElementById(`irr-swap-${a._swapIdx}`);
+      return cb&&!cb.checked ? a.origPhysId : a.physId;
+    }
+    return a.physId;
+  }
+
+  // ── Procedure Shifts path ──
+  if(typ==='shifts'){
+    irPs.forEach(p=>{
+      const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
+      const newS=(_irrPlan.shifts||[]).filter(a=>effectivePid(a)===p.id).length;
+      const ts=irShiftTargetPeriod(p,months);
+      const pct=ts>0?Math.round(newS/ts*100):0;
+      const chg=newS-oldS;
+      const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
+      const sCls=pct>110?'color:var(--red-t)':pct>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const snEl=document.getElementById(`irrd-sn-${p.id}`);
+      if(snEl) snEl.innerHTML=`${newS}${arrow}`;
+      const spEl=document.getElementById(`irrd-sp-${p.id}`);
+      if(spEl){spEl.textContent=ts>0?`${pct}%`:'—';if(ts>0)spEl.setAttribute('style',`text-align:center;font-weight:700;${sCls}`);}
+    });
+    return;
+  }
+
+  // ── Call rebalance path ──
+  irPs.forEach(p=>{
+    if(typ!=='weekend'){
+      const oldD=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
+      const newD=_irrPlan.daily.filter(a=>effectivePid(a)===p.id).length;
+      const td=irDailyTargetPeriod(p,months);
+      const pdNew=td>0?Math.round(newD/td*100):0;
+      const dChg=newD-oldD;
+      const dArrow=dChg>0?`<span style="color:var(--green-t)"> ▲${dChg}</span>`:dChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(dChg)}</span>`:'';
+      const dCls=pdNew>110?'color:var(--red-t)':pdNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const dnEl=document.getElementById(`irrd-dn-${p.id}`);
+      if(dnEl) dnEl.innerHTML=`${newD}${dArrow}`;
+      const dpEl=document.getElementById(`irrd-dp-${p.id}`);
+      if(dpEl){dpEl.textContent=`${pdNew}%`;dpEl.setAttribute('style',`text-align:center;font-weight:700;${dCls}`);}
+    }
+    if(typ!=='daily'){
+      const oldW=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+      const newW=_irrPlan.weekend.filter(a=>effectivePid(a)===p.id).length;
+      const tw=irWkndTargetPeriod(p,months);
+      const pwNew=tw>0?Math.round(newW/tw*100):0;
+      const wChg=newW-oldW;
+      const wArrow=wChg>0?`<span style="color:var(--green-t)"> ▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(wChg)}</span>`:'';
+      const wCls=pwNew>110?'color:var(--red-t)':pwNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
+      const wnEl=document.getElementById(`irrd-wn-${p.id}`);
+      if(wnEl) wnEl.innerHTML=`${newW}${wArrow}`;
+      const wpEl=document.getElementById(`irrd-wp-${p.id}`);
+      if(wpEl){wpEl.textContent=`${pwNew}%`;wpEl.setAttribute('style',`text-align:center;font-weight:700;${wCls}`);}
+    }
+  });
 }
 
 function applyIRRebalance(){
@@ -4531,6 +4804,40 @@ function applyIRRebalance(){
   const typ     =document.getElementById('irr-type')?.value||'both';
   const groups  =['North','South'].filter(g=>grp==='both'||g===grp);
   const inPeriod=(date)=>months.some(ym=>date.startsWith(ym));
+
+  // ── Procedure Shifts apply path ──
+  if(typ==='shifts'){
+    if(!_irrPlan.shifts?.length){_irrPlan=null;return;}
+    // Remove existing non-Home irShifts in period for affected groups
+    S.irShifts=S.irShifts.filter(s=>{
+      if(!inPeriod(s.date)) return true;
+      if(!groups.includes(s.irGroup)) return true;
+      if(s.shift==='Home') return true; // keep Home fills
+      return false;
+    });
+    let appliedSwaps=0,revertedSwaps=0;
+    _irrPlan.shifts.forEach(a=>{
+      let physId=a.physId;
+      if(a.isSwap&&a._swapIdx!==undefined){
+        const cb=document.getElementById(`irr-swap-${a._swapIdx}`);
+        if(cb&&!cb.checked){physId=a.origPhysId;revertedSwaps++;}
+        else appliedSwaps++;
+      }
+      S.irShifts.push({id:S.nextId++,physId,date:a.date,shift:'1st',
+        site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup});
+    });
+    triggerSave();
+    _irrPlan=null;
+    document.getElementById('irr-apply').style.display='none';
+    document.getElementById('irr-apply-note').textContent='';
+    _updateSaveUI(`✓ Shifts rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original`,'var(--green-t)');
+    renderIRRebalancePrep();
+    document.getElementById('irr-preview').innerHTML=
+      `<div class="note ns">✓ Done. ${appliedSwaps} shift reassignment(s) applied, ${revertedSwaps} kept with original physician.</div>`;
+    return;
+  }
+
+  // ── Call rebalance apply path ──
   const types   =[];
   if(typ==='daily'||typ==='both') types.push('daily');
   if(typ==='weekend'||typ==='both') types.push('weekend');
@@ -5993,7 +6300,7 @@ function dashNavMonth(dir){
 }
 
 /* ─── ADMIN CREATE ACCOUNT ─── */
-function adminCreateAccount(){
+async function adminCreateAccount(){
   const first=document.getElementById('ca-first')?.value.trim();
   const last=document.getElementById('ca-last')?.value.trim();
   const email=document.getElementById('ca-email')?.value.trim().toLowerCase();
@@ -6004,12 +6311,43 @@ function adminCreateAccount(){
   if(!first||!last||!email||!pw){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">All fields required.</span>';return;}
   if(pw.length<8){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Password min 8 chars.</span>';return;}
   if(USERS.find(u=>u.email===email)){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Email already exists.</span>';return;}
+
+  const sb=_initAuthClient();
+  if(sb){
+    // Create in Supabase Auth via edge function (requires admin JWT)
+    if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Creating account…</span>';
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const jwt=session?.access_token;
+      if(!jwt) throw new Error('Not authenticated — sign in first.');
+      const fnUrl=`${_SUPABASE_URL}/functions/v1/create-user`;
+      const res=await fetch(fnUrl,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
+        body:JSON.stringify({email,password:pw,role,first,last,physId})
+      });
+      const result=await res.json();
+      if(!res.ok) throw new Error(result.error||'Edge function error');
+      // Add to local USERS directory (no password stored)
+      const nu={id:result.id||('u'+Date.now()),email,pw:'',role,first,last,physId,joined:fmtDate(new Date())};
+      if(!USERS.find(u=>u.email===email)) USERS.push(nu);
+      triggerSave();
+      if(msgEl)msgEl.innerHTML=`<span style="color:var(--green-t)">✓ Account created for ${first} ${last} — they can log in immediately.</span>`;
+      ['ca-first','ca-last','ca-email','ca-pw'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+      renderUserMgmt();
+      return;
+    }catch(e){
+      if(msgEl)msgEl.innerHTML=`<span style="color:var(--red-t)">Auth error: ${e.message}</span>`;
+      return;
+    }
+  }
+  // Fallback: offline mode (no Supabase) — local only
   const nu={id:'u'+Date.now(),email,pw,role,first,last,physId,joined:fmtDate(new Date())};
   USERS.push(nu);
   triggerSave();
-  if(msgEl)msgEl.innerHTML=`<span style="color:var(--green-t)">✓ Account created for ${first} ${last}</span>`;
+  if(msgEl)msgEl.innerHTML=`<span style="color:var(--green-t)">✓ Account created (offline mode).</span>`;
   ['ca-first','ca-last','ca-email','ca-pw'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
-  triggerSave();renderUserMgmt();
+  renderUserMgmt();
 }
 
 /* ─── OPEN SHIFTS MANAGEMENT ─── */
