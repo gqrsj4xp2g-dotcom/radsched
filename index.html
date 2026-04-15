@@ -1887,17 +1887,21 @@ function _hydrateUserFromSession(sbUser){
   if(!sbUser) return;
   const meta=sbUser.user_metadata||{};
   const email=sbUser.email;
+  // Supabase stores user_metadata values as strings — coerce physId back to number
+  const metaPhysId=meta.physId!=null?(Number.isInteger(meta.physId)?meta.physId:parseInt(meta.physId)||null):null;
   let u=USERS.find(x=>x.email===email);
   if(!u){
     u={id:sbUser.id,email,pw:'',role:meta.role||'user',
       first:meta.first||email.split('@')[0],last:meta.last||'',
-      physId:meta.physId!=null?meta.physId:null,
+      physId:metaPhysId,
       joined:meta.joined||new Date().toISOString().slice(0,10)};
     USERS.push(u);
   } else {
-    // Sync authoritative role from Supabase metadata
+    // Sync authoritative fields from Supabase metadata
     if(meta.role) u.role=meta.role;
-    if(meta.physId!=null) u.physId=meta.physId;
+    if(meta.first) u.first=meta.first;
+    if(meta.last) u.last=meta.last;
+    if(metaPhysId!=null) u.physId=metaPhysId;
   }
   CU=u;
 }
@@ -1986,7 +1990,7 @@ async function launchApp(){
   const adm=CU.role==='admin';
   document.getElementById('tb-nm').textContent=CU.first+' '+CU.last;
   document.getElementById('tb-rl').textContent=adm?'Administrator':'Physician / User';
-  document.getElementById('tb-av').textContent=(CU.first[0]+CU.last[0]).toUpperCase();
+  document.getElementById('tb-av').textContent=((CU.first||'?')[0]+(CU.last||'?')[0]).toUpperCase();
   document.querySelectorAll('.admin-only').forEach(el=>el.style.display=adm?'block':'none');
   const si=document.getElementById('save-indicator');
   const now=new Date();
@@ -2041,7 +2045,9 @@ function _applyRemoteData(d){
   if(d.nextId>S.nextId)S.nextId=d.nextId;
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
-      const ex=USERS.find(x=>x.id===u.id);
+      // Ensure physId is always a number (Supabase JSON may return strings)
+      if(u.physId!=null) u.physId=parseInt(u.physId)||null;
+      const ex=USERS.find(x=>x.id===u.id||x.email===u.email);
       if(ex)Object.assign(ex,u);
       else USERS.push(u);
     });
@@ -2330,7 +2336,7 @@ _isRestoring=false;
 /* ─── UTILS ─── */
 function pname(id){const p=S.physicians.find(x=>x.id===id);return p?p.last+', '+p.first:'—';}
 function pshort(id){const p=S.physicians.find(x=>x.id===id);return p?p.last:'?';}
-function ini(p){return p.first[0]+p.last[0];}
+function ini(p){return ((p.first||'?')[0]+(p.last||'?')[0]);}
 function totFte(p){return +(p.drFte+p.irFte).toFixed(2);}
 function isSoldBackDate(physId, date){
   return S.vacations.some(v=>v.physId===physId&&v.type==='Vacation Sold Back'&&date>=v.start&&date<=v.end);
@@ -4074,7 +4080,7 @@ function previewIRAA(){
             (c.date>=a.date&&c.date<=addDays(a.date,4)))) return false;
           if(!dayConditionSiteOk(p,p.irSitePrim||'',c.date,'ir-call')) return false;
           if(!sequenceOk(p,c.date,c.date.slice(0,7))) return false;
-          return cntD[p.id]<dailyCapFn(p);
+          return true; // quota handled by sort (_sortByFte), not filter — ensures all slots can be filled
         });
 
         const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
@@ -4108,7 +4114,7 @@ function previewIRAA(){
           if(_hasAdjacentIRCall(p.id,c.date)||_hasIRCallNearWeekend(p.id,c.date)) return false;
           if(previewConflictsWeekend(p.id,c.date)) return false;
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
-          return cntW[p.id]<wkndCapFn(p);
+          return true; // quota handled by sort (_sortByFte), not filter
         });
 
         const pool=_sortByFte(eligible,gPhys,cntW,wkndCapFn);
