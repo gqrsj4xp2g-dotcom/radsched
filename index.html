@@ -1000,8 +1000,21 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 
   <div class="ibox">
-    <div class="g3">
-      <div class="fg"><label>Month</label><input id="irsa-mo" type="month"></div>
+    <div class="g4" style="flex-wrap:wrap">
+      <div class="fg"><label>Year</label>
+        <select id="irsa-yr" style="width:90px">
+          <option value="2024">2024</option>
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+          <option value="2027">2027</option>
+        </select>
+      </div>
+      <div class="fg"><label>Period</label>
+        <select id="irsa-period" style="width:175px">
+          <option value="H1">H1 — Jan through Jun</option>
+          <option value="H2">H2 — Jul through Dec</option>
+        </select>
+      </div>
       <div class="fg"><label>Shift Type</label>
         <select id="irsa-shift">
           <option value="all">All Shifts</option>
@@ -1513,7 +1526,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         </div>
         <div class="fg" style="background:var(--amber-bg);border:1px solid #fde68a;border-radius:var(--r);padding:10px 12px;margin-top:6px">
           <label style="color:var(--amber-t)">⚓ Anchor Site Minimum %</label>
-          <div class="flex" style="margin-top:4px;gap:8px"><input id="cfg-anc" type="number" value="60" min="10" max="100" style="width:70px" oninput="saveCfg()"><span style="font-size:11px;color:var(--amber-t)">% of all assigned shifts must be at anchor site</span></div>
+          <div class="flex" style="margin-top:4px;gap:8px"><input id="cfg-anc" type="number" value="70" min="10" max="100" style="width:70px" oninput="saveCfg()"><span style="font-size:11px;color:var(--amber-t)">% of all assigned shifts must be at anchor site</span></div>
         </div>
       </div>
       <div class="card">
@@ -2200,7 +2213,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:60},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
   // Chat messages
@@ -2280,7 +2293,7 @@ _isRestoring=false;
   mon.setDate(now.getDate()-(dow===0?6:dow-1)); // get Monday
   const monStr=mon.getFullYear()+'-'+String(mon.getMonth()+1).padStart(2,'0')+'-'+String(mon.getDate()).padStart(2,'0');
   // Month pickers
-  ['my-mo','drc-mo','aa-mo','irc-mo','irsf-mo','irl-mo','irsa-mo',
+  ['my-mo','drc-mo','aa-mo','irc-mo','irsf-mo','irl-mo',
    'anc-mo','os-mo','osmf-mo','fte-mo','ss-mo'].forEach(id=>{
     const el=document.getElementById(id);
     if(el&&!el.value) el.value=ym;
@@ -4016,7 +4029,10 @@ function previewIRAA(){
     const prev=addDays(date,-1),next=addDays(date,1);
     return preview.some(a=>a.physId===pid&&(
       (a.callType==='daily'&&(a.date===prev||a.date===next))||
-      (a.callType==='weekend'&&(date>=a.date&&date<=addDays(a.date,4)))
+      (a.callType==='weekend'&&(
+        (date>=a.date&&date<=addDays(a.date,4))|| // Fri→Tue span
+        date===addDays(a.date,-1)                  // Thu before Friday
+      ))
     ));
   }
 
@@ -4048,8 +4064,10 @@ function previewIRAA(){
           if(!_hasIRShiftOnDate(p.id,c.date)) return false;
           if(S.irCalls.some(ic=>ic.physId===p.id&&(
             ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext)||
-            ic.callType==='weekend'&&(c.date>=ic.date&&c.date<=addDays(ic.date,4)||
-              adjPrev>=ic.date&&adjPrev<=addDays(ic.date,3))
+            ic.callType==='weekend'&&(
+              (c.date>=ic.date&&c.date<=addDays(ic.date,4))|| // Fri→Tue span + Tue
+              c.date===addDays(ic.date,-1)                     // Thu before Friday
+            )
           ))) return false;
           if(previewAdjacentToDaily(p.id,c.date)) return false;
           if(preview.some(a=>a.physId===p.id&&a.callType==='weekend'&&
@@ -4371,15 +4389,15 @@ function previewIRRebalance(){
             const qA=shiftCapFn(a),qB=shiftCapFn(b);
             const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
             if(underA!==underB) return underA?-1:1;
-            // Prefer anchor site match
-            const ancA=a.anchorSite===entry.site?-1:0,ancB=b.anchorSite===entry.site?-1:0;
-            if(ancA!==ancB) return ancA-ancB;
+            // Quota deficit first (most under-target wins), then rotation tiebreak
             const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
             const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
             if(Math.abs(defA-defB)>1e-9) return defB-defA;
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
-            return iA-iB;
+            if(iA!==iB) return iA-iB;
+            // Anchor match is last — never prevents full slot coverage
+            return (b.anchorSite===entry.site?1:0)-(a.anchorSite===entry.site?1:0);
           });
           picked=eligible[0];
         }
@@ -4544,6 +4562,13 @@ function previewIRRebalance(){
           if(!_hasIRShiftOnDate(p.id,date)) return false;
           if(outsideAdjacent(p.id,date,'daily')) return false;
           if(inPlanAdjacent(p.id,date,gAsgn,'daily')) return false;
+          // For typ='daily' (weekend calls unchanged) or typ='both' (pre-weekend phase),
+          // block Thu/Tue adjacency with in-period existing weekend calls.
+          // (For typ='both', weekend calls in plan are handled later from the weekend side.)
+          if(S.irCalls.some(ic=>ic.physId===p.id&&ic.callType==='weekend'&&inPeriod(ic.date)&&(
+            (date>=ic.date&&date<=addDays(ic.date,4))|| // Fri→Tue span
+            date===addDays(ic.date,-1)                   // Thu before Friday
+          ))) return false;
           return true;
         });
 
@@ -5317,7 +5342,27 @@ function renderIRShiftTable(){
 /* ─── IR SHIFT AUTO-ASSIGN ─── */
 function irShiftCnt(pid,ym){return(S.irShifts||[]).filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
 
+// Returns the 6 YM strings for the selected period
+function _irsaMonths(){
+  const yr=parseInt(document.getElementById('irsa-yr')?.value||new Date().getFullYear());
+  const period=document.getElementById('irsa-period')?.value||'H1';
+  const startM=period==='H1'?1:7;
+  return Array.from({length:6},(_,i)=>`${yr}-${String(startM+i).padStart(2,'0')}`);
+}
+function _irsaPeriodLabel(months){
+  const [y,m0]=months[0].split('-').map(Number);
+  const [,m1]=months[5].split('-').map(Number);
+  const fmt=m=>new Date(y,m-1,1).toLocaleString('default',{month:'short'});
+  return `${fmt(m0)}\u2013${fmt(m1)} ${y}`;
+}
+
 function renderIRShiftAutoPage(){
+  // Set period picker to current H1/H2
+  const now=new Date();
+  const yrEl=document.getElementById('irsa-yr');
+  const pEl=document.getElementById('irsa-period');
+  if(yrEl&&!yrEl.value) yrEl.value=String(now.getFullYear());
+  if(pEl&&!pEl.value) pEl.value=now.getMonth()<6?'H1':'H2';
   // Ensure irShiftSlots is initialised
   if(!S.irShiftSlots) S.irShiftSlots={};
   S.sites.filter(s=>s.irGroup).forEach(st=>{
@@ -5333,29 +5378,46 @@ function renderIRShiftAutoPage(){
 function previewIRShiftAA(){
   if(!S.irShifts) S.irShifts=[];
   if(!S.irShiftSlots) S.irShiftSlots={};
-  const ym=document.getElementById('irsa-mo').value||new Date().toISOString().slice(0,7);
+  const months=_irsaMonths();
+  const label=_irsaPeriodLabel(months);
   const shiftFilter=document.getElementById('irsa-shift').value||'all';
   const grpFilter=document.getElementById('irsa-grp')?.value||'both';
   const preview=[], gaps=[];
-  const cells=buildCal(ym);
+  const allCells=months.flatMap(ym=>buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date)));
   const vm=vacMap();
   const irPs=S.physicians.filter(p=>p.irFte>0);
   const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
   const shifts=shiftFilter==='all'?['1st']:[shiftFilter];
 
-  // Running shift counts per physician
+  // Running 6-month shift counts per physician (existing shifts in period)
   const cnt={};
-  irPs.forEach(p=>{cnt[p.id]=irShiftCnt(p.id,ym);});
+  irPs.forEach(p=>{cnt[p.id]=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)&&sh.shift!=='Home').length,0);});
+
+  // FTE-proportional quotas per group so distribution reaches ~100%
+  const shiftQuotas={};
+  groups.forEach(g=>{
+    const gPhys=irPs.filter(p=>p.irGroup===g);
+    // Count total available slots for this group across the period
+    let totalSlots=0;
+    allCells.forEach(c=>{
+      S.sites.filter(s=>s.irGroup===g).forEach(st=>{
+        shifts.forEach(sh=>{ totalSlots+=(S.irShiftSlots[`${st.name}|${c.dow}|${sh}`]??0); });
+      });
+    });
+    const quotas=_irrQuotas(gPhys,totalSlots,p=>irShiftTargetPeriod(p,months));
+    gPhys.forEach(p=>{ shiftQuotas[p.id]=quotas[p.id]??0; });
+  });
 
   function isAssignedOnDate(pid,date){
-    return !!(S.irShifts.find(s=>s.physId===pid&&s.date===date)
+    return !!(S.irShifts.find(s=>s.physId===pid&&s.date===date&&s.shift!=='Home')
            || preview.find(a=>!a._home&&a.physId===pid&&a.date===date));
   }
 
-  cells.filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date)).forEach(c=>{
+  allCells.forEach(c=>{
     groups.forEach(g=>{
       const gSites=S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both');
       const gPhys=irPs.filter(p=>p.irGroup===g);
+      const ym=c.date.slice(0,7);
 
       shifts.forEach(sh=>{
         gSites.forEach(st=>{
@@ -5367,19 +5429,22 @@ function previewIRShiftAA(){
           for(let i=ex;i<need;i++){
             const pool=gPhys.filter(p=>{
               const vd=vacDays(p.id); if(vd.has(c.date)) return false;
-              if(isSoldBackDate(p.id,c.date)) return false; // sold-back: DR only
+              if(isSoldBackDate(p.id,c.date)) return false;
               if(isAssignedOnDate(p.id,c.date)) return false;
-              // Block 2nd/3rd DR shift workers from IR shifts
               if(_has2ndOr3rdShift(p.id,c.date)) return false;
-              if(!siteRuleOk(p,st.name,ym,c.date,'ir'))return false;
-              if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift'))return false;
-              if(!sequenceOk(p,c.date,ym))return false;
+              if(!siteRuleOk(p,st.name,ym,c.date,'ir')) return false;
+              if(!dayConditionSiteOk(p,st.name,c.date,'ir-shift')) return false;
+              if(!sequenceOk(p,c.date,ym)) return false;
               return true;
             }).sort((a,b)=>{
-              // Anchor site match first, then by shift count (load balance)
-              const aA=a.anchorSite===st.name?-1:0,bA=b.anchorSite===st.name?-1:0;
-              if(aA!==bA) return aA-bA;
-              return cnt[a.id]-cnt[b.id];
+              // Quota fulfillment first → FTE-load balance → anchor as tiebreaker only
+              const underA=cnt[a.id]<(shiftQuotas[a.id]||0), underB=cnt[b.id]<(shiftQuotas[b.id]||0);
+              if(underA!==underB) return underA?-1:1;
+              const qA=shiftQuotas[a.id]||1, qB=shiftQuotas[b.id]||1;
+              const loadDiff=cnt[a.id]/qA - cnt[b.id]/qB;
+              if(Math.abs(loadDiff)>1e-9) return loadDiff;
+              // Anchor match is last — never blocks a slot from being filled
+              return (b.anchorSite===st.name?1:0)-(a.anchorSite===st.name?1:0);
             });
             if(pool.length){
               const p=pool[0];
@@ -5391,16 +5456,16 @@ function previewIRShiftAA(){
           }
         });
       });
-    });
 
-    // Auto-home for any IR physician not yet assigned this day
-    const vacOnDate=new Set(vm[c.date]||[]);
-    irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
-      if(vacOnDate.has(p.id)) return;
-      if(isAssignedOnDate(p.id,c.date)) return;
-      const alreadyHome=preview.find(a=>a._home&&a.physId===p.id&&a.date===c.date);
-      if(!alreadyHome)
-        preview.push({_home:true,physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.irSubs[0]||'',irGroup:p.irGroup||'',notes:'Auto home-fill'});
+      // Auto-home for any IR physician not yet assigned this day (hospital shift or home)
+      const vacOnDate=new Set(vm[c.date]||[]);
+      gPhys.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
+        if(vacOnDate.has(p.id)) return;
+        if(isAssignedOnDate(p.id,c.date)) return;
+        if(S.irShifts.find(s=>s.physId===p.id&&s.date===c.date)) return;
+        if(!preview.find(a=>a.physId===p.id&&a.date===c.date))
+          preview.push({_home:true,physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.irSubs[0]||'',irGroup:p.irGroup||'',notes:'Auto home-fill'});
+      });
     });
   });
 
@@ -5408,18 +5473,45 @@ function previewIRShiftAA(){
   const hospPrev=preview.filter(a=>!a._home);
   const homePrev=preview.filter(a=>a._home);
 
-  let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} assignments — ${gaps.length} gap(s)<br>
-    <span style="font-weight:400;font-size:11px;color:var(--txt2)">${hospPrev.length} hospital shifts · ${homePrev.length} at-home fills</span></div>`;
+  // FTE distribution tally
+  const tally=[];
+  irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
+    const existing=months.reduce((s,ym)=>s+(S.irShifts||[]).filter(sh=>sh.physId===p.id&&sh.date.startsWith(ym)&&sh.shift!=='Home').length,0);
+    const newShifts=hospPrev.filter(a=>a.physId===p.id).length;
+    const total=existing+newShifts;
+    const tgt=irShiftTargetPeriod(p,months);
+    const pct=tgt>0?Math.round(total/tgt*100):0;
+    tally.push({p,existing,newShifts,total,tgt,pct});
+  });
+
+  let html=`<div style="font-weight:700;margin-bottom:8px">${hospPrev.length} hospital shifts + ${homePrev.length} home fills — ${gaps.length} gap(s) — ${label}</div>`;
+
+  // Distribution table
+  if(tally.length){
+    html+=`<div class="card" style="margin-bottom:12px"><div class="card-title">FTE Distribution — ${label}</div>
+      <div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>Group</th><th>IR FTE</th>
+        <th>Existing</th><th>+New</th><th>Total</th><th>6-Mo Target</th><th>Util%</th>
+      </tr></thead><tbody>`;
+    tally.forEach(({p,existing,newShifts,total,tgt,pct})=>{
+      const cls=pct>110?'color:var(--red-t)':pct>=85?'color:var(--green-t)':pct>=60?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      html+=`<tr>
+        <td style="font-weight:600">${pname(p.id)}</td>
+        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td style="text-align:center">${p.irFte}</td>
+        <td style="text-align:center;color:var(--txt3)">${existing}</td>
+        <td style="text-align:center;color:var(--teal-t)">+${newShifts}</td>
+        <td style="text-align:center;font-weight:700">${total}</td>
+        <td style="text-align:center;color:var(--txt3)">${tgt>0?tgt.toFixed(1):'—'}</td>
+        <td style="text-align:center;font-weight:700;${cls}">${tgt>0?pct+'%':'—'}</td>
+      </tr>`;
+    });
+    html+='</tbody></table></div></div>';
+  }
 
   if(hospPrev.length){
-    // Group by shift type for a clean summary
-    const byShift={'1st':[]};
-    hospPrev.forEach(a=>{if(byShift[a.shift])byShift[a.shift].push(a);});
-    Object.entries(byShift).filter(([,v])=>v.length).forEach(([sh,rows])=>{
-      html+=`<div style="font-size:11px;font-weight:800;color:var(--txt2);margin:8px 0 4px">${sh} Shift — ${rows.length} assignments</div>`;
-    });
     html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Group</th><th>Date</th><th>Shift</th><th>Site</th><th>Subspecialty</th></tr></thead><tbody>';
-    hospPrev.slice(0,40).forEach(a=>{
+    hospPrev.slice(0,50).forEach(a=>{
       const shCls={'1st':'tb','2nd':'tg','3rd':'ta'}[a.shift]||'tgr';
       html+=`<tr>
         <td>${pname(a.physId)}</td>
@@ -5429,11 +5521,11 @@ function previewIRShiftAA(){
         <td>${a.site}</td>
         <td>${a.sub||'—'}</td></tr>`;
     });
-    if(hospPrev.length>40) html+=`<tr><td colspan="6" style="color:var(--txt3)">...and ${hospPrev.length-40} more</td></tr>`;
+    if(hospPrev.length>50) html+=`<tr><td colspan="6" style="color:var(--txt3)">...and ${hospPrev.length-50} more</td></tr>`;
     html+='</tbody></table></div>';
   }
   if(homePrev.length) html+=`<div class="note ni" style="margin-top:8px">+ ${homePrev.length} at-home fills for unscheduled IR physicians.</div>`;
-  if(gaps.length) html+=`<div class="note nw" style="margin-top:8px">⚠ ${gaps.length} gap(s) — no eligible physician found: ${gaps.slice(0,4).join(', ')}</div>`;
+  if(gaps.length) html+=`<div class="note nw" style="margin-top:8px">\u26a0 ${gaps.length} gap(s) — no eligible physician found: ${gaps.slice(0,5).join(', ')}</div>`;
   if(!preview.length&&!gaps.length) html='<div class="note ns">All IR shift slots already filled for this period.</div>';
 
   document.getElementById('irsa-box').innerHTML=html;
@@ -5446,10 +5538,13 @@ function applyIRShiftAA(){
   (S.irsaPreview||[]).forEach(a=>{
     S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes,irGroup:a.irGroup});
   });
-  document.getElementById('irsa-box').innerHTML=`<div class="note ns">${(S.irsaPreview||[]).length} shifts applied.</div>`;
+  const n=(S.irsaPreview||[]).length;
+  triggerSave();
+  document.getElementById('irsa-box').innerHTML=`<div class="note ns">\u2713 ${n} IR shift assignment(s) applied across ${_irsaPeriodLabel(_irsaMonths())}.</div>`;
   S.irsaPreview=[];
   document.getElementById('irsa-apply').style.display='none';
 }
+
 
 /* ─── IR SHIFT SLOT CONFIG PAGE ─── */
 function renderIRShiftSlots(){
