@@ -1342,6 +1342,43 @@ tbody tr:hover{background:var(--bg3)}
       </div>
     </div>
 
+    <!-- Blackout dates + needs config (inline) -->
+    <div class="g2" style="margin-bottom:10px">
+      <div class="card">
+        <div class="card-title">Holiday Blackout Dates
+          <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">dates the lottery will fill</span>
+        </div>
+        <div class="flex" style="gap:6px;margin-bottom:8px">
+          <select id="haa-hb-name" style="flex:1;min-width:120px">
+            <option>New Year's Day</option><option>MLK Day</option><option>Memorial Day</option>
+            <option>Independence Day</option><option>Labor Day</option><option>Thanksgiving</option>
+            <option>Christmas Eve</option><option>Christmas Day</option><option>New Year's Eve</option>
+          </select>
+          <input id="haa-hb-date" type="date" style="width:140px">
+          <button class="bp bsm" onclick="addHaaBlackout()">Add</button>
+        </div>
+        <div id="haa-hb-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Holiday Staffing Needs
+          <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">slots to fill per holiday</span>
+        </div>
+        <div class="flex" style="gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <select id="haa-hn-name" style="flex:1;min-width:120px">
+            <option>New Year's Day</option><option>MLK Day</option><option>Memorial Day</option>
+            <option>Independence Day</option><option>Labor Day</option><option>Thanksgiving</option>
+            <option>Christmas Eve</option><option>Christmas Day</option><option>New Year's Eve</option>
+          </select>
+          <select id="haa-hn-grp" style="width:80px">
+            <option value="DR">DR</option><option value="IR">IR</option><option value="Both">Both</option>
+          </select>
+          <input id="haa-hn-slots" type="number" min="1" max="10" value="1" style="width:55px">
+          <button class="bp bsm" onclick="addHaaNeed()">Add</button>
+        </div>
+        <div id="haa-hn-list"></div>
+      </div>
+    </div>
+
     <!-- Career tally -->
     <div id="haa-tally"></div>
 
@@ -1497,6 +1534,15 @@ tbody tr:hover{background:var(--bg3)}
         <option value="IR">IR only</option>
       </select>
     </div>
+    <div class="fg" style="margin:0"><label>Year</label>
+      <select id="fte-commute-yr" onchange="renderCommuteMatrix()" style="width:90px">
+        <option value="all">All Years</option>
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+        <option value="2027">2027</option>
+      </select>
+    </div>
     <button class="bp bsm" style="margin-bottom:2px" onclick="calcAllDriveTimes()">🔄 Recalculate</button>
     <button class="bt bsm" style="margin-bottom:2px" onclick="renderCommuteMatrix()">↺ Refresh</button>
   </div>
@@ -1606,8 +1652,21 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <button class="bsm bp" style="margin-bottom:2px" onclick="testMapsKey()">Test</button>
         </div>
         <div id="gmaps-key-msg" style="font-size:12px;margin-top:2px;margin-bottom:8px"></div>
-        <button class="bt" onclick="calcAllDriveTimes()">🔄 Calculate All Drive Times</button>
-        <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:10px"></span>
+        <div class="note ni" style="font-size:11px;margin-bottom:8px">
+          Both legs of each shift are calculated with actual traffic at that time of day:<br>
+          <strong>1st</strong> out 6:30 AM / back 3:00 PM &nbsp;·&nbsp;
+          <strong>2nd</strong> out 2:30 PM / back 11:00 PM &nbsp;·&nbsp;
+          <strong>3rd</strong> out 10:30 PM / back 7:00 AM &nbsp;·&nbsp;
+          <strong>IR Call</strong> out 6:30 AM / back 5:00 PM &nbsp;·&nbsp;
+          <strong>IR Weekend</strong> out 5:00 PM Fri / back 7:30 AM Mon<br>
+          Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="bt" onclick="calcAllDriveTimes()">🔄 Calculate Base Times</button>
+          <button class="bp" onclick="updateTrafficTimes()">🚦 Update All Shift Traffic</button>
+          <button class="bsm" onclick="triggerAutoRefreshTraffic()" title="Force the server-side refresh job to run now">⚡ Server Refresh</button>
+        </div>
+        <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:4px;display:block;margin-top:6px"></span>
       </div>
 
       <div class="card">
@@ -2331,7 +2390,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:''},
   driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
@@ -3659,13 +3718,20 @@ function _setGMapsKey(k){ if(k) localStorage.setItem(_GMAPS_KEY_LS,k); else loca
 function saveGMapsKey(){
   const k=document.getElementById('gmaps-key')?.value.trim()||'';
   _setGMapsKey(k);
+  S.cfg.mapsKey=k; // also persist in shared DB so scheduled refresh can use it
+  triggerSave();
   const msg=document.getElementById('gmaps-key-msg');
-  if(msg) msg.innerHTML=k?'<span style="color:var(--green-t)">✓ Key saved to browser.</span>':'<span style="color:var(--txt3)">Key cleared.</span>';
+  if(msg) msg.innerHTML=k?'<span style="color:var(--green-t)">✓ Key saved (browser + shared DB for scheduled refresh).</span>':'<span style="color:var(--txt3)">Key cleared.</span>';
 }
 
 function _restoreGMapsKeyField(){
   const el=document.getElementById('gmaps-key');
-  if(el) el.value=_getGMapsKey();
+  // Prefer localStorage; fall back to DB-stored key
+  const lsKey=_getGMapsKey();
+  const dbKey=S.cfg?.mapsKey||'';
+  const key=lsKey||dbKey;
+  if(key&&!lsKey) _setGMapsKey(key); // sync DB key → localStorage
+  if(el) el.value=key;
 }
 
 async function testMapsKey(){
@@ -3685,13 +3751,15 @@ async function testMapsKey(){
   }
 }
 
-async function _mapsProxyCall(origins, destinations){
+async function _mapsProxyCall(origins, destinations, departureTime, trafficModel){
   const key=_getGMapsKey();
   if(!key) throw new Error('No Google Maps API key. Add it in Settings → Drive Times.');
+  const body={origins,destinations,mapsKey:key};
+  if(departureTime) { body.departureTime=departureTime; body.trafficModel=trafficModel||'best_guess'; }
   const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({origins,destinations,mapsKey:key})
+    body:JSON.stringify(body)
   });
   const data=await res.json();
   if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
@@ -3705,7 +3773,7 @@ async function calcAllDriveTimes(){
   const sitesWithAddr=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
   if(!physWithAddr.length){setStatus('\u26a0 No physician addresses configured.');return;}
   if(!sitesWithAddr.length){setStatus('\u26a0 No hospital addresses configured.');return;}
-  setStatus(`Calculating ${physWithAddr.length} \u00d7 ${sitesWithAddr.length} pairs\u2026`);
+  setStatus(`Calculating ${physWithAddr.length} \u00d7 ${sitesWithAddr.length} base times\u2026`);
   if(!S.driveTimes) S.driveTimes={};
   const today=fmtDate(new Date());
   let done=0, errors=0;
@@ -3721,39 +3789,174 @@ async function calcAllDriveTimes(){
         row.elements.forEach((el,ci)=>{
           const site=sitesWithAddr[ci];
           const key=`${p.id}|${site.name}`;
+          const existing=S.driveTimes[key]||{}; // preserve existing traffic data
           if(el.status==='OK'){
-            S.driveTimes[key]={mins:Math.round(el.duration.value/60),text:el.duration.text,dist:el.distance?.text||'',updated:today};
+            S.driveTimes[key]={...existing,mins:Math.round(el.duration.value/60),text:el.duration.text,dist:el.distance?.text||'',updated:today};
             done++;
           } else {
-            S.driveTimes[key]={mins:null,text:'N/A',dist:'',updated:today};
+            S.driveTimes[key]={...existing,mins:null,text:'N/A',dist:'',updated:today};
             errors++;
           }
         });
       });
-      setStatus(`Calculated ${Math.min(i+BATCH,physWithAddr.length)}/${physWithAddr.length} physicians\u2026`);
+      setStatus(`Base: ${Math.min(i+BATCH,physWithAddr.length)}/${physWithAddr.length}\u2026`);
       if(i+BATCH<physWithAddr.length) await new Promise(r=>setTimeout(r,600));
-    }catch(e){
-      setStatus(`Error: ${e.message}`);
-      return;
-    }
+    }catch(e){setStatus(`Error: ${e.message}`);return;}
   }
   triggerSave();
-  setStatus(`\u2713 Done \u2014 ${done} times calculated${errors?`, ${errors} unreachable`:'.'}`);
+  setStatus(`\u2713 Base times done \u2014 ${done} pairs${errors?`, ${errors} unreachable`:''}.`);
   if(_fteActiveTab==='commute') renderCommuteMatrix();
 }
 
-function _driveTimeBadge(physId,siteName){
+async function updateTrafficTimes(){
+  const statusEl=document.getElementById('gmaps-calc-status');
+  const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
+  const physWithAddr=S.physicians.filter(p=>p.address?.trim());
+  const sitesWithAddr=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
+  if(!physWithAddr.length){setStatus('\u26a0 No physician addresses configured.');return;}
+  if(!sitesWithAddr.length){setStatus('\u26a0 No hospital addresses configured.');return;}
+  if(!S.driveTimes) S.driveTimes={};
+  const now=new Date().toISOString();
+  let done=0, errors=0;
+  const BATCH=10;
+
+  // Shift type -> outbound departure (home->hospital) + return departure (hospital->home at shift end)
+  const SHIFTS=[
+    {type:'1st',        depTime:'06:30', retTime:'15:00', label:'1st Shift (depart 6:30 AM \u2192 return 3:00 PM)'},
+    {type:'2nd',        depTime:'14:30', retTime:'23:00', label:'2nd Shift (depart 2:30 PM \u2192 return 11:00 PM)'},
+    {type:'3rd',        depTime:'22:30', retTime:'07:00', label:'3rd Shift (depart 10:30 PM \u2192 return 7:00 AM)'},
+    {type:'ir-daily',   depTime:'06:30', retTime:'17:00', label:'IR Call (depart 6:30 AM \u2192 return 5:00 PM)'},
+    {type:'ir-weekend', depTime:'17:00', retTime:'07:30', label:'IR Weekend (depart 5:00 PM Fri \u2192 return 7:30 AM Mon)'},
+  ];
+
+  const hospAddrs=sitesWithAddr.map(s=>s.address.trim());
+
+  for(const shift of SHIFTS){
+    setStatus(`Round-trip traffic: ${shift.label}\u2026`);
+    for(let i=0;i<physWithAddr.length;i+=BATCH){
+      const batch=physWithAddr.slice(i,i+BATCH);
+      const batchAddrs=batch.map(p=>p.address.trim());
+      try{
+        // Outbound (home->hospital) and return (hospital->home) in parallel
+        const [outRes, retRes]=await Promise.all([
+          _mapsProxyCallRT(batchAddrs, hospAddrs, shift.depTime),
+          _mapsProxyCallRT(hospAddrs, batchAddrs, shift.retTime),
+        ]);
+
+        outRes.rows.forEach((row,ri)=>{
+          const p=batch[ri];
+          row.elements.forEach((el,ci)=>{
+            const site=sitesWithAddr[ci];
+            const key=`${p.id}|${site.name}`;
+            if(!S.driveTimes[key]) S.driveTimes[key]={mins:null,text:'N/A',dist:'',updated:''};
+            if(!S.driveTimes[key].byShift) S.driveTimes[key].byShift={};
+            if(el.status==='OK'){
+              const outEl=el.duration_in_traffic||el.duration;
+              // Return: retRes rows are indexed by hospital, elements by physician (transposed)
+              const retEl=retRes.rows[ci]?.elements[ri];
+              const retTraffic=retEl?.status==='OK'
+                ?(retEl.duration_in_traffic||retEl.duration)
+                :outEl; // fallback to outbound time if return unavailable
+              S.driveTimes[key].byShift[shift.type]={
+                outMins:Math.round(outEl.value/60),
+                outText:outEl.text,
+                retMins:Math.round(retTraffic.value/60),
+                retText:retTraffic.text,
+                label:shift.label,
+                updated:now,
+              };
+              done++;
+            } else { errors++; }
+          });
+        });
+        if(i+BATCH<physWithAddr.length) await new Promise(r=>setTimeout(r,400));
+      }catch(e){
+        setStatus(`Error on ${shift.label}: ${e.message}`);
+        return;
+      }
+    }
+    await new Promise(r=>setTimeout(r,300));
+  }
+  triggerSave();
+  setStatus(`\u2713 Round-trip traffic updated \u2014 ${done} entries${errors?`, ${errors} errors`:''}.`);
+  if(_fteActiveTab==='commute') renderCommuteMatrix();
+}
+
+// Wrapper that passes departureTime to the proxy
+async function _mapsProxyCallRT(origins, destinations, departureTime){
+  const key=_getGMapsKey();
+  if(!key) throw new Error('No Google Maps API key. Add it in Settings \u2192 Drive Times.');
+  const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({origins,destinations,mapsKey:key,departureTime})
+  });
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+  return data;
+}
+
+
+
+async function triggerAutoRefreshTraffic(){
+  const statusEl=document.getElementById('gmaps-calc-status');
+  const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
+  setStatus('Triggering server-side refresh\u2026');
+  try{
+    const res=await fetch(`${_getUrl()}/functions/v1/auto-refresh-traffic`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:'{}'
+    });
+    const data=await res.json();
+    if(data.ok) setStatus(`\u2713 ${data.message}. Reload to see updated times.`);
+    else setStatus(`Server error: ${data.error}`);
+  }catch(e){
+    setStatus(`Error: ${e.message}`);
+  }
+}
+
+// Check if per-shift traffic is stale (>7 days old) and warn
+function _checkTrafficStaleness(){
+  if(!S.driveTimes) return;
+  const entries=Object.values(S.driveTimes);
+  if(!entries.length) return;
+  const byShiftEntries=entries.filter(d=>d.byShift&&Object.keys(d.byShift).length>0);
+  if(!byShiftEntries.length) return;
+  const latest=byShiftEntries.flatMap(d=>Object.values(d.byShift||{}).map(s=>s.updated||'')).filter(Boolean).sort().pop();
+  if(!latest) return;
+  const ageDays=(Date.now()-new Date(latest).getTime())/86400000;
+  if(ageDays>7){
+    const statusEl=document.getElementById('gmaps-calc-status');
+    if(statusEl) statusEl.innerHTML=`<span style="color:var(--amber,#d97706)">\u26a0 Traffic data is ${Math.round(ageDays)} days old. Click \u201cUpdate All Shift Traffic\u201d to refresh.</span>`;
+  }
+}
+
+
+
+function _driveTimeBadge(physId,siteName,shiftType){
   if(!S.driveTimes) return '';
   const dt=S.driveTimes[`${physId}|${siteName}`];
   if(!dt||dt.mins===null) return '';
-  const col=dt.mins<=20?'var(--green-t)':dt.mins<=40?'var(--txt3)':'var(--amber,#d97706)';
-  return `<span style="font-size:9px;color:${col};margin-left:2px" title="Drive to ${siteName}: ${dt.text}">🚗${dt.text}</span>`;
+  const shiftMap={'1st':'1st','2nd':'2nd','3rd':'3rd','Home':null,
+    'daily':'ir-daily','weekend':'ir-weekend','ir-daily':'ir-daily','ir-weekend':'ir-weekend'};
+  const sk=shiftMap[shiftType]||null;
+  const traffic=sk&&dt.byShift?.[sk];
+  // Use outbound leg for the badge (commute TO work)
+  const outMins=traffic?traffic.outMins:dt.mins;
+  const outText=traffic?traffic.outText:dt.text;
+  const rtMins=traffic?(traffic.outMins+traffic.retMins):dt.mins*2;
+  const label=traffic?traffic.label:'base';
+  const col=outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
+  const icon=traffic?'🚦':'🚗';
+  return `<span style="font-size:9px;color:${col};margin-left:2px"
+    title="${siteName} | Out: ${outText} | RT: ${rtMins}min (${label})">${icon}${outText}</span>`;
 }
 
 function renderCommuteMatrix(){
   const el=document.getElementById('fte-content');
   if(!el) return;
   const grpFilter=document.getElementById('fte-commute-grp')?.value||'all';
+  const yrFilter=document.getElementById('fte-commute-yr')?.value||'all';
+
   const physicians=S.physicians.filter(p=>{
     if(grpFilter==='DR') return p.drFte>0&&p.role!=='IR';
     if(grpFilter==='IR') return p.irFte>0;
@@ -3775,16 +3978,16 @@ function renderCommuteMatrix(){
 
   let html='';
 
+  // ── ONE-WAY DISTANCE MATRIX ────────────────────────────────────────────
   if(physWithAddr.length&&hospitals.length){
     html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">Commute Time Matrix
-        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">driving \u00b7 green \u226420 min \u00b7 amber \u226440 min \u00b7 red >40 min</span>
+      <div class="card-title">One-Way Commute Matrix
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">driving · green \u226420 min · amber \u226440 min · red >40 min</span>
       </div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th>
         ${hospitals.map(s=>`<th style="text-align:center;min-width:90px;font-size:11px">${s.name}</th>`).join('')}
       </tr></thead><tbody>`;
-
     physWithAddr.forEach(p=>{
       html+=`<tr>
         <td style="font-weight:600;white-space:nowrap">
@@ -3793,14 +3996,28 @@ function renderCommuteMatrix(){
         </td>
         ${hospitals.map(s=>{
           const dt=S.driveTimes?.[`${p.id}|${s.name}`];
-          if(!dt) return `<td style="text-align:center;color:var(--txt3);font-size:11px">—</td>`;
+          if(!dt) return `<td style="text-align:center;color:var(--txt3);font-size:11px">\u2014</td>`;
           if(dt.mins===null) return `<td style="text-align:center;color:var(--txt3);font-size:11px">N/A</td>`;
           const bg=dt.mins<=20?'var(--green-bg)':dt.mins<=40?'transparent':'var(--amber-bg,#fffbeb)';
           const col=dt.mins<=20?'var(--green-t)':dt.mins<=40?'var(--txt)':'var(--amber,#d97706)';
-          return `<td style="text-align:center;background:${bg};padding:6px 4px">
+          // Build per-shift rows if byShift data exists
+          let shiftRows='';
+          if(dt.byShift&&Object.keys(dt.byShift).length){
+            const shiftLabels={'1st':'1st','2nd':'2nd','3rd':'3rd','ir-daily':'IR','ir-weekend':'IR Wknd'};
+            shiftRows=Object.entries(dt.byShift).map(([k,v])=>{
+              const rt=v.outMins+v.retMins;
+              const rtCol=rt<=40?'var(--green-t)':rt<=80?'var(--txt2)':'var(--amber,#d97706)';
+              return `<div style="font-size:9px;color:var(--txt3);border-top:1px solid var(--bdr2);padding-top:2px;margin-top:2px">
+                <span style="font-weight:700">${shiftLabels[k]||k}</span>
+                <span style="color:${rtCol}"> ${v.outMins}+${v.retMins}=${rt}m</span>
+              </div>`;
+            }).join('');
+          }
+          return `<td style="text-align:center;background:${bg};padding:5px 4px">
             <div style="font-weight:800;font-size:14px;color:${col}">${dt.mins}</div>
-            <div style="font-size:9px;color:var(--txt3)">min</div>
+            <div style="font-size:9px;color:var(--txt3)">min base</div>
             ${dt.dist?`<div style="font-size:9px;color:var(--txt3)">${dt.dist}</div>`:''}
+            ${shiftRows}
           </td>`;
         }).join('')}
       </tr>`;
@@ -3808,13 +4025,195 @@ function renderCommuteMatrix(){
     html+=`</tbody></table></div></div>`;
   }
 
+  // ── ROUND-TRIP DRIVE TALLY ─────────────────────────────────────────────
+  // Count every scheduled hospital shift (DR + IR procedure shifts + IR calls)
+  // that has a drive-time entry. Round trip = 2 × one-way mins.
+  const yearLabel=yrFilter==='all'?'All Years':yrFilter;
+
+  function matchesYear(date){
+    return yrFilter==='all'||date.startsWith(yrFilter);
+  }
+
+  // Build per-physician per-hospital shift counts
+  const tallyData=physicians.map(p=>{
+    const byHospital={};
+    let totalRTMins=0, totalTrafficMins=0, totalShifts=0;
+
+    // DR shifts — use per-shift traffic time
+    S.drShifts.filter(s=>s.physId===p.id&&!s.autoHome&&s.site!=='At Home / Remote'&&matchesYear(s.date))
+      .forEach(s=>{
+        const key=`${p.id}|${s.site}`;
+        const dt=S.driveTimes?.[key];
+        if(!dt||dt.mins===null) return;
+        const shiftKey={'1st':'1st','2nd':'2nd','3rd':'3rd'}[s.shift]||null;
+        const traffic=shiftKey&&dt.byShift?.[shiftKey];
+        if(!byHospital[s.site]) byHospital[s.site]={shifts:0,rtMins:0,rtTrafficMins:0};
+        byHospital[s.site].shifts++;
+        const ow=dt.mins;
+        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
+        const rtBase=ow*2, rtTraffic=outM+retM;
+        byHospital[s.site].rtMins+=rtBase; byHospital[s.site].rtTrafficMins+=rtTraffic;
+        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
+        totalShifts++;
+      });
+
+    // IR procedure shifts (use ir-daily traffic)
+    (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchesYear(s.date))
+      .forEach(s=>{
+        const key=`${p.id}|${s.site}`;
+        const dt=S.driveTimes?.[key];
+        if(!dt||dt.mins===null) return;
+        const traffic=dt.byShift?.['ir-daily'];
+        if(!byHospital[s.site]) byHospital[s.site]={shifts:0,rtMins:0,rtTrafficMins:0};
+        byHospital[s.site].shifts++;
+        const ow=dt.mins;
+        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
+        const rtBase=ow*2, rtTraffic=outM+retM;
+        byHospital[s.site].rtMins+=rtBase; byHospital[s.site].rtTrafficMins+=rtTraffic;
+        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
+        totalShifts++;
+      });
+
+    // IR daily calls (use ir-daily traffic)
+    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchesYear(c.date))
+      .forEach(c=>{
+        const key=`${p.id}|${c.site}`;
+        const dt=S.driveTimes?.[key];
+        if(!dt||dt.mins===null) return;
+        const traffic=dt.byShift?.['ir-daily'];
+        if(!byHospital[c.site]) byHospital[c.site]={shifts:0,rtMins:0,rtTrafficMins:0};
+        byHospital[c.site].shifts++;
+        const ow=dt.mins;
+        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
+        const rtBase=ow*2, rtTraffic=outM+retM;
+        byHospital[c.site].rtMins+=rtBase; byHospital[c.site].rtTrafficMins+=rtTraffic;
+        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
+        totalShifts++;
+      });
+
+    // IR weekend calls (use ir-weekend traffic: Friday 5pm departure)
+    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchesYear(c.date))
+      .forEach(c=>{
+        const key=`${p.id}|${c.site}`;
+        const dt=S.driveTimes?.[key];
+        if(!dt||dt.mins===null) return;
+        const traffic=dt.byShift?.['ir-weekend'];
+        if(!byHospital[c.site]) byHospital[c.site]={shifts:0,rtMins:0,rtTrafficMins:0};
+        byHospital[c.site].shifts++;
+        const ow=dt.mins;
+        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
+        const rtBase=ow*2, rtTraffic=outM+retM;
+        byHospital[c.site].rtMins+=rtBase; byHospital[c.site].rtTrafficMins+=rtTraffic;
+        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
+        totalShifts++;
+      });
+
+    const totalHrs=(totalRTMins/60);
+    const hasTraffic=totalTrafficMins!==totalRTMins;
+    return{p,byHospital,totalRTMins,totalTrafficMins,totalShifts,totalHrs,hasTraffic};
+  }).filter(d=>d.totalShifts>0||physWithAddr.some(x=>x.id===d.p.id));
+
+  // Sort by most total drive time
+  const sorted=tallyData.slice().sort((a,b)=>b.totalRTMins-a.totalRTMins);
+  const allSites=[...new Set(sorted.flatMap(d=>Object.keys(d.byHospital)))].sort();
+  const grandTotalMins=sorted.reduce((s,d)=>s+d.totalRTMins,0);
+  const grandTrafficMins=sorted.reduce((s,d)=>s+d.totalTrafficMins,0);
+  const grandTotalShifts=sorted.reduce((s,d)=>s+d.totalShifts,0);
+  const anyTraffic=sorted.some(d=>d.hasTraffic);
+
+  function fmtMins(m){
+    if(!m) return '—';
+    const h=Math.floor(m/60), min=m%60;
+    return h>0?(min>0?`${h}h ${min}m`:`${h}h`):`${min}m`;
+  }
+
+  html+=`<div class="card" style="margin-bottom:14px">
+    <div class="card-title">Round-Trip Drive Time Tally \u2014 ${yearLabel}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+        home \u2192 hospital \u2192 home per shift \u00b7 DR shifts + IR procedure shifts + IR calls
+        ${(()=>{const s=Object.values(S.driveTimes||{}).find(d=>d.trafficProfile);return s?` \u00b7 <span style='color:var(--amber,#d97706)'>\uD83D\uDEA6 Traffic: ${s.trafficProfile}</span>`:'';})()} 
+      </span>
+    </div>`;
+
+  if(!sorted.length||!allSites.length){
+    html+=`<div style="font-size:12px;color:var(--txt3);padding:8px">
+      No shifts with drive-time data found${yrFilter!=='all'?` for ${yrFilter}`:''}. 
+      Make sure physician addresses, hospital addresses, and calculated drive times are all configured.
+    </div>`;
+  } else {
+    // Summary metrics
+    const trafficNote=anyTraffic?`<span style="font-size:10px;color:var(--txt3)"> 🚦with traffic</span>`:'';
+    html+=`<div class="g4" style="margin-bottom:12px">
+      <div class="met"><div class="met-lbl">Total Shifts</div><div class="met-val">${grandTotalShifts}</div></div>
+      <div class="met"><div class="met-lbl">Base Drive Time</div><div class="met-val" style="font-size:16px">${fmtMins(grandTotalMins)}</div></div>
+      <div class="met"><div class="met-lbl">With Traffic${trafficNote}</div><div class="met-val" style="font-size:16px;color:${anyTraffic&&grandTrafficMins>grandTotalMins?'var(--amber,#d97706)':'var(--txt)'}">${fmtMins(grandTrafficMins)}</div></div>
+      <div class="met"><div class="met-lbl">Extra Due to Traffic</div><div class="met-val" style="font-size:16px;color:${anyTraffic&&grandTrafficMins>grandTotalMins?'var(--red-t)':'var(--txt3)'}">${anyTraffic?fmtMins(grandTrafficMins-grandTotalMins):'—'}</div></div>
+    </div>`;
+
+    // Full breakdown table
+    html+=`<div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th>
+      ${allSites.map(s=>`<th style="text-align:center;font-size:11px">${s}<br><span style="font-weight:400;font-size:9px">shifts / rt-time</span></th>`).join('')}
+      <th style="text-align:center;border-left:2px solid var(--bdr)">Total Shifts</th>
+      <th style="text-align:center">Total Drive</th>
+      <th style="text-align:center">Avg per Shift</th>
+    </tr></thead><tbody>`;
+
+    sorted.forEach(({p,byHospital,totalRTMins,totalShifts})=>{
+      const avgPerShift=totalShifts?Math.round(totalRTMins/totalShifts):0;
+      const driveCls=totalRTMins>2400?'color:var(--red-t)':totalRTMins>1200?'color:var(--amber,#d97706)':'color:var(--txt)';
+      html+=`<tr>
+        <td style="font-weight:600;white-space:nowrap">${pname(p.id)}</td>
+        ${allSites.map(site=>{
+          const bh=byHospital[site];
+          if(!bh) return `<td style="text-align:center;color:var(--txt3)">—</td>`;
+          const dt=S.driveTimes?.[`${p.id}|${site}`];
+          const trafficLine=bh.rtTrafficMins&&bh.rtTrafficMins!==bh.rtMins
+            ?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(bh.rtTrafficMins)}</div>`:'';
+          return `<td style="text-align:center;padding:4px 3px">
+            <div style="font-weight:700">${bh.shifts}</div>
+            <div style="font-size:11px;color:var(--txt2)">${fmtMins(bh.rtMins)}</div>
+            ${trafficLine}
+          </td>`;
+        }).join('')}
+        <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr)">${totalShifts}</td>
+        <td style="text-align:center;font-weight:800;${driveCls}">
+          ${fmtMins(totalRTMins)}
+          ${hasTraffic&&totalTrafficMins!==totalRTMins?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(totalTrafficMins)}</div>`:''}
+        </td>
+        <td style="text-align:center;color:var(--txt3)">${fmtMins(avgPerShift)}</td>
+      </tr>`;
+    });
+
+    // Totals row
+    html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
+      <td style="font-weight:800">Team Total</td>
+      ${allSites.map(site=>{
+        const siteTotMins=sorted.reduce((s,d)=>s+(d.byHospital[site]?.rtMins||0),0);
+        const siteTotShifts=sorted.reduce((s,d)=>s+(d.byHospital[site]?.shifts||0),0);
+        if(!siteTotShifts) return `<td style="text-align:center;color:var(--txt3)">—</td>`;
+        return `<td style="text-align:center"><div style="font-weight:800">${siteTotShifts}</div><div style="font-size:11px">${fmtMins(siteTotMins)}</div></td>`;
+      }).join('')}
+      <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr)">${grandTotalShifts}</td>
+      <td style="text-align:center;font-weight:800">
+        ${fmtMins(grandTotalMins)}
+        ${anyTraffic&&grandTrafficMins!==grandTotalMins?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(grandTrafficMins)}</div>`:''}
+      </td>
+      <td></td>
+    </tr>`;
+
+    html+=`</tbody></table></div>`;
+  }
+  html+=`</div>`;
+
+  // Missing address warnings
   const noAddrPhys=physicians.filter(p=>!p.address?.trim());
   const noAddrSites=S.sites.filter(s=>!s.address?.trim()&&s.name!=='At Home / Remote');
-  if(noAddrPhys.length) html+=`<div class="note nw" style="font-size:12px">${noAddrPhys.length} physician(s) missing address: ${noAddrPhys.map(p=>p.last).join(', ')}. Edit in Physician Roster.</div>`;
-  if(noAddrSites.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrSites.length} hospital(s) missing address: ${noAddrSites.map(s=>s.name).join(', ')}. Edit in Settings \u2192 Hospital Sites.</div>`;
+  if(noAddrPhys.length) html+=`<div class="note nw" style="font-size:12px">${noAddrPhys.length} physician(s) missing address: ${noAddrPhys.map(p=>p.last).join(', ')}.</div>`;
+  if(noAddrSites.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrSites.length} hospital(s) missing address: ${noAddrSites.map(s=>s.name).join(', ')}.</div>`;
 
   const updated=[...new Set(Object.values(S.driveTimes||{}).map(d=>d.updated).filter(Boolean))].sort().pop();
-  if(updated) html+=`<div style="font-size:10px;color:var(--txt3);margin-top:8px">Last calculated: ${updated}</div>`;
+  if(updated) html+=`<div style="font-size:10px;color:var(--txt3);margin-top:8px">Drive times last calculated: ${updated}</div>`;
 
   el.innerHTML=html||'<div class="note ni">Configure addresses and calculate to see commute times.</div>';
 }
@@ -3836,7 +4235,7 @@ function renderDRCal(){
       const cls=s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':s.autoHome?'e-home-auto':'ehome';
       const p=S.physicians.find(x=>x.id===s.physId);
       const nonAnc=p?.anchorSite&&s.site!==p.anchorSite?' eanc':'';
-      evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} @ ${s.site}">${pshort(s.physId)} ${s.sub?s.sub.slice(0,4):''}${_driveTimeBadge(s.physId,s.site)}</div>`;
+      evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} @ ${s.site}">${pshort(s.physId)} ${s.sub?s.sub.slice(0,4):''}${_driveTimeBadge(s.physId,s.site,s.shift)}</div>`;
     });
     if(!fsh||fsh==='Weekend') S.weekendCalls.filter(w=>((w.satDate||w.date)===c.date||(w.sunDate)===c.date)&&(!fpid||w.physId===fpid)).forEach(w=>{evs+=`<div class="ev ewk">${pshort(w.physId)} wk</div>`;});
     if(!fsh||fsh==='Holiday') S.holidays.filter(h=>h.date===c.date&&h.group==='DR').forEach(h=>{evs+=`<div class="ev ehol">${pshort(h.physId)} HOL</div>`;});
@@ -4136,7 +4535,7 @@ function renderIRCal(){
           ev=`<div class="ev" style="background:#d1fae5;color:#065f46;border:1px solid #86efac" title="${pname(ic.physId)} — Weekend Call">${pshort(ic.physId)} [${ic.irGroup[0]}] ${isStart?'▶':''}Wk</div>`;
         } else {
           const cls=ic.irGroup==='North'?'eir':'eirs';
-          ev=`<div class="ev ${cls}" title="${pname(ic.physId)} — Daily Call @ ${ic.site}">${pshort(ic.physId)} [${ic.irGroup[0]}]${_driveTimeBadge(ic.physId,ic.site)}</div>`;
+          ev=`<div class="ev ${cls}" title="${pname(ic.physId)} — Daily Call @ ${ic.site}">${pshort(ic.physId)} [${ic.irGroup[0]}]${_driveTimeBadge(ic.physId,ic.site,ic.callType==='weekend'?'ir-weekend':'ir-daily')}</div>`;
         }
         callEvs+=ev;
       });
@@ -4457,8 +4856,11 @@ function renderIRList(){
   const ctColors={'daily':'tt','weekend':'tpk'};
   document.getElementById('irl-tbody').innerHTML=S.irCalls.filter(ic=>ic.date.startsWith(ym)&&(!grp||ic.irGroup===grp)).sort((a,b)=>a.date>b.date?1:-1).map(ic=>{
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
+    const dt=ic.site&&ic.site!=='At Home / Remote'?_driveTimeCell(ic.physId,ic.site):'';
     return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${ic.irGroup==='North'?'tb':'tg'}">${ic.irGroup}</span></td>
-    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType}</span></td><td>${dates}</td><td>${ic.site}</td><td>${ic.notes||'—'}</td>
+    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType}</span></td><td>${dates}</td><td>${ic.site}</td>
+    <td style="text-align:center">${dt||'—'}</td>
+    <td>${ic.notes||'—'}</td>
     <td><button class="br bxs" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRList()">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
@@ -5687,6 +6089,59 @@ function _irCallPhysOnDate(date,irGroup){
 }
 
 
+/* ─── AUTO-ASSIGN TAB — inline blackout/needs helpers ─── */
+function renderHaaBlackoutList(){
+  const el=document.getElementById('haa-hb-list'); if(!el) return;
+  const list=S.holidayBlackouts||[];
+  if(!list.length){el.innerHTML='<p style="color:var(--txt3);font-size:12px">No blackout dates yet.</p>';return;}
+  el.innerHTML=list.slice().sort((a,b)=>a.date>b.date?1:-1).map(b=>`
+    <div class="row">
+      <span class="tag ta" style="min-width:80px">${b.date}</span>
+      <span style="flex:1;font-size:12px">${b.name}</span>
+      <button class="br bxs" onclick="removeHaaBlackout(${b.id})">X</button>
+    </div>`).join('');
+}
+function addHaaBlackout(){
+  const name=document.getElementById('haa-hb-name')?.value;
+  const date=document.getElementById('haa-hb-date')?.value;
+  if(!name||!date){alert('Select a holiday name and date.');return;}
+  if(!S.holidayBlackouts) S.holidayBlackouts=[];
+  if(S.holidayBlackouts.find(b=>b.date===date)){alert('A blackout already exists for this date.');return;}
+  S.holidayBlackouts.push({id:S.nextId++,name,date});
+  document.getElementById('haa-hb-date').value='';
+  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
+}
+function removeHaaBlackout(id){
+  S.holidayBlackouts=(S.holidayBlackouts||[]).filter(x=>x.id!==id);
+  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
+}
+
+function renderHaaNeedsList(){
+  const el=document.getElementById('haa-hn-list'); if(!el) return;
+  const list=S.holidayNeeds||[];
+  if(!list.length){el.innerHTML='<p style="color:var(--txt3);font-size:12px">No staffing needs yet.</p>';return;}
+  el.innerHTML=list.map(n=>`
+    <div class="row">
+      <span style="flex:1;font-size:12px">${n.name}</span>
+      <span class="tag ${n.group==='DR'?'tb':n.group==='IR'?'tt':'tp'}">${n.group}</span>
+      <span class="tag tgr">${n.slots} slot${n.slots!==1?'s':''}</span>
+      <button class="br bxs" onclick="removeHaaNeed(${n.id})">X</button>
+    </div>`).join('');
+}
+function addHaaNeed(){
+  const name=document.getElementById('haa-hn-name')?.value;
+  const grp=document.getElementById('haa-hn-grp')?.value||'DR';
+  const slots=+document.getElementById('haa-hn-slots')?.value||1;
+  if(!name) return;
+  if(!S.holidayNeeds) S.holidayNeeds=[];
+  S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
+  triggerSave(); renderHaaNeedsList(); renderHolidayNeedsList();
+}
+function removeHaaNeed(id){
+  S.holidayNeeds=(S.holidayNeeds||[]).filter(x=>x.id!==id);
+  triggerSave(); renderHaaNeedsList(); renderHolidayNeedsList();
+}
+
 /* ─── HOLIDAY AUTO-ASSIGN (FTE-weighted random lottery) ─── */
 
 // Returns per-physician career tally for holiday calls for a given group.
@@ -5832,9 +6287,15 @@ function previewHolRandom(){
   const year=+document.getElementById('haa-year')?.value||new Date().getFullYear();
   const group=document.getElementById('haa-grp')?.value||'both';
   const mode=document.getElementById('haa-mode')?.value||'weighted';
-  if(!S.holidayBlackouts?.length||!S.holidayNeeds?.length){
-    document.getElementById('haa-box').innerHTML=
-      '<div class="note nw">Configure holiday blackout dates and staffing needs first (Blackout Dates and Holiday Needs config).</div>';
+  // Diagnostic: report exactly what's missing
+  const missingBlackouts=!(S.holidayBlackouts||[]).filter(b=>b.date.startsWith(String(year))).length;
+  const missingNeeds=!(S.holidayNeeds||[]).length;
+  if(missingBlackouts||missingNeeds){
+    let msg=`<div class="note nw"><strong>Cannot generate lottery:</strong><ul style="margin:6px 0 0 16px;font-size:12px">`;
+    if(missingBlackouts) msg+=`<li>No blackout dates configured for ${year}. Add holiday dates above.</li>`;
+    if(missingNeeds)     msg+=`<li>No staffing needs configured. Add holiday needs (e.g. Thanksgiving → DR → 1 slot) above.</li>`;
+    msg+=`</ul></div>`;
+    document.getElementById('haa-box').innerHTML=msg;
     return;
   }
   const preview=[],gaps=[];
@@ -5950,9 +6411,7 @@ function addHoliday(){
   if(grp==='IR') _syncHolidayToIRCall(pid,date,holName); // mirror to IR call schedule
   triggerSave();renderHolTable();renderHolCounter();
 }
-function renderHolTable(){
-  document.getElementById('hol-tbody').innerHTML=S.holidays.sort((a,b)=>a.date>b.date?1:-1).map(h=>`<tr><td>${h.name}</td><td>${h.date}</td><td>${h.year}</td><td>${pname(h.physId)}</td><td><span class="tag ${h.group==='DR'?'tb':'tt'}">${h.group}</span></td><td>${h.notes||'—'}</td><td><button class="br bxs" onclick="S.holidays=S.holidays.filter(x=>x.id!==${h.id});renderHolTable();renderHolCounter()">X</button></td></tr>`).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
-}
+/* renderHolTable — defined below with filter support */
 function renderHolCounter(){
   const grp=document.getElementById('hcg')?.value||'ALL',yr=document.getElementById('hcy')?.value||'all';
   const filtered=S.holidays.filter(h=>(grp==='ALL'||h.group===grp)&&(yr==='all'||h.year===+yr));
@@ -6008,7 +6467,7 @@ function unclaimShift(oid){
 }
 
 /* ─── SETTINGS ─── */
-function renderSettings(){renderSettingsSupabaseStatus();_restoreGMapsKeyField();
+function renderSettings(){renderSettingsSupabaseStatus();_restoreGMapsKeyField();_checkTrafficStaleness();
   document.getElementById('cfg-wd').value=S.cfg.wdMax;document.getElementById('cfg-wk').value=S.cfg.wkMax;
   document.getElementById('cfg-ir-daily').value=S.cfg.irDailyMax||S.cfg.irMax||20;
   document.getElementById('cfg-ir-wknd').value=S.cfg.irWkndMax||4;
@@ -6229,12 +6688,14 @@ function renderIRShiftTable(){
   const shiftCls={'1st':'tb','2nd':'tg','3rd':'ta','Home':'tpk'};
   document.getElementById('irs-tbody').innerHTML=rows.map(s=>{
     const p=S.physicians.find(x=>x.id===s.physId);
+    const dt=s.site!=='At Home / Remote'?_driveTimeCell(s.physId,s.site):'<span style="color:var(--txt3);font-size:11px">—</span>';
     return`<tr>
       <td>${pname(s.physId)}</td>
       <td>${s.date}</td>
       <td><span class="tag ${shiftCls[s.shift]||'tgr'}">${s.shift}</span></td>
       <td>${s.site}</td>
       <td><span class="tag ${(p?.irGroup||'')==='North'?'tb':'tg'}">${p?.irGroup||'—'}</span></td>
+      <td style="text-align:center">${dt}</td>
       <td>${s.sub||'—'}</td>
       <td>${s.notes||'—'}</td>
       <td><button class="br bxs" onclick="if(_adminOnly('delete IR shift'))S.irShifts=S.irShifts.filter(x=>x.id!==${s.id}),renderIRShiftTable()">X</button></td>
@@ -6515,8 +6976,10 @@ function holTab(t,el){
   if(el) el.classList.add('on');
   if(t==='counter')    renderHolCounter();
   if(t==='schedule')   renderHolSchedule();
-  if(t==='autoassign') renderHolCareerTally();
+  if(t==='autoassign'){renderHolCareerTally();renderHaaBlackoutList();renderHaaNeedsList();}
 }
+let _editingHolId=null;
+
 function renderHolTable(){
   const fyr=document.getElementById('holf-yr')?.value||'';
   const fgrp=document.getElementById('holf-grp')?.value||'';
@@ -6524,29 +6987,69 @@ function renderHolTable(){
   const filtered=S.holidays
     .filter(h=>(!fyr||String(h.year)===fyr)&&(!fgrp||h.group===fgrp)&&(!fname||h.name===fname))
     .sort((a,b)=>a.date>b.date?1:-1);
-  document.getElementById('hol-tbody').innerHTML=filtered.map(h=>`
-    <tr>
+  const physOpts=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  const holNames=['New Year\'s Day','MLK Day','Memorial Day','Independence Day','Labor Day',
+    'Thanksgiving','Christmas Eve','Christmas Day','New Year\'s Eve','Other'];
+  document.getElementById('hol-tbody').innerHTML=filtered.map(h=>{
+    if(h.id===_editingHolId){
+      // Inline edit row
+      return`<tr style="background:var(--blue-bg)">
+        <td><select id="hol-edit-name-${h.id}" style="width:100%;font-size:11px">
+          ${holNames.map(n=>`<option${n===h.name?' selected':''}>${n}</option>`).join('')}
+        </select></td>
+        <td><input id="hol-edit-date-${h.id}" type="date" value="${h.date}" style="width:110px"></td>
+        <td><input id="hol-edit-yr-${h.id}" type="number" value="${h.year}" style="width:65px"></td>
+        <td><select id="hol-edit-phys-${h.id}" style="width:100%;font-size:11px">
+          ${physOpts.replace(`value="${h.physId}"`,`value="${h.physId}" selected`)}
+        </select></td>
+        <td><select id="hol-edit-grp-${h.id}" style="font-size:11px">
+          <option value="DR"${h.group==='DR'?' selected':''}>DR</option>
+          <option value="IR"${h.group==='IR'?' selected':''}>IR</option>
+        </select></td>
+        <td><input id="hol-edit-notes-${h.id}" value="${h.notes||''}" style="width:100%;font-size:11px"></td>
+        <td><button class="bg bsm" onclick="saveEditHoliday(${h.id})">✓ Save</button></td>
+        <td><button class="bsm" onclick="cancelEditHoliday()">✕</button></td>
+      </tr>`;
+    }
+    return`<tr>
       <td>${h.name}</td><td>${h.date}</td><td>${h.year}</td><td>${pname(h.physId)}</td>
       <td><span class="tag ${h.group==='DR'?'tb':'tt'}">${h.group}</span></td>
       <td>${h.notes||'—'}</td>
-      <td><button class="bsm" onclick="editHoliday(${h.id})">Edit</button></td>
+      <td><button class="bsm" onclick="startEditHoliday(${h.id})">✏ Edit</button></td>
       <td><button class="br bxs" onclick="deleteHoliday(${h.id})">X</button></td>
-    </tr>`).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">None</td></tr>';
+    </tr>`;
+  }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
-function editHoliday(id){
-  const h=S.holidays.find(x=>x.id===id);if(!h)return;
-  document.getElementById('hol-name').value=h.name;
-  document.getElementById('hol-date').value=h.date;
-  document.getElementById('hol-yr').value=h.year;
-  document.getElementById('hol-phys').value=h.physId;
-  document.getElementById('hol-grp').value=h.group;
-  document.getElementById('hol-notes').value=h.notes||'';
-  // Remove old entry and re-add
-  S.holidays=S.holidays.filter(x=>x.id!==id);
-  renderHolTable();
-  document.getElementById('hol-notes').focus();
-  alert('Record removed for editing. Update fields above and click Add to save changes.');
+
+function startEditHoliday(id){
+  if(!_adminOnly('edit holidays')) return;
+  _editingHolId=id; renderHolTable();
 }
+
+function saveEditHoliday(id){
+  if(!_adminOnly('edit holidays')) return;
+  const h=S.holidays.find(x=>x.id===id); if(!h) return;
+  const nameEl=document.getElementById(`hol-edit-name-${id}`);
+  const dateEl=document.getElementById(`hol-edit-date-${id}`);
+  const yrEl  =document.getElementById(`hol-edit-yr-${id}`);
+  const physEl=document.getElementById(`hol-edit-phys-${id}`);
+  const grpEl =document.getElementById(`hol-edit-grp-${id}`);
+  const notEl =document.getElementById(`hol-edit-notes-${id}`);
+  if(!dateEl?.value){alert('Date is required.');return;}
+  h.name  = nameEl?.value||h.name;
+  h.date  = dateEl.value;
+  h.year  = +yrEl?.value||h.year;
+  h.physId= +physEl?.value||h.physId;
+  h.group = grpEl?.value||h.group;
+  h.notes = notEl?.value||'';
+  _editingHolId=null;
+  triggerSave(); renderHolTable(); renderHolCounter();
+}
+
+function cancelEditHoliday(){
+  _editingHolId=null; renderHolTable();
+}
+/* editHoliday replaced by startEditHoliday / saveEditHoliday inline approach */
 function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
   if(!confirm('Delete this holiday assignment?'))return;
