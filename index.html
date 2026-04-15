@@ -1245,7 +1245,7 @@ tbody tr:hover{background:var(--bg3)}
 <!-- ANCHOR REPORT -->
 <div id="page-anchor-report" class="page">
   <div class="pg-title">⚓ Anchor Compliance</div>
-  <div class="pg-sub">Shows what % of each physician's shifts were at their designated anchor site. Target: ≥60%. Changes immediately when you pick a different month.</div>
+  <div class="pg-sub">Shows what % of each physician's IR procedure shifts were at their designated anchor site. Target: ≥60%. Changes immediately when you pick a different month.</div>
 
   <div class="flexe" style="margin-bottom:12px;align-items:flex-end;gap:10px">
     <div class="fg" style="margin:0"><label>Month</label><input id="anc-mo" type="month" oninput="renderAnchorReport()"></div>
@@ -2411,8 +2411,7 @@ function irWkndTargetYear(p, yr){
 
 /* ─── ANCHOR COMPLIANCE ─── */
 // Anchor compliance is a REPORTING tool only — not a scheduling constraint.
-// Data sources: S.drShifts (non-autoHome) + S.weekendCalls for the given month.
-// S.irCalls and S.irShifts are NEVER included.
+// Data source: S.irShifts (non-Home IR procedure shifts) for the given month.
 
 function ancComp(physId, ym){
   // Returns null if physician has no anchor site configured.
@@ -2420,24 +2419,17 @@ function ancComp(physId, ym){
   const p = S.physicians.find(x => x.id === physId);
   if(!p || !p.anchorSite) return null;
 
-  // DR weekday shifts assigned to this physician this month (exclude auto-home fills)
-  const drShifts = S.drShifts.filter(s =>
+  // IR procedure shifts for this physician this month (exclude Home fills)
+  const irShifts = (S.irShifts||[]).filter(s =>
     s.physId === physId &&
     s.date.startsWith(ym) &&
-    !s.autoHome
+    s.shift !== 'Home'
   );
 
-  // DR weekend calls for this physician this month
-  const wkCalls = S.weekendCalls.filter(w =>
-    w.physId === physId &&
-    (w.satDate || w.date || '').startsWith(ym)
-  );
-
-  const tot = drShifts.length + wkCalls.length;
+  const tot = irShifts.length;
   if(!tot) return {tot:0, atAnc:0, pct:0, ok:null, noData:true, anchor:p.anchorSite};
 
-  const atAnc = drShifts.filter(s => s.site === p.anchorSite).length
-              + wkCalls.filter(w => w.site === p.anchorSite).length;
+  const atAnc = irShifts.filter(s => s.site === p.anchorSite).length;
 
   const pct = Math.round(atAnc / tot * 100);
   return {tot, atAnc, pct, ok: pct >= S.cfg.anchorPct, anchor: p.anchorSite};
@@ -2492,7 +2484,7 @@ function renderDash(){
   const drPs=S.physicians.filter(p=>p.role!=='IR');
   const irPs=S.physicians.filter(p=>p.irFte>0);
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
-  const anchPhys=drPs.filter(p=>p.anchorSite);
+  const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
   document.getElementById('dash-metrics').innerHTML=[
     {l:'DR Physicians',v:drPs.length,s:'incl. mixed',pg:'physicians'},
@@ -2709,7 +2701,7 @@ function renderPhysicians(){
     html+=`<div style="font-weight:800;font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin:12px 0 6px">${rl} (${list.length})</div>`;
     list.forEach(p=>{
       const avc=role==='IR'?'background:var(--teal-bg);color:var(--teal)':role==='MIXED'?'background:var(--purple-bg);color:var(--purple)':'background:var(--blue-bg);color:var(--blue-t)';
-      const c=ancComp(p.id,'2025-06');
+      const c=ancComp(p.id,fmtDate(new Date()).slice(0,7));
       const ftags=[p.drFte>0?`<span class="tag tb">DR ${p.drFte}</span>`:'',...[p.irFte>0?`<span class="tag tt">IR ${p.irFte}</span>`:''],...[p.irGroup?`<span class="tag tg">${p.irGroup}</span>`:'']].join('');
       html+=`<div class="row"><div class="av" style="${avc}">${ini(p)}</div>
         <div style="flex:1">
@@ -4922,16 +4914,16 @@ function renderAnchorReport(){
   const [y, m] = ym.split('-').map(Number);
   const monthLabel = new Date(y, m-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
 
-  // Only DR physicians (drFte > 0) with an anchor site — pure IR never have anchors
-  const drs = S.physicians.filter(p => p.drFte > 0 && p.anchorSite);
+  // All physicians with an anchor site (IR or mixed)
+  const anchPhys = S.physicians.filter(p => p.anchorSite);
 
-  if(!drs.length){
+  if(!anchPhys.length){
     el.innerHTML = '<div class="note ni">No physicians have anchor sites configured. Set an anchor site on each physician profile.</div>';
     return;
   }
 
-  // Compute compliance for this exact month — no fallback rerouting whatsoever
-  const results = drs.map(p => ({p, c: ancComp(p.id, ym)}));
+  // Compute compliance for this exact month
+  const results = anchPhys.map(p => ({p, c: ancComp(p.id, ym)}));
 
   const withData  = results.filter(r => r.c && !r.c.noData);
   const compliant = withData.filter(r => r.c.ok);
@@ -4942,7 +4934,7 @@ function renderAnchorReport(){
 
   // Summary metrics
   html += `<div class="g4" style="margin-bottom:12px">
-    <div class="met"><div class="met-lbl">DR w/ Anchor</div><div class="met-val">${drs.length}</div></div>
+    <div class="met"><div class="met-lbl">Physicians w/ Anchor</div><div class="met-val">${anchPhys.length}</div></div>
     <div class="met"><div class="met-lbl">Compliant \u2265${S.cfg.anchorPct}%</div><div class="met-val" style="color:var(--green)">${compliant.length}</div></div>
     <div class="met"><div class="met-lbl">Below Target</div><div class="met-val" style="color:var(--red)">${failing.length}</div></div>
     <div class="met"><div class="met-lbl">Team Rate</div><div class="met-val">${withData.length ? Math.round(compliant.length/withData.length*100) : 0}%</div></div>
@@ -4956,9 +4948,9 @@ function renderAnchorReport(){
     </div>`;
   }
 
-  // No DR data for this month — show empty state without redirecting
+  // No IR shift data for this month — show empty state without redirecting
   if(!withData.length){
-    html += `<div class="note ni">No DR shifts recorded for ${monthLabel}. Select a month that has assigned DR shifts to see compliance data.</div>`;
+    html += `<div class="note ni">No IR procedure shifts recorded for ${monthLabel}. Select a month that has assigned IR shifts to see compliance data.</div>`;
     el.innerHTML = html;
     return;
   }
@@ -4966,11 +4958,11 @@ function renderAnchorReport(){
   // Per-physician breakdown table
   html += `<div class="card">
     <div class="card-title">Physician Breakdown \u2014 ${monthLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR shifts + weekend calls only \u00b7 auto-home fills excluded \u00b7 reporting only</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">IR procedure shifts only · Home fills excluded · reporting only</span>
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>Physician</th><th>DR FTE</th><th>Anchor</th>
-      <th>DR Shifts</th><th>Wknd Calls</th><th>Total</th><th>At Anchor</th>
+      <th>Physician</th><th>IR FTE</th><th>Anchor</th>
+      <th>IR Shifts</th><th>Total</th><th>At Anchor</th>
       <th>Compliance</th><th>Status</th>
     </tr></thead><tbody>`;
 
@@ -4978,16 +4970,14 @@ function renderAnchorReport(){
     const pct   = c && !c.noData ? c.pct   : 0;
     const tot   = c && !c.noData ? c.tot   : 0;
     const atAnc = c && !c.noData ? c.atAnc : 0;
-    const drCount = S.drShifts.filter(s => s.physId===p.id && s.date.startsWith(ym) && !s.autoHome).length;
-    const wkCount = S.weekendCalls.filter(w => w.physId===p.id && (w.satDate||w.date||'').startsWith(ym)).length;
+    const irCount = (S.irShifts||[]).filter(s => s.physId===p.id && s.date.startsWith(ym) && s.shift!=='Home').length;
     const scls    = !c || c.noData ? 'tgr' : c.ok ? 'ab-ok' : pct >= 40 ? 'ab-lo' : 'ab-bad';
     const statusTxt = !c || c.noData ? 'No data' : c.ok ? 'Compliant' : pct >= 40 ? 'Below Target' : 'Non-Compliant';
     html += `<tr>
       <td style="font-weight:600">${pname(p.id)}</td>
-      <td style="text-align:center">${p.drFte}</td>
-      <td><span class="tag tb">${p.anchorSite}</span></td>
-      <td style="text-align:center">${drCount}</td>
-      <td style="text-align:center">${wkCount}</td>
+      <td style="text-align:center">${p.irFte||'—'}</td>
+      <td><span class="tag ${p.irGroup==='South'?'tg':'tb'}">${p.anchorSite}</span></td>
+      <td style="text-align:center">${irCount}</td>
       <td style="text-align:center;font-weight:700">${tot}</td>
       <td style="text-align:center">${atAnc}</td>
       <td>${tot > 0
@@ -5004,7 +4994,7 @@ function renderAnchorReport(){
 
   if(noData.length){
     html += `<div class="note ni" style="margin-top:10px">
-      ${noData.length} physician(s) had no DR shifts in ${monthLabel} (excluded from rate):
+      ${noData.length} physician(s) had no IR procedure shifts in ${monthLabel} (excluded from rate):
       ${noData.map(r => r.p.last).join(', ')}
     </div>`;
   }
