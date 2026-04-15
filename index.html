@@ -1281,7 +1281,8 @@ tbody tr:hover{background:var(--bg3)}
         <option value="both">Daily + Weekend Calls</option>
         <option value="daily">Daily Calls Only</option>
         <option value="weekend">Weekend Calls Only</option>
-        <option value="shifts">Procedure Shifts</option>
+        <option value="shifts">Procedure Shifts (redistribute existing)</option>
+        <option value="day-fill">📊 Day Shifts — Full Fill to 100% FTE</option>
       </select>
     </div>
     <button class="bp" onclick="previewIRRebalance()" style="margin-bottom:2px">⚖ Preview Rebalance</button>
@@ -1313,7 +1314,7 @@ tbody tr:hover{background:var(--bg3)}
 </div>
 
 <!-- HOLIDAYS -->
-id="page-holidays" class="page">
+<div id="page-holidays" class="page">
   <div class="pg-title">Holiday Call</div>
   <div class="tabs" id="hol-tabs">
     <div class="tab on" onclick="holTab('define',this)">📋 Define Holidays</div>
@@ -5397,7 +5398,6 @@ function renderIRCal(){
           ev=`<div class="ev" style="${grpColor}" title="${pname(ic.physId)} — Daily Call (${ic.irGroup}) @ ${ic.site}${ic.notes?' · '+ic.notes:''}">
             <div style="font-weight:700;font-size:11px">${holNote}${pshort(ic.physId)}</div>
             <div style="font-size:9px;opacity:.85">Daily Call · ${ic.irGroup}</div>
-            <div style="font-size:9px;opacity:.7">${(ic.site||'').split(' ')[0]}${_driveTimeBadge(ic.physId,ic.site,'1st')}</div>
           </div>`;
         }
         callEvs+=ev;
@@ -5734,7 +5734,8 @@ function addIRCallManual(){
   if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');return;}
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
-  S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site,notes:document.getElementById('ird-notes').value});
+  const callSite=callType==='daily'?'':site;
+  S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site:callSite,notes:document.getElementById('ird-notes').value});
   alert('Added. Refresh the list tab to see all entries.');
 }
 
@@ -6156,7 +6157,7 @@ function renderIRRebalancePrep(){
     return;
   }
 
-  const isShifts = typ==='shifts';
+  const isShifts = typ==='shifts'||typ==='day-fill';
 
   // Show current distribution across 6 months
   let html=`<div class="card" style="margin-bottom:12px">
@@ -6165,9 +6166,9 @@ function renderIRRebalancePrep(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${!isShifts&&typ!=='weekend'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
-      ${!isShifts&&typ!=='daily'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
-      ${isShifts?'<th>Proc Shifts</th><th>6-Mo Target</th><th>Shift %</th>':''}
+      ${!isShifts&&typ!=='weekend'&&typ!=='day-fill'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
+      ${!isShifts&&typ!=='daily'&&typ!=='day-fill'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
+      ${isShifts||typ==='day-fill'?'<th>Current Shifts</th><th>FTE Target</th><th>Current %</th>':''}
     </tr></thead><tbody>`;
 
   let anyData=false;
@@ -6413,6 +6414,190 @@ function previewIRRebalance(){
     else{document.getElementById('irr-apply').style.display='none';document.getElementById('irr-apply-note').textContent='';}
     return; // exit — shift path handled completely
   }
+  // ── Day Shifts Full Fill (typ==='day-fill') ────────────────────────────
+  if(typ==='day-fill'){
+    const plan={shifts:[],displacedHomes:[],filled:0,unfilled:0,homesDisplaced:0,failedDates:[]};
+
+    groups.forEach(g=>{
+      const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
+      if(!gPhys.length) return;
+      const gFteTot=gPhys.reduce((s,p)=>s+p.irFte,0)||1;
+
+      // ── Enumerate every Day Shift slot for this group across the period ──
+      const slots=[];
+      months.forEach(ym=>{
+        const cells=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
+        S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both').forEach(site=>{
+          cells.forEach(c=>{
+            const need=(S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`]||0;
+            for(let i=0;i<need;i++) slots.push({date:c.date,site:site.name,irGroup:g});
+          });
+        });
+      });
+      slots.sort((a,b)=>a.date>b.date?1:-1);
+      if(!slots.length) return;
+
+      // ── FTE-proportional quotas ──
+      const quotas=_irrQuotas(gPhys, slots.length, p=>{
+        return slots.length*(p.irFte/gFteTot);
+      });
+
+      // Running counts
+      const cnt={};
+      gPhys.forEach(p=>{cnt[p.id]=0;});
+      const vacCache={};
+      const vd=(pid)=>{ if(!vacCache[pid]) vacCache[pid]=vacDays(pid); return vacCache[pid]; };
+
+      // Track proc-assignments per date (no doubles on same date)
+      const assignedOnDate={};
+
+      // Build a quick lookup: which physicians have a Home shift on each date (in this group)
+      const homeOnDate={};  // date → Set of physIds
+      S.irShifts.filter(s=>s.irGroup===g&&s.shift==='Home'&&months.some(ym=>s.date.startsWith(ym)))
+        .forEach(s=>{
+          if(!homeOnDate[s.date]) homeOnDate[s.date]=new Set();
+          homeOnDate[s.date].add(s.physId);
+        });
+
+      slots.forEach(slot=>{
+        const eligible=gPhys.filter(p=>{
+          if(vd(p.id).has(slot.date)) return false;
+          if(_has2ndOr3rdShift(p.id,slot.date)) return false;
+          if(p.allowedSites?.length&&!p.allowedSites.includes(slot.site)) return false;
+          // No two proc-shifts same physician same date
+          if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
+          return true;
+          // Note: physicians on Home shift ARE eligible — we will displace their Home shift
+        });
+
+        if(!eligible.length){
+          plan.unfilled++;
+          plan.failedDates.push(slot.date);
+          return;
+        }
+
+        // Sort: most behind quota first; prefer non-Home (less disruption), then highest FTE
+        eligible.sort((a,b)=>{
+          const defA=(quotas[a.id]||0)-cnt[a.id];
+          const defB=(quotas[b.id]||0)-cnt[b.id];
+          if(defA!==defB) return defB-defA;
+          // Prefer physician NOT currently on Home (saves displacement for when necessary)
+          const aHome=homeOnDate[slot.date]?.has(a.id)?1:0;
+          const bHome=homeOnDate[slot.date]?.has(b.id)?1:0;
+          if(aHome!==bHome) return aHome-bHome;
+          return b.irFte-a.irFte;
+        });
+
+        const picked=eligible[0];
+        cnt[picked.id]++;
+        if(!assignedOnDate[slot.date]) assignedOnDate[slot.date]=new Set();
+        assignedOnDate[slot.date].add(picked.id);
+
+        // Check if picked physician is being moved from a Home shift
+        const displacingHome=homeOnDate[slot.date]?.has(picked.id);
+        if(displacingHome){
+          // Mark their Home shift for removal on apply
+          const homeShift=S.irShifts.find(s=>s.physId===picked.id&&s.date===slot.date&&s.shift==='Home'&&s.irGroup===g);
+          if(homeShift) plan.displacedHomes.push(homeShift.id);
+          plan.homesDisplaced++;
+        }
+
+        plan.shifts.push({
+          physId:picked.id,date:slot.date,site:slot.site,irGroup:g,
+          shift:'1st',sub:'',notes:displacingHome?'Auto-fill (Home→Proc)':'Auto-fill'
+        });
+        plan.filled++;
+      });
+    });
+
+    _irrPlan={type:'day-fill',shifts:plan.shifts,displacedHomes:plan.displacedHomes,homesDisplaced:plan.homesDisplaced};
+
+    // ── Preview table ──
+    const months2=months;
+    let html=`<div class="card" style="margin-top:12px">
+      <div class="card-title">📊 Day Shift Full-Fill Preview — ${label}
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
+          Fills all ${plan.filled+plan.unfilled} available slot(s) · targets FTE-proportional</span>
+      </div>`;
+
+    if(plan.shifts.length){
+      // Build before/after summary per physician
+      const rows=[];
+      groups.forEach(g=>{
+        const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
+        const gFteTot=gPhys.reduce((s,p)=>s+p.irFte,0)||1;
+        const totalSlots=plan.shifts.filter(s=>s.irGroup===g).length
+          + plan.unfilled; // approximate
+        gPhys.forEach(p=>{
+          const before=months2.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
+          const after=plan.shifts.filter(s=>s.physId===p.id).length;
+          const target=Math.round(totalSlots*(p.irFte/gFteTot)*10)/10;
+          const pctBefore=target>0?Math.round(before/target*100):0;
+          const pctAfter =target>0?Math.round(after/target*100):0;
+          rows.push({p,g,before,after,target,pctBefore,pctAfter});
+        });
+      });
+
+      html+=`<div style="overflow-x:auto"><table><thead><tr>
+        <th>Physician</th><th>Group</th><th>IR FTE</th>
+        <th>Target</th>
+        <th>Before</th><th>Before %</th>
+        <th>After</th><th>After %</th>
+        <th>Change</th>
+      </tr></thead><tbody>`;
+
+      rows.forEach(({p,g,before,after,target,pctBefore,pctAfter})=>{
+        const delta=after-before;
+        const pctCol=pctAfter>=95?'var(--green-t)':pctAfter>=80?'var(--amber,#d97706)':'var(--red-t)';
+        html+=`<tr>
+          <td style="font-weight:600">${pname(p.id)}</td>
+          <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
+          <td style="text-align:center">${p.irFte}</td>
+          <td style="text-align:center">${target.toFixed(1)}</td>
+          <td style="text-align:center;color:var(--txt3)">${before}</td>
+          <td style="text-align:center;color:var(--txt3)">${pctBefore}%</td>
+          <td style="text-align:center;font-weight:700">${after}</td>
+          <td style="text-align:center;font-weight:700;color:${pctCol}">${pctAfter}%</td>
+          <td style="text-align:center;color:${delta>0?'var(--green-t)':delta<0?'var(--red-t)':'var(--txt3)'}">
+            ${delta>0?'+':''}${delta}</td>
+        </tr>`;
+      });
+      html+=`</tbody></table></div>`;
+
+      html+=`<div class="g4" style="margin-top:10px">
+        <div class="met"><div class="met-lbl">Slots Filled</div>
+          <div class="met-val" style="color:var(--green-t)">${plan.filled}</div></div>
+        <div class="met"><div class="met-lbl">Unfillable</div>
+          <div class="met-val" style="color:${plan.unfilled?'var(--amber,#d97706)':'var(--txt3)'}">${plan.unfilled}</div></div>
+        <div class="met"><div class="met-lbl">Home → Proc</div>
+          <div class="met-val" style="color:${plan.homesDisplaced?'var(--blue-t)':'var(--txt3)'}">${plan.homesDisplaced}</div></div>
+        <div class="met"><div class="met-lbl">Physicians</div>
+          <div class="met-val">${[...new Set(plan.shifts.map(s=>s.physId))].length}</div></div>
+      </div>`;
+      if(plan.homesDisplaced) html+=`<div class="note ni" style="margin-top:6px;font-size:12px">🔄 ${plan.homesDisplaced} Home shift(s) will be converted to Procedure Shifts to fill available slots. Physicians stay on those dates.</div>`;
+
+      if(plan.unfilled>0){
+        const badDates=[...new Set(plan.failedDates)].slice(0,8).join(', ');
+        html+=`<div class="note nw" style="margin-top:8px;font-size:12px">
+          ⚠ ${plan.unfilled} slot(s) could not be filled (vacation/conflict).
+          ${plan.failedDates.length>8?'First 8: ':''}<span style="font-family:monospace">${badDates}</span>
+        </div>`;
+      }
+    } else {
+      html+=`<div class="note nw">No shifts could be generated. Make sure irShiftSlots are configured and physicians have IR assignments for this period.</div>`;
+    }
+
+    html+=`</div>`;
+    document.getElementById('irr-preview').innerHTML=html;
+    const applyBtn=document.getElementById('irr-apply');
+    const applyNote=document.getElementById('irr-apply-note');
+    if(applyBtn) applyBtn.style.display=plan.shifts.length?'inline-block':'none';
+    if(applyNote) applyNote.textContent=plan.shifts.length
+      ?`Ready to apply ${plan.shifts.length} shifts. This will REPLACE all existing Day Shifts in the period.`:'';
+    return; // day-fill path complete
+  }
+  // ── END Day Shifts Full Fill ─────────────────────────────────────────────────
+
   // ── END Procedure Shifts path ─────────────────────────────────────────────
 
   const plan={daily:[],weekend:[],swapsD:0,swapsW:0,failedD:[],failedW:[]};
@@ -6522,7 +6707,7 @@ function previewIRRebalance(){
         } else {
           plan.failedD.push(date);
           if(orig){
-            const e={physId:orig.physId,date,callType:'daily',irGroup:g,site:orig.site,notes:orig.notes,
+            const e={physId:orig.physId,date,callType:'daily',irGroup:g,site:'',notes:orig.notes,
               origPhysId:orig.physId,origId:orig.id,isSwap:false,constrained:true};
             plan.daily.push(e); gAsgn.push(e); cntD[orig.physId]=(cntD[orig.physId]||0)+1;
           }
@@ -6817,11 +7002,13 @@ function applyIRRebalance(){
   if(typ==='shifts'){
     if(!_irrPlan.shifts?.length){_irrPlan=null;return;}
     // Remove existing non-Home irShifts in period for affected groups
+    // Also remove Home shifts that were explicitly displaced by day-fill
+    const displacedIds=new Set(_irrPlan.displacedHomes||[]);
     S.irShifts=S.irShifts.filter(s=>{
       if(!inPeriod(s.date)) return true;
       if(!groups.includes(s.irGroup)) return true;
-      if(s.shift==='Home') return true; // keep Home fills
-      return false;
+      if(s.shift==='Home') return !displacedIds.has(s.id); // remove displaced Home, keep others
+      return false; // remove existing proc shifts
     });
     let appliedSwaps=0,revertedSwaps=0;
     _irrPlan.shifts.forEach(a=>{
@@ -6835,13 +7022,20 @@ function applyIRRebalance(){
         site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup});
     });
     triggerSave();
+    const isDayFill=_irrPlan?.type==='day-fill';
+    const totalApplied=_irrPlan.shifts.length;
+    const homesDisplaced=_irrPlan.homesDisplaced||0;
     _irrPlan=null;
     document.getElementById('irr-apply').style.display='none';
     document.getElementById('irr-apply-note').textContent='';
-    _updateSaveUI(`✓ Shifts rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original`,'var(--green-t)');
+    _updateSaveUI(isDayFill
+      ?`✓ ${totalApplied} Day Shift(s) filled${homesDisplaced?' ('+homesDisplaced+' Home→Procedure)':''}`
+      :`✓ Shifts rebalanced — ${appliedSwaps} swap(s) applied`,
+      'var(--green-t)');
     renderIRRebalancePrep();
-    document.getElementById('irr-preview').innerHTML=
-      `<div class="note ns">✓ Done. ${appliedSwaps} shift reassignment(s) applied, ${revertedSwaps} kept with original physician.</div>`;
+    document.getElementById('irr-preview').innerHTML=isDayFill
+      ?`<div class="note ns">✓ Done. ${totalApplied} Day Shift(s) filled across the period${homesDisplaced?' · '+homesDisplaced+' Home shift(s) converted to Procedure':' · no Home shifts displaced'}. Refresh to see updated FTE %.</div>`
+      :`<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied.</div>`;
     return;
   }
 
