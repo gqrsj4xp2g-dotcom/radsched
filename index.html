@@ -1348,14 +1348,20 @@ tbody tr:hover{background:var(--bg3)}
         <div class="card-title">Holiday Blackout Dates
           <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">dates the lottery will fill</span>
         </div>
-        <div class="flex" style="gap:6px;margin-bottom:8px">
+        <div class="flex" style="gap:6px;margin-bottom:4px;flex-wrap:wrap">
           <select id="haa-hb-name" style="flex:1;min-width:120px">
             <option>New Year's Day</option><option>MLK Day</option><option>Memorial Day</option>
             <option>Independence Day</option><option>Labor Day</option><option>Thanksgiving</option>
             <option>Christmas Eve</option><option>Christmas Day</option><option>New Year's Eve</option>
           </select>
-          <input id="haa-hb-date" type="date" style="width:140px">
           <button class="bp bsm" onclick="addHaaBlackout()">Add</button>
+        </div>
+        <div class="flex" style="gap:6px;margin-bottom:8px;align-items:center">
+          <label style="font-size:11px;color:var(--txt3);white-space:nowrap">From</label>
+          <input id="haa-hb-start" type="date" style="flex:1">
+          <label style="font-size:11px;color:var(--txt3);white-space:nowrap">To</label>
+          <input id="haa-hb-end" type="date" style="flex:1">
+          <span style="font-size:10px;color:var(--txt3)">(same day = single date)</span>
         </div>
         <div id="haa-hb-list"></div>
       </div>
@@ -6135,25 +6141,65 @@ function _irCallPhysOnDate(date,irGroup){
 
 
 /* ─── AUTO-ASSIGN TAB — inline blackout/needs helpers ─── */
+let _editingBlackoutId=null;
 function renderHaaBlackoutList(){
   const el=document.getElementById('haa-hb-list'); if(!el) return;
   const list=S.holidayBlackouts||[];
   if(!list.length){el.innerHTML='<p style="color:var(--txt3);font-size:12px">No blackout dates yet.</p>';return;}
-  el.innerHTML=list.slice().sort((a,b)=>a.date>b.date?1:-1).map(b=>`
-    <div class="row">
-      <span class="tag ta" style="min-width:80px">${b.date}</span>
-      <span style="flex:1;font-size:12px">${b.name}</span>
+  el.innerHTML=list.slice().sort((a,b)=>(a.startDate||a.date)>(b.startDate||b.date)?1:-1).map(b=>{
+    const sd=b.startDate||b.date||'';
+    const ed=b.endDate||sd;
+    const rangeLabel=sd===ed?sd:`${sd} \u2013 ${ed}`;
+    const dayCount=sd&&ed?Math.round((new Date(ed)-new Date(sd))/86400000)+1:1;
+    if(b.id===_editingBlackoutId){
+      return`<div style="border:1px solid var(--blue);border-radius:var(--r);padding:6px 8px;margin-bottom:4px;background:var(--blue-bg)">
+        <div class="flex" style="gap:6px;flex-wrap:wrap;align-items:center">
+          <select id="hbe-name-${b.id}" style="flex:1;min-width:100px;font-size:11px">
+            ${['New Year\'s Day','MLK Day','Memorial Day','Independence Day','Labor Day','Thanksgiving','Christmas Eve','Christmas Day','New Year\'s Eve']
+              .map(n=>`<option${n===b.name?' selected':''}>${n}</option>`).join('')}
+          </select>
+          <label style="font-size:10px;color:var(--txt3)">From</label>
+          <input id="hbe-start-${b.id}" type="date" value="${sd}" style="font-size:11px;padding:2px 4px">
+          <label style="font-size:10px;color:var(--txt3)">To</label>
+          <input id="hbe-end-${b.id}" type="date" value="${ed}" style="font-size:11px;padding:2px 4px">
+          <button class="bg bsm" onclick="saveBlackoutEdit(${b.id})">✓</button>
+          <button class="bsm" onclick="_editingBlackoutId=null;renderHaaBlackoutList()">✕</button>
+        </div>
+      </div>`;
+    }
+    return`<div class="row" style="margin-bottom:3px">
+      <span class="tag ta" style="min-width:${sd===ed?'90px':'130px'};font-size:10px">${rangeLabel}</span>
+      <span style="flex:1;font-size:12px">${b.name}${dayCount>1?` <span style="color:var(--txt3);font-size:10px">(${dayCount} days)</span>`:''}</span>
+      <button class="bsm" style="margin-right:2px" onclick="_editingBlackoutId=${b.id};renderHaaBlackoutList()">✏</button>
       <button class="br bxs" onclick="removeHaaBlackout(${b.id})">X</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+function saveBlackoutEdit(id){
+  const b=S.holidayBlackouts?.find(x=>x.id===id); if(!b) return;
+  const nameEl=document.getElementById(`hbe-name-${id}`);
+  const startEl=document.getElementById(`hbe-start-${id}`);
+  const endEl=document.getElementById(`hbe-end-${id}`);
+  if(!startEl?.value){alert('Start date required');return;}
+  b.name=nameEl?.value||b.name;
+  b.startDate=startEl.value;
+  b.endDate=endEl?.value||startEl.value;
+  b.date=b.startDate; // keep legacy field in sync
+  if(b.endDate<b.startDate){alert('End date cannot be before start date');return;}
+  _editingBlackoutId=null;
+  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
 }
 function addHaaBlackout(){
   const name=document.getElementById('haa-hb-name')?.value;
-  const date=document.getElementById('haa-hb-date')?.value;
-  if(!name||!date){alert('Select a holiday name and date.');return;}
+  const startDate=document.getElementById('haa-hb-start')?.value;
+  const endDate=document.getElementById('haa-hb-end')?.value||startDate;
+  if(!name||!startDate){alert('Select a holiday name and start date.');return;}
+  if(endDate<startDate){alert('End date cannot be before start date.');return;}
   if(!S.holidayBlackouts) S.holidayBlackouts=[];
-  if(S.holidayBlackouts.find(b=>b.date===date)){alert('A blackout already exists for this date.');return;}
-  S.holidayBlackouts.push({id:S.nextId++,name,date});
-  document.getElementById('haa-hb-date').value='';
+  S.holidayBlackouts.push({id:S.nextId++,name,startDate,endDate,
+    date:startDate}); // keep .date for legacy compat
+  document.getElementById('haa-hb-start').value='';
+  document.getElementById('haa-hb-end').value='';
   triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
 }
 function removeHaaBlackout(id){
@@ -6333,7 +6379,7 @@ function previewHolRandom(){
   const group=document.getElementById('haa-grp')?.value||'both';
   const mode=document.getElementById('haa-mode')?.value||'weighted';
   // Diagnostic: report exactly what's missing
-  const missingBlackouts=!(S.holidayBlackouts||[]).filter(b=>b.date.startsWith(String(year))).length;
+  const missingBlackouts=!(S.holidayBlackouts||[]).filter(b=>(b.startDate||b.date||'').startsWith(String(year))||(b.endDate||'').startsWith(String(year))).length;
   const missingNeeds=!(S.holidayNeeds||[]).length;
   if(missingBlackouts||missingNeeds){
     let msg=`<div class="note nw"><strong>Cannot generate lottery:</strong><ul style="margin:6px 0 0 16px;font-size:12px">`;
@@ -6349,18 +6395,34 @@ function previewHolRandom(){
   const careerCache={};
   groups.forEach(grp=>{careerCache[grp]=_holCareerDataBeforeYear(grp,year);});
   const runCnt={};
-  const blackouts=(S.holidayBlackouts||[]).filter(b=>b.date.startsWith(String(year))).sort((a,b)=>a.date>b.date?1:-1);
-  blackouts.forEach(bl=>{
+  // Expand blackout entries into individual dates (supports date ranges)
+  const expandedDates=[];
+  (S.holidayBlackouts||[]).forEach(b=>{
+    const sd=b.startDate||b.date||'';
+    const ed=b.endDate||sd;
+    if(!sd) return;
+    // Only include dates in the target year
+    let cur=new Date(sd);
+    const endD=new Date(ed);
+    while(cur<=endD){
+      const ds=cur.toISOString().slice(0,10);
+      if(ds.startsWith(String(year))) expandedDates.push({...b,date:ds});
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+  expandedDates.sort((a,b)=>a.date>b.date?1:-1);
+
+  expandedDates.forEach(bl=>{
     const needs=(S.holidayNeeds||[]).filter(n=>n.name.toLowerCase()===bl.name.toLowerCase());
     if(!needs.length) return;
     needs.forEach(need=>{
       if(group!=='both'&&need.group!==group) return;
       const grp=need.group;
       if(!groups.includes(grp)) return;
+      // Only count explicitly assigned holidays — not IR call coverage
       const alreadyFilled=S.holidays.filter(h=>h.date===bl.date&&h.group===grp).length
                          +preview.filter(a=>a.date===bl.date&&a.group===grp).length;
-      const irCoverage=grp==='IR'?_irCallPhysOnDate(bl.date).length:0;
-      const toFill=Math.max(0,need.slots-alreadyFilled-irCoverage);
+      const toFill=Math.max(0,need.slots-alreadyFilled);
       if(!toFill) return;
       const data=careerCache[grp]||[];
       for(let slot=0;slot<toFill;slot++){
@@ -6374,7 +6436,6 @@ function previewHolRandom(){
           return true;
         });
         if(!eligible.length){gaps.push(`${bl.date} ${bl.name} ${grp}`);break;}
-        // Compute normalised weights
         const wList=eligible.map(d=>{
           const base=_holLotteryWeight(d,grp,mode);
           const extra=(runCnt[d.p.id]||0)*0.25;
@@ -7971,11 +8032,9 @@ async function adminCreateAccount(){
     // Create in Supabase Auth via edge function (requires admin JWT)
     if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Creating account…</span>';
     try{
-      // Refresh session first to ensure token is valid (tokens expire after ~1 hour)
-      await sb.auth.refreshSession().catch(()=>{});
       const {data:{session}}=await sb.auth.getSession();
       const jwt=session?.access_token;
-      if(!jwt) throw new Error('Not authenticated — please log out and back in.');
+      if(!jwt) throw new Error('Not signed in — please log in first.');
       const fnUrl=`${_getUrl()}/functions/v1/create-user`;
       const res=await fetch(fnUrl,{
         method:'POST',
