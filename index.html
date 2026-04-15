@@ -1661,10 +1661,37 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <strong>IR Weekend</strong> out 5:00 PM Fri / back 7:30 AM Mon<br>
           Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
         </div>
+        <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:6px">Shift Departure & Return Times
+            <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;font-size:11px">
+            <span style="font-weight:700;color:var(--txt3)">Shift</span>
+            <span style="font-weight:700;color:var(--txt3)">Depart (home→hospital)</span>
+            <span style="font-weight:700;color:var(--txt3)">Return (hospital→home)</span>
+            <span>1st Shift</span>
+            <input id="st-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
+            <span>2nd Shift</span>
+            <input id="st-2nd-dep" type="time" value="14:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-2nd-ret" type="time" value="23:00" style="font-size:11px;padding:2px 4px">
+            <span>3rd Shift</span>
+            <input id="st-3rd-dep" type="time" value="22:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-3rd-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
+            <span>IR Call</span>
+            <input id="st-ir-daily-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-ir-daily-ret" type="time" value="17:00" style="font-size:11px;padding:2px 4px">
+            <span>IR Weekend</span>
+            <input id="st-ir-weekend-dep" type="time" value="17:00" style="font-size:11px;padding:2px 4px">
+            <input id="st-ir-weekend-ret" type="time" value="07:30" style="font-size:11px;padding:2px 4px">
+          </div>
+          <button class="bt bsm" style="margin-top:6px" onclick="saveShiftTimes()">💾 Save Times</button>
+          <span id="shift-times-msg" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="bt" onclick="calcAllDriveTimes()">🔄 Calculate Base Times</button>
           <button class="bp" onclick="updateTrafficTimes()">🚦 Update All Shift Traffic</button>
-          <button class="bsm" onclick="triggerAutoRefreshTraffic()" title="Force the server-side refresh job to run now">⚡ Server Refresh</button>
+          <button class="bsm" onclick="triggerAutoRefreshTraffic()" title="Force the server-side scheduled refresh to run now">⚡ Server Refresh</button>
         </div>
         <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:4px;display:block;margin-top:6px"></span>
       </div>
@@ -2203,7 +2230,8 @@ async function launchApp(){
 function _applyRemoteData(d){
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-    'openShifts','chatMessages','swapRequests','holidayBlackouts','holidayNeeds','physicians'];
+    'openShifts','chatMessages','swapRequests','holidayBlackouts','holidayNeeds','physicians',
+    'sites','drSubs','irSubs'];
   KEYS.forEach(k=>{
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
@@ -2390,7 +2418,7 @@ let S=/*S_START*/{
   ],
   siteSlots:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:''},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'},'2nd':{dep:'14:30',ret:'23:00'},'3rd':{dep:'22:30',ret:'07:00'},'ir-daily':{dep:'06:30',ret:'17:00'},'ir-weekend':{dep:'17:00',ret:'07:30'}}},
   driveTimes:{},
   nextId:200,
   aaPreview:[],iraPreview:[],irsaPreview:[],
@@ -3709,6 +3737,33 @@ function renderFTECareer(){
 
   el.innerHTML=html;
 }
+/* ─── SHIFT TIME SETTINGS ─── */
+function saveShiftTimes(){
+  const types=['1st','2nd','3rd','ir-daily','ir-weekend'];
+  if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
+  types.forEach(t=>{
+    const depEl=document.getElementById(`st-${t}-dep`);
+    const retEl=document.getElementById(`st-${t}-ret`);
+    if(depEl&&retEl) S.cfg.shiftTimes[t]={dep:depEl.value||S.cfg.shiftTimes[t]?.dep,ret:retEl.value||S.cfg.shiftTimes[t]?.ret};
+  });
+  triggerSave();
+  const msg=document.getElementById('shift-times-msg');
+  if(msg){msg.textContent='✓ Saved. Run \u201cUpdate All Shift Traffic\u201d to recalculate with new times.';
+    setTimeout(()=>{msg.textContent='';},4000);}
+}
+
+function _loadShiftTimesUI(){
+  const defaults={'1st':{dep:'06:30',ret:'15:00'},'2nd':{dep:'14:30',ret:'23:00'},
+    '3rd':{dep:'22:30',ret:'07:00'},'ir-daily':{dep:'06:30',ret:'17:00'},'ir-weekend':{dep:'17:00',ret:'07:30'}};
+  const times=S.cfg.shiftTimes||defaults;
+  Object.entries(times).forEach(([t,v])=>{
+    const depEl=document.getElementById(`st-${t}-dep`);
+    const retEl=document.getElementById(`st-${t}-ret`);
+    if(depEl) depEl.value=v.dep||defaults[t]?.dep||'';
+    if(retEl) retEl.value=v.ret||defaults[t]?.ret||'';
+  });
+}
+
 /* ─── GOOGLE MAPS / DRIVE TIMES ─── */
 
 const _GMAPS_KEY_LS = 'radscheduler_gmaps_key';
@@ -3820,13 +3875,14 @@ async function updateTrafficTimes(){
   let done=0, errors=0;
   const BATCH=10;
 
-  // Shift type -> outbound departure (home->hospital) + return departure (hospital->home at shift end)
+  // Read shift times from S.cfg — user-configurable in Settings → Drive Times
+  const _st=S.cfg.shiftTimes||{};
   const SHIFTS=[
-    {type:'1st',        depTime:'06:30', retTime:'15:00', label:'1st Shift (depart 6:30 AM \u2192 return 3:00 PM)'},
-    {type:'2nd',        depTime:'14:30', retTime:'23:00', label:'2nd Shift (depart 2:30 PM \u2192 return 11:00 PM)'},
-    {type:'3rd',        depTime:'22:30', retTime:'07:00', label:'3rd Shift (depart 10:30 PM \u2192 return 7:00 AM)'},
-    {type:'ir-daily',   depTime:'06:30', retTime:'17:00', label:'IR Call (depart 6:30 AM \u2192 return 5:00 PM)'},
-    {type:'ir-weekend', depTime:'17:00', retTime:'07:30', label:'IR Weekend (depart 5:00 PM Fri \u2192 return 7:30 AM Mon)'},
+    {type:'1st',        depTime:_st['1st']?.dep||'06:30',       retTime:_st['1st']?.ret||'15:00',       label:`1st Shift (out ${_st['1st']?.dep||'06:30'} \u2192 back ${_st['1st']?.ret||'15:00'})`},
+    {type:'2nd',        depTime:_st['2nd']?.dep||'14:30',       retTime:_st['2nd']?.ret||'23:00',       label:`2nd Shift (out ${_st['2nd']?.dep||'14:30'} \u2192 back ${_st['2nd']?.ret||'23:00'})`},
+    {type:'3rd',        depTime:_st['3rd']?.dep||'22:30',       retTime:_st['3rd']?.ret||'07:00',       label:`3rd Shift (out ${_st['3rd']?.dep||'22:30'} \u2192 back ${_st['3rd']?.ret||'07:00'})`},
+    {type:'ir-daily',   depTime:_st['ir-daily']?.dep||'06:30',  retTime:_st['ir-daily']?.ret||'17:00',  label:`IR Call (out ${_st['ir-daily']?.dep||'06:30'} \u2192 back ${_st['ir-daily']?.ret||'17:00'})`},
+    {type:'ir-weekend', depTime:_st['ir-weekend']?.dep||'17:00',retTime:_st['ir-weekend']?.ret||'07:30',label:`IR Weekend (out ${_st['ir-weekend']?.dep||'17:00'} \u2192 back ${_st['ir-weekend']?.ret||'07:30'})`},
   ];
 
   const hospAddrs=sitesWithAddr.map(s=>s.address.trim());
@@ -3954,8 +4010,17 @@ function _driveTimeBadge(physId,siteName,shiftType){
 function renderCommuteMatrix(){
   const el=document.getElementById('fte-content');
   if(!el) return;
+
   const grpFilter=document.getElementById('fte-commute-grp')?.value||'all';
-  const yrFilter=document.getElementById('fte-commute-yr')?.value||'all';
+  const yrFilter =document.getElementById('fte-commute-yr')?.value||'all';
+
+  function matchYear(date){ return yrFilter==='all'||date.startsWith(yrFilter); }
+
+  function fmt(m){
+    if(m==null||m===0) return '\u2014';
+    const h=Math.floor(m/60),mn=m%60;
+    return h>0?(mn>0?`${h}h ${mn}m`:`${h}h`):`${mn}m`;
+  }
 
   const physicians=S.physicians.filter(p=>{
     if(grpFilter==='DR') return p.drFte>0&&p.role!=='IR';
@@ -3964,59 +4029,66 @@ function renderCommuteMatrix(){
   });
   const hospitals=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
   const physWithAddr=physicians.filter(p=>p.address?.trim());
+  const dt=S.driveTimes||{};
+  const hasAnyTimes=Object.keys(dt).length>0;
 
-  if(!S.driveTimes||!Object.keys(S.driveTimes).length){
+  let html='';
+
+  // ── SETUP PROMPT ─────────────────────────────────────────────────────────
+  if(!hasAnyTimes){
     el.innerHTML=`<div class="note ni">No drive times calculated yet.<br><br>
-      <strong>Setup:</strong><ol style="margin:8px 0 0 16px;font-size:12px">
-        <li>Add home addresses to physicians (Physician Roster \u2192 Edit)</li>
-        <li>Add addresses to hospitals (Settings \u2192 Hospital Sites)</li>
-        <li>Enter Google Maps API key (Settings \u2192 Drive Times)</li>
-        <li>Click \u201cCalculate All Drive Times\u201d</li>
+      <strong>Setup steps:</strong>
+      <ol style="margin:8px 0 0 16px;font-size:12px;line-height:1.8">
+        <li>Add home addresses to physicians — Physician Roster \u2192 Edit</li>
+        <li>Add hospital addresses — Settings \u2192 Hospital Sites \u2192 \u270f</li>
+        <li>Enter your Google Maps API key — Settings \u2192 Drive Times</li>
+        <li>Click <strong>\u{1F504} Calculate Base Times</strong></li>
+        <li>Click <strong>\u{1F6A6} Update All Shift Traffic</strong> for per-shift round-trip times</li>
       </ol></div>`;
     return;
   }
 
-  let html='';
-
-  // ── ONE-WAY DISTANCE MATRIX ────────────────────────────────────────────
+  // ── ONE-WAY BASE MATRIX ───────────────────────────────────────────────────
   if(physWithAddr.length&&hospitals.length){
+    const SHIFT_KEYS=['1st','2nd','3rd','ir-daily','ir-weekend'];
+    const SHIFT_SHORT={'1st':'1st','2nd':'2nd','3rd':'3rd','ir-daily':'IR','ir-weekend':'IR Wk'};
+
     html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">One-Way Commute Matrix
-        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">driving · green \u226420 min · amber \u226440 min · red >40 min</span>
+      <div class="card-title">Commute Matrix — Base &amp; Per-Shift Traffic
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">\u{1F697} = base (no traffic) &nbsp;\u00b7&nbsp; \u{1F6A6} = traffic (out+return)</span>
       </div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th>
-        ${hospitals.map(s=>`<th style="text-align:center;min-width:90px;font-size:11px">${s.name}</th>`).join('')}
+        ${hospitals.map(s=>`<th style="text-align:center;min-width:110px;font-size:11px">${s.name}</th>`).join('')}
       </tr></thead><tbody>`;
+
     physWithAddr.forEach(p=>{
       html+=`<tr>
         <td style="font-weight:600;white-space:nowrap">
           ${pname(p.id)}
-          <div style="font-size:9px;color:var(--txt3);font-weight:400;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.address}</div>
+          <div style="font-size:9px;color:var(--txt3);font-weight:400;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.address||''}">${p.address||''}</div>
         </td>
         ${hospitals.map(s=>{
-          const dt=S.driveTimes?.[`${p.id}|${s.name}`];
-          if(!dt) return `<td style="text-align:center;color:var(--txt3);font-size:11px">\u2014</td>`;
-          if(dt.mins===null) return `<td style="text-align:center;color:var(--txt3);font-size:11px">N/A</td>`;
-          const bg=dt.mins<=20?'var(--green-bg)':dt.mins<=40?'transparent':'var(--amber-bg,#fffbeb)';
-          const col=dt.mins<=20?'var(--green-t)':dt.mins<=40?'var(--txt)':'var(--amber,#d97706)';
-          // Build per-shift rows if byShift data exists
-          let shiftRows='';
-          if(dt.byShift&&Object.keys(dt.byShift).length){
-            const shiftLabels={'1st':'1st','2nd':'2nd','3rd':'3rd','ir-daily':'IR','ir-weekend':'IR Wknd'};
-            shiftRows=Object.entries(dt.byShift).map(([k,v])=>{
-              const rt=v.outMins+v.retMins;
-              const rtCol=rt<=40?'var(--green-t)':rt<=80?'var(--txt2)':'var(--amber,#d97706)';
-              return `<div style="font-size:9px;color:var(--txt3);border-top:1px solid var(--bdr2);padding-top:2px;margin-top:2px">
-                <span style="font-weight:700">${shiftLabels[k]||k}</span>
-                <span style="color:${rtCol}"> ${v.outMins}+${v.retMins}=${rt}m</span>
-              </div>`;
-            }).join('');
-          }
-          return `<td style="text-align:center;background:${bg};padding:5px 4px">
-            <div style="font-weight:800;font-size:14px;color:${col}">${dt.mins}</div>
+          const entry=dt[`${p.id}|${s.name}`];
+          if(!entry) return `<td style="text-align:center;color:var(--txt3);font-size:11px">\u2014</td>`;
+          if(entry.mins===null) return `<td style="text-align:center;color:var(--txt3);font-size:11px">N/A</td>`;
+          const col=entry.mins<=20?'var(--green-t)':entry.mins<=40?'var(--txt)':'var(--amber,#d97706)';
+          const bg=entry.mins<=20?'var(--green-bg)':entry.mins<=40?'transparent':'var(--amber-bg,#fffbeb)';
+          // Per-shift traffic rows
+          const shiftRows=SHIFT_KEYS.map(k=>{
+            const sv=entry.byShift?.[k];
+            if(!sv||sv.outMins==null) return '';
+            const rt=sv.outMins+sv.retMins;
+            const rtCol=rt<=40?'var(--green-t)':rt<=80?'var(--txt2)':'var(--amber,#d97706)';
+            return `<div style="font-size:9px;border-top:1px solid var(--bdr2);padding-top:2px;margin-top:1px">
+              <span style="color:var(--txt3)">${SHIFT_SHORT[k]}</span>
+              <span style="color:${rtCol};font-weight:700"> ${sv.outMins}+${sv.retMins}=${rt}m</span>
+            </div>`;
+          }).join('');
+          return `<td style="text-align:center;background:${bg};padding:5px 4px;vertical-align:top">
+            <div style="font-weight:800;font-size:14px;color:${col}">${entry.mins}</div>
             <div style="font-size:9px;color:var(--txt3)">min base</div>
-            ${dt.dist?`<div style="font-size:9px;color:var(--txt3)">${dt.dist}</div>`:''}
+            ${entry.dist?`<div style="font-size:9px;color:var(--txt3)">${entry.dist}</div>`:''}
             ${shiftRows}
           </td>`;
         }).join('')}
@@ -4025,197 +4097,133 @@ function renderCommuteMatrix(){
     html+=`</tbody></table></div></div>`;
   }
 
-  // ── ROUND-TRIP DRIVE TALLY ─────────────────────────────────────────────
-  // Count every scheduled hospital shift (DR + IR procedure shifts + IR calls)
-  // that has a drive-time entry. Round trip = 2 × one-way mins.
-  const yearLabel=yrFilter==='all'?'All Years':yrFilter;
+  // ── ROUND-TRIP TALLY ─────────────────────────────────────────────────────
+  const SHIFT_MAP={'1st':'1st','2nd':'2nd','3rd':'3rd'};
 
-  function matchesYear(date){
-    return yrFilter==='all'||date.startsWith(yrFilter);
-  }
-
-  // Build per-physician per-hospital shift counts
   const tallyData=physicians.map(p=>{
-    const byHospital={};
-    let totalRTMins=0, totalTrafficMins=0, totalShifts=0;
+    const byHosp={};
+    let totalBase=0,totalTraffic=0,totalShifts=0;
 
-    // DR shifts — use per-shift traffic time
-    S.drShifts.filter(s=>s.physId===p.id&&!s.autoHome&&s.site!=='At Home / Remote'&&matchesYear(s.date))
-      .forEach(s=>{
-        const key=`${p.id}|${s.site}`;
-        const dt=S.driveTimes?.[key];
-        if(!dt||dt.mins===null) return;
-        const shiftKey={'1st':'1st','2nd':'2nd','3rd':'3rd'}[s.shift]||null;
-        const traffic=shiftKey&&dt.byShift?.[shiftKey];
-        if(!byHospital[s.site]) byHospital[s.site]={shifts:0,rtMins:0,rtTrafficMins:0};
-        byHospital[s.site].shifts++;
-        const ow=dt.mins;
-        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
-        const rtBase=ow*2, rtTraffic=outM+retM;
-        byHospital[s.site].rtMins+=rtBase; byHospital[s.site].rtTrafficMins+=rtTraffic;
-        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
-        totalShifts++;
-      });
+    function addShift(site,shiftKey){
+      const entry=dt[`${p.id}|${site}`];
+      if(!entry||entry.mins===null) return;
+      const sv=shiftKey?entry.byShift?.[shiftKey]:null;
+      const outM=sv?.outMins??entry.mins;
+      const retM=sv?.retMins??entry.mins;
+      if(!byHosp[site]) byHosp[site]={shifts:0,base:0,traffic:0};
+      byHosp[site].shifts++;
+      byHosp[site].base+=entry.mins*2;
+      byHosp[site].traffic+=outM+retM;
+      totalBase+=entry.mins*2;
+      totalTraffic+=outM+retM;
+      totalShifts++;
+    }
 
-    // IR procedure shifts (use ir-daily traffic)
-    (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchesYear(s.date))
-      .forEach(s=>{
-        const key=`${p.id}|${s.site}`;
-        const dt=S.driveTimes?.[key];
-        if(!dt||dt.mins===null) return;
-        const traffic=dt.byShift?.['ir-daily'];
-        if(!byHospital[s.site]) byHospital[s.site]={shifts:0,rtMins:0,rtTrafficMins:0};
-        byHospital[s.site].shifts++;
-        const ow=dt.mins;
-        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
-        const rtBase=ow*2, rtTraffic=outM+retM;
-        byHospital[s.site].rtMins+=rtBase; byHospital[s.site].rtTrafficMins+=rtTraffic;
-        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
-        totalShifts++;
-      });
+    S.drShifts.filter(s=>s.physId===p.id&&!s.autoHome&&s.site!=='At Home / Remote'&&matchYear(s.date))
+      .forEach(s=>addShift(s.site, SHIFT_MAP[s.shift]||null));
+    (S.irShifts||[]).filter(s=>s.physId===p.id&&s.shift!=='Home'&&s.site!=='At Home / Remote'&&matchYear(s.date))
+      .forEach(s=>addShift(s.site,'ir-daily'));
+    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
+      .forEach(c=>addShift(c.site,'ir-daily'));
+    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchYear(c.date))
+      .forEach(c=>addShift(c.site,'ir-weekend'));
 
-    // IR daily calls (use ir-daily traffic)
-    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='daily'&&c.site&&c.site!=='At Home / Remote'&&matchesYear(c.date))
-      .forEach(c=>{
-        const key=`${p.id}|${c.site}`;
-        const dt=S.driveTimes?.[key];
-        if(!dt||dt.mins===null) return;
-        const traffic=dt.byShift?.['ir-daily'];
-        if(!byHospital[c.site]) byHospital[c.site]={shifts:0,rtMins:0,rtTrafficMins:0};
-        byHospital[c.site].shifts++;
-        const ow=dt.mins;
-        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
-        const rtBase=ow*2, rtTraffic=outM+retM;
-        byHospital[c.site].rtMins+=rtBase; byHospital[c.site].rtTrafficMins+=rtTraffic;
-        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
-        totalShifts++;
-      });
+    return{p,byHosp,totalBase,totalTraffic,totalShifts};
+  }).filter(d=>d.totalShifts>0);
 
-    // IR weekend calls (use ir-weekend traffic: Friday 5pm departure)
-    S.irCalls.filter(c=>c.physId===p.id&&c.callType==='weekend'&&c.site&&c.site!=='At Home / Remote'&&matchesYear(c.date))
-      .forEach(c=>{
-        const key=`${p.id}|${c.site}`;
-        const dt=S.driveTimes?.[key];
-        if(!dt||dt.mins===null) return;
-        const traffic=dt.byShift?.['ir-weekend'];
-        if(!byHospital[c.site]) byHospital[c.site]={shifts:0,rtMins:0,rtTrafficMins:0};
-        byHospital[c.site].shifts++;
-        const ow=dt.mins;
-        const outM=traffic?traffic.outMins:ow, retM=traffic?traffic.retMins:ow;
-        const rtBase=ow*2, rtTraffic=outM+retM;
-        byHospital[c.site].rtMins+=rtBase; byHospital[c.site].rtTrafficMins+=rtTraffic;
-        totalRTMins+=rtBase; totalTrafficMins+=rtTraffic;
-        totalShifts++;
-      });
-
-    const totalHrs=(totalRTMins/60);
-    const hasTraffic=totalTrafficMins!==totalRTMins;
-    return{p,byHospital,totalRTMins,totalTrafficMins,totalShifts,totalHrs,hasTraffic};
-  }).filter(d=>d.totalShifts>0||physWithAddr.some(x=>x.id===d.p.id));
-
-  // Sort by most total drive time
-  const sorted=tallyData.slice().sort((a,b)=>b.totalRTMins-a.totalRTMins);
-  const allSites=[...new Set(sorted.flatMap(d=>Object.keys(d.byHospital)))].sort();
-  const grandTotalMins=sorted.reduce((s,d)=>s+d.totalRTMins,0);
-  const grandTrafficMins=sorted.reduce((s,d)=>s+d.totalTrafficMins,0);
-  const grandTotalShifts=sorted.reduce((s,d)=>s+d.totalShifts,0);
-  const anyTraffic=sorted.some(d=>d.hasTraffic);
-
-  function fmtMins(m){
-    if(!m) return '—';
-    const h=Math.floor(m/60), min=m%60;
-    return h>0?(min>0?`${h}h ${min}m`:`${h}h`):`${min}m`;
-  }
+  const sorted=tallyData.slice().sort((a,b)=>b.totalBase-a.totalBase);
+  const allSites=[...new Set(sorted.flatMap(d=>Object.keys(d.byHosp)))].sort();
+  const grandBase=sorted.reduce((s,d)=>s+d.totalBase,0);
+  const grandTraffic=sorted.reduce((s,d)=>s+d.totalTraffic,0);
+  const grandShifts=sorted.reduce((s,d)=>s+d.totalShifts,0);
+  const hasTraffic=grandTraffic!==grandBase;
+  const yrLabel=yrFilter==='all'?'All Years':yrFilter;
 
   html+=`<div class="card" style="margin-bottom:14px">
-    <div class="card-title">Round-Trip Drive Time Tally \u2014 ${yearLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
-        home \u2192 hospital \u2192 home per shift \u00b7 DR shifts + IR procedure shifts + IR calls
-        ${(()=>{const s=Object.values(S.driveTimes||{}).find(d=>d.trafficProfile);return s?` \u00b7 <span style='color:var(--amber,#d97706)'>\uD83D\uDEA6 Traffic: ${s.trafficProfile}</span>`:'';})()} 
-      </span>
+    <div class="card-title">Round-Trip Drive Tally \u2014 ${yrLabel}
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; DR + IR shifts + IR calls</span>
     </div>`;
 
-  if(!sorted.length||!allSites.length){
+  if(!sorted.length){
     html+=`<div style="font-size:12px;color:var(--txt3);padding:8px">
-      No shifts with drive-time data found${yrFilter!=='all'?` for ${yrFilter}`:''}. 
-      Make sure physician addresses, hospital addresses, and calculated drive times are all configured.
-    </div>`;
+      No scheduled hospital shifts found ${yrFilter!=='all'?`for ${yrFilter}`:''} with drive-time data.
+      Make sure base times are calculated and physicians/hospitals have addresses.</div>`;
   } else {
-    // Summary metrics
-    const trafficNote=anyTraffic?`<span style="font-size:10px;color:var(--txt3)"> 🚦with traffic</span>`:'';
     html+=`<div class="g4" style="margin-bottom:12px">
-      <div class="met"><div class="met-lbl">Total Shifts</div><div class="met-val">${grandTotalShifts}</div></div>
-      <div class="met"><div class="met-lbl">Base Drive Time</div><div class="met-val" style="font-size:16px">${fmtMins(grandTotalMins)}</div></div>
-      <div class="met"><div class="met-lbl">With Traffic${trafficNote}</div><div class="met-val" style="font-size:16px;color:${anyTraffic&&grandTrafficMins>grandTotalMins?'var(--amber,#d97706)':'var(--txt)'}">${fmtMins(grandTrafficMins)}</div></div>
-      <div class="met"><div class="met-lbl">Extra Due to Traffic</div><div class="met-val" style="font-size:16px;color:${anyTraffic&&grandTrafficMins>grandTotalMins?'var(--red-t)':'var(--txt3)'}">${anyTraffic?fmtMins(grandTrafficMins-grandTotalMins):'—'}</div></div>
+      <div class="met"><div class="met-lbl">Total Shifts</div><div class="met-val">${grandShifts}</div></div>
+      <div class="met"><div class="met-lbl">Base Round-Trip</div><div class="met-val" style="font-size:16px">${fmt(grandBase)}</div></div>
+      <div class="met"><div class="met-lbl">With Traffic${hasTraffic?' \u{1F6A6}':''}</div>
+        <div class="met-val" style="font-size:16px;color:${hasTraffic&&grandTraffic>grandBase?'var(--amber,#d97706)':'var(--txt)'}">${fmt(grandTraffic)}</div></div>
+      <div class="met"><div class="met-lbl">Extra from Traffic</div>
+        <div class="met-val" style="font-size:16px;color:${hasTraffic&&grandTraffic>grandBase?'var(--red-t)':'var(--txt3)'}">${hasTraffic?fmt(grandTraffic-grandBase):'\u2014'}</div></div>
     </div>`;
 
-    // Full breakdown table
     html+=`<div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th>
-      ${allSites.map(s=>`<th style="text-align:center;font-size:11px">${s}<br><span style="font-weight:400;font-size:9px">shifts / rt-time</span></th>`).join('')}
-      <th style="text-align:center;border-left:2px solid var(--bdr)">Total Shifts</th>
-      <th style="text-align:center">Total Drive</th>
-      <th style="text-align:center">Avg per Shift</th>
+      ${allSites.map(s=>`<th style="text-align:center;font-size:11px">${s}<br><span style="font-weight:400;font-size:9px">shifts / total RT</span></th>`).join('')}
+      <th style="text-align:center;border-left:2px solid var(--bdr)">Shifts</th>
+      <th style="text-align:center">Base RT</th>
+      ${hasTraffic?'<th style="text-align:center">\u{1F6A6} With Traffic</th>':''}
+      <th style="text-align:center">Avg/Shift</th>
     </tr></thead><tbody>`;
 
-    sorted.forEach(({p,byHospital,totalRTMins,totalShifts})=>{
-      const avgPerShift=totalShifts?Math.round(totalRTMins/totalShifts):0;
-      const driveCls=totalRTMins>2400?'color:var(--red-t)':totalRTMins>1200?'color:var(--amber,#d97706)':'color:var(--txt)';
+    sorted.forEach(({p,byHosp,totalBase,totalTraffic,totalShifts})=>{
+      const avg=totalShifts?Math.round(totalTraffic/totalShifts):0;
+      const driveCls=totalBase>2400?'color:var(--red-t)':totalBase>1200?'color:var(--amber,#d97706)':'color:var(--txt)';
+      const trafficDiff=totalTraffic-totalBase;
       html+=`<tr>
         <td style="font-weight:600;white-space:nowrap">${pname(p.id)}</td>
         ${allSites.map(site=>{
-          const bh=byHospital[site];
-          if(!bh) return `<td style="text-align:center;color:var(--txt3)">—</td>`;
-          const dt=S.driveTimes?.[`${p.id}|${site}`];
-          const trafficLine=bh.rtTrafficMins&&bh.rtTrafficMins!==bh.rtMins
-            ?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(bh.rtTrafficMins)}</div>`:'';
+          const bh=byHosp[site];
+          if(!bh) return `<td style="text-align:center;color:var(--txt3)">\u2014</td>`;
+          const tLine=hasTraffic&&bh.traffic!==bh.base
+            ?`<div style="font-size:10px;color:var(--amber,#d97706)">\u{1F6A6}${fmt(bh.traffic)}</div>`:'';
           return `<td style="text-align:center;padding:4px 3px">
             <div style="font-weight:700">${bh.shifts}</div>
-            <div style="font-size:11px;color:var(--txt2)">${fmtMins(bh.rtMins)}</div>
-            ${trafficLine}
-          </td>`;
+            <div style="font-size:11px;color:var(--txt2)">${fmt(bh.base)}</div>
+            ${tLine}</td>`;
         }).join('')}
         <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr)">${totalShifts}</td>
-        <td style="text-align:center;font-weight:800;${driveCls}">
-          ${fmtMins(totalRTMins)}
-          ${hasTraffic&&totalTrafficMins!==totalRTMins?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(totalTrafficMins)}</div>`:''}
-        </td>
-        <td style="text-align:center;color:var(--txt3)">${fmtMins(avgPerShift)}</td>
+        <td style="text-align:center;font-weight:800;${driveCls}">${fmt(totalBase)}</td>
+        ${hasTraffic?`<td style="text-align:center;font-weight:700;color:${trafficDiff>0?'var(--amber,#d97706)':'var(--txt)'}">${fmt(totalTraffic)}<span style="font-size:10px;color:var(--txt3)"> (+${fmt(trafficDiff)})</span></td>`:''}
+        <td style="text-align:center;color:var(--txt3)">${fmt(avg)}</td>
       </tr>`;
     });
 
     // Totals row
     html+=`<tr style="border-top:2px solid var(--bdr);background:var(--bg3)">
-      <td style="font-weight:800">Team Total</td>
+      <td style="font-weight:800">Total</td>
       ${allSites.map(site=>{
-        const siteTotMins=sorted.reduce((s,d)=>s+(d.byHospital[site]?.rtMins||0),0);
-        const siteTotShifts=sorted.reduce((s,d)=>s+(d.byHospital[site]?.shifts||0),0);
-        if(!siteTotShifts) return `<td style="text-align:center;color:var(--txt3)">—</td>`;
-        return `<td style="text-align:center"><div style="font-weight:800">${siteTotShifts}</div><div style="font-size:11px">${fmtMins(siteTotMins)}</div></td>`;
+        const sBase=sorted.reduce((s,d)=>s+(d.byHosp[site]?.base||0),0);
+        const sShifts=sorted.reduce((s,d)=>s+(d.byHosp[site]?.shifts||0),0);
+        if(!sShifts) return `<td style="text-align:center;color:var(--txt3)">\u2014</td>`;
+        return `<td style="text-align:center"><div style="font-weight:800">${sShifts}</div><div style="font-size:11px">${fmt(sBase)}</div></td>`;
       }).join('')}
-      <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr)">${grandTotalShifts}</td>
-      <td style="text-align:center;font-weight:800">
-        ${fmtMins(grandTotalMins)}
-        ${anyTraffic&&grandTrafficMins!==grandTotalMins?`<div style="font-size:10px;color:var(--amber,#d97706)">🚦${fmtMins(grandTrafficMins)}</div>`:''}
-      </td>
+      <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr)">${grandShifts}</td>
+      <td style="text-align:center;font-weight:800">${fmt(grandBase)}</td>
+      ${hasTraffic?`<td style="text-align:center;font-weight:800;color:var(--amber,#d97706)">${fmt(grandTraffic)}</td>`:''}
       <td></td>
     </tr>`;
-
     html+=`</tbody></table></div>`;
   }
   html+=`</div>`;
 
   // Missing address warnings
-  const noAddrPhys=physicians.filter(p=>!p.address?.trim());
-  const noAddrSites=S.sites.filter(s=>!s.address?.trim()&&s.name!=='At Home / Remote');
-  if(noAddrPhys.length) html+=`<div class="note nw" style="font-size:12px">${noAddrPhys.length} physician(s) missing address: ${noAddrPhys.map(p=>p.last).join(', ')}.</div>`;
-  if(noAddrSites.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrSites.length} hospital(s) missing address: ${noAddrSites.map(s=>s.name).join(', ')}.</div>`;
+  const noAddrP=physicians.filter(p=>!p.address?.trim());
+  const noAddrS=S.sites.filter(s=>!s.address?.trim()&&s.name!=='At Home / Remote');
+  if(noAddrP.length) html+=`<div class="note nw" style="font-size:12px">${noAddrP.length} physician(s) have no address: ${noAddrP.map(p=>p.last).join(', ')}. Edit in Physician Roster.</div>`;
+  if(noAddrS.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrS.length} hospital(s) have no address: ${noAddrS.map(s=>s.name).join(', ')}. Edit in Settings \u2192 Hospital Sites.</div>`;
 
-  const updated=[...new Set(Object.values(S.driveTimes||{}).map(d=>d.updated).filter(Boolean))].sort().pop();
-  if(updated) html+=`<div style="font-size:10px;color:var(--txt3);margin-top:8px">Drive times last calculated: ${updated}</div>`;
+  const lastCalc=[...new Set(Object.values(dt).map(d=>d.updated).filter(Boolean))].sort().pop();
+  const lastTraffic=[...new Set(Object.values(dt).flatMap(d=>Object.values(d.byShift||{}).map(v=>v.updated||'')))].filter(Boolean).sort().pop();
+  if(lastCalc||lastTraffic){
+    html+=`<div style="font-size:10px;color:var(--txt3);margin-top:8px">`;
+    if(lastCalc) html+=`Base times: ${lastCalc.slice(0,10)} &nbsp;`;
+    if(lastTraffic) html+=`\u{1F6A6} Traffic: ${lastTraffic.slice(0,16).replace('T',' ')}`;
+    html+=`</div>`;
+  }
 
-  el.innerHTML=html||'<div class="note ni">Configure addresses and calculate to see commute times.</div>';
+  el.innerHTML=html;
 }
 
 /* ─── DR CALENDAR ─── */
@@ -6467,7 +6475,7 @@ function unclaimShift(oid){
 }
 
 /* ─── SETTINGS ─── */
-function renderSettings(){renderSettingsSupabaseStatus();_restoreGMapsKeyField();_checkTrafficStaleness();
+function renderSettings(){renderSettingsSupabaseStatus();_restoreGMapsKeyField();_checkTrafficStaleness();_loadShiftTimesUI();
   document.getElementById('cfg-wd').value=S.cfg.wdMax;document.getElementById('cfg-wk').value=S.cfg.wkMax;
   document.getElementById('cfg-ir-daily').value=S.cfg.irDailyMax||S.cfg.irMax||20;
   document.getElementById('cfg-ir-wknd').value=S.cfg.irWkndMax||4;
@@ -7926,9 +7934,11 @@ async function adminCreateAccount(){
     // Create in Supabase Auth via edge function (requires admin JWT)
     if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Creating account…</span>';
     try{
+      // Refresh session first to ensure token is valid (tokens expire after ~1 hour)
+      await sb.auth.refreshSession().catch(()=>{});
       const {data:{session}}=await sb.auth.getSession();
       const jwt=session?.access_token;
-      if(!jwt) throw new Error('Not authenticated — sign in first.');
+      if(!jwt) throw new Error('Not authenticated — please log out and back in.');
       const fnUrl=`${_getUrl()}/functions/v1/create-user`;
       const res=await fetch(fnUrl,{
         method:'POST',
@@ -8087,6 +8097,8 @@ async function _pushToSupabase(){
         swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
         holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,irSlots:S.irSlots,
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
+        sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
+        driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
       })
     };
