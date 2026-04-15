@@ -3868,14 +3868,14 @@ function _hasAdjacentIRCall(physId, date){
 
 function _hasIRCallNearWeekend(physId, fridayDate){
   // When assigning a weekend call starting fridayDate (Fri→Mon):
-  // Block if physician already has a daily call on Thu (day before) or Tue (day after Mon end).
-  // Mon itself is inside the weekend span and handled by _hasAdjacentIRCall.
-  const thu=addDays(fridayDate,-1);   // Thursday
-  const tue=addDays(fridayDate,4);    // Tuesday after Mon weekend end
+  // Block if physician already has a daily call on Thu, Mon (within span), or Tue.
+  const thu=addDays(fridayDate,-1);   // Thursday before
+  const mon=addDays(fridayDate,3);    // Monday — last day of weekend span
+  const tue=addDays(fridayDate,4);    // Tuesday after span
   return S.irCalls.some(ic=>{
     if(ic.physId!==physId) return false;
     if(ic.callType==='daily'){
-      return ic.date===thu||ic.date===tue;
+      return ic.date===thu||ic.date===mon||ic.date===tue;
     }
     // Another weekend call within 7 days = back-to-back weekends
     if(ic.callType==='weekend'){
@@ -4037,9 +4037,9 @@ function previewIRAA(){
   }
 
   function previewConflictsWeekend(pid,fridayDate){
-    const thu=addDays(fridayDate,-1), tue=addDays(fridayDate,4);
+    const thu=addDays(fridayDate,-1), mon=addDays(fridayDate,3), tue=addDays(fridayDate,4);
     return preview.some(a=>a.physId===pid&&(
-      (a.callType==='daily'&&(a.date===thu||a.date===tue))||
+      (a.callType==='daily'&&(a.date===thu||a.date===mon||a.date===tue))||
       (a.callType==='weekend'&&a.date!==fridayDate&&
         Math.abs(parseDateLocal(fridayDate).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)
     ));
@@ -4507,8 +4507,8 @@ function previewIRRebalance(){
       if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&(date===addDays(a.date,-1)||date===addDays(a.date,4)))) return true;
     }
     if(callType==='weekend'){
-      const thu=addDays(date,-1),tue=addDays(date,4);
-      if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===thu||a.date===tue))) return true;
+      const thu=addDays(date,-1),mon=addDays(date,3),tue=addDays(date,4);
+      if(assignments.some(a=>a.physId===pid&&a.callType==='daily'&&(a.date===thu||a.date===mon||a.date===tue))) return true;
       if(assignments.some(a=>a.physId===pid&&a.callType==='weekend'&&a.date!==date&&
         Math.abs(parseDateLocal(date).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)) return true;
     }
@@ -4526,9 +4526,9 @@ function previewIRRebalance(){
       );
     }
     if(callType==='weekend'){
-      const thu=addDays(date,-1),tue=addDays(date,4);
+      const thu=addDays(date,-1),mon=addDays(date,3),tue=addDays(date,4);
       return outside.some(c=>
-        c.callType==='daily'&&(c.date===thu||c.date===tue)||
+        c.callType==='daily'&&(c.date===thu||c.date===mon||c.date===tue)||
         c.callType==='weekend'&&c.date!==date&&
           Math.abs(parseDateLocal(date).getTime()-parseDateLocal(c.date).getTime())/86400000<=7
       );
@@ -4638,11 +4638,11 @@ function previewIRRebalance(){
           // Thu / Tue daily-call adjacency:
           //   typ='weekend' → daily calls are untouched, so check S.irCalls
           //   typ='both'    → daily calls are being replaced too; check plan.daily
-          const thu=addDays(fridayDate,-1), tue=addDays(fridayDate,4);
+          const thu=addDays(fridayDate,-1), mon_span=addDays(fridayDate,3), tue=addDays(fridayDate,4);
           if(typ==='weekend'){
-            if(S.irCalls.some(c=>c.physId===p.id&&c.callType==='daily'&&(c.date===thu||c.date===tue))) return false;
+            if(S.irCalls.some(c=>c.physId===p.id&&c.callType==='daily'&&(c.date===thu||c.date===mon_span||c.date===tue))) return false;
           } else {
-            if(plan.daily.some(a=>a.physId===p.id&&(a.date===thu||a.date===tue))) return false;
+            if(plan.daily.some(a=>a.physId===p.id&&(a.date===thu||a.date===mon_span||a.date===tue))) return false;
           }
           const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
