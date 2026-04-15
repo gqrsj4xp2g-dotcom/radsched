@@ -2887,9 +2887,27 @@ function openLinkModal(uid){
 function doLink(uid){
   const u=USERS.find(x=>x.id===uid);if(!u) return;
   u.physId=parseInt(document.getElementById('lm-sel').value)||null;
-  closeModal('link-modal');renderProfiles();
+  triggerSave();
+  closeModal('link-modal');
+  renderUserMgmt();
+  // Also update Supabase Auth metadata so link persists across logins
+  _updateUserAuthMeta(u.id,{physId:u.physId}).catch(()=>{});
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+// Update a Supabase Auth user's metadata (physId, role, etc.) via edge function
+async function _updateUserAuthMeta(userId, fields){
+  const sb=_initAuthClient();
+  if(!sb) return;
+  const {data:{session}}=await sb.auth.getSession();
+  const jwt=session?.access_token;
+  if(!jwt) return;
+  await fetch(`${_getUrl()}/functions/v1/create-user`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
+    body:JSON.stringify({action:'update',userId,...fields})
+  });
+}
 
 /* ─── USER MGMT ─── */
 function renderUserMgmt(){
@@ -2914,8 +2932,8 @@ function renderUserMgmt(){
     </td></tr>`;}).join('')+'</tbody></table></div></div>';
 }
 
-function toggleRole(uid){const u=USERS.find(x=>x.id===uid);if(!u||u.id===CU?.id)return;u.role=u.role==='admin'?'user':'admin';renderUserMgmt();}
-function delUser(uid){if(!confirm('Delete?'))return;USERS=USERS.filter(u=>u.id!==uid);renderUserMgmt();}
+function toggleRole(uid){if(!_adminOnly('change roles'))return;const u=USERS.find(x=>x.id===uid);if(!u||u.id===CU?.id)return;u.role=u.role==='admin'?'user':'admin';triggerSave();renderUserMgmt();_updateUserAuthMeta(u.id,{role:u.role}).catch(()=>{});}
+function delUser(uid){if(!_adminOnly('delete users'))return;if(!confirm('Delete?'))return;USERS=USERS.filter(u=>u.id!==uid);triggerSave();renderUserMgmt();}
 
 /* ─── PHYSICIANS ─── */
 function roleUI(){
