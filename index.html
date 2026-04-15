@@ -4170,6 +4170,8 @@ function renderCommuteMatrix(){
       const tr=sv?_trafficForShift(sv,date):null;
       const outM=tr?.outMins??entry.mins;
       const retM=tr?.retMins??entry.mins;
+      // Skip short commutes — round trip under 30 min not counted
+      if(outM+retM<30) return;
       if(!byHosp[site]) byHosp[site]={shifts:0,base:0,traffic:0};
       byHosp[site].shifts++;
       byHosp[site].base+=entry.mins*2;
@@ -4202,7 +4204,7 @@ function renderCommuteMatrix(){
 
   html+=`<div class="card" style="margin-bottom:14px">
     <div class="card-title">Round-Trip Drive Tally \u2014 ${yrLabel}
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR + IR 1st Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">DR + IR 1st Shifts &nbsp;\u00b7&nbsp; home \u2192 hospital \u2192 home &nbsp;\u00b7&nbsp; round trips \u226530 min only &nbsp;\u00b7&nbsp; <span style='color:var(--blue-t)'>&#x1F6A6; ${qtrLabel}</span></span>
     </div>`;
 
   if(!sorted.length){
