@@ -2419,10 +2419,12 @@ function _applyRemoteData(d){
   if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
   if(d.driveTimes) S.driveTimes=d.driveTimes;
   if(d.nextId>S.nextId)S.nextId=d.nextId;
-  // Patch null siteRules / irCallBlackouts on physicians loaded from older saves
+  // Patch null siteRules / irCallBlackouts / dayConditions on older saves
   (S.physicians||[]).forEach(p=>{
     if(!Array.isArray(p.siteRules)) p.siteRules=[];
     if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
+    if(!Array.isArray(p.dayConditions)) p.dayConditions=[];
+    if(p.seqRules===undefined) p.seqRules=null;
   });
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
@@ -6386,13 +6388,20 @@ function openPhysSiteRules(physId){
   _srPhysId=physId;
   const p=S.physicians.find(x=>x.id===physId);if(!p)return;
   document.getElementById('phys-site-rules-wrap').style.display='block';
-  document.querySelector('#phys-site-rules-wrap .sr-title')?.setAttribute &&
-    (() => {
-      const t=document.querySelector('#phys-site-rules-wrap .sr-title');
-      if(t) t.textContent=`Site Rules — ${p.last}, ${p.first}`;
-    })();
+  const titleEl=document.getElementById('sr-title');
+  if(titleEl) titleEl.textContent=`Scheduling Conditions — ${p.last}, ${p.first}`;
+  // Populate all site dropdowns from S.sites
+  const siteOpts=S.sites.map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+  ['sr-site','sr-req-site','sr-st-site'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){
+      const prev=el.value;
+      el.innerHTML=(id==='sr-req-site'?'<option value="">Any site (no restriction)</option>':'')+siteOpts;
+      if(prev) el.value=prev;
+    }
+  });
   srTab('site', document.querySelector('#phys-site-rules-wrap .tab'));
-  renderConditionsList();
+  renderSiteRulesList();
   if(typeof renderIRBlackoutList==='function') renderIRBlackoutList(_srPhysId);
 }
 function closePhysSiteRules(){
@@ -6400,39 +6409,99 @@ function closePhysSiteRules(){
   _srPhysId=null;
 }
 function srTab(t,el){
-  ['site','seq','daycon','shifttype','irblk'].forEach(tab=>{
-    const el=document.getElementById(`sr-panel-${tab}`);
-    if(el) el.style.display=tab===t?'block':'none';
+  // Map tab keys to actual HTML panel IDs
+  const panelMap={site:'srt-site',day:'srt-day',shift:'srt-shift',seq:'srt-seq',irblk:'srt-irblk'};
+  Object.values(panelMap).forEach(id=>{
+    const p=document.getElementById(id);if(p)p.style.display='none';
   });
+  const active=panelMap[t];
+  if(active){const p=document.getElementById(active);if(p)p.style.display='block';}
   document.querySelectorAll('#phys-site-rules-wrap .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
 }
-function renderConditionsList(){
-  const el=document.getElementById('sr-cond-list');if(!el)return;
+function renderSiteRulesList(){
+  const el=document.getElementById('sr-list');if(!el)return;
   const p=S.physicians.find(x=>x.id===_srPhysId);
+  const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  let html='';
+
+  // Site Rules
   const rules=p?.siteRules||[];
-  if(!rules.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">No site rules.</div>';return;}
-  el.innerHTML=rules.map((r,i)=>`<div class="row">
-    <div style="flex:1;font-size:12px">
-      <strong>${r.site}</strong> · max ${r.maxPerMonth||'—'}/mo · maxConsec ${r.maxConsec||'—'}
-      ${r.blocked?'<span class="tag tr" style="font-size:9px">Blocked</span>':''}
-    </div>
-    <button class="br bxs" onclick="removeSiteRule(${i})">✕</button>
-  </div>`).join('');
+  if(rules.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Site Limits</div>';
+    html+=rules.map((r,i)=>{
+      const tags=[];
+      if(r.blocked) tags.push('<span class="tag tr" style="font-size:9px">BLOCKED</span>');
+      if(r.preferred) tags.push('<span class="tag tg" style="font-size:9px">PREFERRED</span>');
+      if(r.maxPerMonth) tags.push(`<span class="tag" style="font-size:9px">≤${r.maxPerMonth}/mo</span>`);
+      if(r.maxPerWeek) tags.push(`<span class="tag" style="font-size:9px">≤${r.maxPerWeek}/wk</span>`);
+      if(r.allowedShifts?.length) tags.push(`<span class="tag tb" style="font-size:9px">shifts: ${r.allowedShifts.join(',')}</span>`);
+      return `<div class="row" style="margin-bottom:4px">
+        <div style="flex:1;font-size:12px"><strong>${r.site}</strong> ${tags.join(' ')}</div>
+        <button class="br bxs" onclick="removeSiteRule(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Day Conditions
+  const days=p?.dayConditions||[];
+  if(days.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Day Conditions</div>';
+    html+=days.map((d,i)=>{
+      const day=DAYS[d.dow]||d.dow;
+      const site=d.requiredSite?`→ ${d.requiredSite}`:'any site';
+      const type=d.schedType&&d.schedType!=='any'?` (${d.schedType})`:'';
+      return `<div class="row" style="margin-bottom:4px">
+        <div style="flex:1;font-size:12px">${day}${type}: ${site}${d.notes?' — '+d.notes:''}</div>
+        <button class="br bxs" onclick="removeDayCondition(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Sequence Rules
+  const seq=p?.seqRules;
+  if(seq&&(seq.maxConsec||seq.minRest||seq.maxWkCalls)){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Sequence Rules</div>';
+    html+='<div class="row" style="margin-bottom:4px"><div style="flex:1;font-size:12px">';
+    if(seq.maxConsec) html+=`Max ${seq.maxConsec} consecutive days. `;
+    if(seq.minRest) html+=`Min ${seq.minRest} day(s) off between shifts. `;
+    if(seq.maxWkCalls) html+=`Max ${seq.maxWkCalls} weekend calls/mo. `;
+    if(seq.notes) html+=`<span style="color:var(--txt3)">${seq.notes}</span>`;
+    html+=`</div><button class="br bxs" onclick="clearSeqRules()">✕</button></div>`;
+  }
+
+  el.innerHTML=html||'<div style="color:var(--txt3);font-size:12px;font-style:italic">No rules configured yet.</div>';
+}
+
+function renderConditionsList(){ renderSiteRulesList(); }  // backward-compat alias
+
+function removeDayCondition(idx){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  if(!p.dayConditions)return;
+  p.dayConditions.splice(idx,1);
+  triggerSave();renderSiteRulesList();
+}
+
+function clearSeqRules(){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  p.seqRules=null;
+  triggerSave();renderSiteRulesList();
 }
 function addSiteRule(){
   if(!_srPhysId)return;
   const site=document.getElementById('sr-site')?.value;
-  const maxPerMonth=+document.getElementById('sr-max-mo')?.value||null;
-  const maxConsec=+document.getElementById('sr-max-con')?.value||null;
-  const blocked=document.getElementById('sr-blocked')?.checked||false;
   if(!site){alert('Select a site');return;}
+  const maxPerMonth=+document.getElementById('sr-max-mo')?.value||null;
+  const maxPerWeek=+document.getElementById('sr-max-wk')?.value||null;
+  const blocked=document.getElementById('sr-blocked')?.checked||false;
+  const preferred=document.getElementById('sr-preferred')?.checked||false;
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
   const existing=p.siteRules.findIndex(r=>r.site===site);
-  if(existing>=0) p.siteRules[existing]={site,maxPerMonth,maxConsec,blocked};
-  else p.siteRules.push({site,maxPerMonth,maxConsec,blocked});
-  triggerSave();renderConditionsList();
+  const rule={site,maxPerMonth,maxPerWeek,blocked,preferred};
+  if(existing>=0) p.siteRules[existing]=rule;
+  else p.siteRules.push(rule);
+  triggerSave();renderSiteRulesList();
 }
 function removeSiteRule(idx){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
@@ -6440,40 +6509,41 @@ function removeSiteRule(idx){
 }
 function addSeqRule(){
   if(!_srPhysId)return;
-  const site=document.getElementById('sr-seq-site')?.value;
-  const maxConsec=+document.getElementById('sr-seq-max')?.value||0;
-  if(!site||!maxConsec){alert('Select site and max consecutive days');return;}
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
-  if(!Array.isArray(p.siteRules)) p.siteRules=[];
-  const existing=p.siteRules.findIndex(r=>r.site===site);
-  if(existing>=0) p.siteRules[existing].maxConsec=maxConsec;
-  else p.siteRules.push({site,maxConsec});
-  triggerSave();renderConditionsList();
+  const maxConsec=+document.getElementById('sr-max-consec')?.value||null;
+  const minRest=+document.getElementById('sr-min-rest')?.value||null;
+  const maxWkCalls=+document.getElementById('sr-max-wk-calls')?.value||null;
+  const notes=document.getElementById('sr-seq-notes')?.value.trim()||'';
+  p.seqRules={maxConsec,minRest,maxWkCalls,notes};
+  triggerSave();renderSiteRulesList();
 }
 function addDayCondition(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
-  const site=document.getElementById('sr-dc-site')?.value;
-  const dow=+document.getElementById('sr-dc-dow')?.value;
-  if(!site){alert('Select a site');return;}
-  if(!Array.isArray(p.siteRules)) p.siteRules=[];
-  const r=p.siteRules.find(x=>x.site===site)||{site};
-  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
-  if(!r.blockedDOW) r.blockedDOW=[];
-  if(!r.blockedDOW.includes(dow)) r.blockedDOW.push(dow);
-  triggerSave();renderConditionsList();
+  const dow=+document.getElementById('sr-dow')?.value;
+  const schedType=document.getElementById('sr-sched-type')?.value||'any';
+  const requiredSite=document.getElementById('sr-req-site')?.value||'';
+  const notes=document.getElementById('sr-day-notes')?.value.trim()||'';
+  if(!Array.isArray(p.dayConditions)) p.dayConditions=[];
+  p.dayConditions=p.dayConditions.filter(d=>!(d.dow===dow&&d.schedType===schedType));
+  p.dayConditions.push({dow,schedType,requiredSite,notes});
+  triggerSave();renderSiteRulesList();
 }
+
 function addShiftTypeRule(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   const site=document.getElementById('sr-st-site')?.value;
-  const shift=document.getElementById('sr-st-shift')?.value;
-  const maxPerMonth=+document.getElementById('sr-st-max')?.value||null;
-  if(!site||!shift){alert('Select site and shift type');return;}
+  if(!site){alert('Select a site');return;}
+  const allowed=[];
+  if(document.getElementById('sr-st-1st')?.checked) allowed.push('1st');
+  if(document.getElementById('sr-st-2nd')?.checked) allowed.push('2nd');
+  if(document.getElementById('sr-st-3rd')?.checked) allowed.push('3rd');
+  if(document.getElementById('sr-st-wknd')?.checked) allowed.push('wknd');
+  if(document.getElementById('sr-st-ir')?.checked) allowed.push('ir');
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
-  const r=p.siteRules.find(x=>x.site===site)||{site};
-  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
-  if(!r.shiftLimits) r.shiftLimits={};
-  r.shiftLimits[shift]=maxPerMonth;
-  triggerSave();renderConditionsList();
+  let r=p.siteRules.find(x=>x.site===site);
+  if(!r){r={site};p.siteRules.push(r);}
+  r.allowedShifts=allowed;
+  triggerSave();renderSiteRulesList();
 }
 function addBlackout(){
   // Called from page-holiday-auto: add a holiday blackout date
@@ -7198,24 +7268,34 @@ function siteRuleOk(p, siteName, ym, date, shiftKey){
   if(rule.blocked) return false;                // hard block
   // Blackout date ranges
   if((rule.blackouts||[]).some(b=>date>=b.start&&date<=b.end)) return false;
+  // Allowed shift types (shiftKey='s1'|'s2'|'s3'|'home', allowedShifts stores '1st'|'2nd'|'3rd'|'wknd'|'ir')
+  if(rule.allowedShifts?.length && shiftKey){
+    const keyMap={s1:'1st',s2:'2nd',s3:'3rd',home:'home'};
+    const shiftName=keyMap[shiftKey]||shiftKey;
+    if(!rule.allowedShifts.includes(shiftName) && !rule.allowedShifts.includes(shiftKey)) return false;
+  }
   // Per-month cap for this site
   if(rule.maxPerMonth){
-    const usedThisSite = S.drShifts.filter(s=>
+    const used = S.drShifts.filter(s=>
       s.physId===p.id && s.date.startsWith(ym) && s.site===siteName
     ).length;
-    if(usedThisSite >= rule.maxPerMonth) return false;
+    if(used >= rule.maxPerMonth) return false;
   }
-  // Per-shift-type cap
-  if(rule.shiftLimits && shiftKey && rule.shiftLimits[shiftKey]!=null){
-    const shiftName = {s1:'1st',s2:'2nd',s3:'3rd',home:'Home'}[shiftKey]||shiftKey;
-    const usedThisShift = S.drShifts.filter(s=>
-      s.physId===p.id && s.date.startsWith(ym) && s.site===siteName && s.shift===shiftName
+  // Per-week cap for this site
+  if(rule.maxPerWeek){
+    // Get week boundaries for this date (Mon–Sun)
+    const d = parseDateLocal(date);
+    const dow = d.getDay();
+    const weekMon = addDays(date, -(dow===0?6:dow-1));
+    const weekSun = addDays(weekMon, 6);
+    const usedWk = S.drShifts.filter(s=>
+      s.physId===p.id && s.site===siteName &&
+      s.date >= weekMon && s.date <= weekSun
     ).length;
-    if(usedThisShift >= rule.shiftLimits[shiftKey]) return false;
+    if(usedWk >= rule.maxPerWeek) return false;
   }
   return true;
 }
-
 /**
  * dayConditionSiteOk(p, siteName, date, context)
  * Returns true if the physician is eligible to work at siteName on the given date
@@ -7223,14 +7303,19 @@ function siteRuleOk(p, siteName, ym, date, shiftKey){
  * context: 'dr-shift' | 'ir-call' | 'ir-shift'
  */
 function dayConditionSiteOk(p, siteName, date, context){
-  const rules = (p.siteRules||[]);
-  const rule  = rules.find(r=>r.site===siteName);
-  if(!rule) return true;
-  if(!(rule.blockedDOW||[]).length) return true;
-  const dow = parseDateLocal(date).getDay(); // 0=Sun … 6=Sat
-  return !rule.blockedDOW.includes(dow);
+  // context: 'dr-shift' | 'ir-call' | 'ir-shift' | any
+  const conds = (p.dayConditions||[]);
+  if(!conds.length) return true;
+  const dow = parseDateLocal(date).getDay();
+  for(const c of conds){
+    if(c.dow !== dow) continue;
+    // schedType filter
+    if(c.schedType && c.schedType !== 'any' && c.schedType !== context) continue;
+    // If a requiredSite is specified, the physician MUST be at that site
+    if(c.requiredSite && c.requiredSite !== siteName) return false;
+  }
+  return true;
 }
-
 /**
  * sequenceOk(p, date, ym)
  * Returns true if assigning physician p to their primary site on `date` would
@@ -7238,25 +7323,43 @@ function dayConditionSiteOk(p, siteName, date, context){
  * Called before adding a shift to prevent streaks longer than the configured cap.
  */
 function sequenceOk(p, date, ym){
-  const rules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
-  if(!rules.length) return true;
-  for(const rule of rules){
+  const seq = p.seqRules;
+  // Per-site maxConsec from siteRules (old model, kept for compat)
+  const perSiteRules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
+  for(const rule of perSiteRules){
     const cap = rule.maxConsec;
-    // Count how many consecutive days immediately before `date` this physician
-    // already has a shift at rule.site
-    let streak = 0;
-    let d = date;
+    let streak=0, d=date;
     for(let i=0;i<cap;i++){
-      d = addDays(d,-1);
-      const has = S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
-               || S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site);
+      d=addDays(d,-1);
+      const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site);
       if(has) streak++; else break;
     }
-    if(streak >= cap) return false;
+    if(streak>=cap) return false;
+  }
+  // Global maxConsec from seqRules
+  if(seq?.maxConsec){
+    const cap=seq.maxConsec;
+    let streak=0, d=date;
+    for(let i=0;i<cap;i++){
+      d=addDays(d,-1);
+      const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d)
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d);
+      if(has) streak++; else break;
+    }
+    if(streak>=cap) return false;
+  }
+  // Global minRest (min days off between shifts)
+  if(seq?.minRest){
+    for(let i=1;i<=seq.minRest;i++){
+      const prev=addDays(date,-i);
+      const prevHas=S.drShifts.some(s=>s.physId===p.id&&s.date===prev)
+                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev);
+      if(prevHas) return false;
+    }
   }
   return true;
 }
-
 /**
  * _driveTimeCell(physId, site)
  * Returns an inline HTML badge showing drive-time data for the physician→site pair.
@@ -7510,11 +7613,16 @@ function previewAA(){
             const pool2=drs.filter(p=>{
               if(!p.shiftElig[k])return false;
               if(p.allowedSites?.length&&!p.allowedSites.includes(st.name))return false;
+              if(!siteRuleOk(p,st.name,ym,c.date,k))return false;
+              if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
+              if(!sequenceOk(p,c.date,ym))return false;
+              if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false;
               const vd=vacDays(p.id);if(vd.has(c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
               return cnt[p.id].wd<maxDR(p,'wd');
             }).sort((a,b)=>{
-              const aA=a.anchorSite===st.name?-2:0;const bA=b.anchorSite===st.name?-2:0;
+              const aA=(a.anchorSite===st.name?-2:0)+(a.siteRules?.find(r=>r.site===st.name)?.preferred?-1.5:0);
+              const bA=(b.anchorSite===st.name?-2:0)+(b.siteRules?.find(r=>r.site===st.name)?.preferred?-1.5:0);
               if(aA!==bA)return aA-bA;
               return cnt[a.id].wd/maxDR(a,'wd')-cnt[b.id].wd/maxDR(b,'wd');
             });
@@ -7556,7 +7664,8 @@ function previewAA(){
           if(!p.shiftElig.wknd||!p.drSubs.includes(sub))return false;
           const vd=vacDays(p.id);const sunDate=addDays(c.date,1);
           if(vd.has(c.date)||vd.has(sunDate))return false;
-          return cnt[p.id].wk<maxDR(p,'wk');
+          const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
+          return cnt[p.id].wk<_wkCap;
         }).sort((a,b)=>cnt[a.id].wk-cnt[b.id].wk);
         if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate:addDays(c.date,1),sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
         else{gaps.push(`Weekend ${c.date} ${sub}`);S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:''});}
