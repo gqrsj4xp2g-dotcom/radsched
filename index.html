@@ -2236,7 +2236,7 @@ async function doLogout(){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.getElementById('page-dashboard').classList.add('on');
   document.querySelectorAll('.snav-item').forEach(i=>i.classList.remove('on'));
-  document.querySelector('.snav-item').classList.add('on');
+  document.querySelector('.snav-item')?.classList.add('on');
 }
 
 async function launchApp(){
@@ -2387,7 +2387,7 @@ function _refreshCurrentPage(){
     'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRWeekBuilder,
     'ir-shift-auto':renderIRShiftAutoPage,'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
-    holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,
+    holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,
     'open-shifts':renderOpenShifts,'user-mgmt':renderUserMgmt,
     settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,
     'ir-shift-slots':renderIRShiftSlots,
@@ -3013,16 +3013,19 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 
 // Update a Supabase Auth user's metadata (physId, role, etc.) via edge function
 async function _updateUserAuthMeta(userId, fields){
-  const sb=_initAuthClient();
-  if(!sb) return;
-  const {data:{session}}=await sb.auth.getSession();
-  const jwt=session?.access_token;
-  if(!jwt) return;
-  await fetch(`${_getUrl()}/functions/v1/create-user`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
-    body:JSON.stringify({action:'update',userId,...fields})
-  });
+  try{
+    const sb=_initAuthClient();
+    if(!sb) return;
+    const {data:{session}}=await sb.auth.getSession();
+    const jwt=session?.access_token;
+    if(!jwt) return;
+    await fetch(`${_getUrl()}/functions/v1/create-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${jwt}`},
+      body:JSON.stringify({action:'update',userId,...fields})
+    });
+
+  }catch(e){console.warn("[RS] _updateUserAuthMeta:", e.message||e);}
 }
 
 /* ─── USER MGMT ─── */
@@ -3248,7 +3251,30 @@ function addPhys(){
   // Refresh user mgmt so physician link dropdowns reflect the new physician
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
 }
-function removePhys(id){if(!_adminOnly('remove physicians'))return;if(!confirm('Remove?'))return;S.physicians=S.physicians.filter(p=>p.id!==id);renderPhysicians();if(document.getElementById('page-user-mgmt')?.classList.contains('on'))renderUserMgmt();}
+function removePhys(id){
+  if(!_adminOnly('remove physicians'))return;
+  const p=S.physicians.find(x=>x.id===id);
+  if(!p)return;
+  const name=`${p.last}, ${p.first}`;
+  const drCount=S.drShifts.filter(s=>s.physId===id).length;
+  const irShiftCount=S.irShifts.filter(s=>s.physId===id).length;
+  const irCallCount=S.irCalls.filter(s=>s.physId===id).length;
+  const vacCount=S.vacations.filter(v=>v.physId===id).length;
+  const holCount=S.holidays.filter(h=>h.physId===id).length;
+  const wkndCount=S.weekendCalls.filter(w=>w.physId===id).length;
+  const total=drCount+irShiftCount+irCallCount+vacCount+holCount+wkndCount;
+  const msg=`Remove ${name}?\n\nThis will also delete:\n• ${drCount} DR shift(s)\n• ${wkndCount} weekend call(s)\n• ${irShiftCount} IR shift(s)\n• ${irCallCount} IR call(s)\n• ${holCount} holiday assignment(s)\n• ${vacCount} vacation entry(s)`;
+  if(!confirm(msg))return;
+  S.physicians=S.physicians.filter(p=>p.id!==id);
+  S.drShifts=S.drShifts.filter(s=>s.physId!==id);
+  S.weekendCalls=S.weekendCalls.filter(w=>w.physId!==id);
+  S.irShifts=S.irShifts.filter(s=>s.physId!==id);
+  S.irCalls=S.irCalls.filter(c=>c.physId!==id);
+  S.vacations=S.vacations.filter(v=>v.physId!==id);
+  S.holidays=S.holidays.filter(h=>h.physId!==id);
+  renderPhysicians();
+  if(document.getElementById('page-user-mgmt')?.classList.contains('on'))renderUserMgmt();
+}
 
 /* ─── VACATIONS ─── */
 function renderVacations(){
@@ -3987,18 +4013,21 @@ async function testMapsKey(){
 }
 
 async function _mapsProxyCall(origins, destinations, departureTime, trafficModel){
-  const key=_getGMapsKey();
-  if(!key) throw new Error('No Google Maps API key. Add it in Settings → Drive Times.');
-  const body={origins,destinations,mapsKey:key};
-  if(departureTime) { body.departureTime=departureTime; body.trafficModel=trafficModel||'best_guess'; }
-  const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
-  });
-  const data=await res.json();
-  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-  return data;
+  try{
+    const key=_getGMapsKey();
+    if(!key) throw new Error('No Google Maps API key. Add it in Settings → Drive Times.');
+    const body={origins,destinations,mapsKey:key};
+    if(departureTime) { body.departureTime=departureTime; body.trafficModel=trafficModel||'best_guess'; }
+    const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+    return data;
+
+  }catch(e){console.warn("[RS] _mapsProxyCall:", e.message||e);}
 }
 
 async function calcAllDriveTimes(){
@@ -4121,16 +4150,19 @@ async function updateTrafficTimes(){
 
 // Wrapper that passes departureTime to the proxy
 async function _mapsProxyCallRT(origins, destinations, departureTime){
-  const key=_getGMapsKey();
-  if(!key) throw new Error('No Google Maps API key. Add it in Settings \u2192 Drive Times.');
-  const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({origins,destinations,mapsKey:key,departureTime})
-  });
-  const data=await res.json();
-  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-  return data;
+  try{
+    const key=_getGMapsKey();
+    if(!key) throw new Error('No Google Maps API key. Add it in Settings \u2192 Drive Times.');
+    const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({origins,destinations,mapsKey:key,departureTime})
+    });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+    return data;
+
+  }catch(e){console.warn("[RS] _mapsProxyCallRT:", e.message||e);}
 }
 
 
@@ -5690,7 +5722,7 @@ function addOpenShift(){
 
 /* ─── CHAT ─── */
 function renderChat(){
-  const el=document.getElementById('chat-msgs');if(!el)return;
+  const el=document.getElementById('chat-messages');if(!el)return;
   const msgs=(S.chatMessages||[]).sort((a,b)=>a.ts>b.ts?1:-1);
   el.innerHTML=msgs.map(m=>{
     const isMe=m.userId===CU?.id;
@@ -5713,16 +5745,17 @@ function sendChat(){
 
 /* ─── SWAPS ─── */
 function renderSwaps(){
-  const el=document.getElementById('swap-list');if(!el)return;
-  const swaps=(S.swapRequests||[]).sort((a,b)=>b.ts>a.ts?1:-1);
-  el.innerHTML=swaps.map(s=>{
+  const allSwaps=(S.swapRequests||[]).sort((a,b)=>b.ts>a.ts?1:-1);
+  const pending=allSwaps.filter(s=>s.status==='pending');
+  const history=allSwaps.filter(s=>s.status!=='pending');
+  const renderCard=(s)=>{
     const status=s.status||'pending';
     const cls=status==='approved'?'tg':status==='denied'?'tr':'ta';
     return`<div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div style="font-weight:700">${pname(s.fromPhysId)} → ${pname(s.toPhysId)}</div>
-          <div style="font-size:11px;color:var(--txt2)">${s.date} · ${s.shiftType||'Shift'} · ${s.site||'—'}</div>
+          <div style="font-size:11px;color:var(--txt2)">${s.date} · ${s.shiftType||'Shift'}</div>
           ${s.reason?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${s.reason}</div>`:''}
         </div>
         <span class="tag ${cls}">${status}</span>
@@ -5732,7 +5765,11 @@ function renderSwaps(){
         <button class="bsm br" onclick="resolveSwap(${s.id},'denied')">Deny</button>
       </div>`:''}
     </div>`;
-  }).join('')||'<div class="note ni">No swap requests.</div>';
+  };
+  const pendEl=document.getElementById('swp-pending-list');
+  if(pendEl) pendEl.innerHTML=pending.map(renderCard).join('')||'<div class="note ni">No pending swap requests.</div>';
+  const histEl=document.getElementById('swp-history-list');
+  if(histEl) histEl.innerHTML=history.map(renderCard).join('')||'<div class="note ni">No completed swaps yet.</div>';
 }
 function requestSwap(){
   const toId=+document.getElementById('swap-to')?.value;
@@ -5858,26 +5895,33 @@ function renderIRSlots(){
 /* ─── IR SHIFT SLOTS ─── */
 function renderIRShiftSlots(){
   const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const el=document.getElementById('irss-content');if(!el)return;
-  const gSites=(S.sites||[]).filter(s=>s.irGroup&&s.irGroup!=='Both');
-  let html='<div class="g2">';
-  gSites.forEach(st=>{
-    const gColor=st.irGroup==='North'?'var(--blue-t)':'var(--green-t)';
-    html+=`<div class="card"><div class="card-title" style="color:${gColor}">${st.name} <span style="font-weight:400;font-size:11px;color:var(--txt3)">${st.irGroup}</span></div>
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:6px">`;
-    [1,2,3,4,5].forEach(dow=>{
-      const k=`${st.name}|${dow}|1st`;
-      const v=(S.irShiftSlots||{})[k]??1;
-      html+=`<div style="text-align:center">
-        <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
-        <input type="number" min="0" max="10" value="${v}" style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
-          oninput="if(!S.irShiftSlots)S.irShiftSlots={};S.irShiftSlots['${k}']=parseInt(this.value)||0">
-      </div>`;
+  ['North','South'].forEach(grp=>{
+    const el=document.getElementById('ir-shift-slots-'+grp.toLowerCase());if(!el)return;
+    const gSites=(S.sites||[]).filter(s=>s.irGroup===grp);
+    if(!gSites.length){
+      el.innerHTML='<div style="color:var(--txt3);font-size:12px">No '+grp+' group IR sites configured.</div>';
+      return;
+    }
+    const gColor=grp==='North'?'var(--blue-t)':'var(--green-t)';
+    let html='';
+    gSites.forEach(st=>{
+      html+=`<div style="margin-bottom:14px">
+        <div style="font-weight:700;font-size:12px;color:${gColor};margin-bottom:6px">${st.name}</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">`;
+      [1,2,3,4,5].forEach(dow=>{
+        const k=`${st.name}|${dow}|1st`;
+        const v=(S.irShiftSlots||{})[k]??1;
+        html+=`<div style="text-align:center">
+          <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
+          <input type="number" min="0" max="10" value="${v}"
+            style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
+            oninput="if(!S.irShiftSlots)S.irShiftSlots={};S.irShiftSlots['${k}']=parseInt(this.value)||0">
+        </div>`;
+      });
+      html+='</div></div>';
     });
-    html+='</div></div>';
+    el.innerHTML=html;
   });
-  html+='</div>';
-  el.innerHTML=html||'<div class="note ni">No IR sites configured. Add sites with an IR group in Settings.</div>';
 }
 
 /* ─── IMPORT ─── */
@@ -5907,15 +5951,17 @@ function sendChatMessage(){
 
 /* ─── SWAPS ─── */
 function swapTab(t,el){
-  document.getElementById('swap-request-panel').style.display=t==='request'?'block':'none';
-  document.getElementById('swap-list-panel').style.display=t==='list'?'block':'none';
+  ['request','pending','history'].forEach(tab=>{
+    const p=document.getElementById('swpt-'+tab);
+    if(p) p.style.display=tab===t?'block':'none';
+  });
   document.querySelectorAll('#page-swaps .tabs .tab').forEach(x=>x.classList.remove('on'));
   if(el)el.classList.add('on');
-  if(t==='list') renderSwaps();
+  if(t==='pending'||t==='history') renderSwaps();
 }
 function loadMyShifts(){
   const date=document.getElementById('sw-my-date')?.value;
-  const el=document.getElementById('sw-my-shifts');if(!el)return;
+  const el=document.getElementById('sw-my-shift');if(!el)return;
   if(!date||!CU?.physId){el.innerHTML='';return;}
   const shifts=S.drShifts.filter(s=>s.physId===CU.physId&&s.date===date);
   el.innerHTML=shifts.length
@@ -5925,7 +5971,7 @@ function loadMyShifts(){
 function loadTheirShifts(){
   const pid=+document.getElementById('sw-their-phys')?.value;
   const date=document.getElementById('sw-my-date')?.value;
-  const el=document.getElementById('sw-their-shifts');if(!el)return;
+  const el=document.getElementById('sw-their-shift');if(!el)return;
   if(!pid||!date){el.innerHTML='';return;}
   const shifts=S.drShifts.filter(s=>s.physId===pid&&s.date===date);
   el.innerHTML=shifts.length
@@ -5933,17 +5979,33 @@ function loadTheirShifts(){
     :'<option disabled>No shifts on this date</option>';
 }
 function submitSwapRequest(){
+  const myShiftId=+document.getElementById('sw-my-shift')?.value;
   const toId=+document.getElementById('sw-their-phys')?.value;
-  const date=document.getElementById('sw-my-date')?.value;
-  const reason=document.getElementById('sw-reason')?.value.trim()||'';
-  if(!toId||!date){alert('Select a physician and date');return;}
+  const theirShiftId=+document.getElementById('sw-their-shift')?.value;
+  const message=document.getElementById('sw-msg')?.value.trim()||'';
+  if(!myShiftId){alert('Select your shift first.');return;}
+  if(!toId){alert('Select a colleague.');return;}
+  const myShift=S.drShifts.find(s=>s.id===myShiftId);
+  const theirShift=S.drShifts.find(s=>s.id===theirShiftId);
   S.swapRequests.push({
-    id:S.nextId++,fromPhysId:CU?.physId||null,toPhysId:toId,
-    date,shiftType:'1st Shift',site:'',reason,status:'pending',ts:new Date().toISOString()
+    id:S.nextId++,
+    fromPhysId:CU?.physId||null,
+    toPhysId:toId,
+    date:myShift?.date||'',
+    theirDate:theirShift?.date||'',
+    shiftType:myShift?.shift||'1st Shift',
+    site:myShift?.site||'',
+    reason:message,
+    status:'pending',
+    ts:new Date().toISOString()
   });
-  triggerSave();renderSwaps();
-  const msgEl=document.getElementById('sw-msg');
-  if(msgEl){msgEl.textContent='✓ Swap request submitted';msgEl.style.color='var(--green-t)';setTimeout(()=>{msgEl.textContent='';},3000);}
+  triggerSave();
+  // Clear form
+  ['sw-my-date','sw-msg'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['sw-my-shift','sw-their-shift'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML='<option value="">Select shift...</option>';});
+  // Show confirmation and switch to pending tab
+  alert('✓ Swap request submitted!');
+  swapTab('pending',document.querySelector('#page-swaps .tabs .tab:nth-child(2)'));
 }
 
 /* ─── USER MANAGEMENT ─── */
@@ -6077,6 +6139,21 @@ function addShiftTypeRule(){
   triggerSave();renderConditionsList();
 }
 function addBlackout(){
+  // Called from page-holiday-auto: add a holiday blackout date
+  const name=document.getElementById('hb-name')?.value.trim();
+  const date=document.getElementById('hb-date')?.value;
+  if(!date){alert('Select a date.');return;}
+  if(!S.holidayBlackouts) S.holidayBlackouts=[];
+  S.holidayBlackouts.push({id:S.nextId++,name:name||date,date});
+  const nameEl=document.getElementById('hb-name');
+  const dateEl=document.getElementById('hb-date');
+  if(nameEl) nameEl.value='';
+  if(dateEl) dateEl.value='';
+  triggerSave();
+  renderHolidayAuto();
+}
+function addSiteBlackout(){
+  // Called from physician site-rules panel
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   const site=document.getElementById('sr-blk-site')?.value;
   const start=document.getElementById('sr-blk-start')?.value;
@@ -6092,15 +6169,105 @@ function addBlackout(){
 
 /* ─── HOLIDAY AUTO-ASSIGN (page handler) ─── */
 function renderHolidayAuto(){
-  // The holiday-auto page uses the holiday definitions from the Define tab
-  // Refresh the career tally when opening
-  if(typeof renderHolCareerTally==='function') renderHolCareerTally();
+  // Render holiday blackout list
+  const hbEl=document.getElementById('hb-list');
+  if(hbEl){
+    const bkts=S.holidayBlackouts||[];
+    hbEl.innerHTML=bkts.length
+      ?bkts.sort((a,b)=>a.date>b.date?1:-1).map(b=>`<div class="row">
+        <div style="flex:1;font-size:12px"><strong>${b.date}</strong>${b.name&&b.name!==b.date?' — '+b.name:''}</div>
+        <button class="br bxs" onclick="S.holidayBlackouts=S.holidayBlackouts.filter(x=>x.id!==${b.id});triggerSave();renderHolidayAuto()">✕</button>
+      </div>`).join('')
+      :'<div style="color:var(--txt3);font-size:12px">No blackout dates added.</div>';
+  }
+  // Render holiday needs list
+  const hnEl=document.getElementById('hn-list');
+  if(hnEl){
+    const needs=S.holidayNeeds||[];
+    hnEl.innerHTML=needs.length
+      ?needs.sort((a,b)=>a.name>b.name?1:-1).map(n=>`<div class="row">
+        <div style="flex:1;font-size:12px">
+          <strong>${n.name}</strong>
+          <span class="tag ${n.group==='DR'?'tb':n.group==='IR'?'tt':'tg'}" style="font-size:9px;margin-left:4px">${n.group}</span>
+          <span style="color:var(--txt3)"> · ${n.slots} slot${n.slots!==1?'s':''}</span>
+        </div>
+        <button class="br bxs" onclick="S.holidayNeeds=S.holidayNeeds.filter(x=>x.id!==${n.id});triggerSave();renderHolidayAuto()">✕</button>
+      </div>`).join('')
+      :'<div style="color:var(--txt3);font-size:12px">No holiday needs configured.</div>';
+  }
+  // Reset preview box
+  const haBox=document.getElementById('ha-box');
+  if(haBox&&haBox.innerHTML==='') haBox.innerHTML='<p style="color:var(--txt3)">Configure and click Preview.</p>';
 }
 function previewHolidayAA(){
-  if(typeof previewHolRandom==='function') previewHolRandom();
+  if(!_adminOnly('preview holiday auto-assign')) return;
+  const year =+document.getElementById('ha-year')?.value||new Date().getFullYear();
+  const grp  = document.getElementById('ha-grp')?.value||'both';
+  const needs=(S.holidayNeeds||[]).filter(n=>grp==='both'||n.group===grp||n.group==='Both');
+  if(!needs.length){
+    const box=document.getElementById('ha-box');
+    if(box) box.innerHTML='<div class="note nw">No holiday needs configured. Add them above first.</div>';
+    return;
+  }
+  const preview=[];
+  const groups=grp==='both'?['DR','IR']:[grp];
+  groups.forEach(g=>{
+    const gNeeds=needs.filter(n=>n.group===g||n.group==='Both');
+    if(!gNeeds.length) return;
+    const gPhys=S.physicians.filter(p=>g==='DR'?p.drFte>0:p.irFte>0);
+    if(!gPhys.length) return;
+    const gFteTot=gPhys.reduce((s,p)=>s+(g==='DR'?p.drFte:p.irFte),0)||1;
+    const cnt={};
+    gPhys.forEach(p=>{ cnt[p.id]=S.holidays.filter(h=>h.group===g&&h.physId===p.id&&h.year===year).length; });
+    gNeeds.forEach(need=>{
+      const alreadyAssigned=S.holidays.filter(h=>h.name===need.name&&h.year===year&&h.group===g).length;
+      const toAssign=Math.max(0,(need.slots||1)-alreadyAssigned);
+      for(let s=0;s<toAssign;s++){
+        const eligible=gPhys.slice().sort((a,b)=>{
+          const aFte=g==='DR'?a.drFte:a.irFte;
+          const bFte=g==='DR'?b.drFte:b.irFte;
+          return (cnt[a.id]/(aFte||0.01))-(cnt[b.id]/(bFte||0.01));
+        });
+        const picked=eligible[0];if(!picked)break;
+        cnt[picked.id]=(cnt[picked.id]||0)+1;
+        const hbDate=(S.holidayBlackouts||[]).find(b=>b.name===need.name)?.date||`${year}-12-25`;
+        preview.push({physId:picked.id,name:need.name,date:hbDate,year,group:g,notes:'Auto-assigned'});
+      }
+    });
+  });
+  const box=document.getElementById('ha-box');
+  const applyBtn=document.getElementById('ha-apply');
+  if(!preview.length){
+    if(box) box.innerHTML='<div class="note ns">✓ All holiday slots already assigned for '+year+'.</div>';
+    if(applyBtn) applyBtn.style.display='none';
+    return;
+  }
+  let html=`<div class="card"><div class="card-title">Preview — ${preview.length} assignment(s) for ${year}</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Holiday</th><th>Group</th><th>Date</th><th>Physician</th></tr></thead><tbody>`;
+  preview.forEach(p=>{
+    html+=`<tr><td>${p.name}</td><td><span class="tag ${p.group==='DR'?'tb':'tt'}">${p.group}</span></td>
+      <td>${p.date}</td><td style="font-weight:600">${pname(p.physId)}</td></tr>`;
+  });
+  html+='</tbody></table></div></div>';
+  if(box) box.innerHTML=html;
+  if(applyBtn) applyBtn.style.display='inline-block';
+  window._holidayAAPreview=preview;
 }
+
 function applyHolidayAA(){
-  if(typeof applyHolRandom==='function') applyHolRandom();
+  if(!_adminOnly('apply holiday auto-assign')) return;
+  const preview=window._holidayAAPreview||[];
+  if(!preview.length){alert('Run Preview first.');return;}
+  preview.forEach(p=>{
+    S.holidays.push({id:S.nextId++,name:p.name,date:p.date,year:p.year,physId:p.physId,group:p.group,notes:p.notes||''});
+    if(p.group==='IR') _syncHolidayToIRCall(p.physId,p.date,p.name);
+  });
+  triggerSave();
+  window._holidayAAPreview=[];
+  const box=document.getElementById('ha-box');
+  const applyBtn=document.getElementById('ha-apply');
+  if(box) box.innerHTML=`<div class="note ns">✓ Applied ${preview.length} holiday assignment(s).</div>`;
+  if(applyBtn) applyBtn.style.display='none';
 }
 
 /* ─── HOLIDAY SCHEDULE VIEW ─── */
@@ -6232,12 +6399,17 @@ function saveMyVacNote(){
 
 /* ─── HOLIDAY NEEDS (legacy stubs) ─── */
 function addHolidayNeed(){
-  const name=document.getElementById('haa-hn-name')?.value.trim();
-  const grp=document.getElementById('haa-hn-grp')?.value||'DR';
-  const slots=+document.getElementById('haa-hn-slots')?.value||1;
-  if(!name)return;
-  S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
+  const name=document.getElementById('hn-name')?.value||'';
+  const grp=document.getElementById('hn-grp')?.value||'DR';
+  const slots=+document.getElementById('hn-slots')?.value||1;
+  if(!name){alert('Select a holiday');return;}
+  if(!S.holidayNeeds) S.holidayNeeds=[];
+  // Replace existing entry for same name+group if present
+  const existing=S.holidayNeeds.findIndex(h=>h.name===name&&h.group===grp);
+  if(existing>=0) S.holidayNeeds[existing].slots=slots;
+  else S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
   triggerSave();
+  renderHolidayAuto();
 }
 
 
@@ -6270,6 +6442,114 @@ function addHoliday(){
   renderHolCounter();
 }
 
+
+
+/* ─── SITE RULE CONSTRAINT HELPERS ───────────────────────────────────────
+   Called by DR auto-assign, IR auto-assign, and IR rebalancer to evaluate
+   physician site-rule eligibility before assigning any shift or call.
+─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * siteRuleOk(p, siteName, ym, date, shiftKey)
+ * Returns true if physician p is allowed at siteName for shiftKey on date.
+ * Checks: site blocked flag, blackout date ranges, monthly cap, shift-type cap.
+ */
+function siteRuleOk(p, siteName, ym, date, shiftKey){
+  const rules = (p.siteRules||[]);
+  const rule  = rules.find(r=>r.site===siteName);
+  if(!rule) return true;                        // no rule = unrestricted
+  if(rule.blocked) return false;                // hard block
+  // Blackout date ranges
+  if((rule.blackouts||[]).some(b=>date>=b.start&&date<=b.end)) return false;
+  // Per-month cap for this site
+  if(rule.maxPerMonth){
+    const usedThisSite = S.drShifts.filter(s=>
+      s.physId===p.id && s.date.startsWith(ym) && s.site===siteName
+    ).length;
+    if(usedThisSite >= rule.maxPerMonth) return false;
+  }
+  // Per-shift-type cap
+  if(rule.shiftLimits && shiftKey && rule.shiftLimits[shiftKey]!=null){
+    const shiftName = {s1:'1st',s2:'2nd',s3:'3rd',home:'Home'}[shiftKey]||shiftKey;
+    const usedThisShift = S.drShifts.filter(s=>
+      s.physId===p.id && s.date.startsWith(ym) && s.site===siteName && s.shift===shiftName
+    ).length;
+    if(usedThisShift >= rule.shiftLimits[shiftKey]) return false;
+  }
+  return true;
+}
+
+/**
+ * dayConditionSiteOk(p, siteName, date, context)
+ * Returns true if the physician is eligible to work at siteName on the given date
+ * based on day-of-week restrictions in their site rules.
+ * context: 'dr-shift' | 'ir-call' | 'ir-shift'
+ */
+function dayConditionSiteOk(p, siteName, date, context){
+  const rules = (p.siteRules||[]);
+  const rule  = rules.find(r=>r.site===siteName);
+  if(!rule) return true;
+  if(!(rule.blockedDOW||[]).length) return true;
+  const dow = parseDateLocal(date).getDay(); // 0=Sun … 6=Sat
+  return !rule.blockedDOW.includes(dow);
+}
+
+/**
+ * sequenceOk(p, date, ym)
+ * Returns true if assigning physician p to their primary site on `date` would
+ * NOT violate any maxConsec (consecutive-day) rule across all their site rules.
+ * Called before adding a shift to prevent streaks longer than the configured cap.
+ */
+function sequenceOk(p, date, ym){
+  const rules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
+  if(!rules.length) return true;
+  for(const rule of rules){
+    const cap = rule.maxConsec;
+    // Count how many consecutive days immediately before `date` this physician
+    // already has a shift at rule.site
+    let streak = 0;
+    let d = date;
+    for(let i=0;i<cap;i++){
+      d = addDays(d,-1);
+      const has = S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
+               || S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site);
+      if(has) streak++; else break;
+    }
+    if(streak >= cap) return false;
+  }
+  return true;
+}
+
+/**
+ * _driveTimeCell(physId, site)
+ * Returns an inline HTML badge showing drive-time data for the physician→site pair.
+ * Used in IR list table rows. Returns '' if no data available.
+ */
+function _driveTimeCell(physId, site){
+  const dt = S.driveTimes?.[physId]?.[site];
+  if(!dt) return '';
+  const mins = dt.byShift?.['1st']?.trafficMins || dt.baseMins || null;
+  if(mins==null) return '';
+  const color = mins<=20?'var(--green-t)':mins<=40?'var(--amber,#d97706)':'var(--red-t)';
+  return `<span style="font-size:9px;color:${color};margin-left:4px" title="Drive time to ${site}">🚗 ${mins}m</span>`;
+}
+
+
+
+function logImport(msg, type='info'){
+  // Log to vacp-import-log if it exists, else console
+  const el = document.getElementById('vacp-import-log') ||
+              document.getElementById('vac-import-preview') ||
+              document.getElementById('shifts-import-preview');
+  if(el){
+    const color = type==='success'?'var(--green-t)':type==='error'?'var(--red-t)':'var(--txt2)';
+    const entry = document.createElement('div');
+    entry.style.cssText = `font-size:11px;color:${color};margin-top:3px`;
+    entry.textContent = msg;
+    el.appendChild(entry);
+  }
+  console.log('[Import]', msg);
+}
 
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
@@ -9242,7 +9522,10 @@ async function _pullFromSupabase(){
   }catch(e){console.error('[RS] Pull failed:',e);return null;}
 }
 
+let _isSaving=false;
 async function _pushToSupabase(){
+  if(_isSaving)return;
+  _isSaving=true;
   if(!_initSupabase())return false;
   _updateSaveUI('⏳ Saving…','var(--txt3)');
   try{
@@ -9293,23 +9576,26 @@ function renderSettingsSupabaseStatus(){
 }
 
 async function saveSupabaseConfig(){
-  const url=document.getElementById('sb-url')?.value.trim();
-  const key=document.getElementById('sb-key')?.value.trim();
-  const msgEl=document.getElementById('sb-msg');
-  if(!url||!key){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Both URL and key are required.</span>';return;}
-  // Save to localStorage (for this device)
-  localStorage.setItem(_SB_CONFIG_KEY,JSON.stringify({url,key}));
-  _SB_CFG.url=url;_SB_CFG.key=key;
-  _supabase=null;
-  if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Testing connection…</span>';
-  await testSupabaseConnection();
-  // Remind user to download updated file so other devices auto-connect
-  const si=document.getElementById('save-indicator');
-  if(si){
-    si.textContent='💾 Download updated file to share with other devices';
-    si.style.color='var(--amber,#d97706)';
-    setTimeout(()=>{if(si)si.textContent='';},8000);
-  }
+  try{
+    const url=document.getElementById('sb-url')?.value.trim();
+    const key=document.getElementById('sb-key')?.value.trim();
+    const msgEl=document.getElementById('sb-msg');
+    if(!url||!key){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Both URL and key are required.</span>';return;}
+    // Save to localStorage (for this device)
+    localStorage.setItem(_SB_CONFIG_KEY,JSON.stringify({url,key}));
+    _SB_CFG.url=url;_SB_CFG.key=key;
+    _supabase=null;
+    if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Testing connection…</span>';
+    await testSupabaseConnection();
+    // Remind user to download updated file so other devices auto-connect
+    const si=document.getElementById('save-indicator');
+    if(si){
+      si.textContent='💾 Download updated file to share with other devices';
+      si.style.color='var(--amber,#d97706)';
+      setTimeout(()=>{if(si)si.textContent='';},8000);
+    }
+
+  }catch(e){console.warn("[RS] saveSupabaseConfig:", e.message||e);}
 }
 
 async function testSupabaseConnection(){
