@@ -5860,6 +5860,361 @@ function renderImportPage(){
 }
 
 
+
+/* ─── DASHBOARD NAV ─── */
+function dashNavMonth(dir){
+  const el=document.getElementById('dash-mo');
+  if(!el)return;
+  const [y,m]=(el.value||new Date().toISOString().slice(0,7)).split('-').map(Number);
+  const d=new Date(y,m-1+dir,1);
+  el.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  renderDash();
+}
+
+/* ─── CHAT ─── */
+function sendChatMessage(){
+  const inp=document.getElementById('chat-input');if(!inp)return;
+  const text=inp.value.trim();if(!text)return;
+  S.chatMessages.push({id:S.nextId++,userId:CU?.id,text,ts:new Date().toISOString()});
+  inp.value='';triggerSave();renderChat();
+}
+
+/* ─── SWAPS ─── */
+function swapTab(t,el){
+  document.getElementById('swap-request-panel').style.display=t==='request'?'block':'none';
+  document.getElementById('swap-list-panel').style.display=t==='list'?'block':'none';
+  document.querySelectorAll('#page-swaps .tabs .tab').forEach(x=>x.classList.remove('on'));
+  if(el)el.classList.add('on');
+  if(t==='list') renderSwaps();
+}
+function loadMyShifts(){
+  const date=document.getElementById('sw-my-date')?.value;
+  const el=document.getElementById('sw-my-shifts');if(!el)return;
+  if(!date||!CU?.physId){el.innerHTML='';return;}
+  const shifts=S.drShifts.filter(s=>s.physId===CU.physId&&s.date===date);
+  el.innerHTML=shifts.length
+    ?shifts.map(s=>`<option value="${s.id}">${s.shift} @ ${s.site}</option>`).join('')
+    :'<option disabled>No shifts on this date</option>';
+}
+function loadTheirShifts(){
+  const pid=+document.getElementById('sw-their-phys')?.value;
+  const date=document.getElementById('sw-my-date')?.value;
+  const el=document.getElementById('sw-their-shifts');if(!el)return;
+  if(!pid||!date){el.innerHTML='';return;}
+  const shifts=S.drShifts.filter(s=>s.physId===pid&&s.date===date);
+  el.innerHTML=shifts.length
+    ?shifts.map(s=>`<option value="${s.id}">${s.shift} @ ${s.site}</option>`).join('')
+    :'<option disabled>No shifts on this date</option>';
+}
+function submitSwapRequest(){
+  const toId=+document.getElementById('sw-their-phys')?.value;
+  const date=document.getElementById('sw-my-date')?.value;
+  const reason=document.getElementById('sw-reason')?.value.trim()||'';
+  if(!toId||!date){alert('Select a physician and date');return;}
+  S.swapRequests.push({
+    id:S.nextId++,fromPhysId:CU?.physId||null,toPhysId:toId,
+    date,shiftType:'1st Shift',site:'',reason,status:'pending',ts:new Date().toISOString()
+  });
+  triggerSave();renderSwaps();
+  const msgEl=document.getElementById('sw-msg');
+  if(msgEl){msgEl.textContent='✓ Swap request submitted';msgEl.style.color='var(--green-t)';setTimeout(()=>{msgEl.textContent='';},3000);}
+}
+
+/* ─── USER MANAGEMENT ─── */
+async function adminCreateAccount(){
+  if(!_adminOnly('create accounts'))return;
+  const first=document.getElementById('ca-first')?.value.trim();
+  const last=document.getElementById('ca-last')?.value.trim();
+  const email=document.getElementById('ca-email')?.value.trim().toLowerCase();
+  const pw=document.getElementById('ca-pw')?.value;
+  const role=document.getElementById('ca-role')?.value||'user';
+  const physId=parseInt(document.getElementById('ca-phys')?.value)||null;
+  const msgEl=document.getElementById('ca-msg');
+  if(!first||!last||!email||!pw){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">All fields required.</span>';return;}
+  if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Creating…</span>';
+  try{
+    const sb=_initAuthClient();if(!sb)throw new Error('Supabase not configured');
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session?.access_token) throw new Error('Not authenticated');
+    const url=_getUrl();
+    const res=await fetch(`${url}/functions/v1/create-user`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
+      body:JSON.stringify({action:'create',email,password:pw,first,last,role,physId})
+    });
+    const body=await res.json();
+    if(!res.ok||body.error) throw new Error(body.error||'Failed');
+    // Add to local USERS list
+    const newUser={id:body.id,email,first,last,role,physId,joined:new Date().toISOString().slice(0,10)};
+    USERS.push(newUser);
+    triggerSave();
+    if(msgEl)msgEl.innerHTML=`<span style="color:var(--green-t)">✓ Account created for ${email}</span>`;
+    renderUserMgmt();
+  }catch(e){
+    if(msgEl)msgEl.innerHTML=`<span style="color:var(--red-t)">Error: ${e.message}</span>`;
+  }
+}
+
+/* ─── PHYSICIAN SITE RULES ─── */
+let _srPhysId=null;
+function openPhysSiteRules(physId){
+  _srPhysId=physId;
+  const p=S.physicians.find(x=>x.id===physId);if(!p)return;
+  document.getElementById('phys-site-rules-wrap').style.display='block';
+  document.querySelector('#phys-site-rules-wrap .sr-title')?.setAttribute &&
+    (() => {
+      const t=document.querySelector('#phys-site-rules-wrap .sr-title');
+      if(t) t.textContent=`Site Rules — ${p.last}, ${p.first}`;
+    })();
+  srTab('site', document.querySelector('#phys-site-rules-wrap .tab'));
+  renderConditionsList();
+  if(typeof renderIRBlackoutList==='function') renderIRBlackoutList(_srPhysId);
+}
+function closePhysSiteRules(){
+  document.getElementById('phys-site-rules-wrap').style.display='none';
+  _srPhysId=null;
+}
+function srTab(t,el){
+  ['site','seq','daycon','shifttype','irblk'].forEach(tab=>{
+    const el=document.getElementById(`sr-panel-${tab}`);
+    if(el) el.style.display=tab===t?'block':'none';
+  });
+  document.querySelectorAll('#phys-site-rules-wrap .tab').forEach(x=>x.classList.remove('on'));
+  if(el) el.classList.add('on');
+}
+function renderConditionsList(){
+  const el=document.getElementById('sr-cond-list');if(!el)return;
+  const p=S.physicians.find(x=>x.id===_srPhysId);
+  const rules=p?.siteRules||[];
+  if(!rules.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">No site rules.</div>';return;}
+  el.innerHTML=rules.map((r,i)=>`<div class="row">
+    <div style="flex:1;font-size:12px">
+      <strong>${r.site}</strong> · max ${r.maxPerMonth||'—'}/mo · maxConsec ${r.maxConsec||'—'}
+      ${r.blocked?'<span class="tag tr" style="font-size:9px">Blocked</span>':''}
+    </div>
+    <button class="br bxs" onclick="removeSiteRule(${i})">✕</button>
+  </div>`).join('');
+}
+function addSiteRule(){
+  if(!_srPhysId)return;
+  const site=document.getElementById('sr-site')?.value;
+  const maxPerMonth=+document.getElementById('sr-max-mo')?.value||null;
+  const maxConsec=+document.getElementById('sr-max-con')?.value||null;
+  const blocked=document.getElementById('sr-blocked')?.checked||false;
+  if(!site){alert('Select a site');return;}
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  const existing=p.siteRules.findIndex(r=>r.site===site);
+  if(existing>=0) p.siteRules[existing]={site,maxPerMonth,maxConsec,blocked};
+  else p.siteRules.push({site,maxPerMonth,maxConsec,blocked});
+  triggerSave();renderConditionsList();
+}
+function removeSiteRule(idx){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  p.siteRules.splice(idx,1);triggerSave();renderConditionsList();
+}
+function addSeqRule(){
+  if(!_srPhysId)return;
+  const site=document.getElementById('sr-seq-site')?.value;
+  const maxConsec=+document.getElementById('sr-seq-max')?.value||0;
+  if(!site||!maxConsec){alert('Select site and max consecutive days');return;}
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  const existing=p.siteRules.findIndex(r=>r.site===site);
+  if(existing>=0) p.siteRules[existing].maxConsec=maxConsec;
+  else p.siteRules.push({site,maxConsec});
+  triggerSave();renderConditionsList();
+}
+function addDayCondition(){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  const site=document.getElementById('sr-dc-site')?.value;
+  const dow=+document.getElementById('sr-dc-dow')?.value;
+  if(!site){alert('Select a site');return;}
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  const r=p.siteRules.find(x=>x.site===site)||{site};
+  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
+  if(!r.blockedDOW) r.blockedDOW=[];
+  if(!r.blockedDOW.includes(dow)) r.blockedDOW.push(dow);
+  triggerSave();renderConditionsList();
+}
+function addShiftTypeRule(){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  const site=document.getElementById('sr-st-site')?.value;
+  const shift=document.getElementById('sr-st-shift')?.value;
+  const maxPerMonth=+document.getElementById('sr-st-max')?.value||null;
+  if(!site||!shift){alert('Select site and shift type');return;}
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  const r=p.siteRules.find(x=>x.site===site)||{site};
+  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
+  if(!r.shiftLimits) r.shiftLimits={};
+  r.shiftLimits[shift]=maxPerMonth;
+  triggerSave();renderConditionsList();
+}
+function addBlackout(){
+  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  const site=document.getElementById('sr-blk-site')?.value;
+  const start=document.getElementById('sr-blk-start')?.value;
+  const end=document.getElementById('sr-blk-end')?.value;
+  if(!start||!end){alert('Select start and end dates');return;}
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  const r=p.siteRules.find(x=>x.site===site)||{site};
+  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
+  if(!r.blackouts) r.blackouts=[];
+  r.blackouts.push({start,end});
+  triggerSave();renderConditionsList();
+}
+
+/* ─── HOLIDAY AUTO-ASSIGN (page handler) ─── */
+function renderHolidayAuto(){
+  // The holiday-auto page uses the holiday definitions from the Define tab
+  // Refresh the career tally when opening
+  if(typeof renderHolCareerTally==='function') renderHolCareerTally();
+}
+function previewHolidayAA(){
+  if(typeof previewHolRandom==='function') previewHolRandom();
+}
+function applyHolidayAA(){
+  if(typeof applyHolRandom==='function') applyHolRandom();
+}
+
+/* ─── HOLIDAY SCHEDULE VIEW ─── */
+function renderHolSchedule(){
+  const yr=+document.getElementById('holsched-yr')?.value||new Date().getFullYear();
+  const el=document.getElementById('hol-schedule-content');if(!el)return;
+  const hols=S.holidays.filter(h=>h.year===yr).sort((a,b)=>a.date>b.date?1:-1);
+  if(!hols.length){el.innerHTML='<div class="note ni">No holiday assignments for '+yr+'.</div>';return;}
+  // Group by holiday name
+  const grouped={};
+  hols.forEach(h=>{
+    const key=`${h.name}|${h.group}`;
+    if(!grouped[key]) grouped[key]={name:h.name,group:h.group,dates:[],physId:h.physId};
+    grouped[key].dates.push(h.date);
+  });
+  el.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+    <th>Holiday</th><th>Group</th><th>Date(s)</th><th>Physician</th>
+  </tr></thead><tbody>
+  ${Object.values(grouped).sort((a,b)=>a.dates[0]>b.dates[0]?1:-1).map(g=>`<tr>
+    <td style="font-weight:700">${g.name}</td>
+    <td><span class="tag ${g.group==='DR'?'tb':'tt'}">${g.group}</span></td>
+    <td style="font-size:11px">${g.dates.sort().join(', ')}</td>
+    <td>${pname(g.physId)}</td>
+  </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+/* ─── IMPORT PAGE ─── */
+function downloadTemplate(type){
+  let csv='';
+  if(type==='shifts'){
+    csv='date,shift,site,subspecialty,notes\n2026-01-02,1st,CHS,,\n2026-01-03,2nd,CHN,,';
+  } else if(type==='vacations'){
+    csv='physician_last,start,end,type,notes\nSmith,2026-06-01,2026-06-07,Vacation,';
+  } else {
+    csv='date,shift,site\n2026-01-02,1st,CHS';
+  }
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`template_${type}.csv`;
+  a.click();
+}
+function previewVacImport(input){
+  const file=input?.files?.[0];if(!file)return;
+  const el=document.getElementById('vac-import-preview');if(!el)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const lines=e.target.result.split('\n').filter(l=>l.trim());
+      const header=lines[0].toLowerCase().split(',').map(h=>h.trim());
+      const rows=lines.slice(1).map(l=>l.split(',').map(c=>c.trim()));
+      let html=`<table style="font-size:11px"><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}<th>Status</th></tr></thead><tbody>`;
+      const toImport=[];
+      rows.forEach(row=>{
+        const obj={};header.forEach((h,i)=>obj[h]=row[i]||'');
+        const p=S.physicians.find(x=>x.last.toLowerCase()===obj['physician_last']?.toLowerCase());
+        const ok=p&&obj['start']&&obj['end'];
+        if(ok) toImport.push({physId:p.id,start:obj['start'],end:obj['end'],type:obj['type']||'Vacation',notes:obj['notes']||''});
+        html+=`<tr>${header.map(h=>`<td>${obj[h]||'—'}</td>`).join('')}<td>${ok?'<span class="tag tg">✓</span>':'<span class="tag tr">✗</span>'}</td></tr>`;
+      });
+      html+='</tbody></table>';
+      el.innerHTML=html;
+      el.dataset.rows=JSON.stringify(toImport);
+      const applyBtn=document.getElementById('vac-import-apply');
+      if(applyBtn) applyBtn.style.display=toImport.length?'inline-block':'none';
+    }catch(err){el.innerHTML=`<div class="note ne">Parse error: ${err.message}</div>`;}
+  };
+  reader.readAsText(file);
+}
+function applyVacImport(){
+  const el=document.getElementById('vac-import-preview');if(!el)return;
+  try{
+    const rows=JSON.parse(el.dataset.rows||'[]');
+    rows.forEach(r=>S.vacations.push({id:S.nextId++,...r}));
+    triggerSave();
+    el.innerHTML=`<div class="note ns">✓ Imported ${rows.length} vacation entries.</div>`;
+    const applyBtn=document.getElementById('vac-import-apply');
+    if(applyBtn) applyBtn.style.display='none';
+  }catch(e){alert('Import failed: '+e.message);}
+}
+function previewShiftsImport(input){
+  const file=input?.files?.[0];if(!file)return;
+  const el=document.getElementById('shifts-import-preview');if(!el)return;
+  const pid=+document.getElementById('import-phys')?.value;
+  if(!pid){el.innerHTML='<div class="note nw">Select a physician first.</div>';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const lines=e.target.result.split('\n').filter(l=>l.trim());
+      const header=lines[0].toLowerCase().split(',').map(h=>h.trim());
+      const rows=lines.slice(1).map(l=>l.split(',').map(c=>c.trim()));
+      const p=S.physicians.find(x=>x.id===pid);
+      let html=`<table style="font-size:11px"><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}<th>Status</th></tr></thead><tbody>`;
+      const toImport=[];
+      rows.forEach(row=>{
+        const obj={};header.forEach((h,i)=>obj[h]=row[i]||'');
+        const ok=obj['date']&&obj['shift'];
+        if(ok) toImport.push({physId:pid,date:obj['date'],shift:obj['shift'],site:obj['site']||p?.anchorSite||'',sub:obj['subspecialty']||'',notes:obj['notes']||'',autoHome:false});
+        html+=`<tr>${header.map(h=>`<td>${obj[h]||'—'}</td>`).join('')}<td>${ok?'<span class="tag tg">✓</span>':'<span class="tag tr">✗</span>'}</td></tr>`;
+      });
+      html+='</tbody></table>';
+      el.innerHTML=html;
+      el.dataset.rows=JSON.stringify(toImport);
+      const applyBtn=document.getElementById('shifts-import-apply');
+      if(applyBtn) applyBtn.style.display=toImport.length?'inline-block':'none';
+    }catch(err){el.innerHTML=`<div class="note ne">Parse error: ${err.message}</div>`;}
+  };
+  reader.readAsText(file);
+}
+function applyShiftsImport(){
+  const el=document.getElementById('shifts-import-preview');if(!el)return;
+  try{
+    const rows=JSON.parse(el.dataset.rows||'[]');
+    rows.forEach(r=>S.drShifts.push({id:S.nextId++,...r}));
+    triggerSave();
+    el.innerHTML=`<div class="note ns">✓ Imported ${rows.length} shift entries.</div>`;
+    const applyBtn=document.getElementById('shifts-import-apply');
+    if(applyBtn) applyBtn.style.display='none';
+  }catch(e){alert('Import failed: '+e.message);}
+}
+
+/* ─── MY VACATION SAVE ─── */
+function saveMyVacNote(){
+  const el=document.getElementById('myvac-save-msg');
+  if(el){el.textContent='✓ Saved';el.style.color='var(--green-t)';setTimeout(()=>{el.textContent='';},2000);}
+  triggerSave();
+}
+
+/* ─── HOLIDAY NEEDS (legacy stubs) ─── */
+function addHolidayNeed(){
+  const name=document.getElementById('haa-hn-name')?.value.trim();
+  const grp=document.getElementById('haa-hn-grp')?.value||'DR';
+  const slots=+document.getElementById('haa-hn-slots')?.value||1;
+  if(!name)return;
+  S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
+  triggerSave();
+}
+
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
@@ -8573,26 +8928,6 @@ function deleteHoliday(id){
   triggerSave(); renderHolTable(); renderHolCounter();
 }
 
-function renderHolCounter(){
-  const grp=document.getElementById('hcg')?.value||'ALL';
-  const yr =document.getElementById('hcy')?.value||'all';
-  const filtered=S.holidays.filter(h=>(grp==='ALL'||h.group===grp)&&(yr==='all'||h.year===+yr));
-  const c={};
-  filtered.forEach(h=>{
-    if(!c[h.physId])c[h.physId]={tot:0,nm:{}};
-    c[h.physId].tot++;
-    c[h.physId].nm[h.name]=(c[h.physId].nm[h.name]||0)+1;
-  });
-  document.getElementById('hol-counter').innerHTML=
-    Object.entries(c).sort((a,b)=>b[1].tot-a[1].tot).map(([id,v])=>`
-      <div class="row">
-        <div style="flex:1">
-          <div style="font-weight:700;font-size:12px">${pname(+id)}</div>
-          <div style="font-size:10px;color:var(--txt3)">${Object.entries(v.nm).map(([n,cnt])=>`${n}×${cnt}`).join(', ')}</div>
-        </div>
-        <span class="tag tp">${v.tot}</span>
-      </div>`).join('')||'<p style="color:var(--txt3);font-size:12px">No data.</p>';
-}
 
 // ── Calendar sync helpers ───────────────────────────────────────────────────
 
@@ -8759,7 +9094,6 @@ function applyHolRandom(){
 }
 
 // Stubs kept for backward compat (old page-holiday-auto used these)
-function renderHolidayAuto(){ renderHolDefList(); }
 function renderBlackoutList(){ renderHaaBlackoutList(); }
 function renderHolidayNeedsList(){ renderHaaNeedsList(); }
 
@@ -8772,34 +9106,7 @@ function osTab(t,el){
   if(t==='manage'){populateSel('osm-site',S.sites.map(s=>s.name),'');renderManageShifts();}
 }
 
-function addOpenShift(){
-  const date=document.getElementById('osm-date')?.value;
-  if(!date){alert('Select a date.');return;}
-  const type=document.getElementById('osm-type')?.value||'1st Shift';
-  const grp=document.getElementById('osm-grp')?.value||'DR';
-  S.openShifts.push({id:S.nextId++,date,shiftType:type,
-    sub:document.getElementById('osm-sub')?.value||'',
-    site:document.getElementById('osm-site')?.value||'',
-    group:grp,claimedBy:null,
-    notes:document.getElementById('osm-notes')?.value||''});
-  triggerSave();renderManageShifts();renderOpenShifts();
-}
 
-function renderManageShifts(){
-  const ym=document.getElementById('osmf-mo')?.value||new Date().toISOString().slice(0,7);
-  const grp=document.getElementById('osmf-grp')?.value||'';
-  const rows=S.openShifts.filter(o=>o.date.startsWith(ym)&&(!grp||o.group===grp)).sort((a,b)=>a.date>b.date?1:-1);
-  const el=document.getElementById('osm-tbody');if(!el)return;
-  el.innerHTML=rows.map(o=>`<tr>
-    <td>${o.date}</td><td><span class="tag ta">${o.shiftType}</span></td>
-    <td><span class="tag ${o.group==='IR'?'tt':'tb'}">${o.group}</span></td>
-    <td>${o.sub||'—'}</td><td>${o.site||'—'}</td>
-    <td>${o.claimedBy?`<span class="tag tg">${pname(o.claimedBy)}</span>`:'<span class="tag tgr">Unclaimed</span>'}</td>
-    <td>${o.notes||'—'}</td>
-    <td><button class="bsm" onclick="editOpenShift(${o.id})">Edit</button></td>
-    <td><button class="br bxs" onclick="deleteOpenShift(${o.id})">X</button></td>
-  </tr>`).join('')||'<tr><td colspan="9" style="color:var(--txt3);text-align:center">No shifts this month.</td></tr>';
-}
 
 function editOpenShift(id){
   const o=S.openShifts.find(x=>x.id===id);if(!o)return;
@@ -8894,9 +9201,8 @@ async function _pushToSupabase(){
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
-    vacPicking:S.vacPicking,
-        driveTimes:S.driveTimes||{},
         vacPicking:S.vacPicking,
+        driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
       })
     };
