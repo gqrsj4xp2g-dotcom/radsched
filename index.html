@@ -7062,15 +7062,12 @@ Admin access is required for data-changing operations. The current user role is:
       status.textContent = loopCount === 1 ? 'Thinking…' : `Using tools (step ${loopCount})…`;
 
       // Route through Supabase edge function (handles CORS + API key server-side)
-      const sb = _supabase || _initSupabase() && _supabase;
-      const session = sb ? (await sb.auth.getSession())?.data?.session : null;
-      const authHeader = session?.access_token ? `Bearer ${session.access_token}` : '';
-
       const resp = await fetch(`${_getUrl()}/functions/v1/ai-proxy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(authHeader ? { 'Authorization': authHeader } : {})
+          'apikey': _getKey(),
+          'Authorization': `Bearer ${_getKey()}`
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-5-20251001',
