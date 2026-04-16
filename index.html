@@ -322,6 +322,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item on" onclick="nav('dashboard',this)">Dashboard</div>
       <div class="snav-item" onclick="nav('my-schedule',this)">My Schedule</div>
       <div class="snav-item" onclick="nav('chat',this)">💬 Chat</div>
+      <div class="snav-item admin-only" onclick="nav('ai-agent',this)">🤖 AI Scheduler</div>
       <div class="snav-item" onclick="nav('swaps',this)">🔄 Shift Swaps</div>
       <div class="snav-sect">People</div>
       <div class="snav-item admin-only" onclick="nav('physicians',this)">Physician Roster</div>
@@ -942,7 +943,8 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <div id="irs-info" style="margin-bottom:8px"></div>
       <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
-      <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → Home</button>
+      <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → IR Home</button>
+      <button class="bt bsm admin-only" onclick="fillDRHomeForIR()" style="margin-left:6px" title="Assign diagnostic read-from-home DR shifts to IR physicians who have no IR shift scheduled">Fill Unscheduled → DR Home</button>
     </div>
 
   <!-- Shared table + filters -->
@@ -1133,28 +1135,71 @@ tbody tr:hover{background:var(--bg3)}
 <!-- CHAT PAGE -->
 <div id="page-chat" class="page">
   <div class="pg-title">Team Chat</div>
-  <div class="pg-sub">Real-time messaging with your radiology team. Messages persist for this session.</div>
-  <div style="display:flex;gap:12px;height:580px">
-    <!-- Channel list -->
-    <div style="width:160px;flex-shrink:0">
-      <div class="card" style="height:100%;padding:10px">
-        <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Channels</div>
-        <div id="chat-channels"></div>
-        <div style="margin-top:12px;font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Online</div>
-        <div id="chat-online"></div>
+  <div class="pg-sub">Real-time messaging with your radiology team — groups, direct messages, and broadcasts.</div>
+  <div style="display:flex;gap:12px;height:600px">
+
+    <!-- Left sidebar: groups + DMs -->
+    <div style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+
+      <!-- Groups -->
+      <div class="card" style="flex:1;padding:10px;overflow-y:auto;min-height:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Groups</span>
+          <button class="bp bxs admin-only" style="font-size:10px;padding:2px 7px" onclick="openChatGroupEditor()">+ New</button>
+        </div>
+        <div id="chat-group-list"></div>
+      </div>
+
+      <!-- Direct Messages -->
+      <div class="card" style="flex:1;padding:10px;overflow-y:auto;min-height:0">
+        <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Direct Messages</div>
+        <div id="chat-dm-list"></div>
       </div>
     </div>
-    <!-- Message area -->
+
+    <!-- Main chat area -->
     <div style="flex:1;display:flex;flex-direction:column;min-width:0">
       <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden">
-        <div style="padding:10px 14px;border-bottom:1px solid var(--bdr);font-weight:800;font-size:13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center">
-          <span id="chat-channel-title"># general</span>
-          <span style="font-size:10px;color:var(--txt3)" id="chat-member-count"></span>
+
+        <!-- Header -->
+        <div style="padding:10px 14px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>
+            <div style="font-weight:800;font-size:13px" id="chat-channel-title">Select a group or person</div>
+            <div style="font-size:10px;color:var(--txt3)" id="chat-member-count"></div>
+          </div>
+          <button class="br bsm admin-only" id="chat-edit-group-btn" style="display:none;font-size:10px" onclick="editCurrentChatGroup()">✏ Edit Group</button>
         </div>
-        <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px"></div>
-        <div style="padding:10px 14px;border-top:1px solid var(--bdr);display:flex;gap:8px">
-          <input id="chat-input" placeholder="Message #general..." style="flex:1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}">
-          <button class="bp" onclick="sendChatMessage()">Send</button>
+
+        <!-- Messages -->
+        <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:4px"></div>
+
+        <!-- Composer -->
+        <div id="chat-composer" style="padding:10px 14px;border-top:1px solid var(--bdr);display:none">
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <textarea id="chat-input" placeholder="Write a message…" rows="2"
+              style="flex:1;resize:none;border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;border:1px solid var(--bdr);background:var(--bg2);color:var(--txt1)"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+            <button class="bp" onclick="sendChatMessage()" style="padding:8px 16px;height:fit-content">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Group editor modal overlay -->
+    <div id="chat-group-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)closeChatGroupEditor()">
+      <div class="card" style="width:420px;max-height:80vh;overflow-y:auto;padding:20px">
+        <div style="font-weight:800;font-size:15px;margin-bottom:14px" id="chat-group-modal-title">New Group</div>
+        <div class="fg"><label>Group Name</label><input id="cg-name" placeholder="e.g. IR Team, Night Shift"></div>
+        <div class="fg" style="margin-top:8px"><label>Description (optional)</label><input id="cg-desc" placeholder="What's this group for?"></div>
+        <div class="fg" style="margin-top:8px">
+          <label>Members <span style="font-weight:400;color:var(--txt3)">(leave empty = visible to all)</span></label>
+          <div id="cg-members" style="display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid var(--bdr);border-radius:6px;padding:8px"></div>
+        </div>
+        <input type="hidden" id="cg-edit-id">
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="bp" onclick="saveChatGroup()">Save Group</button>
+          <button class="br bsm" onclick="closeChatGroupEditor()">Cancel</button>
+          <button class="br bsm" id="cg-delete-btn" style="display:none;margin-left:auto;color:var(--red-t)" onclick="deleteChatGroup()">Delete</button>
         </div>
       </div>
     </div>
@@ -1914,6 +1959,67 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
     <div id="link-modal-body"></div>
   </div>
 </div>
+
+<!-- AI SCHEDULER AGENT -->
+<div id="page-ai-agent" class="page">
+  <div class="pg-title">🤖 AI Scheduling Assistant</div>
+  <div class="pg-sub">Describe scheduling tasks in plain English — the AI reads your data and applies changes live.</div>
+
+  <div style="display:flex;gap:14px;height:660px">
+    <div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+      <div class="card" style="padding:12px;flex-shrink:0">
+        <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Summarize this month schedule coverage and highlight any gaps or over-assigned physicians.')">📊 Schedule summary</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Find all IR physicians who have no IR shift scheduled for any weekday this month and tell me if they need a DR home shift.')">🔍 Check unscheduled IR</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Review holiday call assignments and tell me if any physician has significantly more or fewer than their fair share based on FTE.')">🎄 Holiday fairness check</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Look for scheduling conflicts: back-to-back IR calls, physicians on vacation who still have shifts, or anyone over their monthly FTE cap.')">⚠️ Find conflicts</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Show me the IR call distribution and identify who is over or under their target.')">⚖️ IR call balance</button>
+        </div>
+      </div>
+      <div class="card" style="padding:12px;flex:1;overflow-y:auto">
+        <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">What it can do</div>
+        <div style="font-size:11px;color:var(--txt2);line-height:1.7">
+          ✦ Read &amp; analyze schedule data<br>
+          ✦ Assign or remove shifts<br>
+          ✦ Add vacation / blackout periods<br>
+          ✦ Fill unscheduled days<br>
+          ✦ Analyze fairness &amp; gaps<br>
+          ✦ Explain any scheduling rule<br>
+          ✦ Bulk schedule operations
+        </div>
+        <div style="margin-top:12px;font-size:10px;color:var(--txt3);border-top:1px solid var(--bdr);padding-top:8px">Changes apply live and save to your database instantly.</div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden">
+        <div style="padding:10px 16px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:800;font-size:13px">AI Scheduling Agent</span>
+            <span style="font-size:11px;color:var(--txt3);margin-left:8px">claude-sonnet-4-5</span>
+          </div>
+          <button class="br bsm" onclick="clearAIChat()" style="font-size:11px">Clear</button>
+        </div>
+        <div id="ai-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;flex-direction:column;align-items:flex-start">
+            <div style="font-size:10px;color:var(--txt3);margin-bottom:4px">AI Scheduler</div>
+            <div style="max-width:85%;padding:10px 14px;border-radius:14px 14px 14px 3px;font-size:13px;line-height:1.5;background:var(--bg3);color:var(--txt1)">Hi! I have full access to your schedule data. Ask me to analyze, find problems, or make changes directly. What would you like to do?</div>
+          </div>
+        </div>
+        <div style="padding:12px 16px;border-top:1px solid var(--bdr)">
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <textarea id="ai-input" rows="2" placeholder="e.g. Assign a DR home shift to Dr. Riedinger for next Monday… or: Check if anyone is double-booked in July…"
+              style="flex:1;resize:none;border-radius:8px;padding:8px 12px;font-size:13px;font-family:inherit;border:1px solid var(--bdr);background:var(--bg2);color:var(--txt1)"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage();}"></textarea>
+            <button class="bp" onclick="sendAIMessage()" id="ai-send-btn" style="padding:8px 16px;height:fit-content">Send</button>
+          </div>
+          <div id="ai-status" style="font-size:10px;color:var(--txt3);margin-top:5px;min-height:14px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 /* ═══════════════════════════════════════════════════
@@ -2004,7 +2110,7 @@ function _buildSaveHTML(){
     openShifts:S.openShifts,siteSlots:S.siteSlots,irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
-    chatMessages:S.chatMessages,swapRequests:S.swapRequests,
+    chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
     _lastSaved:null,
   })+'/*S_END*/';
@@ -2295,7 +2401,7 @@ async function launchApp(){
 function _applyRemoteData(d){
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-    'openShifts','chatMessages','swapRequests','holidayBlackouts','holidayNeeds','physicians',
+    'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
     'sites','drSubs','irSubs','holidayDefs'];
   KEYS.forEach(k=>{
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
@@ -2389,7 +2495,7 @@ function _refreshCurrentPage(){
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
     holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,
     'open-shifts':renderOpenShifts,'user-mgmt':renderUserMgmt,
-    settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,
+    settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'ai-agent':renderAIAgent,
     'ir-shift-slots':renderIRShiftSlots,
   };
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
@@ -2401,7 +2507,7 @@ function _refreshCurrentPage(){
 // ── Reactive persistence system ──
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-  'openShifts','physicians','chatMessages','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs'];
+  'openShifts','physicians','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs'];
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
@@ -2502,7 +2608,10 @@ let S=/*S_START*/{
     picks:{},assignments:{}},
   // Chat messages
   chatMessages:[
-    {id:1,userId:'u1',text:'Welcome to RadScheduler! Use the Chat tab to coordinate with colleagues.',ts:'2025-06-01T09:00:00',channel:'general'},
+    {id:1,userId:'u1',text:'Welcome to RadScheduler! Use the Chat tab to coordinate with colleagues.',ts:'2025-06-01T09:00:00',channel:'general',toGroupId:null,toUserId:null},
+  ],
+  chatGroups:[
+    {id:2,name:'General',memberIds:[],createdBy:'u1',isPrivate:false,description:'Everyone'},
   ],
   // Shift swap requests
   swapRequests:[],
@@ -2787,7 +2896,7 @@ function nav(pg,el){
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
-    'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,
+    'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,
   };
   if(fns[pg]) fns[pg]();
 }
@@ -3441,6 +3550,7 @@ function bulkAssignMultiWeek(shift){
 
 // Track active FTE tab explicitly — CSS display state is unreliable
 let _fteActiveTab='month';
+let _holActiveTab='assignments';
 
 function _renderFTECurrent(){
   if(_fteActiveTab==='period') renderFTEPeriod();
@@ -5699,7 +5809,7 @@ function claimShift(oid,pid){
   const p=S.physicians.find(x=>x.id===pid);
   if(o.group==='DR'&&p.role==='IR'){alert('IR-only physicians cannot claim DR shifts.');return;}
   o.claimedBy=pid;
-  if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'South',site:o.site,notes:'Claimed'});
+  if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'',site:o.site,notes:'Claimed'});
   else if(o.shiftType.includes('Weekend'))S.weekendCalls.push({id:S.nextId++,physId:pid,satDate:o.date,sunDate:addDays(o.date,1),sub:o.sub,site:o.site,ctype:'Primary',notes:'Claimed'});
   else S.drShifts.push({id:S.nextId++,physId:pid,date:o.date,shift:'1st',site:o.site,sub:o.sub,notes:'Claimed',autoHome:false});
   triggerSave();renderOpenShifts();
@@ -5721,21 +5831,248 @@ function addOpenShift(){
 }
 
 /* ─── CHAT ─── */
+
+/* ─── CHAT ─── */
+let _chatContext = null; // {type:'group'|'dm', id:string, name:string}
+
+// ── Sidebar rendering ──────────────────────────────────────────────────────
 function renderChat(){
-  const el=document.getElementById('chat-messages');if(!el)return;
-  const msgs=(S.chatMessages||[]).sort((a,b)=>a.ts>b.ts?1:-1);
+  _renderChatGroupList();
+  _renderChatDMList();
+  if(_chatContext) _openChatContext(_chatContext);
+  else _showChatPlaceholder();
+}
+
+function _renderChatGroupList(){
+  const el=document.getElementById('chat-group-list');if(!el)return;
+  const groups=(S.chatGroups||[]).filter(g=>
+    !g.memberIds?.length || // public groups
+    g.memberIds.includes(CU?.id) || // member
+    CU?.role==='admin'
+  );
+  if(!groups.length){
+    el.innerHTML='<div style="font-size:11px;color:var(--txt3);font-style:italic">No groups yet</div>';
+    return;
+  }
+  el.innerHTML=groups.map(g=>{
+    const active=_chatContext?.type==='group'&&_chatContext.id===String(g.id);
+    const unread=_countUnread('group',String(g.id));
+    return`<div onclick="openChatGroup('${g.id}')" style="padding:5px 8px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:${active?'var(--navy)':'transparent'};color:${active?'#fff':'var(--txt1)'};margin-bottom:2px;font-size:12px">
+      <span># ${g.name}</span>
+      ${unread?`<span style="background:var(--red-t);color:#fff;border-radius:10px;font-size:9px;padding:1px 5px;font-weight:700">${unread}</span>`:''}
+    </div>`;
+  }).join('');
+}
+
+function _renderChatDMList(){
+  const el=document.getElementById('chat-dm-list');if(!el)return;
+  // Show all users except self
+  const others=USERS.filter(u=>u.id!==CU?.id);
+  if(!others.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);font-style:italic">No other users</div>';return;}
+  el.innerHTML=others.map(u=>{
+    const dmId=_dmId(CU?.id,u.id);
+    const active=_chatContext?.type==='dm'&&_chatContext.id===dmId;
+    const unread=_countUnread('dm',dmId);
+    const p=S.physicians.find(x=>x.id===u.physId);
+    const label=p?p.last+', '+p.first.charAt(0)+'.':(u.first||u.email);
+    return`<div onclick="openChatDM('${u.id}')" style="padding:5px 8px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:${active?'var(--navy)':'transparent'};color:${active?'#fff':'var(--txt1)'};margin-bottom:2px;font-size:12px">
+      <span>💬 ${label}</span>
+      ${unread?`<span style="background:var(--red-t);color:#fff;border-radius:10px;font-size:9px;padding:1px 5px;font-weight:700">${unread}</span>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ── Open group / DM ──────────────────────────────────────────────────────
+function openChatGroup(groupId){
+  const g=(S.chatGroups||[]).find(x=>String(x.id)===String(groupId));if(!g)return;
+  _chatContext={type:'group',id:String(g.id),name:g.name};
+  _markRead('group',String(g.id));
+  _openChatContext(_chatContext);
+  _renderChatGroupList();
+  _renderChatDMList();
+}
+
+function openChatDM(userId){
+  const u=USERS.find(x=>x.id===userId);if(!u)return;
+  const p=S.physicians.find(x=>x.id===u.physId);
+  const name=p?p.last+', '+p.first:(u.first+' '+u.last).trim()||u.email;
+  const dmId=_dmId(CU?.id,userId);
+  _chatContext={type:'dm',id:dmId,name,toUserId:userId};
+  _markRead('dm',dmId);
+  _openChatContext(_chatContext);
+  _renderChatGroupList();
+  _renderChatDMList();
+}
+
+function _openChatContext(ctx){
+  const titleEl=document.getElementById('chat-channel-title');
+  const countEl=document.getElementById('chat-member-count');
+  const composerEl=document.getElementById('chat-composer');
+  const editBtn=document.getElementById('chat-edit-group-btn');
+  const inp=document.getElementById('chat-input');
+  if(titleEl) titleEl.textContent=ctx.type==='group'?'# '+ctx.name:'💬 '+ctx.name;
+  if(editBtn) editBtn.style.display=(ctx.type==='group'&&CU?.role==='admin')?'block':'none';
+  if(countEl){
+    if(ctx.type==='group'){
+      const g=(S.chatGroups||[]).find(x=>String(x.id)===ctx.id);
+      const cnt=g?.memberIds?.length?g.memberIds.length:'All';
+      countEl.textContent=g?.description||`${cnt} member${cnt===1?'':'s'}`;
+    } else {
+      countEl.textContent='Direct Message';
+    }
+  }
+  if(composerEl) composerEl.style.display='block';
+  if(inp) inp.placeholder=ctx.type==='group'?`Message # ${ctx.name}…`:`Message ${ctx.name}…`;
+  _renderMessages();
+}
+
+function _showChatPlaceholder(){
+  const msgs=document.getElementById('chat-messages');
+  const composer=document.getElementById('chat-composer');
+  const titleEl=document.getElementById('chat-channel-title');
+  if(titleEl) titleEl.textContent='Select a group or person';
+  if(msgs) msgs.innerHTML='<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--txt3);font-size:13px;text-align:center;padding:40px">Select a group from the left<br>or start a direct message</div>';
+  if(composer) composer.style.display='none';
+}
+
+// ── Render messages ──────────────────────────────────────────────────────
+function _renderMessages(){
+  const el=document.getElementById('chat-messages');if(!el||!_chatContext)return;
+  const msgs=_getContextMessages().sort((a,b)=>a.ts>b.ts?1:-1);
+  if(!msgs.length){
+    el.innerHTML='<div style="text-align:center;color:var(--txt3);padding:40px;font-size:13px">No messages yet. Say something!</div>';
+    return;
+  }
+  let lastDate='';
   el.innerHTML=msgs.map(m=>{
     const isMe=m.userId===CU?.id;
     const u=USERS.find(x=>x.id===m.userId);
-    return`<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:10px">
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:2px">${u?u.first+' '+u.last:'?'} · ${m.ts?.slice(0,16).replace('T',' ')||''}</div>
-      <div style="max-width:70%;padding:8px 12px;border-radius:12px;font-size:13px;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}">
-        ${m.text.replace(/\n/g,'<br>')}
+    const dayStr=(m.ts||'').slice(0,10);
+    let dateDivider='';
+    if(dayStr!==lastDate){
+      lastDate=dayStr;
+      const label=dayStr===fmtDate(new Date())?'Today':dayStr;
+      dateDivider=`<div style="text-align:center;font-size:10px;color:var(--txt3);margin:8px 0;display:flex;align-items:center;gap:8px"><div style="flex:1;height:1px;background:var(--bdr)"></div>${label}<div style="flex:1;height:1px;background:var(--bdr)"></div></div>`;
+    }
+    return dateDivider+`<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:2px">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:3px;padding:0 4px">${u?u.first+' '+u.last:'?'} · ${(m.ts||'').slice(0,16).replace('T',' ')}</div>
+      <div style="max-width:72%;padding:8px 13px;border-radius:${isMe?'14px 14px 3px 14px':'14px 14px 14px 3px'};font-size:13px;line-height:1.45;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}">
+        ${m.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}
       </div>
     </div>`;
-  }).join('')||'<div style="text-align:center;color:var(--txt3);padding:20px">No messages yet.</div>';
+  }).join('');
   el.scrollTop=el.scrollHeight;
 }
+
+// ── Send message ──────────────────────────────────────────────────────────
+function sendChatMessage(){
+  const inp=document.getElementById('chat-input');if(!inp||!_chatContext)return;
+  const text=inp.value.trim();if(!text)return;
+  const msg={
+    id:S.nextId++,
+    userId:CU?.id,
+    text,
+    ts:new Date().toISOString(),
+    channel:_chatContext.type==='group'?_chatContext.id:'dm',
+    toGroupId:_chatContext.type==='group'?_chatContext.id:null,
+    toUserId:_chatContext.type==='dm'?_chatContext.toUserId:null,
+    dmId:_chatContext.type==='dm'?_chatContext.id:null,
+  };
+  S.chatMessages.push(msg);
+  inp.value='';
+  triggerSave();
+  _renderMessages();
+}
+
+// ── Group editor ──────────────────────────────────────────────────────────
+function openChatGroupEditor(groupId){
+  const modal=document.getElementById('chat-group-modal');if(!modal)return;
+  const g=groupId?(S.chatGroups||[]).find(x=>String(x.id)===String(groupId)):null;
+  document.getElementById('chat-group-modal-title').textContent=g?'Edit Group':'New Group';
+  document.getElementById('cg-name').value=g?.name||'';
+  document.getElementById('cg-desc').value=g?.description||'';
+  document.getElementById('cg-edit-id').value=g?String(g.id):'';
+  document.getElementById('cg-delete-btn').style.display=g?'block':'none';
+  // Populate member checkboxes
+  const membersEl=document.getElementById('cg-members');
+  membersEl.innerHTML=USERS.filter(u=>u.id!==CU?.id).map(u=>{
+    const checked=g?.memberIds?.includes(u.id)?'checked':'';
+    const p=S.physicians.find(x=>x.id===u.physId);
+    const label=p?p.last+', '+p.first:(u.first+' '+u.last).trim()||u.email;
+    return`<label style="display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;font-size:12px">
+      <input type="checkbox" value="${u.id}" ${checked} style="accent-color:var(--navy)"> ${label}
+      <span class="tag ${u.role==='admin'?'tb':'tg'}" style="font-size:9px">${u.role}</span>
+    </label>`;
+  }).join('')||'<div style="font-size:11px;color:var(--txt3)">No other users yet</div>';
+  modal.style.display='flex';
+}
+
+function editCurrentChatGroup(){
+  if(_chatContext?.type==='group') openChatGroupEditor(_chatContext.id);
+}
+
+function closeChatGroupEditor(){
+  const modal=document.getElementById('chat-group-modal');
+  if(modal) modal.style.display='none';
+}
+
+function saveChatGroup(){
+  if(!_adminOnly('manage chat groups'))return;
+  const name=document.getElementById('cg-name').value.trim();
+  if(!name){alert('Group name is required.');return;}
+  const desc=document.getElementById('cg-desc').value.trim();
+  const editId=document.getElementById('cg-edit-id').value;
+  const memberIds=[...document.querySelectorAll('#cg-members input[type=checkbox]:checked')].map(cb=>cb.value);
+  if(editId){
+    const g=(S.chatGroups||[]).find(x=>String(x.id)===editId);
+    if(g){Object.assign(g,{name,description:desc,memberIds});triggerSave();}
+  } else {
+    if(!(S.chatGroups)) S.chatGroups=[];
+    S.chatGroups.push({id:S.nextId++,name,description:desc,memberIds,createdBy:CU?.id,isPrivate:memberIds.length>0});
+    triggerSave();
+  }
+  closeChatGroupEditor();
+  renderChat();
+}
+
+function deleteChatGroup(){
+  if(!_adminOnly('delete chat groups'))return;
+  const editId=document.getElementById('cg-edit-id').value;if(!editId)return;
+  const g=(S.chatGroups||[]).find(x=>String(x.id)===editId);
+  if(!g)return;
+  if(!confirm(`Delete group "${g.name}"? Messages will be kept.`))return;
+  S.chatGroups=S.chatGroups.filter(x=>String(x.id)!==editId);
+  triggerSave();
+  closeChatGroupEditor();
+  if(_chatContext?.id===editId) _chatContext=null;
+  renderChat();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function _getContextMessages(){
+  if(!_chatContext)return[];
+  if(_chatContext.type==='group')
+    return(S.chatMessages||[]).filter(m=>String(m.toGroupId)===_chatContext.id||m.channel===_chatContext.id);
+  return(S.chatMessages||[]).filter(m=>m.dmId===_chatContext.id||
+    (m.toUserId===_chatContext.toUserId&&m.userId===CU?.id)||
+    (m.toUserId===CU?.id&&m.userId===_chatContext.toUserId));
+}
+
+function _dmId(a,b){return[a,b].sort().join('::');}
+
+// Simple unread counter (session-only — tracks last-seen timestamp per context)
+const _chatLastSeen={};
+function _markRead(type,id){_chatLastSeen[type+'::'+id]=new Date().toISOString();}
+function _countUnread(type,id){
+  const msgs=type==='group'
+    ?(S.chatMessages||[]).filter(m=>String(m.toGroupId)===id||m.channel===id)
+    :(S.chatMessages||[]).filter(m=>m.dmId===id);
+  const since=_chatLastSeen[type+'::'+id];
+  if(!since) return msgs.filter(m=>m.userId!==CU?.id).length;
+  return msgs.filter(m=>m.ts>since&&m.userId!==CU?.id).length;
+}
+
+
 function sendChat(){
   const inp=document.getElementById('chat-input');if(!inp)return;
   const text=inp.value.trim();if(!text)return;
@@ -5942,12 +6279,7 @@ function dashNavMonth(dir){
 }
 
 /* ─── CHAT ─── */
-function sendChatMessage(){
-  const inp=document.getElementById('chat-input');if(!inp)return;
-  const text=inp.value.trim();if(!text)return;
-  S.chatMessages.push({id:S.nextId++,userId:CU?.id,text,ts:new Date().toISOString()});
-  inp.value='';triggerSave();renderChat();
-}
+
 
 /* ─── SWAPS ─── */
 function swapTab(t,el){
@@ -6444,6 +6776,397 @@ function addHoliday(){
 
 
 
+
+/* ─── AI SCHEDULING AGENT ─── */
+
+let _aiHistory = [];  // conversation history for multi-turn context
+
+// ── Tool definitions ────────────────────────────────────────────────────
+const _AI_TOOLS = [
+  {
+    name: 'get_schedule_data',
+    description: 'Read current scheduling data from the application. Returns physicians, shifts, IR calls, vacations, holidays, and related data.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        collections: {
+          type: 'array',
+          items: { type: 'string', enum: ['physicians','drShifts','weekendCalls','irShifts','irCalls','vacations','holidays','openShifts','swapRequests','sites','cfg'] },
+          description: 'Which data collections to return'
+        },
+        month: { type: 'string', description: 'Optional YYYY-MM filter to limit shift/call data to a specific month' }
+      },
+      required: ['collections']
+    }
+  },
+  {
+    name: 'assign_dr_shift',
+    description: 'Assign a DR shift to a physician on a specific date.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:    { type: 'number', description: 'Physician ID' },
+        date:      { type: 'string', description: 'Date in YYYY-MM-DD format' },
+        shift:     { type: 'string', enum: ['Home','1st','2nd','3rd'], description: 'Shift type' },
+        site:      { type: 'string', description: 'Site name, or "At Home / Remote" for home shifts' },
+        sub:       { type: 'string', description: 'Subspecialty (optional)' },
+        notes:     { type: 'string', description: 'Notes (optional)' }
+      },
+      required: ['physId','date','shift']
+    }
+  },
+  {
+    name: 'remove_shift',
+    description: 'Remove a DR shift, IR shift, or IR call by its ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type:    { type: 'string', enum: ['drShift','irShift','irCall','weekendCall'], description: 'Type of shift to remove' },
+        shiftId: { type: 'number', description: 'The shift ID to remove' }
+      },
+      required: ['type','shiftId']
+    }
+  },
+  {
+    name: 'add_vacation',
+    description: 'Add a vacation or time-off block for a physician.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number' },
+        start:  { type: 'string', description: 'Start date YYYY-MM-DD' },
+        end:    { type: 'string', description: 'End date YYYY-MM-DD' },
+        type:   { type: 'string', enum: ['Vacation','CME','Sick Leave','Personal','Conference'], description: 'Type of time off' },
+        notes:  { type: 'string' }
+      },
+      required: ['physId','start','end','type']
+    }
+  },
+  {
+    name: 'add_ir_call_blackout',
+    description: 'Add an IR call blackout period for a physician (dates they cannot take IR call).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number' },
+        start:  { type: 'string' },
+        end:    { type: 'string' },
+        reason: { type: 'string' }
+      },
+      required: ['physId','start','end']
+    }
+  },
+  {
+    name: 'fill_dr_home_for_ir',
+    description: 'Automatically fill DR read-from-home shifts for all IR physicians who have no IR shift scheduled on a given month. Respects vacations, existing shifts, and blackouts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        month: { type: 'string', description: 'Month to fill in YYYY-MM format' }
+      },
+      required: ['month']
+    }
+  },
+  {
+    name: 'assign_ir_shift',
+    description: 'Assign an IR procedure shift to a physician.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number' },
+        date:   { type: 'string' },
+        shift:  { type: 'string', enum: ['1st','Home'] },
+        site:   { type: 'string' },
+        sub:    { type: 'string' },
+        notes:  { type: 'string' }
+      },
+      required: ['physId','date','shift']
+    }
+  }
+];
+
+// ── Tool execution ──────────────────────────────────────────────────────
+function _aiExecuteTool(name, input) {
+  const adminOk = CU?.role === 'admin';
+
+  if(name === 'get_schedule_data'){
+    const result = {};
+    const month = input.month;
+    (input.collections||[]).forEach(k => {
+      let data = S[k];
+      if(!data){ result[k] = []; return; }
+      // Filter by month if provided and collection has date fields
+      if(month && Array.isArray(data)){
+        const dated = ['drShifts','irShifts','irCalls','weekendCalls'];
+        if(dated.includes(k)){
+          data = data.filter(x => (x.date||x.satDate||'').startsWith(month));
+        }
+        if(k==='vacations'){
+          data = data.filter(v => v.start <= month+'-31' && v.end >= month+'-01');
+        }
+      }
+      result[k] = data;
+    });
+    // Add physician name helper
+    result._pname = (id) => {
+      const p = S.physicians.find(x=>x.id===id);
+      return p ? `${p.last}, ${p.first}` : `ID ${id}`;
+    };
+    return { ok: true, data: result };
+  }
+
+  if(name === 'assign_dr_shift'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, date, shift, site, sub, notes} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const vd = vacDays(physId);
+    if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
+    const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
+    if(existing) return { ok:false, error:`${p.last} already has a DR shift on ${date} (shift: ${existing.shift}).` };
+    const siteName = site || (shift==='Home'?'At Home / Remote': (p.anchorSite||S.sites[0]?.name||''));
+    S.drShifts.push({
+      id: S.nextId++, physId, date,
+      shift, site: siteName,
+      sub: sub||'', notes: notes||'AI assigned', autoHome: shift==='Home'
+    });
+    triggerSave();
+    if(document.getElementById('drb-tbody')) renderDRBuilder();
+    return { ok:true, message:`Assigned ${shift} DR shift to ${p.last} on ${date} at ${siteName}.` };
+  }
+
+  if(name === 'remove_shift'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {type, shiftId} = input;
+    const map = { drShift:'drShifts', irShift:'irShifts', irCall:'irCalls', weekendCall:'weekendCalls' };
+    const arr = map[type];
+    if(!arr) return { ok:false, error:'Unknown shift type.' };
+    const before = S[arr].length;
+    S[arr] = S[arr].filter(x=>x.id!==shiftId);
+    if(S[arr].length === before) return { ok:false, error:`No ${type} with ID ${shiftId} found.` };
+    triggerSave();
+    return { ok:true, message:`Removed ${type} ID ${shiftId}.` };
+  }
+
+  if(name === 'add_vacation'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, start, end, type, notes} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(end < start) return { ok:false, error:'End date must be after start date.' };
+    S.vacations.push({id:S.nextId++, physId, start, end, type: type||'Vacation', notes: notes||'AI assigned'});
+    triggerSave();
+    return { ok:true, message:`Added ${type} for ${p.last} from ${start} to ${end}.` };
+  }
+
+  if(name === 'add_ir_call_blackout'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, start, end, reason} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(!p.irCallBlackouts) p.irCallBlackouts = [];
+    p.irCallBlackouts.push({id:S.nextId++, start, end, reason: reason||'AI assigned'});
+    triggerSave();
+    return { ok:true, message:`Added IR call blackout for ${p.last} from ${start} to ${end}.` };
+  }
+
+  if(name === 'fill_dr_home_for_ir'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {month} = input;
+    const irPhys = S.physicians.filter(p=>p.irFte>0);
+    const cells = buildCal(month).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
+    let added=0;
+    irPhys.forEach(p=>{
+      const vd=vacDays(p.id);
+      cells.forEach(c=>{
+        const date=c.date;
+        if(vd.has(date))return;
+        if((S.irShifts||[]).find(s=>s.physId===p.id&&s.date===date))return;
+        if(_has2ndOr3rdShift(p.id,date))return;
+        if((S.drShifts||[]).find(s=>s.physId===p.id&&s.date===date))return;
+        S.drShifts.push({id:S.nextId++,physId:p.id,date,shift:'Home',
+          site:'At Home / Remote',sub:(p.drSubs||[])[0]||'General Procedures',
+          notes:'Auto: IR unscheduled (AI)',autoHome:true});
+        added++;
+      });
+    });
+    triggerSave();
+    if(document.getElementById('drb-tbody')) renderDRBuilder();
+    return {ok:true, message:`Added ${added} DR Home shift(s) for unscheduled IR physicians in ${month}.`};
+  }
+
+  if(name === 'assign_ir_shift'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, date, shift, site, sub, notes} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if((S.irShifts||[]).find(s=>s.physId===physId&&s.date===date))
+      return { ok:false, error:`${p.last} already has an IR shift on ${date}.` };
+    const siteName = site || p.irSitePrim || '';
+    S.irShifts.push({
+      id:S.nextId++, physId, date, shift: shift||'1st',
+      site: siteName, sub: sub||'', notes: notes||'AI assigned',
+      irGroup: p.irGroup||''
+    });
+    triggerSave();
+    return {ok:true, message:`Assigned IR ${shift} shift to ${p.last} on ${date} at ${siteName}.`};
+  }
+
+  return { ok:false, error:`Unknown tool: ${name}` };
+}
+
+// ── Send user message to AI ─────────────────────────────────────────────
+async function sendAIMessage(){
+  const inp = document.getElementById('ai-input');
+  const sendBtn = document.getElementById('ai-send-btn');
+  const status  = document.getElementById('ai-status');
+  if(!inp) return;
+  const text = inp.value.trim();
+  if(!text) return;
+
+  inp.value = '';
+  sendBtn.disabled = true;
+  _aiAppendMsg('user', text);
+
+  // Build system prompt with current schedule context
+  const today = fmtDate(new Date());
+  const ym    = today.slice(0,7);
+  const phyList = S.physicians.map(p=>`ID ${p.id}: ${p.last}, ${p.first} (${p.role}, drFte:${p.drFte}, irFte:${p.irFte}, irGroup:${p.irGroup||'none'})`).join('\n');
+
+  const systemPrompt = `You are an AI scheduling assistant for a radiology practice's RadScheduler system.
+Today is ${today}. Current month: ${ym}.
+
+Physicians in the system:
+${phyList}
+
+You have tools to read schedule data, assign/remove shifts, add vacations, and perform bulk operations.
+When making changes, always confirm what you've done clearly. When analyzing data, be specific with numbers and names.
+If asked to make a change you cannot safely verify, explain what you need first.
+Always call get_schedule_data before analyzing or making changes — never assume what's in the schedule without reading it first.
+Admin access is required for data-changing operations. The current user role is: ${CU?.role||'unknown'}.`;
+
+  _aiHistory.push({ role: 'user', content: text });
+
+  try {
+    let continueLoop = true;
+    let loopCount = 0;
+    const MAX_LOOPS = 6; // prevent infinite tool loops
+
+    while(continueLoop && loopCount < MAX_LOOPS){
+      loopCount++;
+      status.textContent = loopCount === 1 ? 'Thinking…' : `Using tools (step ${loopCount})…`;
+
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 4096,
+          system: systemPrompt,
+          tools: _AI_TOOLS,
+          messages: _aiHistory
+        })
+      });
+
+      if(!resp.ok){
+        const err = await resp.json().catch(()=>({}));
+        throw new Error(err?.error?.message || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+
+      // Add assistant response to history
+      _aiHistory.push({ role: 'assistant', content: data.content });
+
+      // Process content blocks
+      let hasToolUse = false;
+      let toolResults = [];
+      let textBlocks = [];
+
+      for(const block of data.content){
+        if(block.type === 'text' && block.text){
+          textBlocks.push(block.text);
+        }
+        if(block.type === 'tool_use'){
+          hasToolUse = true;
+          status.textContent = `Running: ${block.name}…`;
+          const result = _aiExecuteTool(block.name, block.input);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(result)
+          });
+        }
+      }
+
+      // Show any text blocks that came before tool use
+      if(textBlocks.length && (!hasToolUse || data.stop_reason === 'end_turn')){
+        _aiAppendMsg('assistant', textBlocks.join('\n\n'));
+      }
+
+      if(hasToolUse){
+        // Add tool results to history and loop
+        _aiHistory.push({ role: 'user', content: toolResults });
+      } else {
+        continueLoop = false;
+      }
+
+      if(data.stop_reason === 'end_turn' && !hasToolUse){
+        continueLoop = false;
+      }
+    }
+
+    status.textContent = '';
+  } catch(e){
+    _aiAppendMsg('error', `Error: ${e.message}`);
+    status.textContent = '';
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+function aiQuick(prompt){
+  const inp = document.getElementById('ai-input');
+  if(inp){ inp.value = prompt; sendAIMessage(); }
+}
+
+function _aiAppendMsg(role, text){
+  const el = document.getElementById('ai-messages');
+  if(!el) return;
+  const isUser = role === 'user';
+  const isError = role === 'error';
+  const bg = isUser ? 'var(--navy)' : isError ? 'var(--red-t)' : 'var(--bg3)';
+  const color = isUser ? '#fff' : 'var(--txt1)';
+  const radius = isUser ? '14px 14px 3px 14px' : '14px 14px 14px 3px';
+  const label = isUser ? (CU?.first||'You') : isError ? 'Error' : 'AI Scheduler';
+  const align = isUser ? 'flex-end' : 'flex-start';
+  const formatted = text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/`([^`]+)`/g,'<code style="background:var(--bg2);padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
+    .replace(/\n/g,'<br>');
+  const div = document.createElement('div');
+  div.style.cssText = `display:flex;flex-direction:column;align-items:${align}`;
+  div.innerHTML = `<div style="font-size:10px;color:var(--txt3);margin-bottom:4px">${label}</div>
+    <div style="max-width:85%;padding:10px 14px;border-radius:${radius};font-size:13px;line-height:1.55;background:${bg};color:${color}">${formatted}</div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearAIChat(){
+  _aiHistory = [];
+  const el = document.getElementById('ai-messages');
+  if(el) el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:flex-start">
+    <div style="font-size:10px;color:var(--txt3);margin-bottom:4px">AI Scheduler</div>
+    <div style="max-width:85%;padding:10px 14px;border-radius:14px 14px 14px 3px;font-size:13px;line-height:1.5;background:var(--bg3);color:var(--txt1)">Chat cleared. How can I help you?</div>
+  </div>`;
+}
+
+function renderAIAgent(){
+  // Nothing to pre-render — conversation is live
+}
+
+
 /* ─── SITE RULE CONSTRAINT HELPERS ───────────────────────────────────────
    Called by DR auto-assign, IR auto-assign, and IR rebalancer to evaluate
    physician site-rule eligibility before assigning any shift or call.
@@ -6688,6 +7411,8 @@ function fillDRHomeShifts(){
   if(!date){alert('Select a date in the DR builder first.');return;}
   const vm=vacMap();const vacOnDate=new Set(vm[date]||[]);
   let added=0;
+  const _fdow=parseDateLocal(date).getDay();
+  if(_fdow===0||_fdow===6){alert('Cannot fill home shifts on weekends. Use the Weekend Calls builder for Saturday/Sunday assignments.');return;}
   S.physicians.filter(p=>p.drFte>0&&p.role!=='IR').forEach(p=>{
     if(vacOnDate.has(p.id))return;
     const already=S.drShifts.find(s=>s.physId===p.id&&s.date===date)||
@@ -6815,8 +7540,8 @@ function previewAA(){
         if(ex>=1)return;
         const pool=drs.filter(p=>{
           if(!p.shiftElig.wknd||!p.drSubs.includes(sub))return false;
-          const vd=vacDays(p.id);const sun=new Date(c.date);sun.setDate(sun.getDate()+1);
-          if(vd.has(c.date)||vd.has(sun.toISOString().slice(0,10)))return false;
+          const vd=vacDays(p.id);const sunDate=addDays(c.date,1);
+          if(vd.has(c.date)||vd.has(sunDate))return false;
           return cnt[p.id].wk<maxDR(p,'wk');
         }).sort((a,b)=>cnt[a.id].wk-cnt[b.id].wk);
         if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate:addDays(c.date,1),sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
@@ -6847,7 +7572,10 @@ function previewAA(){
 }
 function applyAA(){
   if(!_adminOnly('apply auto-assign'))return;
-  S.aaPreview.forEach(a=>{
+  if(!S.aaPreview.length)return;
+  const toApply=[...S.aaPreview];
+  S.aaPreview=[];
+  toApply.forEach(a=>{
     if(a.type==='wk')
       S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',notes:'Auto'});
     else
@@ -7196,6 +7924,74 @@ function _hasAdjacentWeekend(physId, satDate){
     return diff>0&&diff<=7;
   });
 }
+
+
+function fillDRHomeForIR(){
+  if(!_adminOnly('fill DR home shifts for IR physicians')) return;
+
+  // Use the current month filter (same selector as IR shift table)
+  const moEl = document.getElementById('irsf-mo');
+  const ym   = moEl?.value || new Date().toISOString().slice(0,7);
+  if(!ym){ alert('Set the Filter Month above first.'); return; }
+
+  const irPhys = S.physicians.filter(p => p.irFte > 0);
+  if(!irPhys.length){ alert('No IR physicians found.'); return; }
+
+  const cells = buildCal(ym).filter(c =>
+    c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date)
+  );
+
+  let added = 0, skippedVac = 0, skippedShift = 0, skippedDR = 0;
+
+  irPhys.forEach(p => {
+    const vd = vacDays(p.id);
+    cells.forEach(c => {
+      const date = c.date;
+
+      // Skip if on vacation
+      if(vd.has(date)){ skippedVac++; return; }
+
+      // Skip if already has any IR shift on this date (including IR Home)
+      if((S.irShifts||[]).find(s => s.physId === p.id && s.date === date)){
+        skippedShift++; return;
+      }
+
+      // Skip if on a 2nd or 3rd shift (hospital obligation that day)
+      if(_has2ndOr3rdShift(p.id, date)){ skippedShift++; return; }
+
+      // Skip if already has any DR shift on this date
+      if((S.drShifts||[]).find(s => s.physId === p.id && s.date === date)){
+        skippedDR++; return;
+      }
+
+      // Assign DR read-from-home shift
+      S.drShifts.push({
+        id: S.nextId++,
+        physId: p.id,
+        date,
+        shift: 'Home',
+        site: 'At Home / Remote',
+        sub: (p.drSubs||[])[0] || 'General Procedures',
+        notes: 'Auto: IR unscheduled',
+        autoHome: true,
+      });
+      added++;
+    });
+  });
+
+  triggerSave();
+  renderIRShiftTable();
+  // Refresh DR calendar if visible
+  if(document.getElementById('drc-mo')) renderDRCal();
+  if(document.getElementById('drb-tbody')) renderDRBuilder();
+
+  alert(
+    `Added ${added} DR Home shift(s) for unscheduled IR physician days in ${ym}.
+` +
+    `Skipped: ${skippedVac} vacation day(s), ${skippedShift} already-scheduled day(s), ${skippedDR} existing DR shift(s).`
+  );
+}
+
 
 function addIRCallFromGrid(sel,date,callType,group){
   if(!_adminOnly('assign IR call')){sel.value='';return;}
@@ -7565,7 +8361,10 @@ function previewIRAA(){
 
 function applyIRAA(){
   if(!_adminOnly('apply IR auto-assign'))return;
-  S.iraPreview.forEach(a=>{
+  if(!S.iraPreview.length)return;
+  const toApply=[...S.iraPreview];
+  S.iraPreview=[];
+  toApply.forEach(a=>{
     S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:'Auto'});
   });
   const n=S.iraPreview.length;
@@ -9019,12 +9818,20 @@ function _holBlockTotal(group, year){
 
 // ── Tab navigation ──────────────────────────────────────────────────────────
 function holTab(t,el){
+  _holActiveTab=t;  // persist so renderHolidays can restore it
   ['define','assignments','autoassign','counter','schedule'].forEach(x=>{
     const e=document.getElementById('holt-'+x);
     if(e) e.style.display=x===t?'block':'none';
   });
   document.querySelectorAll('#hol-tabs .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
+  else {
+    // When called programmatically (no el), find and activate the matching tab button
+    const tabs=document.querySelectorAll('#hol-tabs .tab');
+    const tabLabels=['define','assignments','autoassign','counter','schedule'];
+    const tabEl=tabs[tabLabels.indexOf(t)];
+    if(tabEl) tabEl.classList.add('on');
+  }
   if(t==='define')      renderHolDefList();
   else if(t==='assignments'){ _populateHolFilterName(); renderHolTable(); }
   else if(t==='counter')    renderHolCounter();
@@ -9035,12 +9842,9 @@ function holTab(t,el){
 // Entry from nav
 function renderHolidays(){
   _populateHolPhysSel();
-  // Force reset all tabs then open define
-  ['define','assignments','autoassign','counter','schedule'].forEach(x=>{
-    const e=document.getElementById('holt-'+x);
-    if(e) e.style.display='none';
-  });
-  holTab('define', document.querySelector('#hol-tabs .tab'));
+  // Restore whichever tab was last active (default: assignments if holidays exist)
+  const tab = _holActiveTab || (S.holidays.length ? 'assignments' : 'define');
+  holTab(tab);
 }
 
 // ── Holiday Definition CRUD ─────────────────────────────────────────────────
@@ -9534,7 +10338,7 @@ async function _pushToSupabase(){
       data:JSON.stringify({
         physicians:S.physicians,vacations:S.vacations,drShifts:S.drShifts,
         weekendCalls:S.weekendCalls,irShifts:S.irShifts,irCalls:S.irCalls,
-        holidays:S.holidays,openShifts:S.openShifts,chatMessages:S.chatMessages,
+        holidays:S.holidays,openShifts:S.openShifts,chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],
         swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
         holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,irSlots:S.irSlots,
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
