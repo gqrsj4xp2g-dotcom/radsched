@@ -8371,7 +8371,8 @@ function previewIRAA(){
       dailyDates.forEach(date=>{
         baseElig[date]=gPhys.filter(p=>
           !vacDays(p.id).has(date)&&!isSoldBackDate(p.id,date)&&
-          !_has2ndOr3rdShift(p.id,date)&&_hasIRShiftOnDate(p.id,date)&&
+          !isIRCallBlackout(p.id,date)&&
+          !_has2ndOr3rdShift(p.id,date)&&
           dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')&&
           sequenceOk(p,date,date.slice(0,7))
         ).length;
@@ -8394,9 +8395,12 @@ function previewIRAA(){
             if(isIRCallBlackout(p.id,date)) return false;
             if(irOnDate(p.id,date)) return false;
             if(_has2ndOr3rdShift(p.id,date)) return false;
-            if(!_hasIRShiftOnDate(p.id,date)) return false;
+            // Physicians without a proc shift are still eligible — daily call implies
+            // they are doing IR procedures that day. Sort prefers those WITH existing shifts.
             if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')) return false;
             if(!sequenceOk(p,date,date.slice(0,7))) return false;
+            // Hard cap: once physician reaches their FTE quota, they are out of pool
+            if(cntD[p.id] >= dailyCapFn(p)) return false;
             if(pass<=1){
               if(S.irCalls.some(ic=>ic.physId===p.id&&(
                 (ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext))||
@@ -8412,12 +8416,19 @@ function previewIRAA(){
             return true;
           });
 
-          const pool=_sortByFte(eligible,gPhys,cntD,dailyCapFn);
+          // Sort: FTE deficit first, then prefer physician WITH existing proc shift
+          const sortedPool=_sortByFte(eligible,gPhys,cntD,dailyCapFn).sort((a,b)=>{
+            const ra=cntD[a.id]/(dailyCapFn(a)||1), rb=cntD[b.id]/(dailyCapFn(b)||1);
+            if(Math.abs(ra-rb)>0.01) return ra-rb;
+            return (_hasIRShiftOnDate(a.id,date)?0:1)-(_hasIRShiftOnDate(b.id,date)?0:1);
+          });
+          const pool=sortedPool;
           if(pool.length){
             const p=pool[0];
             const site='';
+            const needsProcShift=!_hasIRShiftOnDate(p.id,date);
             const note=pass===0?'Auto':pass===1?'Auto (back-to-back waived)':'Auto (all adj. waived)';
-            preview.push({physId:p.id,date,callType:'daily',irGroup:g,site,notes:note,_pass:pass});
+            preview.push({physId:p.id,date,callType:'daily',irGroup:g,site,notes:note,_pass:pass,needsProcShift});
             cntD[p.id]++;
             if(pass>0) relaxedFills++;
           } else {
@@ -8459,6 +8470,8 @@ function previewIRAA(){
             if(isSoldBackDate(p.id,friday)) return false;
             if(isIRCallBlackout(p.id,friday)) return false;
             if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+            // Hard cap: once physician reaches their FTE quota, out of pool
+            if(cntW[p.id] >= wkndCapFn(p)) return false;
             if(pass===0){
               if(_hasAdjacentIRCall(p.id,friday)) return false;
               if(_hasIRCallNearWeekend(p.id,friday)) return false;
@@ -8574,13 +8587,23 @@ function applyIRAA(){
   if(!S.iraPreview.length)return;
   const toApply=[...S.iraPreview];
   S.iraPreview=[];
+  let procShiftsAdded=0;
   toApply.forEach(a=>{
     S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:'Auto'});
+    // Auto-create a 1st proc shift for daily calls where physician had none scheduled
+    if(a.callType==='daily'&&a.needsProcShift&&!_hasIRShiftOnDate(a.physId,a.date)){
+      const p=S.physicians.find(x=>x.id===a.physId);
+      const site=p?.irSitePrim||(S.sites.find(s=>s.irGroup===a.irGroup)?.name||'');
+      S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',
+        site,sub:'',notes:'Auto (with call)',irGroup:a.irGroup});
+      procShiftsAdded++;
+    }
   });
-  const n=S.iraPreview.length;
+  const n=toApply.length;
   triggerSave();
-  document.getElementById('ira-box').innerHTML=`<div class="note ns">${n} IR call assignment(s) applied across ${_iraPeriodLabel(_iraMonths())}.</div>`;
-  S.iraPreview=[];document.getElementById('ira-apply').style.display='none';
+  const note=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';
+  document.getElementById('ira-box').innerHTML=`<div class="note ns">${n} IR call assignment(s) applied across ${_iraPeriodLabel(_iraMonths())}${note}.</div>`;
+  document.getElementById('ira-apply').style.display='none';
 }
 
 
@@ -8810,6 +8833,8 @@ function previewIRRebalance(){
           if(p.allowedSites?.length&&!p.allowedSites.includes(entry.site)) return false;
           // No two shifts same physician same date
           if(gSAsgn.some(a=>a.physId===p.id&&a.date===entry.date)) return false;
+          // Hard FTE cap: once at quota, physician is out of the pool
+          if(cntS[p.id] >= shiftCapFn(p)) return false;
           return true;
         });
 
@@ -8986,6 +9011,8 @@ function previewIRRebalance(){
           if(p.allowedSites?.length&&!p.allowedSites.includes(slot.site)) return false;
           // No two proc-shifts same physician same date
           if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
+          // Hard FTE quota cap: once at quota, physician is out of the pool
+          if(cnt[p.id] >= (quotas[p.id]??Infinity)) return false;
           return true;
           // Note: physicians on Home shift ARE eligible — we will displace their Home shift
         });
@@ -9198,6 +9225,8 @@ function previewIRRebalance(){
             (date>=ic.date&&date<=addDays(ic.date,4))|| // Fri→Tue span
             date===addDays(ic.date,-1)                   // Thu before Friday
           ))) return false;
+          // Hard FTE cap — once at quota, physician is out of the pool
+          if(cntD[p.id] >= dailyCapFn(p)) return false;
           return true;
         });
 
@@ -9283,6 +9312,8 @@ function previewIRRebalance(){
           }
           const span=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),mon];
           if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+          // Hard FTE cap — once at quota, out of pool
+          if(cntW[p.id] >= wkndCapFn(p)) return false;
           return true;
         });
 
@@ -9587,6 +9618,7 @@ function applyIRRebalance(){
   // Insert plan entries — for swaps, respect checkbox state; unchecked reverts to original
   let appliedSwaps=0, revertedSwaps=0;
   const toAdd=[...(_irrPlan.daily||[]),...(_irrPlan.weekend||[])];
+  let procShiftsAdded=0;
   toAdd.forEach(a=>{
     let physId=a.physId;
     let note=a.notes||'';
@@ -9603,13 +9635,22 @@ function applyIRRebalance(){
     }
     S.irCalls.push({id:S.nextId++,physId,date:a.date,callType:a.callType,
       irGroup:a.irGroup,site:a.site,notes:note});
+    // Auto-create proc shift for daily calls if physician has none on that date
+    if(a.callType==='daily'&&!_hasIRShiftOnDate(physId,a.date)){
+      const p=S.physicians.find(x=>x.id===physId);
+      const site=p?.irSitePrim||(S.sites.find(s=>s.irGroup===a.irGroup)?.name||'');
+      S.irShifts.push({id:S.nextId++,physId,date:a.date,shift:'1st',
+        site,sub:'',notes:'Auto (with call)',irGroup:a.irGroup});
+      procShiftsAdded++;
+    }
   });
 
   triggerSave();
   _irrPlan=null;
   document.getElementById('irr-apply').style.display='none';
   document.getElementById('irr-apply-note').textContent='';
-  _updateSaveUI(`✓ Rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original`,'var(--green-t)');
+  const procNote=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';
+  _updateSaveUI(`✓ Rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original${procNote}`,'var(--green-t)');
   renderIRRebalancePrep();
   document.getElementById('irr-preview').innerHTML=
     `<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied, ${revertedSwaps} kept with original physician.</div>`;
