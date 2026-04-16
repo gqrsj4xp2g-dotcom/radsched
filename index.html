@@ -1362,6 +1362,32 @@ tbody tr:hover{background:var(--bg3)}
 
   <!-- ASSIGNMENTS TAB -->
   <div id="holt-assignments" style="display:none">
+    <!-- Manual assignment form -->
+    <div class="ibox" style="margin-bottom:10px">
+      <div class="card-title">Assign Holiday Call</div>
+      <div class="g3">
+        <div class="fg"><label>Physician</label>
+          <select id="hol-phys">
+            <option value="">Select physician</option>
+          </select></div>
+        <div class="fg"><label>Holiday Name</label>
+          <input id="hol-name" placeholder="e.g. Christmas 2026"></div>
+        <div class="fg"><label>Date</label>
+          <input id="hol-date" type="date"></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Year</label>
+          <input id="hol-yr" type="number" value="2026" min="2020" max="2035" style="width:90px"></div>
+        <div class="fg"><label>Group</label>
+          <select id="hol-grp">
+            <option value="DR">DR Call</option>
+            <option value="IR">IR Call</option>
+          </select></div>
+        <div class="fg"><label>Notes</label>
+          <input id="hol-notes" placeholder="Optional"></div>
+      </div>
+      <button class="bp" onclick="addHoliday()" style="margin-top:8px">Assign Holiday Call</button>
+    </div>
     <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
       <div class="fg" style="margin:0"><label>Filter Year</label>
         <select id="holf-yr" onchange="renderHolTable()" style="width:90px">
@@ -6212,6 +6238,36 @@ function addHolidayNeed(){
   if(!name)return;
   S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
   triggerSave();
+}
+
+
+
+function addHoliday(){
+  if(!_adminOnly('assign holiday call')) return;
+  const pid   = +document.getElementById('hol-phys')?.value;
+  const date  = document.getElementById('hol-date')?.value;
+  const grp   = document.getElementById('hol-grp')?.value||'DR';
+  const name  = document.getElementById('hol-name')?.value.trim();
+  const yr    = +document.getElementById('hol-yr')?.value||new Date().getFullYear();
+  const notes = document.getElementById('hol-notes')?.value.trim()||'';
+  if(!pid)   { alert('Select a physician.'); return; }
+  if(!date)  { alert('Select a date.'); return; }
+  if(!name)  { alert('Enter a holiday name.'); return; }
+  const p = S.physicians.find(x=>x.id===pid);
+  if(!p) return;
+  if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
+  // Check for duplicate (same phys/date/group)
+  if(S.holidays.find(h=>h.physId===pid&&h.date===date&&h.group===grp)){
+    if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
+  }
+  S.holidays.push({id:S.nextId++, name, date, year:yr, physId:pid, group:grp, notes});
+  if(grp==='IR') _syncHolidayToIRCall(pid, date, name);
+  // Clear form
+  ['hol-date','hol-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  triggerSave();
+  _populateHolFilterName();
+  renderHolTable();
+  renderHolCounter();
 }
 
 
