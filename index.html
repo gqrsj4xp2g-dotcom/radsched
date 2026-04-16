@@ -5590,6 +5590,276 @@ function doReassignHoliday(id){
 }
 
 
+
+/* ─── OPEN SHIFTS ─── */
+function renderOpenShifts(){
+  const pSel=document.getElementById('os-phys');
+  if(pSel&&pSel.options.length<2) S.physicians.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.text=p.last+', '+p.first;pSel.appendChild(o);});
+  const pid=pSel?.value?+pSel.value:null;
+  const ym=document.getElementById('os-mo')?.value||new Date().toISOString().slice(0,7);
+  const selP=pid?S.physicians.find(p=>p.id===pid):null;
+  const opens=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)).sort((a,b)=>a.date>b.date?1:-1);
+  const el=document.getElementById('os-list');if(!el)return;
+  if(!opens.length){el.innerHTML='<div class="note ns">No open shifts this month!</div>';return;}
+  const unclaimed=opens.filter(o=>!o.claimedBy).length;
+  let html=`<div style="font-size:12px;color:var(--txt2);margin-bottom:8px">${opens.length} total — ${unclaimed} unclaimed</div>`;
+  opens.forEach(o=>{
+    const isIR=o.group==='IR';const isClaimed=!!o.claimedBy;
+    const isMyAnch=selP?.anchorSite===o.site;
+    const subMatch=selP&&selP.drSubs?.includes(o.sub);
+    html+=`<div style="border:1px solid var(--bdr);border-left:4px solid ${isIR?'var(--teal)':'var(--blue)'};border-radius:var(--rl);padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px">${o.date} — <span class="tag ${isIR?'tt':'tb'}">${o.shiftType}</span>
+          ${isMyAnch?'<span class="tag tg" style="margin-left:4px">⚓ Your anchor site</span>':''}
+          ${selP&&!subMatch&&o.sub?'<span class="tag ta" style="margin-left:4px">Outside subspecialty</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--txt2);margin-top:2px">${o.sub||'—'} | ${o.site||'TBD'}</div>
+        ${isClaimed?`<div style="font-size:11px;color:var(--green-t);margin-top:2px">Claimed by ${pname(o.claimedBy)}</div>`:''}
+      </div>
+      ${selP&&!isClaimed?`<button class="bg bsm" onclick="claimShift(${o.id},${selP.id})">Claim</button>`:''}
+      ${selP&&isClaimed&&o.claimedBy===selP.id?`<button class="br bsm" onclick="unclaimShift(${o.id})">Unclaim</button>`:''}
+    </div>`;
+  });
+  el.innerHTML=html;
+}
+function renderManageShifts(){
+  const ym=document.getElementById('osmf-mo')?.value||new Date().toISOString().slice(0,7);
+  const grp=document.getElementById('osmf-grp')?.value||'';
+  const rows=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)&&(!grp||o.group===grp)).sort((a,b)=>a.date>b.date?1:-1);
+  const el=document.getElementById('osm-tbody');if(!el)return;
+  el.innerHTML=rows.map(o=>`<tr>
+    <td>${o.date}</td><td><span class="tag ta">${o.shiftType}</span></td>
+    <td><span class="tag ${o.group==='IR'?'tt':'tb'}">${o.group}</span></td>
+    <td>${o.sub||'—'}</td><td>${o.site||'—'}</td>
+    <td>${o.claimedBy?`<span class="tag tg">${pname(o.claimedBy)}</span>`:'<span class="tag tgr">Unclaimed</span>'}</td>
+    <td>${o.notes||'—'}</td>
+    <td><button class="br bxs" onclick="S.openShifts=S.openShifts.filter(x=>x.id!==${o.id});renderManageShifts()">X</button></td>
+  </tr>`).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No open shifts</td></tr>';
+}
+function claimShift(oid,pid){
+  const o=(S.openShifts||[]).find(x=>x.id===oid);if(!o)return;
+  const p=S.physicians.find(x=>x.id===pid);
+  if(o.group==='DR'&&p.role==='IR'){alert('IR-only physicians cannot claim DR shifts.');return;}
+  o.claimedBy=pid;
+  if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'South',site:o.site,notes:'Claimed'});
+  else if(o.shiftType.includes('Weekend'))S.weekendCalls.push({id:S.nextId++,physId:pid,satDate:o.date,sunDate:addDays(o.date,1),sub:o.sub,site:o.site,ctype:'Primary',notes:'Claimed'});
+  else S.drShifts.push({id:S.nextId++,physId:pid,date:o.date,shift:'1st',site:o.site,sub:o.sub,notes:'Claimed',autoHome:false});
+  triggerSave();renderOpenShifts();
+}
+function unclaimShift(oid){
+  const o=(S.openShifts||[]).find(x=>x.id===oid);if(!o)return;
+  S.drShifts=S.drShifts.filter(s=>!(s.physId===o.claimedBy&&s.date===o.date&&s.notes==='Claimed'));
+  S.irCalls=S.irCalls.filter(s=>!(s.physId===o.claimedBy&&s.date===o.date&&s.notes==='Claimed'));
+  S.weekendCalls=S.weekendCalls.filter(s=>!(s.physId===o.claimedBy&&(s.satDate||s.date)===o.date&&s.notes==='Claimed'));
+  o.claimedBy=null;triggerSave();renderOpenShifts();
+}
+function addOpenShift(){
+  if(!_adminOnly('add open shift'))return;
+  const date=document.getElementById('osm-date')?.value;const type=document.getElementById('osm-type')?.value||'1st Shift';
+  const grp=document.getElementById('osm-grp')?.value||'DR';const site=document.getElementById('osm-site')?.value||'';
+  if(!date){alert('Select date');return;}
+  S.openShifts.push({id:S.nextId++,date,shiftType:type,sub:'',site,group:grp,claimedBy:null,notes:''});
+  triggerSave();renderManageShifts();
+}
+
+/* ─── CHAT ─── */
+function renderChat(){
+  const el=document.getElementById('chat-msgs');if(!el)return;
+  const msgs=(S.chatMessages||[]).sort((a,b)=>a.ts>b.ts?1:-1);
+  el.innerHTML=msgs.map(m=>{
+    const isMe=m.userId===CU?.id;
+    const u=USERS.find(x=>x.id===m.userId);
+    return`<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:10px">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:2px">${u?u.first+' '+u.last:'?'} · ${m.ts?.slice(0,16).replace('T',' ')||''}</div>
+      <div style="max-width:70%;padding:8px 12px;border-radius:12px;font-size:13px;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}">
+        ${m.text.replace(/\n/g,'<br>')}
+      </div>
+    </div>`;
+  }).join('')||'<div style="text-align:center;color:var(--txt3);padding:20px">No messages yet.</div>';
+  el.scrollTop=el.scrollHeight;
+}
+function sendChat(){
+  const inp=document.getElementById('chat-input');if(!inp)return;
+  const text=inp.value.trim();if(!text)return;
+  S.chatMessages.push({id:S.nextId++,userId:CU?.id,text,ts:new Date().toISOString()});
+  inp.value='';triggerSave();renderChat();
+}
+
+/* ─── SWAPS ─── */
+function renderSwaps(){
+  const el=document.getElementById('swap-list');if(!el)return;
+  const swaps=(S.swapRequests||[]).sort((a,b)=>b.ts>a.ts?1:-1);
+  el.innerHTML=swaps.map(s=>{
+    const status=s.status||'pending';
+    const cls=status==='approved'?'tg':status==='denied'?'tr':'ta';
+    return`<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-weight:700">${pname(s.fromPhysId)} → ${pname(s.toPhysId)}</div>
+          <div style="font-size:11px;color:var(--txt2)">${s.date} · ${s.shiftType||'Shift'} · ${s.site||'—'}</div>
+          ${s.reason?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${s.reason}</div>`:''}
+        </div>
+        <span class="tag ${cls}">${status}</span>
+      </div>
+      ${CU?.role==='admin'&&status==='pending'?`<div style="margin-top:8px;display:flex;gap:6px">
+        <button class="bsm bg" onclick="resolveSwap(${s.id},'approved')">Approve</button>
+        <button class="bsm br" onclick="resolveSwap(${s.id},'denied')">Deny</button>
+      </div>`:''}
+    </div>`;
+  }).join('')||'<div class="note ni">No swap requests.</div>';
+}
+function requestSwap(){
+  const toId=+document.getElementById('swap-to')?.value;
+  const date=document.getElementById('swap-date')?.value;
+  const reason=document.getElementById('swap-reason')?.value.trim()||'';
+  if(!toId||!date){alert('Select physician and date');return;}
+  S.swapRequests.push({id:S.nextId++,fromPhysId:CU?.physId||null,toPhysId:toId,date,shiftType:'1st Shift',site:'',reason,status:'pending',ts:new Date().toISOString()});
+  triggerSave();renderSwaps();
+}
+function resolveSwap(id,status){
+  if(!_adminOnly('resolve swap'))return;
+  const s=(S.swapRequests||[]).find(x=>x.id===id);if(!s)return;
+  s.status=status;triggerSave();renderSwaps();
+}
+
+/* ─── SETTINGS ─── */
+function renderSettings(){
+  renderSettingsSupabaseStatus();
+  if(typeof _restoreGMapsKeyField==='function') _restoreGMapsKeyField();
+  const cfgFields={
+    'cfg-wd':'wdMax','cfg-wk':'wkMax','cfg-ir-daily':'irDailyMax',
+    'cfg-ir-wknd':'irWkndMax','cfg-rest':'rest','cfg-anc':'anchorPct'
+  };
+  Object.entries(cfgFields).forEach(([id,k])=>{
+    const el=document.getElementById(id);
+    if(el) el.value=S.cfg[k]??S.cfg.irMax??0;
+  });
+  renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
+  if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
+}
+function saveCfg(){
+  S.cfg.wdMax=+document.getElementById('cfg-wd')?.value||20;
+  S.cfg.wkMax=+document.getElementById('cfg-wk')?.value||4;
+  S.cfg.irDailyMax=+document.getElementById('cfg-ir-daily')?.value||20;
+  S.cfg.irWkndMax=+document.getElementById('cfg-ir-wknd')?.value||4;
+  S.cfg.irMax=S.cfg.irDailyMax;
+  S.cfg.rest=+document.getElementById('cfg-rest')?.value||1;
+  S.cfg.anchorPct=+document.getElementById('cfg-anc')?.value||60;
+  triggerSave();
+}
+function renderDRSList(){const el=document.getElementById('drs-list');if(!el)return;el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="S.drSubs.splice(${i},1);renderDRSList()">X</button></div>`).join('');}
+function renderIRSList(){const el=document.getElementById('irs-list');if(!el)return;el.innerHTML=(S.irSubs||[]).map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="S.irSubs.splice(${i},1);renderIRSList()">X</button></div>`).join('');}
+function renderSitesList(){
+  const el=document.getElementById('sites-list');if(!el)return;
+  el.innerHTML=(S.sites||[]).map((s,i)=>{
+    const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';
+    return`<div class="row"><span style="font-size:12px;flex:1">${s.name}</span>${g}<button class="br bxs" onclick="S.sites.splice(${i},1);renderSitesList()">X</button></div>`;
+  }).join('');
+}
+function renderWkndNeeds(){const el=document.getElementById('wknd-needs');if(!el)return;el.innerHTML=(S.drSubs||[]).map(s=>`<div class="row"><span style="font-size:12px;min-width:140px">${s}</span><input type="number" min="0" max="10" value="${S.wkndNeeds?.[s]||0}" style="width:55px" onchange="if(!S.wkndNeeds)S.wkndNeeds={};S.wkndNeeds['${s}']=parseInt(this.value)||0"></div>`).join('');}
+function addDRSub(){const v=document.getElementById('new-drs')?.value.trim();if(!v||(S.drSubs||[]).includes(v))return;S.drSubs.push(v);document.getElementById('new-drs').value='';renderDRSList();}
+function addIRSub(){const v=document.getElementById('new-irs')?.value.trim();if(!v||(S.irSubs||[]).includes(v))return;S.irSubs.push(v);document.getElementById('new-irs').value='';renderIRSList();}
+function addSite(){
+  const name=document.getElementById('new-site')?.value.trim();
+  const grp=document.getElementById('new-site-irg')?.value||null;
+  if(!name||(S.sites||[]).find(s=>s.name===name))return;
+  S.sites.push({name,irGroup:grp||null});
+  document.getElementById('new-site').value='';
+  triggerSave();renderSitesList();
+  S.sites.forEach(st=>{['1st','2nd','3rd','Home'].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
+}
+
+/* ─── SITE SLOTS ─── */
+function renderSiteSlots(){
+  const ym=document.getElementById('ss-mo')?.value||new Date().toISOString().slice(0,7);
+  const [y,m]=ym.split('-').map(Number);
+  const first=new Date(y,m-1,1);
+  const weeks=Math.ceil((first.getDay()+new Date(y,m,0).getDate())/7);
+  const tabsEl=document.getElementById('ss-week-tabs');if(!tabsEl)return;
+  const aw=+tabsEl.querySelector('.wktab.on')?.dataset?.w||1;
+  tabsEl.innerHTML='';
+  for(let w=1;w<=weeks;w++){const b=document.createElement('button');b.className='wktab'+(w===aw?' on':'');b.textContent='Wk '+w;b.dataset.w=w;b.onclick=function(){document.querySelectorAll('.wktab').forEach(x=>x.classList.remove('on'));this.classList.add('on');renderSlotGrid(ym,+this.dataset.w);};tabsEl.appendChild(b);}
+  renderSlotGrid(ym,aw);
+}
+function renderSlotGrid(ym,week){
+  const el=document.getElementById('ss-content');if(!el)return;
+  let html='<div class="g2">';
+  (S.sites||[]).forEach(st=>{
+    const shifts=st.name==='At Home / Remote'?['Home']:['1st','Home'];
+    html+=`<div class="card"><div class="card-title">${st.name}</div><div class="g${shifts.length}">`;
+    shifts.forEach(sh=>{
+      const k=`${st.name}|${week}|${sh}`;const v=S.siteSlots?.[k]??0;
+      html+=`<div class="fg"><label>${sh==='Home'?'Home':sh+' Shift'}</label><input type="number" min="0" max="15" value="${v}" style="width:55px" onchange="if(!S.siteSlots)S.siteSlots={};S.siteSlots['${st.name}|${week}|${sh}']=parseInt(this.value)||0"></div>`;
+    });
+    html+='</div></div>';
+  });
+  html+='</div>';
+  el.innerHTML=html;
+}
+
+/* ─── IR SLOTS ─── */
+function renderIRSlots(){
+  const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  ['north','south'].forEach(g=>{
+    const G=g[0].toUpperCase()+g.slice(1);
+    const gSites=(S.sites||[]).filter(s=>s.irGroup===G||s.irGroup==='Both');
+    let html='';
+    gSites.forEach(st=>{
+      html+=`<div style="margin-bottom:14px">
+        <div style="font-weight:800;font-size:12px;margin-bottom:6px;color:${G==='North'?'var(--blue-t)':'var(--green-t)'}">${st.name}</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">`;
+      DOW.forEach((dn,dow)=>{
+        if(!S.irSlots) S.irSlots={};
+        const k=`${st.name}|${dow}`;
+        const v=S.irSlots[k]!==undefined?S.irSlots[k]:(dow>=1&&dow<=5?1:0);
+        const isWknd=dow===0||dow===6;
+        html+=`<div style="text-align:center">
+          <label style="display:block;font-size:9.5px;font-weight:800;color:${isWknd?'var(--amber-t)':'var(--txt2)'};margin-bottom:3px;text-transform:uppercase">${dn}</label>
+          <input type="number" min="0" max="5" value="${v}"
+            style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:${isWknd?'var(--amber-bg)':'var(--bg2)'}"
+            oninput="if(!S.irSlots)S.irSlots={};S.irSlots['${k}']=parseInt(this.value)||0">
+        </div>`;
+      });
+      html+=`</div>
+      <div style="font-size:10px;color:var(--amber-t);margin-top:3px">Amber = weekends — covered by IR Weekend Call, not daily slots.</div>
+      </div>`;
+    });
+    if(!gSites.length)html='<p style="color:var(--txt3);font-size:12px">No IR sites in this group. Add sites with an IR group in Settings.</p>';
+    const el=document.getElementById(`ir-slots-${g}`);if(el)el.innerHTML=html;
+  });
+}
+
+/* ─── IR SHIFT SLOTS ─── */
+function renderIRShiftSlots(){
+  const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const el=document.getElementById('irss-content');if(!el)return;
+  const gSites=(S.sites||[]).filter(s=>s.irGroup&&s.irGroup!=='Both');
+  let html='<div class="g2">';
+  gSites.forEach(st=>{
+    const gColor=st.irGroup==='North'?'var(--blue-t)':'var(--green-t)';
+    html+=`<div class="card"><div class="card-title" style="color:${gColor}">${st.name} <span style="font-weight:400;font-size:11px;color:var(--txt3)">${st.irGroup}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:6px">`;
+    [1,2,3,4,5].forEach(dow=>{
+      const k=`${st.name}|${dow}|1st`;
+      const v=(S.irShiftSlots||{})[k]??1;
+      html+=`<div style="text-align:center">
+        <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
+        <input type="number" min="0" max="10" value="${v}" style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
+          oninput="if(!S.irShiftSlots)S.irShiftSlots={};S.irShiftSlots['${k}']=parseInt(this.value)||0">
+      </div>`;
+    });
+    html+='</div></div>';
+  });
+  html+='</div>';
+  el.innerHTML=html||'<div class="note ni">No IR sites configured. Add sites with an IR group in Settings.</div>';
+}
+
+/* ─── IMPORT ─── */
+function renderImportPage(){
+  // Import page is static HTML with event handlers — nothing to render dynamically
+}
+
+
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
