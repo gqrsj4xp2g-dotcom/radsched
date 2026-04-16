@@ -1042,31 +1042,11 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR SHIFT AUTO-ASSIGN -->
 <div id="page-ir-shift-auto" class="page">
   <div class="pg-title">IR Shift Auto-Assign</div>
-  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-    <button class="br bsm" onclick="clearIRShifts('all')" title="Clear all entries from this schedule">🗑 Reset All</button>
-  </div>
 
   <div class="ibox">
-    <div class="g4" style="flex-wrap:wrap">
-      <div class="fg"><label>Year</label>
-        <select id="irsa-yr" style="width:90px">
-          <option value="2024">2024</option>
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-          <option value="2027">2027</option>
-        </select>
-      </div>
-      <div class="fg"><label>Period</label>
-        <select id="irsa-period" style="width:175px">
-          <option value="H1">H1 — Jan through Jun</option>
-          <option value="H2">H2 — Jul through Dec</option>
-        </select>
-      </div>
-      <div class="fg"><label>Shift Type</label>
-        <select id="irsa-shift">
-          <option value="all">All Shifts</option>
-          <option value="1st">1st Shift Only</option>
-        </select>
+    <div class="g4" style="flex-wrap:wrap;align-items:flex-end">
+      <div class="fg"><label>Month</label>
+        <input id="irsa-mo" type="month" style="width:160px">
       </div>
       <div class="fg"><label>IR Group</label>
         <select id="irsa-grp">
@@ -1075,14 +1055,21 @@ tbody tr:hover{background:var(--bg3)}
           <option value="South">South Only</option>
         </select>
       </div>
+      <div class="fg"><label>Options</label>
+        <label class="chk" style="margin-top:6px"><input type="checkbox" id="irsa-fill-call" checked>
+          Assign IR shift to on-call physicians who lack one</label>
+      </div>
     </div>
-    <div class="flexe" style="gap:8px;margin-top:8px">
+    <div class="flexe" style="gap:8px;margin-top:10px">
       <button class="ba" onclick="previewIRShiftAA()">▶ Preview</button>
-      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">✓ Apply All</button>
+      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">✓ Apply</button>
+      <button class="br bsm" onclick="clearIRShifts('month')" title="Clear all shifts for the selected month">🗑 Clear Month</button>
     </div>
   </div>
-  <div class="note ni" style="margin-bottom:8px">Fills IR daily procedure schedule by site slots. Load-balanced by shift count per physician.</div>
-  <div class="card" id="irsa-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
+  <div class="note ni" style="margin-bottom:8px">
+    Assigns IR procedure shifts for a single month. Physicians on daily call who have no procedure shift assigned will automatically receive one. Anchor compliance targets ~<span id="irsa-anc-target">70</span>%.
+  </div>
+  <div id="irsa-box"><p style="color:var(--txt3)">Select a month and click Preview.</p></div>
 </div>
 
 <!-- IR AUTO-ASSIGN -->
@@ -2435,6 +2422,8 @@ function _applyRemoteData(d){
       else USERS.push(u);
     });
   }
+  // Track when this data was saved so poll can detect remote changes
+  if(d.savedAt) S._remoteSavedAt = d.savedAt;
   _isRestoring=false;
 }
 
@@ -2478,7 +2467,11 @@ function _subscribeRealtime(){
     if(S._lastSaved&&(new Date()-S._lastSaved)<5000) return; // skip if we just saved
     try{
       const d=await _pullFromSupabase();
-      if(d&&d.nextId&&d.nextId>S.nextId){
+      const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
+      const knownSaved=S._remoteSavedAt?new Date(S._remoteSavedAt).getTime():0;
+      const localSaved=S._lastSaved?S._lastSaved.getTime():0;
+      const baseline=Math.max(knownSaved,localSaved);
+      if(d&&remoteSaved>baseline+500){
         _applyRemoteData(d);
         _refreshCurrentPage();
         const si=document.getElementById('save-indicator');
@@ -2486,7 +2479,7 @@ function _subscribeRealtime(){
           setTimeout(()=>{if(si)si.textContent='';},2000);}
       }
     }catch(e){/* non-fatal poll error */}
-  }, 30000);
+  }, 10000); // poll every 10s as realtime fallback
 }
 
 function _refreshCurrentPage(){
@@ -3476,7 +3469,7 @@ function clearDRShifts(mode){
 function clearIRShifts(mode){
   if(!_adminOnly('clear IR shifts'))return;
   if(!S.irShifts?.length){alert('No IR shifts to clear.');return;}
-  const fmo=document.getElementById('irsf-mo')?.value||'';
+  const fmo=document.getElementById('irsf-mo')?.value||document.getElementById('irsa-mo')?.value||'';
   const fpid=+document.getElementById('irsf-phys')?.value||0;
   const fsh=document.getElementById('irsf-shift')?.value||'';
   let targets=S.irShifts;
@@ -3488,6 +3481,11 @@ function clearIRShifts(mode){
     if(fpid) parts.push(pname(fpid));
     if(fsh) parts.push(fsh+' shift');
     desc=(parts.length?parts.join(' · ')+' IR shifts':'all IR shifts');
+  } else if(mode==='month'){
+    const momo=document.getElementById('irsa-mo')?.value||fmo;
+    if(!momo){alert('Select a month first.');return;}
+    targets=S.irShifts.filter(s=>s.date.startsWith(momo)&&s.shift!=='Home');
+    desc=`non-Home IR shifts for ${momo}`;
   }
   if(!targets.length){alert('No IR shifts match the current filters.');return;}
   if(!confirm(`Delete ${targets.length} ${desc}? This cannot be undone.`))return;
@@ -3497,7 +3495,6 @@ function clearIRShifts(mode){
   const si=document.getElementById('save-indicator');
   if(si){si.textContent=`✓ Cleared ${ids.size} IR shift(s)`;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},3000);}
 }
-
 /* ─── DR BUILDER TABS ─── */
 function drBuilderTab(shift, el){
   document.querySelectorAll('#drb-tabs .tab').forEach(t=>t.classList.remove('on'));
@@ -5273,181 +5270,233 @@ function saveAllMyVacPicks(){
 let _irsaPreview = [];
 
 function renderIRShiftAutoPage(){
-  // Just ensure the box has default content if nothing previewed yet
-  const box = document.getElementById('irsa-box');
-  if(box && box.children.length === 0)
-    box.innerHTML = '<p style="color:var(--txt3)">Configure and click Preview.</p>';
+  const mo=document.getElementById('irsa-mo');
+  if(mo && !mo.value) mo.value=new Date().toISOString().slice(0,7);
+  const ancSpan=document.getElementById('irsa-anc-target');
+  if(ancSpan) ancSpan.textContent=Math.round(S.cfg.anchorPct||70);
 }
-
 function previewIRShiftAA(){
   if(!_adminOnly('preview IR shift auto-assign')) return;
 
-  const yr     = +document.getElementById('irsa-yr')?.value || new Date().getFullYear();
-  const period = document.getElementById('irsa-period')?.value || 'H1';
-  const grp    = document.getElementById('irsa-grp')?.value || 'both';
-  const startM = period === 'H1' ? 1 : 7;
-  const months = Array.from({length:6}, (_,i) => `${yr}-${String(startM+i).padStart(2,'0')}`);
+  const ym  = document.getElementById('irsa-mo')?.value || new Date().toISOString().slice(0,7);
+  const grp = document.getElementById('irsa-grp')?.value || 'both';
+  const fillCall = document.getElementById('irsa-fill-call')?.checked !== false;
+  const ancPct = (S.cfg.anchorPct || 70) / 100;
   const groups = ['North','South'].filter(g => grp === 'both' || g === grp);
+  const ancSpan = document.getElementById('irsa-anc-target');
+  if(ancSpan) ancSpan.textContent = Math.round(ancPct*100);
 
   _irsaPreview = [];
   const errors = [];
-  let totalFilled = 0, totalUnfilled = 0;
+  let totalFilled = 0, totalUnfilled = 0, callFills = 0;
 
   groups.forEach(g => {
     const gPhys = S.physicians.filter(p => p.irFte > 0 && p.irGroup === g);
     if(!gPhys.length){ errors.push(`No IR physicians in ${g} group.`); return; }
     const gFteTot = gPhys.reduce((s,p) => s + p.irFte, 0) || 1;
 
-    // Enumerate all Day Shift slots for this group across the period
+    // Build slot list from irShiftSlots config
     const slots = [];
-    months.forEach(ym => {
-      const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
-      S.sites.filter(s => s.irGroup === g || s.irGroup === 'Both').forEach(site => {
-        cells.forEach(c => {
-          const need = (S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`] || 0;
-          for(let i = 0; i < need; i++) slots.push({date:c.date, site:site.name, irGroup:g});
-        });
+    const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
+    S.sites.filter(s => s.irGroup === g || s.irGroup === 'Both').forEach(site => {
+      cells.forEach(c => {
+        const need = (S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`] || 0;
+        for(let i = 0; i < need; i++) slots.push({date:c.date, site:site.name, irGroup:g});
       });
     });
     slots.sort((a,b) => a.date > b.date ? 1 : -1);
-    if(!slots.length){ errors.push(`No shift slots configured for ${g} group.`); return; }
 
-    // FTE-proportional quotas
-    const quotas = _irrQuotas(gPhys, slots.length, p => slots.length * (p.irFte / gFteTot));
+    // Collect on-call physicians who need a proc shift
+    const callNeedShift = []; // {physId, date, site}
+    if(fillCall){
+      S.irCalls.filter(ic => ic.callType==='daily' && ic.irGroup===g && ic.date.startsWith(ym))
+        .forEach(ic => {
+          const hasShift = (S.irShifts||[]).some(s => s.physId===ic.physId && s.date===ic.date && s.shift!=='Home');
+          if(!hasShift){
+            const p = S.physicians.find(x => x.id===ic.physId);
+            const site = p?.irSitePrim || (S.sites.find(s => s.irGroup===g)?.name||'');
+            if(!callNeedShift.some(e => e.physId===ic.physId && e.date===ic.date))
+              callNeedShift.push({physId:ic.physId, date:ic.date, site});
+          }
+        });
+    }
 
-    const cnt = {};
-    gPhys.forEach(p => { cnt[p.id] = 0; });
+    if(!slots.length && !callNeedShift.length){
+      errors.push(`No shift slots configured for ${g} group and no call physicians need shifts.`);
+      return;
+    }
+
+    // Vacation-adjusted monthly quotas
     const vacCache = {};
-    const vd = pid => { if(!vacCache[pid]) vacCache[pid] = vacDays(pid); return vacCache[pid]; };
-    const assignedOnDate = {};
+    const vd = pid => { if(!vacCache[pid]) vacCache[pid]=vacDays(pid); return vacCache[pid]; };
+    const totalDays = cells.length || 1;
+    const gAvailFte = gPhys.reduce((s,p) => {
+      const av = cells.filter(c => !vd(p.id).has(c.date)).length;
+      return s + p.irFte*(av/totalDays);
+    }, 0) || gFteTot;
 
+    const quotas = _irrQuotas(gPhys, slots.length, p => {
+      const av = cells.filter(c => !vd(p.id).has(c.date)).length;
+      return slots.length * (p.irFte*(av/totalDays)/gAvailFte);
+    });
+
+    const cnt={}, ancCnt={};
+    gPhys.forEach(p => { cnt[p.id]=0; ancCnt[p.id]=0; });
+    const assignedOnDate={};
+
+    function anchorScore(p, site){
+      if(!p.irSitePrim) return 0;
+      const rate = cnt[p.id]>0 ? ancCnt[p.id]/cnt[p.id] : ancPct;
+      const gap  = ancPct - rate;
+      return site===p.irSitePrim ? (gap>0?-gap*3:gap*1) : (gap>0?gap*2:-gap*0.5);
+    }
+
+    // Pass 1: fill configured slots
     slots.forEach(slot => {
       const eligible = gPhys.filter(p => {
         if(vd(p.id).has(slot.date)) return false;
-        if(_has2ndOr3rdShift(p.id, slot.date)) return false;
+        if(_has2ndOr3rdShift(p.id,slot.date)) return false;
         if(p.allowedSites?.length && !p.allowedSites.includes(slot.site)) return false;
         if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
+        if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===slot.date&&s.shift!=='Home')) return false;
+        if(_irsaPreview.some(a=>a.physId===p.id&&a.date===slot.date)) return false;
+        if(cnt[p.id] >= (quotas[p.id]??Infinity)) return false;
         return true;
       });
 
       if(!eligible.length){ totalUnfilled++; return; }
 
       eligible.sort((a,b) => {
-        const defA = (quotas[a.id]||0) - cnt[a.id];
-        const defB = (quotas[b.id]||0) - cnt[b.id];
-        if(defA !== defB) return defB - defA;
-        return b.irFte - a.irFte;
+        const asA=anchorScore(a,slot.site), asB=anchorScore(b,slot.site);
+        if(Math.abs(asA-asB)>0.05) return asA-asB;
+        const defA=(quotas[a.id]||0)-cnt[a.id], defB=(quotas[b.id]||0)-cnt[b.id];
+        if(defA!==defB) return defB-defA;
+        return b.irFte-a.irFte;
       });
 
-      const picked = eligible[0];
-      cnt[picked.id]++;
-      if(!assignedOnDate[slot.date]) assignedOnDate[slot.date] = new Set();
-      assignedOnDate[slot.date].add(picked.id);
-      _irsaPreview.push({physId:picked.id, date:slot.date, site:slot.site,
+      const p = eligible[0];
+      cnt[p.id]++;
+      if(slot.site===p.irSitePrim) ancCnt[p.id]++;
+      if(!assignedOnDate[slot.date]) assignedOnDate[slot.date]=new Set();
+      assignedOnDate[slot.date].add(p.id);
+      _irsaPreview.push({physId:p.id, date:slot.date, site:slot.site,
         irGroup:g, shift:'1st', sub:'', notes:'Auto-assign'});
       totalFilled++;
     });
 
-    // Append per-physician summary
+    // Pass 2: ensure on-call physicians get a proc shift
+    callNeedShift.forEach(entry => {
+      if(_irsaPreview.some(a=>a.physId===entry.physId&&a.date===entry.date)) return;
+      if(vd(entry.physId).has(entry.date)) return;
+      if(_has2ndOr3rdShift(entry.physId,entry.date)) return;
+      const p = S.physicians.find(x=>x.id===entry.physId);
+      if(p) ancCnt[p.id]=(ancCnt[p.id]||0)+(entry.site===p.irSitePrim?1:0);
+      _irsaPreview.push({physId:entry.physId, date:entry.date, site:entry.site,
+        irGroup:g, shift:'1st', sub:'', notes:'Auto (with call)', isCallFill:true});
+      callFills++;
+    });
+
     gPhys.forEach(p => {
-      p._irsaAftCnt = cnt[p.id] || 0;
-      p._irsaTgt    = (quotas[p.id] || 0);
+      p._irsaAftCnt = _irsaPreview.filter(a=>a.physId===p.id).length;
+      p._irsaTgt    = quotas[p.id] || 0;
+      p._irsaAncCnt = ancCnt[p.id] || 0;
     });
   });
 
-  // Build preview HTML
-  const box = document.getElementById('irsa-box');
-  const applyBtn = document.getElementById('irsa-apply');
+  const box=document.getElementById('irsa-box');
+  const applyBtn=document.getElementById('irsa-apply');
+
   if(!_irsaPreview.length){
-    box.innerHTML = `<div class="note nw">${errors.join('<br>') || 'No shifts could be generated. Check irShiftSlots configuration.'}</div>`;
-    if(applyBtn) applyBtn.style.display = 'none';
+    box.innerHTML=`<div class="note ${errors.length?'nw':'ni'}">${errors.length?errors.join('<br>'):'No slots to fill — all procedure shifts already assigned for this month.'}</div>`;
+    if(applyBtn) applyBtn.style.display='none';
     return;
   }
 
-  let html = `<div class="card" style="margin-bottom:10px">
-    <div class="card-title">Preview — ${period} ${yr}
+  const totalAnchor=_irsaPreview.filter(s=>{const p=S.physicians.find(x=>x.id===s.physId);return p?.irSitePrim===s.site;}).length;
+  const overallAnchorPct=(_irsaPreview.length>0)?Math.round(totalAnchor/_irsaPreview.length*100):0;
+  const tgtPct=Math.round(ancPct*100);
+  const [yr,mo]=ym.split('-');
+  const monthLabel=new Date(+yr,+mo-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+
+  let html=`<div class="card" style="margin-bottom:10px">
+    <div class="card-title">Preview — ${monthLabel}
       <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
-        ${totalFilled} shifts · ${totalUnfilled} unfillable
+        ${totalFilled} slot fills · ${callFills} call fills · anchor ${overallAnchorPct}% (target ~${tgtPct}%)
       </span>
     </div>
-    <div class="g3" style="margin-bottom:10px">
-      <div class="met"><div class="met-lbl">Shifts Generated</div>
-        <div class="met-val" style="color:var(--green-t)">${totalFilled}</div></div>
-      <div class="met"><div class="met-lbl">Unfillable Slots</div>
-        <div class="met-val" style="color:${totalUnfilled?'var(--amber,#d97706)':'var(--txt3)'}">
-          ${totalUnfilled}</div></div>
-      <div class="met"><div class="met-lbl">Physicians Used</div>
-        <div class="met-val">${[...new Set(_irsaPreview.map(s=>s.physId))].length}</div></div>
+    <div class="g4" style="margin-bottom:10px">
+      <div class="met"><div class="met-lbl">Slot Fills</div><div class="met-val" style="color:var(--green-t)">${totalFilled}</div></div>
+      <div class="met"><div class="met-lbl">Call Fills</div><div class="met-val" style="color:var(--blue-t)">${callFills}</div></div>
+      <div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:${Math.abs(overallAnchorPct-tgtPct)<=8?'var(--green-t)':'var(--amber,#d97706)'}">
+        ${overallAnchorPct}%</div></div>
+      <div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:${totalUnfilled?'var(--amber,#d97706)':'var(--txt3)'}">
+        ${totalUnfilled}</div></div>
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>Physician</th><th>Group</th><th>IR FTE</th>
-      <th>Target</th><th>Assigned</th><th>% of Target</th>
+      <th>Physician</th><th>Group</th><th>IR FTE</th><th>Target</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>
     </tr></thead><tbody>`;
 
-  groups.forEach(g => {
-    S.physicians.filter(p => p.irFte > 0 && p.irGroup === g).forEach(p => {
-      const after = _irsaPreview.filter(s => s.physId === p.id).length;
-      const tgt   = p._irsaTgt || 0;
-      const pct   = tgt > 0 ? Math.round(after / tgt * 100) : 0;
-      const col   = pct >= 95 ? 'var(--green-t)' : pct >= 80 ? 'var(--amber,#d97706)' : 'var(--red-t)';
-      html += `<tr>
-        <td style="font-weight:600">${pname(p.id)}</td>
+  groups.forEach(g=>{
+    S.physicians.filter(p=>p.irFte>0&&p.irGroup===g).forEach(p=>{
+      if(!p._irsaTgt&&!p._irsaAftCnt) return;
+      const after=p._irsaAftCnt||0, tgt=p._irsaTgt||0;
+      const pct=tgt>0?Math.round(after/tgt*100):(after>0?100:0);
+      const ancR=after>0?Math.round((p._irsaAncCnt||0)/after*100):0;
+      const ancDiff=Math.abs(ancR-tgtPct);
+      const col=pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
+      const ancCol=ancDiff<=8?'var(--green-t)':ancDiff<=15?'var(--amber,#d97706)':'var(--red-t)';
+      html+=`<tr><td style="font-weight:600">${pname(p.id)}</td>
         <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
         <td style="text-align:center">${p.irFte}</td>
         <td style="text-align:center">${tgt.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700">${after}</td>
-        <td style="text-align:center;font-weight:700;color:${col}">${pct}%</td>
+        <td style="text-align:center;font-weight:800;color:${col}">${pct}%</td>
+        <td style="text-align:center;font-weight:700;color:${ancCol}">${ancR}%</td>
       </tr>`;
     });
   });
 
-  html += `</tbody></table></div></div>`;
-  if(errors.length) html += `<div class="note nw" style="font-size:12px">${errors.join('<br>')}</div>`;
-  if(totalUnfilled) html += `<div class="note nw" style="font-size:12px;margin-top:4px">
-    ⚠ ${totalUnfilled} slot(s) could not be filled due to vacation or conflicts.</div>`;
+  html+=`</tbody></table></div></div>`;
+  if(errors.length) html+=`<div class="note nw" style="font-size:12px">${errors.join('<br>')}</div>`;
+  if(callFills) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">ℹ ${callFills} proc shift(s) added for on-call physicians who had no shift scheduled.</div>`;
+  if(totalUnfilled) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">⚠ ${totalUnfilled} slot(s) unfillable due to vacation or site restriction.</div>`;
 
-  box.innerHTML = html;
-  if(applyBtn) applyBtn.style.display = 'inline-block';
-}
-
-function applyIRShiftAA(){
+  box.innerHTML=html;
+  if(applyBtn) applyBtn.style.display='inline-block';
+}function applyIRShiftAA(){
   if(!_adminOnly('apply IR shift auto-assign')) return;
   if(!_irsaPreview.length){ alert('Nothing to apply — run Preview first.'); return; }
-  if(!confirm(`Apply ${_irsaPreview.length} shift assignments? This will replace all existing non-Home Day Shifts for the selected period and groups.`)) return;
 
-  const yr     = +document.getElementById('irsa-yr')?.value || new Date().getFullYear();
-  const period = document.getElementById('irsa-period')?.value || 'H1';
-  const grp    = document.getElementById('irsa-grp')?.value || 'both';
-  const startM = period === 'H1' ? 1 : 7;
-  const months = Array.from({length:6}, (_,i) => `${yr}-${String(startM+i).padStart(2,'0')}`);
-  const groups = ['North','South'].filter(g => grp === 'both' || g === grp);
-  const inPeriod = date => months.some(ym => date.startsWith(ym));
+  const ym  = document.getElementById('irsa-mo')?.value || new Date().toISOString().slice(0,7);
+  const grp = document.getElementById('irsa-grp')?.value || 'both';
+  const groups = ['North','South'].filter(g => grp==='both'||g===grp);
+  const callFillCount = _irsaPreview.filter(a=>a.isCallFill).length;
 
-  // Remove existing non-Home Day Shifts for these groups in this period
+  if(!confirm(`Apply ${_irsaPreview.length} shift(s) for ${ym}? Existing non-Home IR shifts for this month will be replaced.`)) return;
+
   S.irShifts = S.irShifts.filter(s => {
-    if(!inPeriod(s.date)) return true;
+    if(!s.date.startsWith(ym)) return true;
     if(!groups.includes(s.irGroup)) return true;
-    if(s.shift === 'Home') return true; // keep Home fills
-    return false; // remove existing 1st shifts
+    if(s.shift==='Home') return true;
+    return false;
   });
 
-  // Add new assignments
   _irsaPreview.forEach(a => {
     S.irShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
       shift:'1st', site:a.site, sub:a.sub||'', notes:a.notes||'', irGroup:a.irGroup});
   });
 
-  const n = _irsaPreview.length;
-  _irsaPreview = [];
+  const n=_irsaPreview.length;
+  _irsaPreview=[];
   triggerSave();
 
-  const box = document.getElementById('irsa-box');
-  const applyBtn = document.getElementById('irsa-apply');
-  if(box) box.innerHTML = `<div class="note ns">✓ ${n} IR Day Shift(s) assigned. Calendars updated.</div>`;
-  if(applyBtn) applyBtn.style.display = 'none';
+  const box=document.getElementById('irsa-box');
+  const applyBtn=document.getElementById('irsa-apply');
+  const callNote=callFillCount?` (incl. ${callFillCount} for on-call physicians)`:'';
+  if(box) box.innerHTML=`<div class="note ns">✓ ${n} IR shift(s) assigned for ${ym}${callNote}.</div>`;
+  if(applyBtn) applyBtn.style.display='none';
   if(document.getElementById('irc-mo')) renderIRCal();
 }
-
 
 /* ─── IR SHIFT BUILDER (missing functions rebuilt) ─── */
 
