@@ -1976,7 +1976,7 @@ function _buildSaveHTML(){
     vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,holidayDefs:S.holidayDefs||[],driveTimes:S.driveTimes||{},
+    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
@@ -2240,10 +2240,17 @@ async function launchApp(){
         if(si){si.textContent='✓ Synced';si.style.color='var(--green-t)';
           setTimeout(()=>{if(si)si.textContent='';},2500);}
       } else {
-        // First run — save seed data to Supabase
-        await _pushToSupabase();
-        if(si){si.textContent='✓ Initialized';si.style.color='var(--green-t)';
-          setTimeout(()=>{if(si)si.textContent='';},2500);}
+        // DB has no row yet — this is a true first run, push seed data
+        // SAFETY: only push if nextId is still at seed default (< 300)
+        if(S.nextId < 300){
+          await _pushToSupabase();
+          if(si){si.textContent='✓ Initialized';si.style.color='var(--green-t)';
+            setTimeout(()=>{if(si)si.textContent='';},2500);}
+        } else {
+          // nextId is high — real data exists somewhere; don't overwrite
+          if(si){si.textContent='⚠ DB load failed — check connection';si.style.color='var(--red-t)';
+            setTimeout(()=>{if(si)si.textContent='';},6000);}
+        }
       }
       _subscribeRealtime();
     }catch(e){
@@ -2272,8 +2279,14 @@ function _applyRemoteData(d){
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
   if(d.cfg)Object.assign(S.cfg,d.cfg);
+  if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
   if(d.driveTimes) S.driveTimes=d.driveTimes;
   if(d.nextId>S.nextId)S.nextId=d.nextId;
+  // Patch null siteRules / irCallBlackouts on physicians loaded from older saves
+  (S.physicians||[]).forEach(p=>{
+    if(!Array.isArray(p.siteRules)) p.siteRules=[];
+    if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
+  });
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
       // Ensure physId is always a number (Supabase JSON may return strings)
@@ -2342,12 +2355,16 @@ function _refreshCurrentPage(){
   const pg=document.querySelector('.page.on')?.id?.replace('page-','');
   if(!pg)return;
   const fns={
-    dashboard:renderDash,'my-schedule':renderMySched,
-    'dr-cal':()=>renderDRCal(),'dr-builder':()=>renderDRBuilder(),
-    'dr-weekends':()=>renderWkBuilder(),'ir-cal':()=>renderIRCal(),
-    'ir-shifts':()=>renderIRShiftBuilder(),'ir-builder':()=>renderIRWeekBuilder(),
-    'anchor-report':()=>renderAnchorReport(),'fte':_renderFTECurrent,
-    'open-shifts':()=>renderOpenShifts(),
+    dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
+    physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
+    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
+    'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRWeekBuilder,
+    'ir-shift-auto':renderIRShiftAutoPage,'ir-rebalance':renderIRRebalancePrep,
+    'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
+    holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,
+    'open-shifts':renderOpenShifts,'user-mgmt':renderUserMgmt,
+    settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,
+    'ir-shift-slots':renderIRShiftSlots,
   };
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
 }
@@ -2358,7 +2375,7 @@ function _refreshCurrentPage(){
 // ── Reactive persistence system ──
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-  'openShifts','physicians','chatMessages','swapRequests','holidayBlackouts','holidayNeeds'];
+  'openShifts','physicians','chatMessages','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs'];
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
@@ -2484,6 +2501,7 @@ let S=/*S_START*/{
     {id:11,name:'Christmas Day',group:'DR',slots:2},
     {id:12,name:'Christmas Day',group:'IR',slots:1},
   ],
+  holidayDefs:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
@@ -3134,14 +3152,17 @@ function _saveEditPhys(id){
   p.drSubs=[...document.querySelectorAll('[name="drs"]:checked')].map(c=>c.value);
   p.irSubs=[...document.querySelectorAll('[name="irs"]:checked')].map(c=>c.value);
   p.shiftElig={
-    s1:!!document.getElementById('pe-s1')?.checked&&role!=='IR',
-    s2:!!document.getElementById('pe-s2')?.checked,
-    s3:!!document.getElementById('pe-s3')?.checked,
-    home:!!document.getElementById('pe-home')?.checked&&role!=='IR',
-    wknd:!!document.getElementById('pe-wknd')?.checked&&role!=='IR',
+    s1: !!document.getElementById('pe-s1')?.checked,
+    s2: !!document.getElementById('pe-s2')?.checked,
+    s3: !!document.getElementById('pe-s3')?.checked,
+    home: !!document.getElementById('pe-home')?.checked,
+    wknd: !!document.getElementById('pe-wknd')?.checked,
   };
   p.drSite=anchor||allowed[0]||S.sites[0]?.name||'';
   p.address=document.getElementById('p-address')?.value.trim()||'';
+  // Ensure these fields exist on legacy physicians loaded from older saves
+  if(!Array.isArray(p.siteRules)) p.siteRules=[];
+  if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
   triggerSave();
   cancelEditPhys();
   renderPhysicians();
@@ -3184,9 +3205,17 @@ function addPhys(){
     anchorSite:anchor,allowedSites:allowed.length?allowed:S.sites.map(s=>s.name),
     drSubs:[...document.querySelectorAll('[name="drs"]:checked')].map(c=>c.value),
     irSubs:[...document.querySelectorAll('[name="irs"]:checked')].map(c=>c.value),
-    shiftElig:{s1:document.getElementById('pe-s1').checked&&role!=='IR',s2:document.getElementById('pe-s2').checked,s3:document.getElementById('pe-s3').checked,home:document.getElementById('pe-home').checked&&role!=='IR',wknd:document.getElementById('pe-wknd').checked&&role!=='IR'},
+    shiftElig:{
+      s1:!!document.getElementById('pe-s1')?.checked,
+      s2:!!document.getElementById('pe-s2')?.checked,
+      s3:!!document.getElementById('pe-s3')?.checked,
+      home:!!document.getElementById('pe-home')?.checked,
+      wknd:!!document.getElementById('pe-wknd')?.checked,
+    },
     drSite:anchor||S.sites[0]?.name||'',
     address:document.getElementById('p-address')?.value.trim()||'',
+    siteRules:[],
+    irCallBlackouts:[],
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
   renderPhysicians();
@@ -8067,8 +8096,9 @@ function renderHolDefList(){
     return;
   }
   el.innerHTML = defs.map(d=>{
-    const assignedDR = S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='DR').length;
-    const assignedIR = S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR').length;
+    // Count distinct assignments (1 physician per block regardless of how many dates)
+    const assignedDR = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='DR').map(h=>h.physId)).size;
+    const assignedIR = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR').map(h=>h.physId)).size;
     const needDR = d.drSlots||0, needIR = d.irSlots||0;
     const drFull = assignedDR>=needDR, irFull = assignedIR>=needIR;
     return `<div class="card" style="margin-bottom:8px">
@@ -8594,7 +8624,9 @@ async function _pushToSupabase(){
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
+    vacPicking:S.vacPicking,
         driveTimes:S.driveTimes||{},
+        vacPicking:S.vacPicking,
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
       })
     };
