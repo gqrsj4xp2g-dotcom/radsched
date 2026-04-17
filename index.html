@@ -5306,7 +5306,8 @@ function previewIRShiftAA(){
       const t = irShiftTargetMonth(p, ym);
       return t > 0 ? t : slots.length * (p.irFte / gFteTot);
     });
-    const shiftCapFn = p => shiftQuotas[p.id] ?? Math.max(Math.ceil(irShiftTargetMonth(p, ym)), 1);
+    // Monthly integer quota: from largest-remainder, falling back to rounded target (min 1)
+    const shiftCapFn = p => (shiftQuotas[p.id] != null && shiftQuotas[p.id] > 0) ? shiftQuotas[p.id] : Math.max(Math.round(irShiftTargetMonth(p, ym)), 1);
 
     // ── Running state ─────────────────────────────────────────────────────
     const cntS = {}, ancS = {};
@@ -5432,7 +5433,6 @@ function previewIRShiftAA(){
         // Tag stats
     gPhys.forEach(p => {
       p._irsaAftCnt = cntS[p.id] || 0;
-      p._irsaTgt    = irShiftTargetMonth(p, ym);
       p._irsaQta    = shiftCapFn(p);
       p._irsaAncCnt = ancS[p.id] || 0;
     });
@@ -5474,13 +5474,13 @@ function previewIRShiftAA(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      <th>Month Target</th><th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>
+      <th>Monthly Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>
     </tr></thead><tbody>`;
 
   groups.forEach(g=>{
     S.physicians.filter(p=>p.irFte>0&&p.irGroup===g).forEach(p=>{
       if(!p._irsaQta && !p._irsaAftCnt) return;
-      const after=p._irsaAftCnt||0, tgt=p._irsaTgt||0, qta=p._irsaQta||0;
+      const after=p._irsaAftCnt||0, qta=p._irsaQta||0;
       const pct=qta>0?Math.round(after/qta*100):(after>0?100:0);
       const hasAnc=!!p.anchorSite;
       const ancR=hasAnc&&after>0?Math.round((p._irsaAncCnt||0)/after*100):null;
@@ -5489,7 +5489,6 @@ function previewIRShiftAA(){
       html+=`<tr><td style="font-weight:600">${pname(p.id)}</td>
         <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
         <td style="text-align:center">${p.irFte}</td>
-        <td style="text-align:center;color:var(--txt3)">${tgt.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700">${qta}</td>
         <td style="text-align:center;font-weight:700">${after}</td>
         <td style="text-align:center;font-weight:800;color:${col}">${pct}%</td>
@@ -8837,7 +8836,7 @@ function renderIRRebalancePrep(){
   irPs.forEach(p=>{
     if(isShifts){
       const s=months.reduce((acc,ym)=>acc+irProcShiftCnt(p.id,ym),0);
-      const ts=irShiftTargetPeriod(p,months);
+      const ts=irShiftTargetMonth(p,months[0]);
       if(s>0) anyData=true;
       const ps=ts>0?Math.round(s/ts*100):0;
       const sCls=ps>110?'color:var(--red-t)':ps>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
@@ -8959,7 +8958,7 @@ function previewIRRebalance(){
         const gFteTot=gPhys.reduce((s,x)=>s+x.irFte,0)||1;
         return gShiftEntries.length*(p.irFte/gFteTot);
       });
-      const shiftCapFn=p=>shiftQuotas[p.id]??Math.max(Math.ceil(irShiftTargetPeriod(p,months)),1);
+      const shiftCapFn=p=>(shiftQuotas[p.id]!=null&&shiftQuotas[p.id]>0)?shiftQuotas[p.id]:Math.max(Math.round(irShiftTargetMonth(p,months[0])),1);
       const gSAsgn=[];
 
       // On-call lookup: if a physician is on daily call on a date, they must have a shift
@@ -9019,8 +9018,8 @@ function previewIRRebalance(){
             const fitB=b.anchorSite===entry.site?ancNeedB:-ancNeedB;
             if(fitA!==fitB) return fitB-fitA;
             // Highest deficit first
-            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
-            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
+            const defA=irShiftTargetMonth(a,months[0])-cntS[a.id];
+            const defB=irShiftTargetMonth(b,months[0])-cntS[b.id];
             if(Math.abs(defA-defB)>1e-9) return defB-defA;
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
@@ -9063,7 +9062,7 @@ function previewIRRebalance(){
     irPs.forEach(p=>{
       const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
       const newS=plan.shifts.filter(a=>a.physId===p.id).length;
-      const ts=irShiftTargetPeriod(p,months);
+      const ts=irShiftTargetMonth(p,months[0]);
       const pct=ts>0?Math.round(newS/ts*100):0;
       const chg=newS-oldS;
       const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
@@ -9674,7 +9673,7 @@ function _irrUpdateDistribution(){
     irPs.forEach(p=>{
       const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
       const newS=(_irrPlan.shifts||[]).filter(a=>effectivePid(a)===p.id).length;
-      const ts=irShiftTargetPeriod(p,months);
+      const ts=irShiftTargetMonth(p,months[0]);
       const pct=ts>0?Math.round(newS/ts*100):0;
       const chg=newS-oldS;
       const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
