@@ -5356,19 +5356,17 @@ function previewIRShiftAA() {
 
     // Score: how much does assigning physician P to (site) improve the schedule?
     // Lower score = better candidate (sort ascending → pick [0])
-    // Equal weight: FTE attainment deficit + anchor rate deficit
+    // FTE is PRIMARY (weight 10x), anchor is SECONDARY tiebreaker.
     function pickScore(p, site) {
       var q    = effQuota(p);
       var got  = cnt[p.id];
-      // FTE: proportional deficit (1.0 = empty, 0.0 = at quota)
+      // FTE: proportional deficit (1.0 = empty, 0.0 = at quota) — PRIMARY
       var fteDef = q > 0 ? (q - got) / q : 0;
-      // Anchor: how far below ANC_PCT% is this physician?
-      var ancRate = (got > 0 && p.anchorSite) ? ancCnt[p.id] / got : (p.anchorSite ? 0 : ANC_PCT);
-      var ancDef  = p.anchorSite ? Math.max(0, ANC_PCT - ancRate) : 0;
-      // Bonus if this slot is at physician's anchor site and they need it
-      var ancBonus = (p.anchorSite === site && ancDef > 0) ? ancDef : 0;
-      // Combined score — higher fteDef + ancBonus means pick this person first
-      return -(fteDef + ancBonus);  // negate so sort ascending = best first
+      // Anchor: how far below ANC_PCT% is this physician? — SECONDARY tiebreaker only
+      var ancRate  = (got > 0 && p.anchorSite) ? ancCnt[p.id] / got : 0;
+      var ancBonus = (p.anchorSite === site && p.anchorSite && ancRate < ANC_PCT) ? (ANC_PCT - ancRate) * 0.1 : 0;
+      // FTE dominates; anchor only breaks ties when FTE is equal
+      return -(fteDef * 10 + ancBonus);  // negate so sort ascending = best first
     }
 
     function doAssign(p, slot, note) {
