@@ -5330,16 +5330,17 @@ function previewIRShiftAA(){
     }
 
     // Soft rules for IR shifts — relaxed progressively in fallback passes.
-    // NOTE: siteRuleOk is NOT used here — it counts S.drShifts and is DR-specific.
-    //       isIRCallBlackout is NOT used here — blackouts apply to IR CALL duty only, not procedure shifts.
-    //       p.allowedSites is NOT used — IR physicians work across group sites.
+    // irSiteRuleOk: checks siteRules.blocked, siteRules.blackouts, and allowedShifts includes 'ir'
+    //               does NOT apply maxPerMonth/maxPerWeek (those count drShifts and are DR-only)
+    // dayConditionSiteOk: checks DOW-specific requiredSite conditions
+    // sequenceOk: checks seqRules.maxConsec and seqRules.minRest
+    // isIRCallBlackout is NOT used — blackouts apply to IR CALL duty only, not procedure shifts.
     function softRulesOk(p, site, date){
-      // Only block on physician-configured day conditions (DOW-specific site requirements)
+      if(!irSiteRuleOk(p, site, date)) return false;
       if(!dayConditionSiteOk(p, site, date, 'ir-shift')) return false;
       return true;
     }
     function seqOk(p, date){
-      // Respect consecutive-day and rest rules (seqRules set by admin in Physician Rules)
       return sequenceOk(p, date, ym);
     }
 
@@ -7460,6 +7461,18 @@ function siteRuleOk(p, siteName, ym, date, shiftKey){
  * based on day-of-week restrictions in their site rules.
  * context: 'dr-shift' | 'ir-call' | 'ir-shift'
  */
+// IR-specific site rule check — checks blocked/blackout/allowedShifts('ir')
+// but NOT maxPerMonth/maxPerWeek (those count S.drShifts and are DR-only)
+function irSiteRuleOk(p, siteName, date){
+  const rule = (p.siteRules||[]).find(r => r.site===siteName);
+  if(!rule) return true;                          // no rule = unrestricted
+  if(rule.blocked) return false;                  // hard blocked from this site
+  if((rule.blackouts||[]).some(b => date>=b.start && date<=b.end)) return false;
+  // If allowedShifts is set and 'ir' is NOT in it, physician can't do IR shifts here
+  if(rule.allowedShifts?.length && !rule.allowedShifts.includes('ir')) return false;
+  return true;
+}
+
 function dayConditionSiteOk(p, siteName, date, context){
   // context: 'dr-shift' | 'ir-call' | 'ir-shift' | any
   const conds = (p.dayConditions||[]);
