@@ -5375,28 +5375,34 @@ function previewIRShiftAA(){
       const off = totalSoFar % n;
       return pool.slice().sort((a,b) => {
         const qA = shiftCapFn(a), qB = shiftCapFn(b);
-        const defA = qA - cntS[a.id];   // positive = under quota, 0 = exactly at quota, negative = over
+        const defA = qA - cntS[a.id];   // positive = under quota, 0 = at quota, negative = over
         const defB = qB - cntS[b.id];
-        const underA = defA > 0;         // strictly under quota
+        const underA = defA > 0;         // strictly under quota (< 100%)
         const underB = defB > 0;
         // Hard tier: under-quota ALWAYS beats at/over-quota.
-        // No physician exceeds 100% while another is below 100%.
+        // No physician exceeds 100% while another is still below 100%.
         if(underA !== underB) return underA ? -1 : 1;
-        // Both are in the same tier (both under, or both at/over quota).
-        // Anchor scoring (only relevant within the under-quota tier)
-        const ancTgtA = a.anchorSite ? Math.round(qA * ancPct / 100) : 0;
-        const ancTgtB = b.anchorSite ? Math.round(qB * ancPct / 100) : 0;
-        const ancNeedA = Math.max(0, ancTgtA - (ancS[a.id]||0));
-        const ancNeedB = Math.max(0, ancTgtB - (ancS[b.id]||0));
-        const fitA = a.anchorSite===site ?  ancNeedA : -ancNeedA;
-        const fitB = b.anchorSite===site ?  ancNeedB : -ancNeedB;
-        // FTE protection within tier: if one physician is 2+ shifts further behind,
-        // FTE wins over anchor to prevent a single physician from falling too far back.
+        // Per-physician anchor rate vs 70% target.
+        // Uses each physician's INDIVIDUAL current anchor rate (ancS/cntS),
+        // not a count computed from quota. This ensures the check is meaningful
+        // regardless of quota size: a physician at 25% anchor has a 45% gap,
+        // one at 60% has only a 10% gap — and priority scales accordingly.
+        const rateA = cntS[a.id] > 0 ? (ancS[a.id]||0) / cntS[a.id] : 0;
+        const rateB = cntS[b.id] > 0 ? (ancS[b.id]||0) / cntS[b.id] : 0;
+        const ancGapA = a.anchorSite ? Math.max(0, ancPct/100 - rateA) : 0; // how far below 70%
+        const ancGapB = b.anchorSite ? Math.max(0, ancPct/100 - rateB) : 0;
+        // fitA/fitB: directional anchor score for assigning to this slot's site.
+        // Positive → assigning physician here helps their individual anchor rate.
+        // Negative → assigning here would hurt it (should send them to their anchor site instead).
+        const fitA = a.anchorSite===site ?  ancGapA : -ancGapA;
+        const fitB = b.anchorSite===site ?  ancGapB : -ancGapB;
+        // FTE protection: if one physician is 2+ shifts further behind on FTE within
+        // the same tier, FTE wins over anchor (protects non-anchor physicians like Reyes).
         if(Math.abs(defA - defB) >= ANC_FTE_PROTECT){
-          if(defA !== defB) return defB - defA;  // FTE wins
+          if(defA !== defB) return defB - defA;
         }
-        // Primary: anchor compliance (drives to ~70%)
-        if(fitA !== fitB) return fitB - fitA;
+        // Primary: per-physician anchor compliance (drives each physician to ~70%)
+        if(Math.abs(fitA - fitB) > 1e-9) return fitB - fitA;
         // Secondary: FTE deficit
         if(defA !== defB) return defB - defA;
         // Tiebreak: fair rotation
