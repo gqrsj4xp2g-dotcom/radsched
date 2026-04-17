@@ -5359,15 +5359,17 @@ function previewIRShiftAA(){
     //
     // Anchor is PRIMARY so the 70% target is actually reached, not just approached.
     // FTE is SECONDARY — it still governs distribution when anchor is neutral.
-    // Protection: if one physician is 3+ shifts further behind on FTE, FTE wins
-    //   regardless of anchor, so no physician is severely starved for coverage.
+    // Protection: if one physician is 2+ shifts further behind on FTE, FTE wins
+    //   regardless of anchor, so no physician is starved for coverage.
+    //   Threshold = 2 ensures physicians without an anchorSite (e.g. Reyes, Locascio)
+    //   are protected earlier — they get no anchor boost so can fall behind quickly.
     // Rotation tiebreak for true ties.
     //
     // fitA/fitB — directional anchor score for assigning this physician to this slot:
     //   > 0 : assigning HERE helps anchor compliance (slot is at physician's anchor site and they need it)
     //   < 0 : assigning HERE hurts compliance (non-anchor slot for physician who still needs anchor)
     //   = 0 : neutral (physician has no anchor site, or anchor already satisfied)
-    const ANC_FTE_PROTECT = 3; // if FTE gap >= this, FTE overrides anchor to protect fairness
+    const ANC_FTE_PROTECT = 2; // if FTE gap >= this, FTE overrides anchor (protects non-anchor physicians)
     function sortPool(pool, site){
       const totalSoFar = Object.values(cntS).reduce((s,v) => s+v, 0);
       const off = totalSoFar % n;
