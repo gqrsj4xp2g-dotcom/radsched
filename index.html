@@ -5369,7 +5369,6 @@ function previewIRShiftAA(){
     //   > 0 : assigning HERE helps anchor compliance (slot is at physician's anchor site and they need it)
     //   < 0 : assigning HERE hurts compliance (non-anchor slot for physician who still needs anchor)
     //   = 0 : neutral (physician has no anchor site, or anchor already satisfied)
-    const ANC_FTE_PROTECT = 2; // if FTE gap >= this, FTE overrides anchor (protects non-anchor physicians)
     function sortPool(pool, site){
       const totalSoFar = Object.values(cntS).reduce((s,v) => s+v, 0);
       const off = totalSoFar % n;
@@ -5396,15 +5395,11 @@ function previewIRShiftAA(){
         // Negative → assigning here would hurt it (should send them to their anchor site instead).
         const fitA = a.anchorSite===site ?  ancGapA : -ancGapA;
         const fitB = b.anchorSite===site ?  ancGapB : -ancGapB;
-        // FTE protection: if one physician is 2+ shifts further behind on FTE within
-        // the same tier, FTE wins over anchor (protects non-anchor physicians like Reyes).
-        if(Math.abs(defA - defB) >= ANC_FTE_PROTECT){
-          if(defA !== defB) return defB - defA;
-        }
-        // Primary: per-physician anchor compliance (drives each physician to ~70%)
-        if(Math.abs(fitA - fitB) > 1e-9) return fitB - fitA;
-        // Secondary: FTE deficit
+        // Primary: FTE deficit (most behind their quota wins)
         if(defA !== defB) return defB - defA;
+        // Secondary: per-physician anchor compliance (~70% target)
+        // Uses each physician's individual current anchor rate vs 70% target.
+        if(Math.abs(fitA - fitB) > 1e-9) return fitB - fitA;
         // Tiebreak: fair rotation
         const iA = (gPhys.findIndex(x=>x.id===a.id) - off + n) % n;
         const iB = (gPhys.findIndex(x=>x.id===b.id) - off + n) % n;
