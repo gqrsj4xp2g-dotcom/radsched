@@ -5355,28 +5355,43 @@ function previewIRShiftAA(){
       return sequenceOk(p, date, ym);
     }
 
-    // ── Sort: FTE deficit first (primary), anchor secondary, rotation tiebreak
-    // FTE deficit = shiftCapFn(p) - cntS[p.id]:  positive = under quota, negative = over
-    // Anchor: how many more anchor-site shifts does physician need to reach ~ancPct%
-    // Rotation: fair round-robin so ties rotate across physicians
+    // ── Sort: anchor compliance first, FTE deficit second, rotation tiebreak
+    //
+    // Anchor is PRIMARY so the 70% target is actually reached, not just approached.
+    // FTE is SECONDARY — it still governs distribution when anchor is neutral.
+    // Protection: if one physician is 3+ shifts further behind on FTE, FTE wins
+    //   regardless of anchor, so no physician is severely starved for coverage.
+    // Rotation tiebreak for true ties.
+    //
+    // fitA/fitB — directional anchor score for assigning this physician to this slot:
+    //   > 0 : assigning HERE helps anchor compliance (slot is at physician's anchor site and they need it)
+    //   < 0 : assigning HERE hurts compliance (non-anchor slot for physician who still needs anchor)
+    //   = 0 : neutral (physician has no anchor site, or anchor already satisfied)
+    const ANC_FTE_PROTECT = 3; // if FTE gap >= this, FTE overrides anchor to protect fairness
     function sortPool(pool, site){
       const totalSoFar = Object.values(cntS).reduce((s,v) => s+v, 0);
       const off = totalSoFar % n;
       return pool.slice().sort((a,b) => {
-        // 1. FTE deficit (most behind = highest priority)
-        const defA = shiftCapFn(a) - cntS[a.id];
-        const defB = shiftCapFn(b) - cntS[b.id];
-        if(defA !== defB) return defB - defA;
-        // 2. Anchor need (drives compliance toward ancPct%)
         const qA = shiftCapFn(a), qB = shiftCapFn(b);
+        const defA = qA - cntS[a.id];   // positive = under quota (needs more shifts)
+        const defB = qB - cntS[b.id];
+        // Anchor scoring
         const ancTgtA = a.anchorSite ? Math.round(qA * ancPct / 100) : 0;
         const ancTgtB = b.anchorSite ? Math.round(qB * ancPct / 100) : 0;
         const ancNeedA = Math.max(0, ancTgtA - (ancS[a.id]||0));
         const ancNeedB = Math.max(0, ancTgtB - (ancS[b.id]||0));
         const fitA = a.anchorSite===site ?  ancNeedA : -ancNeedA;
         const fitB = b.anchorSite===site ?  ancNeedB : -ancNeedB;
+        // FTE protection: if one physician is significantly more behind on FTE,
+        // protect them regardless of anchor (prevents severe under-assignment)
+        if(Math.abs(defA - defB) >= ANC_FTE_PROTECT){
+          if(defA !== defB) return defB - defA;  // FTE wins
+        }
+        // Primary: anchor compliance (drives to 70%)
         if(fitA !== fitB) return fitB - fitA;
-        // 3. Fair rotation tiebreak
+        // Secondary: FTE deficit
+        if(defA !== defB) return defB - defA;
+        // Tiebreak: fair rotation
         const iA = (gPhys.findIndex(x=>x.id===a.id) - off + n) % n;
         const iB = (gPhys.findIndex(x=>x.id===b.id) - off + n) % n;
         return iA - iB;
