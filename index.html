@@ -5271,7 +5271,6 @@ function previewIRShiftAA(){
   if(ancSpan) ancSpan.textContent = S.cfg.anchorPct || 70;
 
   _irsaPreview = [];
-  _irsaDRPreview = [];
   const errors = [];
   let totalFilled = 0, totalUnfilled = 0, callPriorityFills = 0;
 
@@ -5428,34 +5427,9 @@ function previewIRShiftAA(){
       totalFilled++;
     });
 
-    // ── DR home fill: physicians with no IR shift on a given day → DR Home ───
-    // Runs per-day for each IR physician. Any weekday where a physician has neither
-    // an IR shift (from existing data or this preview run) nor a DR shift gets a
-    // read-from-home DR assignment so they are never left completely unscheduled.
-    cells.forEach(c => {
-      gPhys.forEach(p => {
-        const date = c.date;
-        if(vd(p.id).has(date)) return;                          // on vacation
-        if(_has2ndOr3rdShift(p.id, date)) return;              // 2nd/3rd shift
-        if(isSoldBackDate(p.id, date)) return;                  // sold-back day
-        // Already has an IR shift (existing or new from this preview)
-        if(gSAsgn.some(a => a.physId===p.id && a.date===date)) return;
-        if((S.irShifts||[]).some(s => s.physId===p.id && s.date===date)) return;
-        // Already has a DR shift (existing or already in DR preview)
-        if((S.drShifts||[]).some(s => s.physId===p.id && s.date===date)) return;
-        if(_irsaDRPreview.some(a => a.physId===p.id && a.date===date)) return;
-        // Assign DR read-from-home
-        _irsaDRPreview.push({
-          physId: p.id, date, shift:'Home',
-          site: 'At Home / Remote',
-          sub: (p.drSubs||[])[0] || 'General Procedures',
-          notes: 'Auto: IR unscheduled',
-          autoHome: true,
-        });
-      });
-    });
+    // (DR home fills removed — auto-assign only assigns IR shifts)
 
-    // Tag stats
+        // Tag stats
     gPhys.forEach(p => {
       p._irsaAftCnt = cntS[p.id] || 0;
       p._irsaTgt    = irShiftTargetMonth(p, ym);
@@ -5495,8 +5469,6 @@ function previewIRShiftAA(){
       <div class="met"><div class="met-lbl">On-Call Priority</div><div class="met-val" style="color:var(--blue-t)">${callPriorityFills}</div></div>
       <div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:${Math.abs(overallAnchorPct-ancPct)<=8?'var(--green-t)':'var(--amber,#d97706)'}">
         ${overallAnchorPct}%</div></div>
-      <div class="met"><div class="met-lbl">DR Home Fills</div><div class="met-val" style="color:var(--teal-t)">
-        ${_irsaDRPreview.length}</div></div>
       <div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:${totalUnfilled?'var(--red-t)':'var(--txt3)'}">
         ${totalUnfilled}</div></div>
     </div>
@@ -5530,8 +5502,7 @@ function previewIRShiftAA(){
   if(errors.length) html+=`<div class="note nw" style="font-size:12px">${errors.join('<br>')}</div>`;
   if(callPriorityFills) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">
     ℹ ${callPriorityFills} slot(s) assigned to on-call physicians first.</div>`;
-  if(_irsaDRPreview.length) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">
-    🏠 ${_irsaDRPreview.length} DR read-from-home shift(s) will be assigned to IR physicians with no IR shift that day.</div>`;
+
   if(totalUnfilled) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">
     ⚠ ${totalUnfilled} slot(s) truly unfillable — all physicians unavailable (vacation / 2nd-3rd shift).</div>`;
 
@@ -8857,8 +8828,8 @@ function renderIRRebalancePrep(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${!isShifts&&typ!=='weekend'&&typ!=='day-fill'?'<th>Daily Calls</th><th>6-Mo Target</th><th>Daily %</th>':''}
-      ${!isShifts&&typ!=='daily'&&typ!=='day-fill'?'<th>Wknd Calls</th><th>6-Mo Target</th><th>Wknd %</th>':''}
+      ${!isShifts&&typ!=='weekend'&&typ!=='day-fill'?'<th>Daily Calls</th><th>Month Target</th><th>Daily %</th>':''}
+      ${!isShifts&&typ!=='daily'&&typ!=='day-fill'?'<th>Wknd Calls</th><th>Month Target</th><th>Wknd %</th>':''}
       ${isShifts||typ==='day-fill'?'<th>Current Shifts</th><th>FTE Target</th><th>Current %</th>':''}
     </tr></thead><tbody>`;
 
@@ -8958,10 +8929,27 @@ function previewIRRebalance(){
       if(!gPhys.length) return;
 
       // Collect all non-Home irShifts in period for this group, sorted by date
-      const gShiftEntries=S.irShifts
+      // Collect existing non-Home irShifts for this group/period
+      let gShiftEntries=S.irShifts
         .filter(s=>inPeriod(s.date)&&s.irGroup===g&&s.shift!=='Home')
         .sort((a,b)=>a.date>b.date?1:-1);
-      if(!gShiftEntries.length) return;
+
+      // If no existing shifts (e.g. month not yet scheduled), fall back to
+      // building slots from irShiftSlots config — same source as auto-assign
+      if(!gShiftEntries.length){
+        const slotCells=buildCal(months[0]).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
+        const synthId=1000000;let sid=synthId;
+        S.sites.filter(s=>s.irGroup===g||s.irGroup==='Both').forEach(site=>{
+          slotCells.forEach(c=>{
+            const need=(S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`]||0;
+            for(let i=0;i<need;i++) gShiftEntries.push({
+              id:sid++,physId:0,date:c.date,site:site.name,shift:'1st',irGroup:g,sub:'',notes:'',_synthetic:true
+            });
+          });
+        });
+        gShiftEntries.sort((a,b)=>a.date>b.date?1:-1);
+        if(!gShiftEntries.length) return; // truly no slots configured
+      }
 
       const cntS={};gPhys.forEach(p=>{cntS[p.id]=0;});
       const ancS={};gPhys.forEach(p=>{ancS[p.id]=0;}); // anchor shifts in new plan
@@ -8989,7 +8977,7 @@ function previewIRRebalance(){
              !vacDays(callP.id).has(entry.date)&&
              !_has2ndOr3rdShift(callPhysId,entry.date)&&
              !isSoldBackDate(callPhysId,entry.date)){
-            const isSwap=entry.physId!==callPhysId;
+            const isSwap=!entry._synthetic&&entry.physId!==callPhysId;
             const e={physId:callPhysId,date:entry.date,site:entry.site,shift:'1st',
               irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
               origPhysId:entry.physId,origId:entry.id,isSwap,callPriority:true};
@@ -9042,7 +9030,7 @@ function previewIRRebalance(){
         }
 
         if(picked){
-          const isSwap=entry.physId!==picked.id;
+          const isSwap=!entry._synthetic&&entry.physId!==picked.id;
           const e={physId:picked.id,date:entry.date,site:entry.site,shift:'1st',
             irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
             origPhysId:entry.physId,origId:entry.id,isSwap};
@@ -9070,7 +9058,7 @@ function previewIRRebalance(){
       </div>
       <div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>Group</th><th>IR FTE</th>
-        <th>Shifts (was)</th><th id="irrd-sh-hd">Shifts (new)</th><th>6-Mo Target</th><th id="irrd-sp-hd">Shift %</th>
+        <th>Shifts (was)</th><th id="irrd-sh-hd">Shifts (new)</th><th>Month Target</th><th id="irrd-sp-hd">Shift %</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
       const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
@@ -9546,8 +9534,8 @@ function previewIRRebalance(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      ${typ!=='weekend'?'<th>Daily (was)</th><th>Daily (new)</th><th>6-Mo Target</th><th>Daily %</th>':''}
-      ${typ!=='daily'?'<th>Wknd (was)</th><th>Wknd (new)</th><th>6-Mo Target</th><th>Wknd %</th>':''}
+      ${typ!=='weekend'?'<th>Daily (was)</th><th>Daily (new)</th><th>Month Target</th><th>Daily %</th>':''}
+      ${typ!=='daily'?'<th>Wknd (was)</th><th>Wknd (new)</th><th>Month Target</th><th>Wknd %</th>':''}
     </tr></thead><tbody>`;
 
   irPs.forEach(p=>{
