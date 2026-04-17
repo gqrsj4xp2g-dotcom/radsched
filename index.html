@@ -5253,6 +5253,7 @@ function saveAllMyVacPicks(){
 /* ─── IR SHIFT AUTO-ASSIGN ─── */
 
 let _irsaPreview = [];
+let _irsaDRPreview = [];  // DR home shifts for unscheduled IR physicians
 
 function renderIRShiftAutoPage(){
   const mo=document.getElementById('irsa-mo');
@@ -5270,6 +5271,7 @@ function previewIRShiftAA(){
   if(ancSpan) ancSpan.textContent = S.cfg.anchorPct || 70;
 
   _irsaPreview = [];
+  _irsaDRPreview = [];
   const errors = [];
   let totalFilled = 0, totalUnfilled = 0, callPriorityFills = 0;
 
@@ -5327,15 +5329,18 @@ function previewIRShiftAA(){
       return false;
     }
 
-    // Physician rules — can be relaxed in fallback passes
+    // Soft rules for IR shifts — relaxed progressively in fallback passes.
+    // NOTE: siteRuleOk is NOT used here — it counts S.drShifts and is DR-specific.
+    //       isIRCallBlackout is NOT used here — blackouts apply to IR CALL duty only, not procedure shifts.
+    //       p.allowedSites is NOT used — IR physicians work across group sites.
     function softRulesOk(p, site, date){
-      if(p.allowedSites?.length && !p.allowedSites.includes(site)) return false;
-      if(!siteRuleOk(p, site, ym, date, 's1')) return false;
+      // Only block on physician-configured day conditions (DOW-specific site requirements)
       if(!dayConditionSiteOk(p, site, date, 'ir-shift')) return false;
       return true;
     }
     function seqOk(p, date){
-      return sequenceOk(p, date, ym) && !isIRCallBlackout(p.id, date);
+      // Respect consecutive-day and rest rules (seqRules set by admin in Physician Rules)
+      return sequenceOk(p, date, ym);
     }
 
     // ── Sort — FTE deficit first (primary), anchor secondary, rotation tiebreak
@@ -5422,6 +5427,33 @@ function previewIRShiftAA(){
       totalFilled++;
     });
 
+    // ── DR home fill: physicians with no IR shift on a given day → DR Home ───
+    // Runs per-day for each IR physician. Any weekday where a physician has neither
+    // an IR shift (from existing data or this preview run) nor a DR shift gets a
+    // read-from-home DR assignment so they are never left completely unscheduled.
+    cells.forEach(c => {
+      gPhys.forEach(p => {
+        const date = c.date;
+        if(vd(p.id).has(date)) return;                          // on vacation
+        if(_has2ndOr3rdShift(p.id, date)) return;              // 2nd/3rd shift
+        if(isSoldBackDate(p.id, date)) return;                  // sold-back day
+        // Already has an IR shift (existing or new from this preview)
+        if(gSAsgn.some(a => a.physId===p.id && a.date===date)) return;
+        if((S.irShifts||[]).some(s => s.physId===p.id && s.date===date)) return;
+        // Already has a DR shift (existing or already in DR preview)
+        if((S.drShifts||[]).some(s => s.physId===p.id && s.date===date)) return;
+        if(_irsaDRPreview.some(a => a.physId===p.id && a.date===date)) return;
+        // Assign DR read-from-home
+        _irsaDRPreview.push({
+          physId: p.id, date, shift:'Home',
+          site: 'At Home / Remote',
+          sub: (p.drSubs||[])[0] || 'General Procedures',
+          notes: 'Auto: IR unscheduled',
+          autoHome: true,
+        });
+      });
+    });
+
     // Tag stats
     gPhys.forEach(p => {
       p._irsaAftCnt = cntS[p.id] || 0;
@@ -5462,6 +5494,8 @@ function previewIRShiftAA(){
       <div class="met"><div class="met-lbl">On-Call Priority</div><div class="met-val" style="color:var(--blue-t)">${callPriorityFills}</div></div>
       <div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:${Math.abs(overallAnchorPct-ancPct)<=8?'var(--green-t)':'var(--amber,#d97706)'}">
         ${overallAnchorPct}%</div></div>
+      <div class="met"><div class="met-lbl">DR Home Fills</div><div class="met-val" style="color:var(--teal-t)">
+        ${_irsaDRPreview.length}</div></div>
       <div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:${totalUnfilled?'var(--red-t)':'var(--txt3)'}">
         ${totalUnfilled}</div></div>
     </div>
@@ -5495,6 +5529,8 @@ function previewIRShiftAA(){
   if(errors.length) html+=`<div class="note nw" style="font-size:12px">${errors.join('<br>')}</div>`;
   if(callPriorityFills) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">
     ℹ ${callPriorityFills} slot(s) assigned to on-call physicians first.</div>`;
+  if(_irsaDRPreview.length) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">
+    🏠 ${_irsaDRPreview.length} DR read-from-home shift(s) will be assigned to IR physicians with no IR shift that day.</div>`;
   if(totalUnfilled) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">
     ⚠ ${totalUnfilled} slot(s) truly unfillable — all physicians unavailable (vacation / 2nd-3rd shift).</div>`;
 
@@ -5507,10 +5543,10 @@ function previewIRShiftAA(){
   const ym  = document.getElementById('irsa-mo')?.value || new Date().toISOString().slice(0,7);
   const grp = document.getElementById('irsa-grp')?.value || 'both';
   const groups = ['North','South'].filter(g => grp==='both'||g===grp);
-  const callFillCount = _irsaPreview.filter(a=>a.isCallFill).length;
 
-  if(!confirm(`Apply ${_irsaPreview.length} shift(s) for ${ym}? Existing non-Home IR shifts for this month will be replaced.`)) return;
+  if(!confirm(`Apply ${_irsaPreview.length} IR shift(s)${_irsaDRPreview.length?' + '+_irsaDRPreview.length+' DR home shift(s)':''} for ${ym}? Existing non-Home IR shifts for this month will be replaced.`)) return;
 
+  // Replace existing non-Home IR shifts for selected groups/month
   S.irShifts = S.irShifts.filter(s => {
     if(!s.date.startsWith(ym)) return true;
     if(!groups.includes(s.irGroup)) return true;
@@ -5518,23 +5554,36 @@ function previewIRShiftAA(){
     return false;
   });
 
+  // Apply IR shifts
   _irsaPreview.forEach(a => {
     S.irShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
       shift:'1st', site:a.site, sub:a.sub||'', notes:a.notes||'', irGroup:a.irGroup});
   });
 
-  const n=_irsaPreview.length;
-  _irsaPreview=[];
+  // Apply DR home shifts for unscheduled IR physicians
+  const drAdded = _irsaDRPreview.length;
+  _irsaDRPreview.forEach(a => {
+    // Only add if no DR shift already exists on that date (guard against double-apply)
+    if(!(S.drShifts||[]).some(s => s.physId===a.physId && s.date===a.date)){
+      S.drShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
+        shift:a.shift, site:a.site, sub:a.sub||'', notes:a.notes||'', autoHome:true});
+    }
+  });
+
+  const n = _irsaPreview.length;
+  _irsaPreview = [];
+  _irsaDRPreview = [];
   triggerSave();
 
-  const box=document.getElementById('irsa-box');
-  const applyBtn=document.getElementById('irsa-apply');
-  const callNote=callFillCount?` (incl. ${callFillCount} for on-call physicians)`:'';
-  if(box) box.innerHTML=`<div class="note ns">✓ ${n} IR shift(s) assigned for ${ym}${callNote}.</div>`;
+  const box = document.getElementById('irsa-box');
+  const applyBtn = document.getElementById('irsa-apply');
+  const drNote = drAdded ? ` + ${drAdded} DR home shift(s) for unscheduled days` : '';
+  if(box) box.innerHTML=`<div class="note ns">✓ ${n} IR shift(s) assigned for ${ym}${drNote}.</div>`;
   if(applyBtn) applyBtn.style.display='none';
   if(document.getElementById('irc-mo')) renderIRCal();
+  if(document.getElementById('drc-mo')) renderDRCal();
+  if(document.getElementById('drb-tbody')) renderDRBuilder();
 }
-
 /* ─── IR SHIFT BUILDER (missing functions rebuilt) ─── */
 
 function renderIRShiftBuilder(){
