@@ -8961,7 +8961,32 @@ function previewIRRebalance(){
       const shiftCapFn=p=>shiftQuotas[p.id]??Math.max(Math.ceil(irShiftTargetPeriod(p,months)),1);
       const gSAsgn=[];
 
+      // On-call lookup: if a physician is on daily call on a date, they must have a shift
+      const callPhysOnDate={};
+      S.irCalls.filter(ic=>ic.callType==='daily'&&ic.irGroup===g&&inPeriod(ic.date))
+        .forEach(ic=>{if(!callPhysOnDate[ic.date])callPhysOnDate[ic.date]=ic.physId;});
+
       gShiftEntries.forEach(entry=>{
+        // ── On-call physician gets priority for this slot ─────────────────
+        const callPhysId=callPhysOnDate[entry.date];
+        if(callPhysId){
+          const callP=S.physicians.find(x=>x.id===callPhysId);
+          const alreadyAssigned=gSAsgn.some(a=>a.physId===callPhysId&&a.date===entry.date);
+          if(callP&&!alreadyAssigned&&
+             !vacDays(callP.id).has(entry.date)&&
+             !_has2ndOr3rdShift(callPhysId,entry.date)&&
+             !isSoldBackDate(callPhysId,entry.date)){
+            const isSwap=entry.physId!==callPhysId;
+            const e={physId:callPhysId,date:entry.date,site:entry.site,shift:'1st',
+              irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
+              origPhysId:entry.physId,origId:entry.id,isSwap,callPriority:true};
+            plan.shifts.push(e);gSAsgn.push(e);cntS[callPhysId]=(cntS[callPhysId]||0)+1;
+            if(callP.anchorSite===entry.site) ancS[callPhysId]=(ancS[callPhysId]||0)+1;
+            if(isSwap) plan.swapsS++;
+            return;
+          }
+        }
+
         const eligible=gPhys.filter(p=>{
           if(vacDays(p.id).has(entry.date)) return false;
           if(_has2ndOr3rdShift(p.id,entry.date)) return false;
@@ -9068,7 +9093,7 @@ function previewIRRebalance(){
         </div>
         <div style="overflow-x:auto"><table><thead><tr>
           <th style="width:28px;text-align:center">✓</th>
-          <th>Date</th><th>Site</th><th>Group</th><th>From (current)</th><th>→ Proposed</th>
+          <th>Date</th><th>Site</th><th>Group</th><th>From (current)</th><th>→ Proposed</th><th></th>
         </tr></thead><tbody>`;
       allShiftSwaps.forEach((a,i)=>{
         html+=`<tr id="irr-swap-row-${i}" style="transition:opacity .15s">
@@ -9079,6 +9104,7 @@ function previewIRRebalance(){
           <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
           <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
           <td style="font-weight:600;color:var(--green-t)">${pname(a.physId)}</td>
+          <td style="font-size:11px;color:var(--blue-t)">${a.callPriority?'📞 on-call':''}</td>
         </tr>`;
       });
       html+='</tbody></table></div></div>';
