@@ -1046,8 +1046,14 @@ tbody tr:hover{background:var(--bg3)}
 
   <div class="ibox">
     <div class="g3" style="flex-wrap:wrap;align-items:flex-end">
-      <div class="fg"><label>Month</label>
-        <input id="irsa-mo" type="month" style="width:160px">
+      <div class="fg"><label>Period</label>
+        <select id="irsa-period">
+          <option value="H1">H1 (Jan &ndash; Jun)</option>
+          <option value="H2">H2 (Jul &ndash; Dec)</option>
+        </select>
+      </div>
+      <div class="fg"><label>Year</label>
+        <select id="irsa-yr" style="width:100px"></select>
       </div>
       <div class="fg"><label>IR Group</label>
         <select id="irsa-grp">
@@ -1058,13 +1064,13 @@ tbody tr:hover{background:var(--bg3)}
       </div>
     </div>
     <div class="flexe" style="gap:8px;margin-top:10px">
-      <button class="ba" onclick="previewIRShiftAA()">▶ Preview</button>
-      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">✓ Apply</button>
-      <button class="br bsm" onclick="clearIRShifts('month')" title="Clear all shifts for the selected month">🗑 Clear Month</button>
+      <button class="ba" onclick="previewIRShiftAA()">&#9654; Preview</button>
+      <button class="bp" id="irsa-apply" style="display:none" onclick="applyIRShiftAA()">&#10003; Apply</button>
+      <button class="br bsm" onclick="clearIRShiftsPeriod()" title="Clear all non-Home IR shifts for the selected period">&#128465; Clear Period</button>
     </div>
   </div>
   <div class="note ni" style="margin-bottom:8px">
-    Distributes configured IR shift slots to available physicians by FTE quota and ~<span id="irsa-anc-target">70</span>% anchor compliance. On-call physicians are prioritised for a shift on their call day.
+    Distributes configured IR shift slots to available physicians by FTE quota and ~<span id="irsa-anc-target">70</span>% anchor compliance over a 6-month period. On-call physicians are prioritised for a shift on their call day.
   </div>
   <div id="irsa-box"><p style="color:var(--txt3)">Select a month and click Preview.</p></div>
 </div>
@@ -5257,9 +5263,11 @@ let _irsaPreview = [];
 let _irsaDRPreview = [];  // DR home shifts for unscheduled IR physicians
 
 function renderIRShiftAutoPage(){
-  const mo=document.getElementById('irsa-mo');
-  if(mo && !mo.value) mo.value=new Date().toISOString().slice(0,7);
-  const ancSpan=document.getElementById('irsa-anc-target');
+  var yrEl=document.getElementById('irsa-yr');
+  if(yrEl&&!yrEl.options.length){var now=new Date(),cy=now.getFullYear();for(var y=cy-3;y<=cy+2;y++){var o=document.createElement('option');o.value=y;o.textContent=y;yrEl.appendChild(o);}yrEl.value=cy;}
+  var pEl=document.getElementById('irsa-period');
+  if(pEl&&!pEl.dataset.init){pEl.value=new Date().getMonth()<6?'H1':'H2';pEl.dataset.init='1';}
+  var ancSpan=document.getElementById('irsa-anc-target');
   if(ancSpan) ancSpan.textContent=Math.round(S.cfg.anchorPct||70);
 }
 /* ── IR Shift Auto-Assign helpers (global scope, no hoisting issues) ─── */
@@ -5271,7 +5279,11 @@ function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,ym,ANC_RATE){var q=_irsaEffQ
 
 function previewIRShiftAA(){
   if(!_adminOnly('preview IR shift auto-assign'))return;
-  var ym=(document.getElementById('irsa-mo')||{}).value||new Date().toISOString().slice(0,7);
+  var period=(document.getElementById('irsa-period')||{}).value||'H2';
+  var yr=(document.getElementById('irsa-yr')||{}).value||String(new Date().getFullYear());
+  var startMo=period==='H1'?1:7;
+  var months=[],mi2;for(mi2=startMo;mi2<startMo+6;mi2++)months.push(yr+'-'+(mi2<10?'0':'')+mi2);
+  var periodLbl=period+' '+yr+' ('+months[0].slice(5)+' \u2013 '+months[5].slice(5)+')';
   var grpSel=(document.getElementById('irsa-grp')||{}).value||'both';
   var ancTgt=S.cfg?(S.cfg.anchorPct||70):70;
   var ANC_RATE=ancTgt/100;
@@ -5286,99 +5298,96 @@ function previewIRShiftAA(){
     grp=groups[gi];
     phys=allP.filter(function(p){return p.irFte>0&&p.irGroup===grp;});
     if(!phys.length){errors.push('No IR physicians in '+grp+'.');continue;}
-    cells=buildCal(ym).filter(function(c){return c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date);});
+    cells=[];
+    var moi;for(moi=0;moi<months.length;moi++){var mc=buildCal(months[moi]).filter(function(c){return c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date);});for(var ci3=0;ci3<mc.length;ci3++)cells.push(mc[ci3]);}
     slots=_irsaBuildSlots(grp,cells,allS,slots_cfg);
     if(!slots.length){errors.push('No slots configured for '+grp+'.');continue;}
-    callMap=_irsaBuildCallMap(grp,ym,allC);
+    callMap=_irsaBuildCallMap(grp,months,allC);
     gFt=0;for(pi=0;pi<phys.length;pi++)gFt+=phys[pi].irFte;if(!gFt)gFt=1;
-    rawQ=_irrQuotas(phys,slots.length,function(p){var t=irShiftTargetMonth(p,ym);return t>0?t:slots.length*(p.irFte/gFt);});
+    rawQ=_irrQuotas(phys,slots.length,function(p){var t=irShiftTargetPeriod(p,months);return t>0?t:slots.length*(p.irFte/gFt);});
     callDays={};for(pi=0;pi<phys.length;pi++)callDays[phys[pi].id]=0;
     var cds=Object.keys(callMap);for(di=0;di<cds.length;di++){var cpid=callMap[cds[di]];if(callDays.hasOwnProperty(cpid))callDays[cpid]++;}
     assigned=[];cnt={};anc={};for(pi=0;pi<phys.length;pi++){cnt[phys[pi].id]=0;anc[phys[pi].id]=0;}
     for(si=0;si<slots.length;si++){
-      slot=slots[si];
+      slot=slots[si];var slotMo=slot.date.slice(0,7);
       cPid=callMap[slot.date];
       if(cPid){cP=null;for(pi=0;pi<phys.length;pi++){if(phys[pi].id===cPid){cP=phys[pi];break;}}
         if(cP&&!_irsaBlocked(cP,slot.date,assigned)){assigned.push({physId:cP.id,date:slot.date,site:slot.site,notes:'Auto (on-call)'});cnt[cP.id]++;if(cP.anchorSite&&cP.anchorSite===slot.site)anc[cP.id]++;callF++;totalA++;continue;}}
-      var _r=rawQ,_cd=callDays,_s=slot,_cnt=cnt,_anc=anc;
-      pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&irSiteRuleOk(p,_s.site,_s.date)&&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')&&sequenceOk(p,_s.date,ym)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,ym);});
-      if(!pool.length)pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&sequenceOk(p,_s.date,ym)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,ym);});
-      if(!pool.length)pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,ym);});
+      var _r=rawQ,_cd=callDays,_s=slot,_cnt=cnt,_anc=anc,_mo=slotMo;
+      pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&irSiteRuleOk(p,_s.site,_s.date)&&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')&&sequenceOk(p,_s.date,_mo)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,months);});
+      if(!pool.length)pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&sequenceOk(p,_s.date,_mo)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,months);});
+      if(!pool.length)pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned)&&_cnt[p.id]<_irsaEffQ(p,_r,_cd,months);});
       if(!pool.length)pool=phys.filter(function(p){return !_irsaBlocked(p,_s.date,assigned);});
       if(!pool.length){totalU++;continue;}
-      pool.sort(function(a,b){return _irsaScore(b,_s.site,_cnt,_anc,_r,_cd,ym,ANC_RATE)-_irsaScore(a,_s.site,_cnt,_anc,_r,_cd,ym,ANC_RATE);});
-      picked=pool[0];note=_cnt[picked.id]>=_irsaEffQ(picked,_r,_cd,ym)?'Auto (over-quota)':'Auto';
+      pool.sort(function(a,b){return _irsaScore(b,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE)-_irsaScore(a,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE);});
+      picked=pool[0];note=_cnt[picked.id]>=_irsaEffQ(picked,_r,_cd,months)?'Auto (over-quota)':'Auto';
       assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note});
       cnt[picked.id]++;if(picked.anchorSite&&picked.anchorSite===slot.site)anc[picked.id]++;totalA++;
     }
     for(ai=0;ai<assigned.length;ai++)_irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:grp,shift:'1st',sub:'',notes:assigned[ai].notes});
-    for(pi=0;pi<phys.length;pi++){phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;phys[pi]._irsaQta=_irsaEffQ(phys[pi],rawQ,callDays,ym);phys[pi]._irsaAncCnt=anc[phys[pi].id]||0;}
+    for(pi=0;pi<phys.length;pi++){phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;phys[pi]._irsaQta=_irsaEffQ(phys[pi],rawQ,callDays,months);phys[pi]._irsaAncCnt=anc[phys[pi].id]||0;}
   }
   var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
-  if(!_irsaPreview.length){if(box)box.innerHTML='<div class="note '+(errors.length?'nw':'ni')+'">'+(errors.length?errors.join('<br>'):'No slots to fill for this month.')+'</div>';if(applyBtn)applyBtn.style.display='none';return;}
+  if(!_irsaPreview.length){if(box)box.innerHTML='<div class="note '+(errors.length?'nw':'ni')+'">'+(errors.length?errors.join('<br>'):'No slots to fill for this period.')+'</div>';if(applyBtn)applyBtn.style.display='none';return;}
   var ancE=0,ancH=0,ri,row,rp,xi;
   for(ri=0;ri<_irsaPreview.length;ri++){row=_irsaPreview[ri];rp=null;for(xi=0;xi<allP.length;xi++){if(allP[xi].id===row.physId){rp=allP[xi];break;}}if(rp&&rp.anchorSite){ancE++;if(rp.anchorSite===row.site)ancH++;}}
-  var ancPD=ancE>0?Math.round(ancH/ancE*100):0,allN=_irsaPreview.length,yrmo=ym.split('-'),mLbl=new Date(+yrmo[0],+yrmo[1]-1,1).toLocaleString('default',{month:'long',year:'numeric'});
-  var html='<div class="card" style="margin-bottom:10px"><div class="card-title">Preview — '+mLbl+'<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">'+allN+' assigned · '+totalU+' unfillable · '+callF+' on-call · anchor '+ancPD+'% (target ~'+ancTgt+'%)</span></div><div class="g4" style="margin-bottom:10px"><div class="met"><div class="met-lbl">Assigned</div><div class="met-val" style="color:var(--green-t)">'+allN+'</div></div><div class="met"><div class="met-lbl">On-Call</div><div class="met-val" style="color:var(--blue-t)">'+callF+'</div></div><div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:'+(Math.abs(ancPD-ancTgt)<=8?'var(--green-t)':'var(--amber,#d97706)')+'">'+ancPD+'%</div></div><div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:'+(totalU?'var(--red-t)':'var(--txt3)')+'">'+totalU+'</div></div></div><div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Group</th><th>IR FTE</th><th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th></tr></thead><tbody>';
+  var ancPD=ancE>0?Math.round(ancH/ancE*100):0,allN=_irsaPreview.length;
+  var html='<div class="card" style="margin-bottom:10px"><div class="card-title">Preview \u2014 '+periodLbl+'<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">'+allN+' assigned \xb7 '+totalU+' unfillable \xb7 '+callF+' on-call \xb7 anchor '+ancPD+'% (target ~'+ancTgt+'%)</span></div><div class="g4" style="margin-bottom:10px"><div class="met"><div class="met-lbl">Assigned</div><div class="met-val" style="color:var(--green-t)">'+allN+'</div></div><div class="met"><div class="met-lbl">On-Call</div><div class="met-val" style="color:var(--blue-t)">'+callF+'</div></div><div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:'+(Math.abs(ancPD-ancTgt)<=8?'var(--green-t)':'var(--amber,#d97706)')+'">'+ ancPD+'%</div></div><div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:'+(totalU?'var(--red-t)':'var(--txt3)')+'">'+totalU+'</div></div></div><div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Group</th><th>IR FTE</th><th>Period Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th></tr></thead><tbody>';
   var gj,grp2,gp2,pj,p2,g2,q2,pct,hA,aR,col,acol;
   for(gj=0;gj<groups.length;gj++){grp2=groups[gj];gp2=allP.filter(function(p){return p.irFte>0&&p.irGroup===grp2;});
     for(pj=0;pj<gp2.length;pj++){p2=gp2[pj];if(!p2._irsaQta&&!p2._irsaAftCnt)continue;
       g2=p2._irsaAftCnt||0;q2=p2._irsaQta||0;pct=q2>0?Math.min(100,Math.round(g2/q2*100)):(g2>0?100:0);hA=!!p2.anchorSite;aR=(hA&&g2>0)?Math.round((p2._irsaAncCnt||0)/g2*100):null;
       col=pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
       acol=aR===null?'var(--txt3)':Math.abs(aR-ancTgt)<=8?'var(--green-t)':Math.abs(aR-ancTgt)<=15?'var(--amber,#d97706)':'var(--red-t)';
-      html+='<tr><td style="font-weight:600">'+pname(p2.id)+'</td><td><span class="tag '+(grp2==='North'?'tb':'tg')+'">'+grp2+'</span></td><td style="text-align:center">'+p2.irFte+'</td><td style="text-align:center;font-weight:700">'+q2+'</td><td style="text-align:center;font-weight:700">'+g2+'</td><td style="text-align:center;font-weight:800;color:'+col+'">'+pct+'%</td><td style="text-align:center;font-weight:700;color:'+acol+'">'+(aR===null?'—':aR+'%')+'</td></tr>';}}
+      html+='<tr><td style="font-weight:600">'+pname(p2.id)+'</td><td><span class="tag '+(grp2==='North'?'tb':'tg')+'">'+grp2+'</span></td><td style="text-align:center">'+p2.irFte+'</td><td style="text-align:center;font-weight:700">'+q2+'</td><td style="text-align:center;font-weight:700">'+g2+'</td><td style="text-align:center;font-weight:800;color:'+col+'">'+pct+'%</td><td style="text-align:center;font-weight:700;color:'+acol+'">'+(aR===null?'\u2014':aR+'%')+'</td></tr>';}}
   html+='</tbody></table></div></div>';
   if(errors.length)html+='<div class="note nw" style="font-size:12px">'+errors.join('<br>')+'</div>';
-  if(callF)html+='<div class="note ni" style="font-size:12px;margin-top:4px">ℹ '+callF+' on-call slot(s) assigned first.</div>';
-  if(totalU)html+='<div class="note nw" style="font-size:12px;margin-top:4px">⚠ '+totalU+' slot(s) unfillable.</div>';
+  if(callF)html+='<div class="note ni" style="font-size:12px;margin-top:4px">\u2139 '+callF+' on-call slot(s) assigned first.</div>';
+  if(totalU)html+='<div class="note nw" style="font-size:12px;margin-top:4px">\u26a0 '+totalU+' slot(s) unfillable \u2014 all physicians unavailable.</div>';
   if(box)box.innerHTML=html;if(applyBtn)applyBtn.style.display='inline-block';
 }function applyIRShiftAA(){
-  if(!_adminOnly('apply IR shift auto-assign')) return;
-  if(!_irsaPreview.length){ alert('Nothing to apply — run Preview first.'); return; }
-
-  const ym  = document.getElementById('irsa-mo')?.value || new Date().toISOString().slice(0,7);
-  const grp = document.getElementById('irsa-grp')?.value || 'both';
-  const groups = ['North','South'].filter(g => grp==='both'||g===grp);
-
-  if(!confirm(`Apply ${_irsaPreview.length} IR shift(s)${_irsaDRPreview.length?' + '+_irsaDRPreview.length+' DR home shift(s)':''} for ${ym}? Existing non-Home IR shifts for this month will be replaced.`)) return;
-
-  // Replace existing non-Home IR shifts for selected groups/month
-  S.irShifts = S.irShifts.filter(s => {
-    if(!s.date.startsWith(ym)) return true;
-    if(!groups.includes(s.irGroup)) return true;
-    if(s.shift==='Home') return true;
-    return false;
+  if(!_adminOnly('apply IR shift auto-assign'))return;
+  if(!_irsaPreview.length){alert('Nothing to apply \u2014 run Preview first.');return;}
+  var period=(document.getElementById('irsa-period')||{}).value||'H2';
+  var yr=(document.getElementById('irsa-yr')||{}).value||String(new Date().getFullYear());
+  var startMo=period==='H1'?1:7;
+  var months=[],mi;for(mi=startMo;mi<startMo+6;mi++)months.push(yr+'-'+(mi<10?'0':'')+mi);
+  var periodLbl=period+' '+yr;
+  var grp=(document.getElementById('irsa-grp')||{}).value||'both';
+  var groups=['North','South'].filter(function(g){return grp==='both'||g===grp;});
+  if(!confirm('Apply '+_irsaPreview.length+' IR shift(s) for '+periodLbl+'? Existing non-Home IR shifts for this period will be replaced.'))return;
+  S.irShifts=(S.irShifts||[]).filter(function(s){
+    var inP=false;for(var mi2=0;mi2<months.length;mi2++){if(s.date.startsWith(months[mi2])){inP=true;break;}}
+    if(!inP)return true;if(!groups.includes(s.irGroup))return true;if(s.shift==='Home')return true;return false;
   });
+  _irsaPreview.forEach(function(a){S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup});});
+  var n=_irsaPreview.length;_irsaPreview=[];_irsaDRPreview=[];triggerSave();
+  var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
+  if(box)box.innerHTML='<div class="note ns">\u2713 '+n+' IR shift(s) assigned for '+periodLbl+'.</div>';
+  if(applyBtn)applyBtn.style.display='none';
+  if(document.getElementById('irc-mo'))renderIRCal();
+  if(document.getElementById('drc-mo'))renderDRCal();
+  if(document.getElementById('drb-tbody'))renderDRBuilder();
+}
 
-  // Apply IR shifts
-  _irsaPreview.forEach(a => {
-    S.irShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
-      shift:'1st', site:a.site, sub:a.sub||'', notes:a.notes||'', irGroup:a.irGroup});
+function clearIRShiftsPeriod(){
+  if(!_adminOnly('clear IR shifts'))return;
+  var period=(document.getElementById('irsa-period')||{}).value||'H2';
+  var yr=(document.getElementById('irsa-yr')||{}).value||String(new Date().getFullYear());
+  var startMo=period==='H1'?1:7;
+  var months=[],mi;for(mi=startMo;mi<startMo+6;mi++)months.push(yr+'-'+(mi<10?'0':'')+mi);
+  var periodLbl=period+' '+yr;
+  var grp=(document.getElementById('irsa-grp')||{}).value||'both';
+  var groups=['North','South'].filter(function(g){return grp==='both'||g===grp;});
+  if(!confirm('Clear all non-Home IR shifts for '+periodLbl+'?'))return;
+  S.irShifts=(S.irShifts||[]).filter(function(s){
+    var inP=false;for(var mi2=0;mi2<months.length;mi2++){if(s.date.startsWith(months[mi2])){inP=true;break;}}
+    if(!inP)return true;if(!groups.includes(s.irGroup))return true;if(s.shift==='Home')return true;return false;
   });
-
-  // Apply DR home shifts for unscheduled IR physicians
-  const drAdded = _irsaDRPreview.length;
-  _irsaDRPreview.forEach(a => {
-    // Only add if no DR shift already exists on that date (guard against double-apply)
-    if(!(S.drShifts||[]).some(s => s.physId===a.physId && s.date===a.date)){
-      S.drShifts.push({id:S.nextId++, physId:a.physId, date:a.date,
-        shift:a.shift, site:a.site, sub:a.sub||'', notes:a.notes||'', autoHome:true});
-    }
-  });
-
-  const n = _irsaPreview.length;
-  _irsaPreview = [];
-  _irsaDRPreview = [];
   triggerSave();
-
-  const box = document.getElementById('irsa-box');
-  const applyBtn = document.getElementById('irsa-apply');
-  const drNote = drAdded ? ` + ${drAdded} DR home shift(s) for unscheduled days` : '';
-  if(box) box.innerHTML=`<div class="note ns">✓ ${n} IR shift(s) assigned for ${ym}${drNote}.</div>`;
-  if(applyBtn) applyBtn.style.display='none';
-  if(document.getElementById('irc-mo')) renderIRCal();
-  if(document.getElementById('drc-mo')) renderDRCal();
-  if(document.getElementById('drb-tbody')) renderDRBuilder();
+  var box=document.getElementById('irsa-box');
+  if(box)box.innerHTML='<div class="note ns">\u2713 IR shifts cleared for '+periodLbl+'.</div>';
+  if(document.getElementById('irc-mo'))renderIRCal();
 }
 /* ─── IR SHIFT BUILDER (missing functions rebuilt) ─── */
 
