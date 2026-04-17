@@ -5357,16 +5357,20 @@ function previewIRShiftAA() {
       }
       function seqOk(p, date) { return sequenceOk(p, date, ym); }
 
-      // Score: FTE primary (weight 10), anchor secondary (weight 1)
-      // Lower = better; physician most behind gets lowest (most negative) score
+      // Score: attain% is PRIMARY — physician furthest below their FTE quota wins.
+      // Anchor is a secondary tiebreaker only.
+      // Lower score = better candidate (sort ascending → pool[0] is picked).
       function score(p, site) {
         var q   = quota(p);
         var got = cnt[p.id];
-        var fte = q > 0 ? (q - got) / q : 0;          // 1.0 = empty, 0.0 = at quota
+        // Attain %: how far below quota as a proportion (1.0 = nothing assigned yet)
+        var attainDef = q > 0 ? (q - got) / q : 0;
+        // Anchor bonus: tiny nudge when slot is at anchor site and rate below target
         var rate = got > 0 ? anc[p.id] / got : 0;
         var ancBonus = (p.anchorSite === site && p.anchorSite && rate < ANC_PCT)
-                       ? (ANC_PCT - rate) : 0;
-        return -(fte * 10 + ancBonus);                 // negate → sort ascending = best first
+                       ? (ANC_PCT - rate) * 0.1 : 0;
+        // attainDef dominates (weight 1.0); ancBonus is a small tiebreaker (max ~0.07)
+        return -(attainDef + ancBonus);
       }
 
       // Assign one slot
