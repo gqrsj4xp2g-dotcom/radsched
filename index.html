@@ -5263,199 +5263,258 @@ function renderIRShiftAutoPage(){
 }
 function previewIRShiftAA() {
   try {
+
     if (!_adminOnly('preview IR shift auto-assign')) return;
 
+    // ── Setup ─────────────────────────────────────────────────────────────
     var ym      = (document.getElementById('irsa-mo')  || {}).value || new Date().toISOString().slice(0, 7);
     var grpSel  = (document.getElementById('irsa-grp') || {}).value || 'both';
     var ancTgt  = S.cfg ? (S.cfg.anchorPct || 70) : 70;
-    var ANC_PCT = ancTgt / 100;
+    var ANC_RATE = ancTgt / 100;   // e.g. 0.70
     var groups  = ['North', 'South'].filter(function(g) { return grpSel === 'both' || g === grpSel; });
-    var el = document.getElementById('irsa-anc-target');
-    if (el) el.textContent = ancTgt;
+
+    var ancEl = document.getElementById('irsa-anc-target');
+    if (ancEl) ancEl.textContent = ancTgt;
 
     _irsaPreview = [];
-    var errors = [];
-    var totalAssigned = 0, totalUnfilled = 0, callFills = 0;
+    var errors       = [];
+    var totalAssigned = 0;
+    var totalUnfilled = 0;
+    var callFills     = 0;
 
-    var irCallsArr     = S.irCalls     || [];
-    var irShiftSlots   = S.irShiftSlots || {};
-    var sitesArr       = S.sites        || [];
-    var physiciansArr  = S.physicians   || [];
+    // Safe references to state
+    var allPhysicians = S.physicians   || [];
+    var allSites      = S.sites        || [];
+    var allCalls      = S.irCalls      || [];
+    var shiftSlots    = S.irShiftSlots || {};
 
+    // ── Per-group loop ────────────────────────────────────────────────────
     for (var gi = 0; gi < groups.length; gi++) {
-      var grpName = groups[gi];
+      var grp = groups[gi];
 
-      // Physicians in this group
-      var phys = physiciansArr.filter(function(p) { return p.irFte > 0 && p.irGroup === grpName; });
-      if (!phys.length) { errors.push('No IR physicians in ' + grpName + '.'); continue; }
+      // Physicians in this group with IR FTE
+      var phys = allPhysicians.filter(function(p) {
+        return p.irFte > 0 && p.irGroup === grp;
+      });
+      if (!phys.length) { errors.push('No IR physicians in ' + grp + ' group.'); continue; }
 
-      // Slots from irShiftSlots config
+      // Weekday cells for this month (holiday-blackout excluded)
       var calCells = buildCal(ym).filter(function(c) {
         return c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date);
       });
+
+      // Build ordered slot list from irShiftSlots configuration
       var slots = [];
-      sitesArr.filter(function(s) { return s.irGroup === grpName || s.irGroup === 'Both'; })
-        .forEach(function(site) {
-          calCells.forEach(function(c) {
-            var n = irShiftSlots[site.name + '|' + c.dow + '|1st'] || 0;
-            for (var x = 0; x < n; x++) slots.push({ date: c.date, site: site.name });
-          });
-        });
+      var grpSites = allSites.filter(function(s) { return s.irGroup === grp || s.irGroup === 'Both'; });
+      for (var si2 = 0; si2 < grpSites.length; si2++) {
+        var site = grpSites[si2];
+        for (var ci = 0; ci < calCells.length; ci++) {
+          var c = calCells[ci];
+          var need = shiftSlots[site.name + '|' + c.dow + '|1st'] || 0;
+          for (var ni = 0; ni < need; ni++) {
+            slots.push({ date: c.date, site: site.name });
+          }
+        }
+      }
       slots.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
-      if (!slots.length) { errors.push('No slots configured for ' + grpName + '.'); continue; }
 
-      // On-call lookup
+      if (!slots.length) {
+        errors.push('No slots configured for ' + grp + '. Check IR Shift Slots page.');
+        continue;
+      }
+
+      // Who is on daily call each date this month?
       var callOnDate = {};
-      irCallsArr.filter(function(ic) {
-        return ic.callType === 'daily' && ic.irGroup === grpName && ic.date.startsWith(ym);
-      }).forEach(function(ic) {
-        if (!callOnDate[ic.date]) callOnDate[ic.date] = ic.physId;
-      });
+      for (var ci2 = 0; ci2 < allCalls.length; ci2++) {
+        var ic = allCalls[ci2];
+        if (ic.callType === 'daily' && ic.irGroup === grp && ic.date.startsWith(ym)) {
+          if (!callOnDate[ic.date]) callOnDate[ic.date] = ic.physId;
+        }
+      }
 
-      // FTE quotas
-      var gFteTot = phys.reduce(function(s, p) { return s + p.irFte; }, 0) || 1;
+      // FTE-proportional integer quotas via largest-remainder
+      var gFteTot = 0;
+      for (var pi = 0; pi < phys.length; pi++) gFteTot += phys[pi].irFte;
+      if (!gFteTot) gFteTot = 1;
+
       var rawQ = _irrQuotas(phys, slots.length, function(p) {
         var t = irShiftTargetMonth(p, ym);
         return t > 0 ? t : slots.length * (p.irFte / gFteTot);
       });
 
-      // Count call days per physician
+      // Count how many call days each physician has this month
+      // Effective quota = max(fte-quota, call-count) so attain% never exceeds 100%
       var callDays = {};
-      phys.forEach(function(p) { callDays[p.id] = 0; });
-      Object.keys(callOnDate).forEach(function(d) {
-        var pid = callOnDate[d];
-        if (callDays.hasOwnProperty(pid)) callDays[pid]++;
-      });
+      for (var pi2 = 0; pi2 < phys.length; pi2++) callDays[phys[pi2].id] = 0;
+      var callDates = Object.keys(callOnDate);
+      for (var di = 0; di < callDates.length; di++) {
+        var cpid = callOnDate[callDates[di]];
+        if (callDays.hasOwnProperty(cpid)) callDays[cpid]++;
+      }
 
-      // Effective quota = max(fte-quota, call-days) so attain% never exceeds 100%
-      function quota(p) {
-        var bq = rawQ[p.id];
+      function effQuota(p) {
+        var bq   = rawQ[p.id];
         var base = (bq != null && bq > 0) ? bq : Math.max(Math.round(irShiftTargetMonth(p, ym)), 1);
         return Math.max(base, callDays[p.id] || 0);
       }
 
-      // Running state
-      var assigned = [];
-      var cnt = {}, anc = {};
-      phys.forEach(function(p) { cnt[p.id] = 0; anc[p.id] = 0; });
+      // Running state for this group
+      var assigned = [];          // [{physId, date, site, notes}]
+      var cnt      = {};          // total shifts assigned per physician this run
+      var ancCnt   = {};          // anchor-site shifts per physician this run
+      for (var pi3 = 0; pi3 < phys.length; pi3++) {
+        cnt[phys[pi3].id]    = 0;
+        ancCnt[phys[pi3].id] = 0;
+      }
 
-      // Hard unavailability — never overridden
-      function unavail(p, date) {
-        var vd = vacDays(p.id);
-        if (vd.has(date)) return true;
-        if (_has2ndOr3rdShift(p.id, date)) return true;
-        if (isSoldBackDate(p.id, date)) return true;
-        for (var k = 0; k < assigned.length; k++) {
-          if (assigned[k].physId === p.id && assigned[k].date === date) return true;
+      // Has physician already been assigned on this date in this run?
+      function alreadyOnDate(pid, date) {
+        for (var i = 0; i < assigned.length; i++) {
+          if (assigned[i].physId === pid && assigned[i].date === date) return true;
         }
         return false;
       }
 
-      // Physician-specific rules
-      function siteOk(p, site, date) {
+      // Hard unavailability — never overridden by any fallback pass
+      function hardUnavail(p, date) {
+        var vd = vacDays(p.id);
+        if (vd.has(date))                   return true;  // on vacation
+        if (_has2ndOr3rdShift(p.id, date))  return true;  // DR 2nd/3rd shift
+        if (isSoldBackDate(p.id, date))     return true;  // sold-back day
+        if (alreadyOnDate(p.id, date))      return true;  // already assigned today
+        return false;
+      }
+
+      // Soft rules — relaxed progressively across passes
+      function siteRulesOk(p, site, date) {
         return irSiteRuleOk(p, site, date) && dayConditionSiteOk(p, site, date, 'ir-shift');
       }
-      function seqOk(p, date) { return sequenceOk(p, date, ym); }
-
-      // Score: attain% is PRIMARY — physician furthest below their FTE quota wins.
-      // Anchor is a secondary tiebreaker only.
-      // Lower score = better candidate (sort ascending → pool[0] is picked).
-      function score(p, site) {
-        var q   = quota(p);
-        var got = cnt[p.id];
-        // Attain %: how far below quota as a proportion (1.0 = nothing assigned yet)
-        var attainDef = q > 0 ? (q - got) / q : 0;
-        // Anchor bonus: tiny nudge when slot is at anchor site and rate below target
-        var rate = got > 0 ? anc[p.id] / got : 0;
-        var ancBonus = (p.anchorSite === site && p.anchorSite && rate < ANC_PCT)
-                       ? (ANC_PCT - rate) * 0.1 : 0;
-        // attainDef dominates (weight 1.0); ancBonus is a small tiebreaker (max ~0.07)
-        return -(attainDef + ancBonus);
+      function seqRulesOk(p, date) {
+        return sequenceOk(p, date, ym);
       }
 
-      // Assign one slot
-      function assign(p, slot, note) {
+      // ── Scoring ───────────────────────────────────────────────────────
+      // Priority: on-call first, then FTE attainment and anchor compliance
+      // weighted equally. Physician with highest combined score gets the slot.
+      //
+      //   FTE component:    (quota - assigned) / quota   → 0.0 (at quota) to 1.0 (empty)
+      //   Anchor component: if slot.site === anchorSite and rate < target:
+      //                       (target_rate - current_rate)  → 0.0 to ~0.70
+      //
+      // Both components are on similar scales and contribute equally.
+      // Result is negated so pool.sort() ascending puts best candidate at [0].
+      function pickScore(p, site) {
+        var q        = effQuota(p);
+        var got      = cnt[p.id];
+        var fteDef   = q > 0 ? (q - got) / q : 0;
+        var curRate  = got > 0 ? ancCnt[p.id] / got : 0;
+        var ancDef   = (p.anchorSite && p.anchorSite === site && curRate < ANC_RATE)
+                       ? (ANC_RATE - curRate) : 0;
+        return -(fteDef + ancDef);   // negate → ascending sort = highest score first
+      }
+
+      // Record an assignment
+      function doAssign(p, slot, note) {
         assigned.push({ physId: p.id, date: slot.date, site: slot.site, notes: note });
         cnt[p.id]++;
-        if (p.anchorSite === slot.site) anc[p.id]++;
+        if (p.anchorSite && p.anchorSite === slot.site) ancCnt[p.id]++;
       }
 
-      // Main loop
+      // ── Main slot loop ────────────────────────────────────────────────
       for (var si = 0; si < slots.length; si++) {
         var slot = slots[si];
 
-        // STEP A: on-call physician first
+        // ── STEP A: On-call physician gets first slot on their call date ──
         var callPid = callOnDate[slot.date];
         if (callPid) {
           var callP = null;
-          for (var pi = 0; pi < phys.length; pi++) {
-            if (phys[pi].id === callPid) { callP = phys[pi]; break; }
+          for (var pi4 = 0; pi4 < phys.length; pi4++) {
+            if (phys[pi4].id === callPid) { callP = phys[pi4]; break; }
           }
-          if (callP && !unavail(callP, slot.date)) {
-            assign(callP, slot, 'Auto (on-call)');
-            callFills++; totalAssigned++;
+          if (callP && !hardUnavail(callP, slot.date)) {
+            doAssign(callP, slot, 'Auto (on-call)');
+            callFills++;
+            totalAssigned++;
             continue;
           }
         }
 
-        // STEP B: best physician by score, 4 progressive passes
-        var pool = null, pass = 0;
+        // ── STEP B: Fill by FTE + anchor score, 4 progressive passes ─────
 
-        // Pass 1: all rules + within quota
-        var p1 = phys.filter(function(p) {
-          return !unavail(p, slot.date) && siteOk(p, slot.site, slot.date)
-              && seqOk(p, slot.date) && cnt[p.id] < quota(p);
+        // Pass 1: obey all physician rules, stay within FTE quota
+        var pool = phys.filter(function(p) {
+          return !hardUnavail(p, slot.date)
+              && siteRulesOk(p, slot.site, slot.date)
+              && seqRulesOk(p, slot.date)
+              && cnt[p.id] < effQuota(p);
         });
-        if (p1.length) { pool = p1; pass = 1; }
 
-        // Pass 2: relax site/day rules, keep quota
-        if (!pool) {
-          var p2 = phys.filter(function(p) {
-            return !unavail(p, slot.date) && seqOk(p, slot.date) && cnt[p.id] < quota(p);
+        // Pass 2: relax site/day-condition rules, keep within quota
+        if (!pool.length) {
+          pool = phys.filter(function(p) {
+            return !hardUnavail(p, slot.date)
+                && seqRulesOk(p, slot.date)
+                && cnt[p.id] < effQuota(p);
           });
-          if (p2.length) { pool = p2; pass = 2; }
         }
 
-        // Pass 3: relax sequence, keep quota
-        if (!pool) {
-          var p3 = phys.filter(function(p) {
-            return !unavail(p, slot.date) && cnt[p.id] < quota(p);
+        // Pass 3: relax sequence rules too, keep within quota
+        if (!pool.length) {
+          pool = phys.filter(function(p) {
+            return !hardUnavail(p, slot.date)
+                && cnt[p.id] < effQuota(p);
           });
-          if (p3.length) { pool = p3; pass = 3; }
         }
 
-        // Pass 4: relax quota — slot must fill
-        if (!pool) {
-          var p4 = phys.filter(function(p) { return !unavail(p, slot.date); });
-          if (p4.length) { pool = p4; pass = 4; }
+        // Pass 4: relax quota cap — slot must fill if anyone is available
+        if (!pool.length) {
+          pool = phys.filter(function(p) { return !hardUnavail(p, slot.date); });
         }
 
-        if (!pool) { totalUnfilled++; continue; }
+        // Truly unfillable: everyone on vacation / 2nd-3rd / sold-back today
+        if (!pool.length) {
+          totalUnfilled++;
+          continue;
+        }
 
-        pool.sort(function(a, b) { return score(a, slot.site) - score(b, slot.site); });
-        var note = pass === 4 ? 'Auto (over-quota)' : pass === 3 ? 'Auto (seq-relax)' : pass === 2 ? 'Auto (site-relax)' : 'Auto';
-        assign(pool[0], slot, note);
+        // Sort by score descending (we negated so ascending puts best at [0])
+        pool.sort(function(a, b) {
+          return pickScore(a, slot.site) - pickScore(b, slot.site);
+        });
+
+        var pass = pool === phys ? 4 : 0;  // label for note
+        var note = (cnt[pool[0].id] >= effQuota(pool[0])) ? 'Auto (over-quota)'
+                 : !siteRulesOk(pool[0], slot.site, slot.date) ? 'Auto (site-relax)'
+                 : !seqRulesOk(pool[0], slot.date) ? 'Auto (seq-relax)'
+                 : 'Auto';
+        doAssign(pool[0], slot, note);
         totalAssigned++;
       }
 
-      // Commit to _irsaPreview
+      // ── Commit this group's assignments to _irsaPreview ───────────────
       for (var ai = 0; ai < assigned.length; ai++) {
         _irsaPreview.push({
-          physId: assigned[ai].physId, date: assigned[ai].date,
-          site: assigned[ai].site, irGroup: grpName,
-          shift: '1st', sub: '', notes: assigned[ai].notes
+          physId:  assigned[ai].physId,
+          date:    assigned[ai].date,
+          site:    assigned[ai].site,
+          irGroup: grp,
+          shift:   '1st',
+          sub:     '',
+          notes:   assigned[ai].notes
         });
       }
 
-      // Tag display stats
-      phys.forEach(function(p) {
-        p._irsaAftCnt = cnt[p.id] || 0;
-        p._irsaQta    = quota(p);
-        p._irsaAncCnt = anc[p.id] || 0;
-      });
+      // Tag stats on physician objects for table display
+      for (var pi5 = 0; pi5 < phys.length; pi5++) {
+        var p = phys[pi5];
+        p._irsaAftCnt = cnt[p.id]    || 0;
+        p._irsaQta    = effQuota(p);
+        p._irsaAncCnt = ancCnt[p.id] || 0;
+      }
+
     } // end group loop
 
-    // Render
+    // ── Build preview HTML ─────────────────────────────────────────────────
     var box      = document.getElementById('irsa-box');
     var applyBtn = document.getElementById('irsa-apply');
 
@@ -5466,80 +5525,94 @@ function previewIRShiftAA() {
       return;
     }
 
-    var ancElig = _irsaPreview.filter(function(s) {
-      var p = physiciansArr.find(function(x) { return x.id === s.physId; });
-      return p && !!p.anchorSite;
-    });
-    var ancHits = ancElig.filter(function(s) {
-      var p = physiciansArr.find(function(x) { return x.id === s.physId; });
-      return p && p.anchorSite === s.site;
-    }).length;
-    var ancPctDsp = ancElig.length > 0 ? Math.round(ancHits / ancElig.length * 100) : 0;
-    var allN = _irsaPreview.length;
-    var yrmo = ym.split('-');
-    var monthLbl = new Date(+yrmo[0], +yrmo[1] - 1, 1)
-                    .toLocaleString('default', { month: 'long', year: 'numeric' });
+    // Overall anchor compliance (only physicians who have an anchor site)
+    var ancElig = 0, ancHit = 0;
+    for (var ri = 0; ri < _irsaPreview.length; ri++) {
+      var row = _irsaPreview[ri];
+      var rp  = allPhysicians.find(function(x) { return x.id === row.physId; });
+      if (rp && rp.anchorSite) {
+        ancElig++;
+        if (rp.anchorSite === row.site) ancHit++;
+      }
+    }
+    var ancPctDsp = ancElig > 0 ? Math.round(ancHit / ancElig * 100) : 0;
+    var allN      = _irsaPreview.length;
+    var yrmo      = ym.split('-');
+    var monthLbl  = new Date(+yrmo[0], +yrmo[1] - 1, 1)
+                      .toLocaleString('default', { month: 'long', year: 'numeric' });
 
-    var html = '<div class="card" style="margin-bottom:10px">'
-      + '<div class="card-title">Preview \u2014 ' + monthLbl
-      + '<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">'
-      + allN + ' assigned \xb7 ' + totalUnfilled + ' unfillable \xb7 '
-      + callFills + ' on-call \xb7 anchor ' + ancPctDsp + '% (target ~' + ancTgt + '%)'
-      + '</span></div>'
-      + '<div class="g4" style="margin-bottom:10px">'
-      + '<div class="met"><div class="met-lbl">Assigned</div><div class="met-val" style="color:var(--green-t)">' + allN + '</div></div>'
-      + '<div class="met"><div class="met-lbl">On-Call</div><div class="met-val" style="color:var(--blue-t)">' + callFills + '</div></div>'
-      + '<div class="met"><div class="met-lbl">Anchor</div><div class="met-val" style="color:'
-      + (Math.abs(ancPctDsp - ancTgt) <= 8 ? 'var(--green-t)' : 'var(--amber,#d97706)') + '">' + ancPctDsp + '%</div></div>'
-      + '<div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:'
-      + (totalUnfilled ? 'var(--red-t)' : 'var(--txt3)') + '">' + totalUnfilled + '</div></div>'
-      + '</div>'
-      + '<div style="overflow-x:auto"><table><thead><tr>'
-      + '<th>Physician</th><th>Group</th><th>IR FTE</th>'
-      + '<th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>'
-      + '</tr></thead><tbody>';
+    var ancOk = Math.abs(ancPctDsp - ancTgt) <= 8;
+    var html =
+      '<div class="card" style="margin-bottom:10px">' +
+        '<div class="card-title">Preview \u2014 ' + monthLbl +
+          '<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">' +
+            allN + ' assigned \xb7 ' + totalUnfilled + ' unfillable \xb7 ' +
+            callFills + ' on-call \xb7 anchor ' + ancPctDsp + '% (target ~' + ancTgt + '%)' +
+          '</span>' +
+        '</div>' +
+        '<div class="g4" style="margin-bottom:10px">' +
+          '<div class="met"><div class="met-lbl">Assigned</div>' +
+            '<div class="met-val" style="color:var(--green-t)">' + allN + '</div></div>' +
+          '<div class="met"><div class="met-lbl">On-Call</div>' +
+            '<div class="met-val" style="color:var(--blue-t)">' + callFills + '</div></div>' +
+          '<div class="met"><div class="met-lbl">Anchor Rate</div>' +
+            '<div class="met-val" style="color:' + (ancOk ? 'var(--green-t)' : 'var(--amber,#d97706)') + '">' + ancPctDsp + '%</div></div>' +
+          '<div class="met"><div class="met-lbl">Unfillable</div>' +
+            '<div class="met-val" style="color:' + (totalUnfilled ? 'var(--red-t)' : 'var(--txt3)') + '">' + totalUnfilled + '</div></div>' +
+        '</div>' +
+        '<div style="overflow-x:auto"><table><thead><tr>' +
+          '<th>Physician</th><th>Group</th><th>IR FTE</th>' +
+          '<th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>' +
+        '</tr></thead><tbody>';
 
     for (var gj = 0; gj < groups.length; gj++) {
       var grp2 = groups[gj];
-      physiciansArr.filter(function(p) { return p.irFte > 0 && p.irGroup === grp2; })
-        .forEach(function(p) {
-          if (!p._irsaQta && !p._irsaAftCnt) return;
-          var got  = p._irsaAftCnt || 0;
-          var qta  = p._irsaQta    || 0;
-          var pct  = qta > 0 ? Math.round(got / qta * 100) : (got > 0 ? 100 : 0);
-          var hasA = !!p.anchorSite;
-          var ancR = (hasA && got > 0) ? Math.round((p._irsaAncCnt || 0) / got * 100) : null;
-          var col  = pct >= 95 ? 'var(--green-t)' : pct >= 80 ? 'var(--amber,#d97706)' : 'var(--red-t)';
-          var acol = ancR === null ? 'var(--txt3)'
-                   : Math.abs(ancR - ancTgt) <= 8  ? 'var(--green-t)'
-                   : Math.abs(ancR - ancTgt) <= 15 ? 'var(--amber,#d97706)' : 'var(--red-t)';
-          html += '<tr>'
-            + '<td style="font-weight:600">' + pname(p.id) + '</td>'
-            + '<td><span class="tag ' + (grp2 === 'North' ? 'tb' : 'tg') + '">' + grp2 + '</span></td>'
-            + '<td style="text-align:center">' + p.irFte + '</td>'
-            + '<td style="text-align:center;font-weight:700">' + qta + '</td>'
-            + '<td style="text-align:center;font-weight:700">' + got + '</td>'
-            + '<td style="text-align:center;font-weight:800;color:' + col + '">' + pct + '%</td>'
-            + '<td style="text-align:center;font-weight:700;color:' + acol + '">'
-            + (ancR === null ? '\u2014' : ancR + '%') + '</td>'
-            + '</tr>';
-        });
+      var grpPhys2 = allPhysicians.filter(function(p) { return p.irFte > 0 && p.irGroup === grp2; });
+      for (var pj = 0; pj < grpPhys2.length; pj++) {
+        var p2  = grpPhys2[pj];
+        if (!p2._irsaQta && !p2._irsaAftCnt) continue;
+        var got2 = p2._irsaAftCnt || 0;
+        var qta2 = p2._irsaQta    || 0;
+        var pct2 = qta2 > 0 ? Math.round(got2 / qta2 * 100) : (got2 > 0 ? 100 : 0);
+        var hasA = !!p2.anchorSite;
+        var ancR = (hasA && got2 > 0) ? Math.round((p2._irsaAncCnt || 0) / got2 * 100) : null;
+        var col  = pct2 >= 95 ? 'var(--green-t)' : pct2 >= 80 ? 'var(--amber,#d97706)' : 'var(--red-t)';
+        var acol = ancR === null ? 'var(--txt3)'
+                 : Math.abs(ancR - ancTgt) <= 8  ? 'var(--green-t)'
+                 : Math.abs(ancR - ancTgt) <= 15 ? 'var(--amber,#d97706)' : 'var(--red-t)';
+        html +=
+          '<tr>' +
+            '<td style="font-weight:600">' + pname(p2.id) + '</td>' +
+            '<td><span class="tag ' + (grp2 === 'North' ? 'tb' : 'tg') + '">' + grp2 + '</span></td>' +
+            '<td style="text-align:center">' + p2.irFte + '</td>' +
+            '<td style="text-align:center;font-weight:700">' + qta2 + '</td>' +
+            '<td style="text-align:center;font-weight:700">' + got2 + '</td>' +
+            '<td style="text-align:center;font-weight:800;color:' + col + '">' + pct2 + '%</td>' +
+            '<td style="text-align:center;font-weight:700;color:' + acol + '">' +
+              (ancR === null ? '\u2014' : ancR + '%') +
+            '</td>' +
+          '</tr>';
+      }
     }
 
     html += '</tbody></table></div></div>';
     if (errors.length)   html += '<div class="note nw" style="font-size:12px">' + errors.join('<br>') + '</div>';
-    if (callFills)       html += '<div class="note ni" style="font-size:12px;margin-top:4px">\u2139 ' + callFills + ' on-call physician slot(s) assigned first.</div>';
-    if (totalUnfilled)   html += '<div class="note nw" style="font-size:12px;margin-top:4px">\u26a0 ' + totalUnfilled + ' slot(s) unfillable \u2014 all physicians unavailable.</div>';
+    if (callFills)       html += '<div class="note ni" style="font-size:12px;margin-top:4px">' +
+                                   '\u2139 ' + callFills + ' slot(s) given to on-call physician(s) first.</div>';
+    if (totalUnfilled)   html += '<div class="note nw" style="font-size:12px;margin-top:4px">' +
+                                   '\u26a0 ' + totalUnfilled + ' slot(s) unfillable \u2014 all physicians unavailable on those dates.</div>';
 
     if (box) box.innerHTML = html;
     if (applyBtn) applyBtn.style.display = 'inline-block';
 
-  } catch(err) {
-    var box2 = document.getElementById('irsa-box');
-    if (box2) box2.innerHTML = '<div class="note nr" style="color:var(--red-t);padding:12px">'
-      + '<strong>Auto-assign error:</strong> ' + err.message
-      + '<br><small style="font-family:monospace">' + (err.stack||'').split('\n').slice(0,3).join('<br>') + '</small></div>';
-    console.error('[RadScheduler] previewIRShiftAA error:', err);
+  } catch (err) {
+    var errBox = document.getElementById('irsa-box');
+    if (errBox) errBox.innerHTML =
+      '<div class="note nw" style="color:var(--red-t)">' +
+        '<strong>Auto-assign error:</strong> ' + (err.message || err) + '<br>' +
+        '<code style="font-size:11px">' + (err.stack || '').split('\n').slice(0, 4).join('<br>') + '</code>' +
+      '</div>';
+    console.error('[RadScheduler] previewIRShiftAA:', err);
   }
 }function applyIRShiftAA(){
   if(!_adminOnly('apply IR shift auto-assign')) return;
