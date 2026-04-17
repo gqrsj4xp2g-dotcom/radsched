@@ -5375,21 +5375,27 @@ function previewIRShiftAA(){
       const off = totalSoFar % n;
       return pool.slice().sort((a,b) => {
         const qA = shiftCapFn(a), qB = shiftCapFn(b);
-        const defA = qA - cntS[a.id];   // positive = under quota (needs more shifts)
+        const defA = qA - cntS[a.id];   // positive = under quota, 0 = exactly at quota, negative = over
         const defB = qB - cntS[b.id];
-        // Anchor scoring
+        const underA = defA > 0;         // strictly under quota
+        const underB = defB > 0;
+        // Hard tier: under-quota ALWAYS beats at/over-quota.
+        // No physician exceeds 100% while another is below 100%.
+        if(underA !== underB) return underA ? -1 : 1;
+        // Both are in the same tier (both under, or both at/over quota).
+        // Anchor scoring (only relevant within the under-quota tier)
         const ancTgtA = a.anchorSite ? Math.round(qA * ancPct / 100) : 0;
         const ancTgtB = b.anchorSite ? Math.round(qB * ancPct / 100) : 0;
         const ancNeedA = Math.max(0, ancTgtA - (ancS[a.id]||0));
         const ancNeedB = Math.max(0, ancTgtB - (ancS[b.id]||0));
         const fitA = a.anchorSite===site ?  ancNeedA : -ancNeedA;
         const fitB = b.anchorSite===site ?  ancNeedB : -ancNeedB;
-        // FTE protection: if one physician is significantly more behind on FTE,
-        // protect them regardless of anchor (prevents severe under-assignment)
+        // FTE protection within tier: if one physician is 2+ shifts further behind,
+        // FTE wins over anchor to prevent a single physician from falling too far back.
         if(Math.abs(defA - defB) >= ANC_FTE_PROTECT){
           if(defA !== defB) return defB - defA;  // FTE wins
         }
-        // Primary: anchor compliance (drives to 70%)
+        // Primary: anchor compliance (drives to ~70%)
         if(fitA !== fitB) return fitB - fitA;
         // Secondary: FTE deficit
         if(defA !== defB) return defB - defA;
