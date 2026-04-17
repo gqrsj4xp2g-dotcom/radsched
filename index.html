@@ -5265,10 +5265,9 @@ function previewIRShiftAA(){
 
   const ym     = document.getElementById('irsa-mo')?.value || new Date().toISOString().slice(0,7);
   const grp    = document.getElementById('irsa-grp')?.value || 'both';
-  const ancPct = S.cfg.anchorPct || 70;   // integer percent, e.g. 70
   const groups = ['North','South'].filter(g => grp === 'both' || g === grp);
   const ancSpan = document.getElementById('irsa-anc-target');
-  if(ancSpan) ancSpan.textContent = ancPct;
+  if(ancSpan) ancSpan.textContent = S.cfg.anchorPct || 70;
 
   _irsaPreview = [];
   const errors = [];
@@ -5277,12 +5276,7 @@ function previewIRShiftAA(){
   groups.forEach(g => {
     const gPhys = S.physicians.filter(p => p.irFte > 0 && p.irGroup === g);
     if(!gPhys.length){ errors.push(`No IR physicians in ${g} group.`); return; }
-    const gFteTot = gPhys.reduce((s,p) => s + p.irFte, 0) || 1;
-    const n = gPhys.length;
-
-    // ── Vacation cache ────────────────────────────────────────────────────
-    const vacCache = {};
-    const vd = pid => { if(!vacCache[pid]) vacCache[pid] = vacDays(pid); return vacCache[pid]; };
+    const n = Math.max(gPhys.length, 1);
 
     // ── Build slot list from irShiftSlots config ──────────────────────────
     const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
@@ -5300,144 +5294,111 @@ function previewIRShiftAA(){
       return;
     }
 
-    // ── Build quick lookup: who is on daily call each date ────────────────
-    // On-call physician should get priority for a slot on their call day.
-    const callPhysOnDate = {};  // date → physId (first daily call physician for this group)
+    // ── On-call lookup: who is on daily call each date this month ─────────
+    const callPhysOnDate = {};
     S.irCalls.filter(ic => ic.callType==='daily' && ic.irGroup===g && ic.date.startsWith(ym))
-      .forEach(ic => {
-        if(!callPhysOnDate[ic.date]) callPhysOnDate[ic.date] = ic.physId;
-      });
+      .forEach(ic => { if(!callPhysOnDate[ic.date]) callPhysOnDate[ic.date] = ic.physId; });
 
-    // ── Vacation-adjusted FTE quotas ──────────────────────────────────────
-    const totalDays = cells.length || 1;
-    const gAvailFte = gPhys.reduce((s,p) => {
-      const av = cells.filter(c => !vd(p.id).has(c.date)).length;
-      return s + p.irFte * (av / totalDays);
-    }, 0) || gFteTot;
-
-    const rawTarget = {};
-    gPhys.forEach(p => {
-      const av = cells.filter(c => !vd(p.id).has(c.date)).length;
-      rawTarget[p.id] = gAvailFte > 0 ? slots.length * (p.irFte*(av/totalDays)/gAvailFte) : 0;
+    // ── FTE-proportional quotas (largest-remainder, vacation-adjusted) ────
+    // Mirror rebalancer: quotas = share of slot pool proportional to FTE
+    const gFteTot = gPhys.reduce((s,p) => s + p.irFte, 0) || 1;
+    const shiftQuotas = _irrQuotas(gPhys, slots.length, p => {
+      // Use irShiftTargetMonth which accounts for slot config and group FTE
+      const t = irShiftTargetMonth(p, ym);
+      return t > 0 ? t : slots.length * (p.irFte / gFteTot);
     });
+    const shiftCapFn = p => shiftQuotas[p.id] ?? Math.max(Math.ceil(irShiftTargetMonth(p, ym)), 1);
 
-    // Largest-remainder integer quotas summing exactly to slots.length
-    const quotas = _irrQuotas(gPhys, slots.length, p => rawTarget[p.id]);
+    // ── Running state (mirrors rebalancer: cntS, ancS, gSAsgn) ───────────
+    const cntS = {}, ancS = {};
+    gPhys.forEach(p => { cntS[p.id] = 0; ancS[p.id] = 0; });
+    const gSAsgn = [];  // assignments placed this run (prevents double-booking same date)
 
-    // ── Running state ─────────────────────────────────────────────────────
-    const cnt = {}, ancCnt = {};
-    gPhys.forEach(p => { cnt[p.id] = 0; ancCnt[p.id] = 0; });
-    const assignedOnDate = {};
-
-    const alreadyHasShift = (physId, date) =>
-      (S.irShifts||[]).some(s => s.physId===physId && s.date===date && s.shift!=='Home') ||
-      _irsaPreview.some(a => a.physId===physId && a.date===date);
-
-    // Full rule check with optional relaxation for coverage fallback
-    function canAssign(p, date, site, relaxSiteRule, relaxSeq){
-      if(vd(p.id).has(date)) return false;
-      if(_has2ndOr3rdShift(p.id, date)) return false;
-      if((assignedOnDate[date]||new Set()).has(p.id)) return false;
-      if(alreadyHasShift(p.id, date)) return false;
-      if(isSoldBackDate(p.id, date)) return false;
-      if(isIRCallBlackout(p.id, date)) return false;
-      if(!relaxSiteRule){
-        if(p.allowedSites?.length && site && !p.allowedSites.includes(site)) return false;
-        if(!siteRuleOk(p, site||'', ym, date, 's1')) return false;
-        if(!dayConditionSiteOk(p, site||'', date, 'ir-shift')) return false;
-      }
-      if(!relaxSeq && !sequenceOk(p, date, ym)) return false;
-      return true;
-    }
-
-    // REBALANCER SORT — same algorithm as optimal procedure-shifts rebalancer
-    // Sort: under-quota → anchor-need fit → highest deficit → rotation tiebreak
-    function makeSort(site){
-      const totalCnt = Object.values(cnt).reduce((s,v) => s+v, 0);
-      const off = totalCnt % n;
-      return (a,b) => {
-        const qA = quotas[a.id]||0, qB = quotas[b.id]||0;
-        const underA = cnt[a.id] < qA, underB = cnt[b.id] < qB;
-        if(underA !== underB) return underA ? -1 : 1;
-        // Anchor-need fit: how many more anchor shifts needed to reach ancPct% target
-        const ancTgtA = a.irSitePrim ? Math.round(qA * ancPct / 100) : 0;
-        const ancTgtB = b.irSitePrim ? Math.round(qB * ancPct / 100) : 0;
-        const ancNeedA = Math.max(0, ancTgtA - (ancCnt[a.id]||0));
-        const ancNeedB = Math.max(0, ancTgtB - (ancCnt[b.id]||0));
-        const fitA = a.irSitePrim===site ?  ancNeedA : -ancNeedA;
-        const fitB = b.irSitePrim===site ?  ancNeedB : -ancNeedB;
-        if(fitA !== fitB) return fitB - fitA;
-        // Highest deficit first
-        const defA = rawTarget[a.id] - cnt[a.id];
-        const defB = rawTarget[b.id] - cnt[b.id];
-        if(Math.abs(defA - defB) > 1e-9) return defB - defA;
-        // Fair rotation tiebreak
-        const iA = (gPhys.findIndex(x=>x.id===a.id) - off + n) % n;
-        const iB = (gPhys.findIndex(x=>x.id===b.id) - off + n) % n;
-        return iA - iB;
-      };
-    }
-
-    function assign(p, date, site, notes){
-      cnt[p.id]++;
-      if(site === p.irSitePrim) ancCnt[p.id]++;
-      if(!assignedOnDate[date]) assignedOnDate[date] = new Set();
-      assignedOnDate[date].add(p.id);
-      _irsaPreview.push({physId:p.id, date, site, irGroup:g, shift:'1st', sub:'', notes});
-      totalFilled++;
-    }
-
-    // ── Main slot assignment loop ─────────────────────────────────────────
+    // ── Main slot loop — exact same structure as rebalancer shifts path ────
     slots.forEach(slot => {
-      const sort = makeSort(slot.site);
-      const callPhysId = callPhysOnDate[slot.date];   // on-call physician today (if any)
-
-      // ── Step A: if the on-call physician doesn't have a shift yet, try to
-      //            give them this slot first — they MUST be at work if on call.
-      if(callPhysId && !alreadyHasShift(callPhysId, slot.date)){
+      // ── On-call physician gets first priority for this slot ──────────────
+      const callPhysId = callPhysOnDate[slot.date];
+      if(callPhysId){
         const callP = S.physicians.find(x => x.id===callPhysId);
-        if(callP && canAssign(callP, slot.date, slot.site, true, true)){
-          assign(callP, slot.date, slot.site, 'Auto (on-call priority)');
-          callPriorityFills++;
+        const alreadyOnDate = gSAsgn.some(a => a.physId===callPhysId && a.date===slot.date) ||
+          (S.irShifts||[]).some(s => s.physId===callPhysId && s.date===slot.date && s.shift!=='Home');
+        if(callP && !alreadyOnDate &&
+          !vacDays(callP.id).has(slot.date) &&
+          !_has2ndOr3rdShift(callPhysId, slot.date) &&
+          !isSoldBackDate(callPhysId, slot.date)){
+          // Assign call physician to this slot (bypass quota cap for on-call coverage)
+          const e = {physId:callPhysId, date:slot.date, site:slot.site, irGroup:g,
+            shift:'1st', sub:'', notes:'Auto (on-call priority)'};
+          _irsaPreview.push(e); gSAsgn.push(e);
+          cntS[callPhysId]++;
+          if(callP.anchorSite === slot.site) ancS[callPhysId]++;
+          callPriorityFills++; totalFilled++;
           return;
         }
       }
 
-      // ── Step B: normal assignment with progressively relaxed rules ────────
-      // Full rules (respect all physician site/sequence rules)
-      let pool = gPhys.filter(p =>
-        canAssign(p, slot.date, slot.site, false, false) && cnt[p.id] < (quotas[p.id]??Infinity)
-      );
-      // Relax site-rule + day-conditions (coverage takes precedence over personal rules)
-      if(!pool.length) pool = gPhys.filter(p =>
-        canAssign(p, slot.date, slot.site, true, false) && cnt[p.id] < (quotas[p.id]??Infinity)
-      );
-      // Relax sequence rules too
-      if(!pool.length) pool = gPhys.filter(p =>
-        canAssign(p, slot.date, slot.site, true, true) && cnt[p.id] < (quotas[p.id]??Infinity)
-      );
-      // Last resort: relax FTE quota cap (still fill the slot)
-      if(!pool.length) pool = gPhys.filter(p =>
-        canAssign(p, slot.date, slot.site, true, true)
-      );
+      // ── Standard eligible filter — same as rebalancer, no cascades ────────
+      const eligible = gPhys.filter(p => {
+        if(vacDays(p.id).has(slot.date)) return false;
+        if(_has2ndOr3rdShift(p.id, slot.date)) return false;
+        if(p.allowedSites?.length && !p.allowedSites.includes(slot.site)) return false;
+        if(gSAsgn.some(a => a.physId===p.id && a.date===slot.date)) return false;
+        if((S.irShifts||[]).some(s => s.physId===p.id && s.date===slot.date && s.shift!=='Home')) return false;
+        if(!siteRuleOk(p, slot.site, ym, slot.date, 's1')) return false;
+        if(!dayConditionSiteOk(p, slot.site, slot.date, 'ir-shift')) return false;
+        if(!sequenceOk(p, slot.date, ym)) return false;
+        if(isSoldBackDate(p.id, slot.date)) return false;
+        if(isIRCallBlackout(p.id, slot.date)) return false;
+        if(cntS[p.id] >= shiftCapFn(p)) return false;
+        return true;
+      });
 
-      if(!pool.length){ totalUnfilled++; return; }
+      let picked = null;
+      if(eligible.length){
+        const off = Object.values(cntS).reduce((s,v) => s+v, 0) % n;
+        // ── IDENTICAL SORT TO REBALANCER ──────────────────────────────────
+        eligible.sort((a,b) => {
+          const qA = shiftCapFn(a), qB = shiftCapFn(b);
+          const underA = cntS[a.id] < qA, underB = cntS[b.id] < qB;
+          if(underA !== underB) return underA ? -1 : 1;
+          // Anchor fit: drives toward anchorPct% compliance (uses anchorSite like rebalancer)
+          const ancTgtA = a.anchorSite ? Math.round(qA * S.cfg.anchorPct / 100) : 0;
+          const ancTgtB = b.anchorSite ? Math.round(qB * S.cfg.anchorPct / 100) : 0;
+          const ancNeedA = Math.max(0, ancTgtA - (ancS[a.id]||0));
+          const ancNeedB = Math.max(0, ancTgtB - (ancS[b.id]||0));
+          const fitA = a.anchorSite === slot.site ?  ancNeedA : -ancNeedA;
+          const fitB = b.anchorSite === slot.site ?  ancNeedB : -ancNeedB;
+          if(fitA !== fitB) return fitB - fitA;
+          // Highest deficit first
+          const defA = irShiftTargetMonth(a, ym) - cntS[a.id];
+          const defB = irShiftTargetMonth(b, ym) - cntS[b.id];
+          if(Math.abs(defA - defB) > 1e-9) return defB - defA;
+          // Fair rotation tiebreak
+          const iA = (gPhys.findIndex(x=>x.id===a.id) - off + n) % n;
+          const iB = (gPhys.findIndex(x=>x.id===b.id) - off + n) % n;
+          return iA - iB;
+        });
+        picked = eligible[0];
+      }
 
-      pool.sort(sort);
-      const fullRulesLen = gPhys.filter(p =>
-        canAssign(p,slot.date,slot.site,false,false) && cnt[p.id]<(quotas[p.id]??Infinity)
-      ).length;
-      const note = fullRulesLen > 0 ? 'Auto-assign'
-                 : cnt[pool[0].id] >= (quotas[pool[0].id]??Infinity) ? 'Auto (over-quota fill)' : 'Auto (site override)';
-      assign(pool[0], slot.date, slot.site, note);
+      if(picked){
+        const e = {physId:picked.id, date:slot.date, site:slot.site, irGroup:g,
+          shift:'1st', sub:'', notes:'Auto-assign'};
+        _irsaPreview.push(e); gSAsgn.push(e);
+        cntS[picked.id]++;
+        if(picked.anchorSite === slot.site) ancS[picked.id]++;
+        totalFilled++;
+      } else {
+        totalUnfilled++;
+      }
     });
 
     // Tag stats for display
     gPhys.forEach(p => {
-      p._irsaAftCnt = _irsaPreview.filter(a => a.physId===p.id).length;
-      p._irsaTgt    = rawTarget[p.id] || 0;
-      p._irsaQta    = quotas[p.id] || 0;
-      p._irsaAncCnt = ancCnt[p.id] || 0;
+      p._irsaAftCnt = cntS[p.id] || 0;
+      p._irsaTgt    = irShiftTargetMonth(p, ym);
+      p._irsaQta    = shiftCapFn(p);
+      p._irsaAncCnt = ancS[p.id] || 0;
     });
   });
 
@@ -5453,9 +5414,18 @@ function previewIRShiftAA(){
     return;
   }
 
-  const totalAnchor = _irsaPreview.filter(s=>{const p=S.physicians.find(x=>x.id===s.physId);return p?.irSitePrim===s.site;}).length;
+  const ancPct = S.cfg.anchorPct || 70;
+  // Only physicians with anchorSite count in anchor compliance (mirrors rebalancer)
+  const anchorEligible = _irsaPreview.filter(s => {
+    const p = S.physicians.find(x => x.id===s.physId);
+    return !!p?.anchorSite;
+  });
+  const totalAnchor = anchorEligible.filter(s => {
+    const p = S.physicians.find(x => x.id===s.physId);
+    return p?.anchorSite === s.site;
+  }).length;
+  const overallAnchorPct = anchorEligible.length > 0 ? Math.round(totalAnchor/anchorEligible.length*100) : 0;
   const allAssigned = _irsaPreview.length;
-  const overallAnchorPct = allAssigned > 0 ? Math.round(totalAnchor/allAssigned*100) : 0;
   const [yr,mo] = ym.split('-');
   const monthLabel = new Date(+yr,+mo-1,1).toLocaleString('default',{month:'long',year:'numeric'});
 
@@ -5475,7 +5445,7 @@ function previewIRShiftAA(){
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      <th>Target</th><th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>
+      <th>Month Target</th><th>Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th>
     </tr></thead><tbody>`;
 
   groups.forEach(g=>{
@@ -5483,9 +5453,10 @@ function previewIRShiftAA(){
       if(!p._irsaQta && !p._irsaAftCnt) return;
       const after=p._irsaAftCnt||0, tgt=p._irsaTgt||0, qta=p._irsaQta||0;
       const pct=qta>0?Math.round(after/qta*100):(after>0?100:0);
-      const ancR=after>0?Math.round((p._irsaAncCnt||0)/after*100):0;
-      const col=pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
-      const ancCol=Math.abs(ancR-ancPct)<=8?'var(--green-t)':Math.abs(ancR-ancPct)<=15?'var(--amber,#d97706)':'var(--red-t)';
+      const hasAnc = !!p.anchorSite;
+      const ancR = hasAnc && after>0 ? Math.round((p._irsaAncCnt||0)/after*100) : null;
+      const col = pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
+      const ancCol = ancR===null?'var(--txt3)':Math.abs(ancR-ancPct)<=8?'var(--green-t)':Math.abs(ancR-ancPct)<=15?'var(--amber,#d97706)':'var(--red-t)';
       html+=`<tr><td style="font-weight:600">${pname(p.id)}</td>
         <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
         <td style="text-align:center">${p.irFte}</td>
@@ -5493,7 +5464,7 @@ function previewIRShiftAA(){
         <td style="text-align:center;font-weight:700">${qta}</td>
         <td style="text-align:center;font-weight:700">${after}</td>
         <td style="text-align:center;font-weight:800;color:${col}">${pct}%</td>
-        <td style="text-align:center;font-weight:700;color:${ancCol}">${ancR}%</td>
+        <td style="text-align:center;font-weight:700;color:${ancCol}">${ancR===null?'—':ancR+'%'}</td>
       </tr>`;
     });
   });
@@ -5503,7 +5474,7 @@ function previewIRShiftAA(){
   if(callPriorityFills) html+=`<div class="note ni" style="font-size:12px;margin-top:4px">
     ℹ ${callPriorityFills} slot(s) assigned to on-call physicians first.</div>`;
   if(totalUnfilled) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">
-    ⚠ ${totalUnfilled} configured slot(s) unfillable — no available physician for that date/site.</div>`;
+    ⚠ ${totalUnfilled} configured slot(s) unfillable — no eligible physician available.</div>`;
 
   box.innerHTML=html;
   if(applyBtn) applyBtn.style.display='inline-block';
