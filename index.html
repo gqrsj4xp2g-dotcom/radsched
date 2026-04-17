@@ -5308,9 +5308,20 @@ function previewIRShiftAA(){
       const t = irShiftTargetMonth(p, ym);
       return t > 0 ? t : slots.length * (p.irFte / gFteTot);
     });
+    // Count mandatory call days per physician — on-call requires a procedure shift,
+    // so the effective quota must be at least as large as the number of call days.
+    // This ensures attain% never exceeds 100% even when call pushes beyond base quota.
+    const callDaysCount = {};
+    gPhys.forEach(p => { callDaysCount[p.id] = 0; });
+    Object.values(callPhysOnDate).forEach(physId => {
+      if(callDaysCount[physId] != null) callDaysCount[physId]++;
+    });
+
     const shiftCapFn = p => {
       const q = shiftQuotas[p.id];
-      return (q != null && q > 0) ? q : Math.max(Math.round(irShiftTargetMonth(p, ym)), 1);
+      const base = (q != null && q > 0) ? q : Math.max(Math.round(irShiftTargetMonth(p, ym)), 1);
+      // Effective quota absorbs mandatory call days so attain% stays ≤ 100%
+      return Math.max(base, callDaysCount[p.id] || 0);
     };
 
     // ── Vacation cache ────────────────────────────────────────────────────
