@@ -1241,10 +1241,23 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 </div>
 
-<!-- HOLIDAY AUTO-ASSIGN PAGE -->
+<!-- HOLIDAY AUTO-ASSIGN PAGE (LEGACY — superseded by Holiday Call → Auto-Assign tab) -->
 <div id="page-holiday-auto" class="page admin-only">
-  <div class="pg-title">Holiday Auto-Assign</div>
-  <div class="pg-sub">Automatically assign physicians to holiday call slots, balancing across the team. Configured holidays are blackout dates — no normal daily shifts will be assigned on those days.</div>
+  <div class="pg-title">Holiday Auto-Assign <span style="font-size:11px;font-weight:400;color:var(--amber-t,#92400e);margin-left:8px">(Legacy)</span></div>
+  <div class="pg-sub">Automatically assign physicians to holiday call slots, balancing across the team.</div>
+
+  <div class="card" style="background:var(--amber-bg,#fffbeb);border:1px solid #fde68a;margin-bottom:12px">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div style="font-size:20px">⚠️</div>
+      <div style="flex:1;font-size:12px;color:var(--amber-t,#92400e);line-height:1.55">
+        <strong>This page is deprecated.</strong> It uses the old 2-pool (DR / IR) model and is kept only for backward compatibility.
+        The current holiday system supports three pools (DR, IR North, IR South) with explicit holiday date blocks.
+        <br><br>
+        <strong>Go to </strong><a href="#" onclick="nav('holidays',document.querySelector('[onclick*=holidays]'));return false;" style="color:var(--blue);font-weight:700">Holiday Call → Define Holidays + Auto-Assign</a>
+        <strong> instead.</strong>
+      </div>
+    </div>
+  </div>
 
   <div class="g2" style="margin-bottom:10px">
     <div class="card">
@@ -1825,6 +1838,23 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
       </div>
     </div>
   </div>
+
+  <!-- Natural-Language Scheduling Rules -->
+  <div class="card" style="margin-top:14px;border:2px solid var(--purple)">
+    <div class="card-title">🧠 Scheduling Rules — If / Then Logic</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px">
+      Plain-English rules that the auto-assign engines will enforce. Use the
+      <strong>AI Scheduler</strong> page to write new rules (it will parse your
+      sentence into a structured form automatically). Rules below are enforced
+      for DR shifts, IR calls, and weekend calls.
+      <br>Example: <em>"If Dr. Chen is assigned at CHE, she must be on 1st shift."</em>
+    </div>
+    <div id="nl-rules-list"><p style="color:var(--txt3);font-size:12px">Loading…</p></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--txt3)">
+      To add a rule, go to <strong>🤖 AI Scheduler</strong> and type the rule in plain English.
+      The AI will translate it into a structured rule and file it here.
+    </div>
+  </div>
 </div>
 
 <!-- SITE SLOTS -->
@@ -1969,6 +1999,10 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Review holiday call assignments and tell me if any physician has significantly more or fewer than their fair share based on FTE.')">🎄 Holiday fairness check</button>
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Look for scheduling conflicts: back-to-back IR calls, physicians on vacation who still have shifts, or anyone over their monthly FTE cap.')">⚠️ Find conflicts</button>
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Show me the IR call distribution and identify who is over or under their target.')">⚖️ IR call balance</button>
+          <div style="border-top:1px solid var(--bdr);margin:4px 0 2px;padding-top:6px;font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em">Configure</div>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('List all current scheduling rules and explain what each one does in plain English.')">🧠 List scheduling rules</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I want to add a new scheduling rule. Walk me through what kind of rules you support and ask me for the details I need to provide.')">➕ Add a new rule</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I need to add a new hospital site. Ask me for the name, IR group (if any), and any anchor physicians.')">🏥 Add a new site</button>
         </div>
       </div>
       <div class="card" style="padding:12px;flex:1;overflow-y:auto">
@@ -1979,8 +2013,13 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           ✦ Add vacation / blackout periods<br>
           ✦ Fill unscheduled days<br>
           ✦ Analyze fairness &amp; gaps<br>
-          ✦ Explain any scheduling rule<br>
-          ✦ Bulk schedule operations
+          ✦ Bulk schedule operations<br>
+          <span style="color:var(--purple);font-weight:700">Configure:</span><br>
+          ✦ Create &amp; manage hospital sites<br>
+          ✦ Update physician FTE &amp; eligibility<br>
+          ✦ Create holiday definitions<br>
+          ✦ Write if/then rules in plain English<br>
+          &nbsp;&nbsp;that the auto-assigner will enforce
         </div>
         <div style="margin-top:12px;font-size:10px;color:var(--txt3);border-top:1px solid var(--bdr);padding-top:8px">Changes apply live and save to your database instantly.</div>
       </div>
@@ -2129,6 +2168,7 @@ function _buildSaveHTML(){
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
+    natLangRules:S.natLangRules||[],
     _lastSaved:null,
   })+'/*S_END*/';
   const uData='let USERS = /*USERS_START*/'+JSON.stringify(USERS)+'/*USERS_END*/';
@@ -2519,7 +2559,7 @@ function _applyRemoteData(d){
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
-    'sites','drSubs','irSubs','holidayDefs'];
+    'sites','drSubs','irSubs','holidayDefs','natLangRules'];
   KEYS.forEach(k=>{
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
@@ -2565,6 +2605,8 @@ function _applyRemoteData(d){
     // Don't delete d.irSlots yet — keeps the file readable by older tabs if multi-window.
     // The editor (submitHolDef) strips it on next save.
   });
+  // 3) Default natLangRules to [] if loading an older DB row without this field
+  if(!Array.isArray(S.natLangRules)) S.natLangRules=[];
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
       // Ensure physId is always a number (Supabase JSON may return strings)
@@ -2668,7 +2710,7 @@ function _refreshCurrentPage(){
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
   'openShifts','physicians','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs',
-  'sites','drSubs','irSubs'];
+  'sites','drSubs','irSubs','natLangRules'];
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
@@ -2798,6 +2840,8 @@ let S=/*S_START*/{
     {id:12,name:'Christmas Day',group:'IR',slots:1},
   ],
   holidayDefs:[],
+  // Natural-language if/then rules — enforced during auto-assign
+  natLangRules:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
@@ -3082,7 +3126,7 @@ async function createPractice(){
     physicians:[],
     vacations:[], drShifts:[], weekendCalls:[], irShifts:[], irCalls:[],
     holidays:[], openShifts:[], chatMessages:[], chatGroups:[], swapRequests:[],
-    holidayBlackouts:[], holidayNeeds:[], holidayDefs:[],
+    holidayBlackouts:[], holidayNeeds:[], holidayDefs:[], natLangRules:[],
     sites:[
       {name:"Main Site", irGroup:null, irAnchors:[], irFillins:[]},
       {name:"At Home / Remote", irGroup:null, irAnchors:[], irFillins:[]}
@@ -3128,7 +3172,7 @@ async function switchPractice(id,name){
     // _isRestoring=true suppresses triggerSave from firing during the swap.
     ['physicians','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays',
      'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds',
-     'sites','drSubs','irSubs','holidayDefs'].forEach(k=>{ S[k]=[]; });
+     'sites','drSubs','irSubs','holidayDefs','natLangRules'].forEach(k=>{ S[k]=[]; });
     ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
@@ -6597,7 +6641,70 @@ function renderSettings(){
     if(el) el.value=S.cfg[k]??S.cfg.irMax??0;
   });
   renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
+  renderNatLangRules();
   if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
+}
+
+// Render the natural-language rules list in Settings
+function renderNatLangRules(){
+  const el=document.getElementById('nl-rules-list'); if(!el) return;
+  const rules=(S.natLangRules||[]);
+  if(!rules.length){
+    el.innerHTML='<p style="color:var(--txt3);font-size:12px">No rules yet. Visit the <strong>AI Scheduler</strong> page and type an if/then rule in plain English.</p>';
+    return;
+  }
+  const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  el.innerHTML=rules.slice().sort((a,b)=>(b.enabled?1:0)-(a.enabled?1:0)||a.id-b.id).map(r=>{
+    const w=r.when||{}, t=r.then||{};
+    // Build human-readable structured summary
+    const whenParts=[];
+    if(w.physId!=null){ const p=S.physicians.find(x=>x.id===w.physId); whenParts.push(`phys=${p?p.last:'#'+w.physId}`); }
+    if(w.site)     whenParts.push(`site=${w.site}`);
+    if(w.shift)    whenParts.push(`shift=${w.shift}`);
+    if(w.sub)      whenParts.push(`sub=${w.sub}`);
+    if(w.irGroup)  whenParts.push(`IR ${w.irGroup}`);
+    if(Array.isArray(w.dow)&&w.dow.length) whenParts.push(`days=${w.dow.map(d=>dayNames[d]).join(',')}`);
+    if(w.dateRange) whenParts.push(`${w.dateRange.start||''}→${w.dateRange.end||''}`);
+    const thenParts=[`action=${t.action}`];
+    if(t.requireSite)  thenParts.push(`site=${t.requireSite}`);
+    if(t.requireShift) thenParts.push(`shift=${t.requireShift}`);
+    if(t.maxPerMonth!=null) thenParts.push(`≤${t.maxPerMonth}/mo`);
+    if(t.maxPerWeek!=null)  thenParts.push(`≤${t.maxPerWeek}/wk`);
+    if(t.maxPerYear!=null)  thenParts.push(`≤${t.maxPerYear}/yr`);
+    const disabledStyle = r.enabled===false ? 'opacity:.4;' : '';
+    const actionColor = t.action==='block'?'var(--red-t)':t.action==='require'?'var(--amber-t)':t.action==='limit'?'var(--purple)':'var(--blue-t)';
+    return `<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;margin-bottom:6px;${disabledStyle}">
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px">${escHtml(r.sentence||'(no sentence)')}</div>
+          <div style="font-size:10px;color:var(--txt3);font-family:monospace">
+            IF ${whenParts.join(' & ')||'(always)'} → THEN <span style="color:${actionColor};font-weight:700">${thenParts.join(' · ')}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="bsm bt" onclick="toggleNatLangRule(${r.id})" title="${r.enabled===false?'Enable':'Disable'}">${r.enabled===false?'○':'●'}</button>
+          <button class="br bxs" onclick="deleteNatLangRule(${r.id})" title="Delete">✕</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleNatLangRule(id){
+  if(!_adminOnly('toggle scheduling rule')) return;
+  const r=(S.natLangRules||[]).find(x=>x.id===id); if(!r) return;
+  r.enabled = !(r.enabled!==false);
+  triggerSave();
+  renderNatLangRules();
+}
+
+function deleteNatLangRule(id){
+  if(!_adminOnly('delete scheduling rule')) return;
+  const r=(S.natLangRules||[]).find(x=>x.id===id); if(!r) return;
+  if(!confirm(`Delete this scheduling rule?\n\n"${r.sentence}"`)) return;
+  S.natLangRules=(S.natLangRules||[]).filter(x=>x.id!==id);
+  triggerSave();
+  renderNatLangRules();
 }
 function saveCfg(){
   S.cfg.wdMax=+document.getElementById('cfg-wd')?.value||20;
@@ -7396,7 +7503,7 @@ function applyHolidayAA(){
       h.name===p.name && h.year===p.year && h.group===p.group && h.physId===p.physId);
     if(already){skipped++;return;}
     S.holidays.push({id:S.nextId++,name:p.name,date:p.date,year:p.year,physId:p.physId,group:p.group,notes:p.notes||''});
-    if(p.group==='IR') _syncHolidayToIRCall(p.physId,p.date,p.name);
+    if(p.group==='IR'||p.group==='IR-North'||p.group==='IR-South') _syncHolidayToIRCall(p.physId,p.date,p.name);
     added++;
   });
   triggerSave();
@@ -7701,6 +7808,206 @@ const _AI_TOOLS = [
       },
       required: ['physId','date','shift']
     }
+  },
+  {
+    name: 'create_site',
+    description: 'Create a new hospital site. Specify irGroup only if the site belongs to an IR group (North or South). Omit irGroup for general DR-only sites.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name:    { type: 'string', description: 'Site name (must be unique)' },
+        irGroup: { type: 'string', enum: ['North','South','Both'], description: 'Optional: IR group assignment' },
+        address: { type: 'string', description: 'Optional hospital address for drive-time calc' },
+        irAnchorPhysIds: { type: 'array', items: {type:'number'}, description: 'Optional: physician IDs who are IR anchors here (counts toward their IR FTE)' },
+        irFillinPhysIds: { type: 'array', items: {type:'number'}, description: 'Optional: physician IDs who are IR fill-ins here (does NOT count toward IR FTE)' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'update_site',
+    description: 'Update an existing site: change IR group, anchors, or fill-ins. Only include fields you want to change.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name:    { type: 'string', description: 'Existing site name' },
+        irGroup: { type: 'string', enum: ['North','South','Both','none'], description: 'Set "none" to remove IR group' },
+        irAnchorPhysIds: { type: 'array', items: {type:'number'} },
+        irFillinPhysIds: { type: 'array', items: {type:'number'} }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'delete_site',
+    description: 'Delete a site. This cascades and removes all shifts, calls, and references to this site. Use with caution.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'update_physician',
+    description: 'Update physician properties. Only include fields you want to change.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:        { type: 'number' },
+        drFte:         { type: 'number', description: 'DR FTE (0.0-1.0)' },
+        irFte:         { type: 'number', description: 'IR FTE (0.0-1.0)' },
+        irGroup:       { type: 'string', enum: ['North','South','none'] },
+        anchorSite:    { type: 'string', description: 'DR anchor site name' },
+        irSitePrim:    { type: 'string', description: 'IR primary site name' },
+        allowedSites:  { type: 'array', items: {type:'string'}, description: 'All sites this physician can be assigned to' },
+        drSubs:        { type: 'array', items: {type:'string'}, description: 'DR subspecialties' },
+        irSubs:        { type: 'array', items: {type:'string'}, description: 'IR subspecialties' },
+        shiftElig:     { type: 'object', description: 'Shift eligibility flags: {s1,s2,s3,home,wknd} booleans' }
+      },
+      required: ['physId']
+    }
+  },
+  {
+    name: 'add_physician_site_rule',
+    description: 'Add or update a site-specific rule for a physician: block them from a site, prefer a site, limit shifts/month/week at a site, or restrict which shift types they can do there.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:        { type: 'number' },
+        site:          { type: 'string', description: 'Site name the rule applies to' },
+        blocked:       { type: 'boolean', description: 'Hard block: cannot be assigned here' },
+        preferred:     { type: 'boolean', description: 'Prefer this site for assignments' },
+        maxPerMonth:   { type: 'number', description: 'Max shifts per month at this site' },
+        maxPerWeek:    { type: 'number', description: 'Max shifts per week at this site' },
+        allowedShifts: { type: 'array', items: {type:'string', enum:['1st','2nd','3rd','wknd','ir']}, description: 'Which shift types are allowed at this site' }
+      },
+      required: ['physId','site']
+    }
+  },
+  {
+    name: 'remove_physician_site_rule',
+    description: 'Remove a physician\u2019s site rule for a given site.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number' },
+        site:   { type: 'string' }
+      },
+      required: ['physId','site']
+    }
+  },
+  {
+    name: 'add_physician_day_condition',
+    description: 'Add a day-of-week condition for a physician (e.g. "on Tuesdays must be at site CHN for DR shifts"). dow is 0=Sun..6=Sat.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:       { type: 'number' },
+        dow:          { type: 'number', description: '0=Sun..6=Sat' },
+        schedType:    { type: 'string', enum: ['any','dr-shift','ir-call','ir-shift'], description: 'Which schedule this applies to' },
+        requiredSite: { type: 'string', description: 'Site physician must be at on this day' },
+        notes:        { type: 'string' }
+      },
+      required: ['physId','dow','requiredSite']
+    }
+  },
+  {
+    name: 'set_physician_seq_rules',
+    description: 'Set sequence rules for a physician: max consecutive shift days, minimum rest days between shifts, max weekend calls.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:      { type: 'number' },
+        maxConsec:   { type: 'number' },
+        minRest:     { type: 'number' },
+        maxWkCalls:  { type: 'number' },
+        notes:       { type: 'string' }
+      },
+      required: ['physId']
+    }
+  },
+  {
+    name: 'create_holiday_definition',
+    description: 'Create a holiday definition with a name, year, list of blackout dates, and slot counts for each of the three pools (DR, IR North, IR South).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name:          { type: 'string', description: 'Holiday name (e.g. "Thanksgiving 2026")' },
+        year:          { type: 'number' },
+        dates:         { type: 'array', items: {type:'string'}, description: 'All dates covered (YYYY-MM-DD)' },
+        drSlots:       { type: 'number', description: 'Physicians needed from DR pool (0 to skip)' },
+        irNorthSlots:  { type: 'number', description: 'Physicians needed from IR North pool' },
+        irSouthSlots:  { type: 'number', description: 'Physicians needed from IR South pool' },
+        notes:         { type: 'string' }
+      },
+      required: ['name','year','dates']
+    }
+  },
+  {
+    name: 'create_natural_language_rule',
+    description: 'Add an "if/then" scheduling rule written in plain English AND a structured representation. These rules are consulted during auto-assign to enforce constraints. Each rule MUST include both a human-readable sentence and a parsed structured form.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        sentence: { type: 'string', description: 'Human-readable rule (e.g. "If Dr. Chen is scheduled at CHE, then she must be on 1st shift only")' },
+        enabled:  { type: 'boolean', description: 'Default true. Whether rule is active.' },
+        when: {
+          type: 'object',
+          description: 'Trigger conditions (ALL must match). Include only fields that are part of the condition.',
+          properties: {
+            physId:    { type: 'number', description: 'Rule applies to this specific physician' },
+            site:      { type: 'string', description: 'Rule triggers when assignment site is this' },
+            shift:     { type: 'string', enum:['1st','2nd','3rd','Home','wknd','ir-call','ir-shift','ir-weekend','holiday'] },
+            dow:       { type: 'array', items:{type:'number'}, description: 'Array of day-of-week numbers 0=Sun..6=Sat' },
+            sub:       { type: 'string', description: 'Subspecialty' },
+            irGroup:   { type: 'string', enum:['North','South'] },
+            dateRange: { type: 'object', properties: {start:{type:'string'},end:{type:'string'}} }
+          }
+        },
+        then: {
+          type: 'object',
+          description: 'Effect: block = reject assignment if when-conditions match.  require = physician MUST be at this site/shift when when-conditions match.  prefer = downrank this assignment.  limit = cap occurrences.',
+          properties: {
+            action:       { type: 'string', enum:['block','require','prefer','limit'], description: 'What to do when the condition matches' },
+            requireSite:  { type: 'string', description: 'For require: the site physician must be at' },
+            requireShift: { type: 'string', description: 'For require: the shift type physician must be on' },
+            maxPerMonth:  { type: 'number', description: 'For limit: max occurrences per month' },
+            maxPerWeek:   { type: 'number', description: 'For limit: max occurrences per week' },
+            maxPerYear:   { type: 'number', description: 'For limit: max occurrences per year' }
+          },
+          required: ['action']
+        }
+      },
+      required: ['sentence','when','then']
+    }
+  },
+  {
+    name: 'list_natural_language_rules',
+    description: 'List all current natural-language scheduling rules.',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'delete_natural_language_rule',
+    description: 'Delete a natural-language rule by ID.',
+    input_schema: {
+      type: 'object',
+      properties: { ruleId: { type: 'number' } },
+      required: ['ruleId']
+    }
+  },
+  {
+    name: 'toggle_natural_language_rule',
+    description: 'Enable or disable a natural-language rule without deleting it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ruleId:  { type: 'number' },
+        enabled: { type: 'boolean' }
+      },
+      required: ['ruleId','enabled']
+    }
   }
 ];
 
@@ -7831,6 +8138,249 @@ function _aiExecuteTool(name, input) {
     return {ok:true, message:`Assigned IR ${shift} shift to ${p.last} on ${date} at ${siteName}.`};
   }
 
+  // ── SITE MANAGEMENT ───────────────────────────────────────────────────────
+  if(name === 'create_site'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {name:siteName, irGroup, address, irAnchorPhysIds, irFillinPhysIds} = input;
+    if(!siteName) return { ok:false, error:'Site name required.' };
+    if((S.sites||[]).find(s=>s.name===siteName)) return { ok:false, error:`Site "${siteName}" already exists.` };
+    const site = {
+      name: siteName,
+      irGroup: irGroup||null,
+      irAnchors: Array.isArray(irAnchorPhysIds)?irAnchorPhysIds.filter(id=>S.physicians.find(p=>p.id===id)):[],
+      irFillins: Array.isArray(irFillinPhysIds)?irFillinPhysIds.filter(id=>S.physicians.find(p=>p.id===id)):[]
+    };
+    if(address) site.address = address;
+    S.sites.push(site);
+    // Seed default slot map for the new site (mirrors addSite())
+    ['1st','2nd','3rd','Home'].forEach(sh=>{
+      for(let w=1;w<=5;w++){
+        const k=`${siteName}|${w}|${sh}`;
+        if(S.siteSlots[k]===undefined) S.siteSlots[k]=0;
+      }
+    });
+    triggerSave();
+    if(document.getElementById('sites-list')) renderSitesList();
+    return { ok:true, message:`Created site "${siteName}"${irGroup?' in IR '+irGroup:''}${site.irAnchors.length?', '+site.irAnchors.length+' IR anchor(s)':''}${site.irFillins.length?', '+site.irFillins.length+' IR fill-in(s)':''}.` };
+  }
+
+  if(name === 'update_site'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {name:siteName, irGroup, irAnchorPhysIds, irFillinPhysIds} = input;
+    const site = (S.sites||[]).find(s=>s.name===siteName);
+    if(!site) return { ok:false, error:`Site "${siteName}" not found.` };
+    const changes = [];
+    if(irGroup!==undefined){ site.irGroup = irGroup==='none'?null:irGroup; changes.push(`irGroup=${site.irGroup||'(none)'}`); }
+    if(Array.isArray(irAnchorPhysIds)){
+      site.irAnchors = irAnchorPhysIds.filter(id=>S.physicians.find(p=>p.id===id));
+      changes.push(`anchors=${site.irAnchors.length}`);
+    }
+    if(Array.isArray(irFillinPhysIds)){
+      site.irFillins = irFillinPhysIds.filter(id=>S.physicians.find(p=>p.id===id));
+      changes.push(`fillins=${site.irFillins.length}`);
+    }
+    triggerSave();
+    if(document.getElementById('sites-list')) renderSitesList();
+    return { ok:true, message:`Updated site "${siteName}": ${changes.join(', ')||'no changes'}.` };
+  }
+
+  if(name === 'delete_site'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {name:siteName} = input;
+    const idx = (S.sites||[]).findIndex(s=>s.name===siteName);
+    if(idx<0) return { ok:false, error:`Site "${siteName}" not found.` };
+    // Manually cascade (same logic as removeSiteWithCascade but without the confirm dialog)
+    S.sites.splice(idx,1);
+    (S.physicians||[]).forEach(p=>{
+      if(p.anchorSite===siteName) p.anchorSite=null;
+      if(Array.isArray(p.allowedSites)) p.allowedSites=p.allowedSites.filter(x=>x!==siteName);
+      if(Array.isArray(p.siteRules)) p.siteRules=p.siteRules.filter(r=>r.site!==siteName);
+      if(Array.isArray(p.dayConditions)) p.dayConditions=p.dayConditions.filter(d=>d.site!==siteName && d.requiredSite!==siteName);
+      if(p.irSitePrim===siteName) p.irSitePrim=null;
+      if(p.drSite===siteName) p.drSite=null;
+    });
+    if(Array.isArray(S.drShifts))     S.drShifts=S.drShifts.filter(x=>x.site!==siteName);
+    if(Array.isArray(S.irShifts))     S.irShifts=S.irShifts.filter(x=>x.site!==siteName);
+    if(Array.isArray(S.weekendCalls)) S.weekendCalls=S.weekendCalls.filter(x=>x.site!==siteName);
+    if(Array.isArray(S.irCalls))      S.irCalls=S.irCalls.filter(x=>x.site!==siteName);
+    if(Array.isArray(S.openShifts))   S.openShifts=S.openShifts.filter(x=>x.site!==siteName);
+    ['siteSlots','irSlots','irShiftSlots','wkndNeeds'].forEach(m=>{
+      const map=S[m];
+      if(map && typeof map==='object'){
+        Object.keys(map).forEach(k=>{
+          if(k===siteName || k.startsWith(siteName+'|')) delete map[k];
+        });
+      }
+    });
+    if(S.driveTimes && typeof S.driveTimes==='object'){
+      Object.keys(S.driveTimes).forEach(k=>{
+        if(k.endsWith('|'+siteName)) delete S.driveTimes[k];
+      });
+    }
+    triggerSave();
+    if(document.getElementById('sites-list')) renderSitesList();
+    return { ok:true, message:`Deleted site "${siteName}" and cascaded removals.` };
+  }
+
+  // ── PHYSICIAN MANAGEMENT ──────────────────────────────────────────────────
+  if(name === 'update_physician'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, drFte, irFte, irGroup, anchorSite, irSitePrim, allowedSites, drSubs, irSubs, shiftElig} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const changes = [];
+    if(drFte!==undefined){ p.drFte=Math.max(0,Math.min(1,+drFte)); changes.push(`drFte=${p.drFte}`); }
+    if(irFte!==undefined){ p.irFte=Math.max(0,Math.min(1,+irFte)); changes.push(`irFte=${p.irFte}`); }
+    if(irGroup!==undefined){ p.irGroup = irGroup==='none'?null:irGroup; changes.push(`irGroup=${p.irGroup||'(none)'}`); }
+    if(anchorSite!==undefined){ p.anchorSite=anchorSite||null; changes.push(`anchorSite=${p.anchorSite||'(none)'}`); }
+    if(irSitePrim!==undefined){ p.irSitePrim=irSitePrim||null; changes.push(`irSitePrim=${p.irSitePrim||'(none)'}`); }
+    if(Array.isArray(allowedSites)){ p.allowedSites=allowedSites.slice(); changes.push(`allowedSites=${p.allowedSites.length}`); }
+    if(Array.isArray(drSubs)){ p.drSubs=drSubs.slice(); changes.push(`drSubs=${p.drSubs.length}`); }
+    if(Array.isArray(irSubs)){ p.irSubs=irSubs.slice(); changes.push(`irSubs=${p.irSubs.length}`); }
+    if(shiftElig && typeof shiftElig==='object'){ p.shiftElig={...p.shiftElig, ...shiftElig}; changes.push('shiftElig updated'); }
+    // Role recompute if FTE changed
+    if(drFte!==undefined || irFte!==undefined){
+      if(p.drFte>0 && p.irFte>0) p.role='MIXED';
+      else if(p.irFte>0) p.role='IR';
+      else p.role='DR';
+      changes.push(`role=${p.role}`);
+    }
+    triggerSave();
+    if(document.getElementById('page-physicians')?.classList.contains('on') && typeof renderPhysicians==='function') renderPhysicians();
+    return { ok:true, message:`Updated ${p.last}, ${p.first}: ${changes.join(', ')||'no changes'}.` };
+  }
+
+  if(name === 'add_physician_site_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, site, blocked, preferred, maxPerMonth, maxPerWeek, allowedShifts} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(!(S.sites||[]).find(s=>s.name===site)) return { ok:false, error:`Site "${site}" not found.` };
+    if(!Array.isArray(p.siteRules)) p.siteRules=[];
+    let rule = p.siteRules.find(r=>r.site===site);
+    if(!rule){ rule={site}; p.siteRules.push(rule); }
+    if(blocked!==undefined) rule.blocked=!!blocked;
+    if(preferred!==undefined) rule.preferred=!!preferred;
+    if(maxPerMonth!==undefined) rule.maxPerMonth = maxPerMonth>0?+maxPerMonth:null;
+    if(maxPerWeek!==undefined)  rule.maxPerWeek  = maxPerWeek>0?+maxPerWeek:null;
+    if(Array.isArray(allowedShifts)) rule.allowedShifts = allowedShifts.slice();
+    triggerSave();
+    return { ok:true, message:`Site rule for ${p.last} @ ${site}: ${JSON.stringify(rule)}` };
+  }
+
+  if(name === 'remove_physician_site_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, site} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const before = (p.siteRules||[]).length;
+    p.siteRules = (p.siteRules||[]).filter(r=>r.site!==site);
+    triggerSave();
+    return { ok:true, message:`Removed ${before-p.siteRules.length} site rule(s) for ${p.last} @ ${site}.` };
+  }
+
+  if(name === 'add_physician_day_condition'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, dow, schedType, requiredSite, notes} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(dow<0||dow>6) return { ok:false, error:'dow must be 0-6 (0=Sun).' };
+    if(!Array.isArray(p.dayConditions)) p.dayConditions=[];
+    const st = schedType||'any';
+    p.dayConditions = p.dayConditions.filter(d=>!(d.dow===dow && d.schedType===st));
+    p.dayConditions.push({dow, schedType:st, requiredSite: requiredSite||'', notes: notes||''});
+    triggerSave();
+    const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dow];
+    return { ok:true, message:`${p.last}: on ${dayName}s for ${st}, require site ${requiredSite}.` };
+  }
+
+  if(name === 'set_physician_seq_rules'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physId, maxConsec, minRest, maxWkCalls, notes} = input;
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    p.seqRules = p.seqRules || {};
+    if(maxConsec!==undefined)  p.seqRules.maxConsec  = +maxConsec||null;
+    if(minRest!==undefined)    p.seqRules.minRest    = +minRest||null;
+    if(maxWkCalls!==undefined) p.seqRules.maxWkCalls = +maxWkCalls||null;
+    if(notes!==undefined)      p.seqRules.notes      = notes;
+    triggerSave();
+    return { ok:true, message:`Seq rules for ${p.last}: ${JSON.stringify(p.seqRules)}` };
+  }
+
+  // ── HOLIDAY DEFINITIONS ───────────────────────────────────────────────────
+  if(name === 'create_holiday_definition'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {name:holName, year, dates, drSlots, irNorthSlots, irSouthSlots, notes} = input;
+    if(!holName||!year||!Array.isArray(dates)||!dates.length) return { ok:false, error:'name, year, and non-empty dates array required.' };
+    if(!S.holidayDefs) S.holidayDefs=[];
+    S.holidayDefs.push({
+      id: S.nextId++,
+      name: holName,
+      year: +year,
+      dates: dates.slice().sort(),
+      drSlots: +drSlots||0,
+      irNorthSlots: +irNorthSlots||0,
+      irSouthSlots: +irSouthSlots||0,
+      notes: notes||''
+    });
+    triggerSave();
+    if(document.getElementById('holdef-list') && typeof renderHolDefList==='function') renderHolDefList();
+    return { ok:true, message:`Created holiday "${holName}" (${year}) covering ${dates.length} date(s). Pools: DR=${drSlots||0}, IR-N=${irNorthSlots||0}, IR-S=${irSouthSlots||0}.` };
+  }
+
+  // ── NATURAL-LANGUAGE RULES ────────────────────────────────────────────────
+  if(name === 'create_natural_language_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {sentence, when, then, enabled} = input;
+    if(!sentence||!when||!then||!then.action) return { ok:false, error:'sentence, when, and then.action all required.' };
+    if(!Array.isArray(S.natLangRules)) S.natLangRules=[];
+    const rule = {
+      id: S.nextId++,
+      sentence,
+      when: {...when},
+      then: {...then},
+      enabled: enabled!==false,
+      createdAt: new Date().toISOString(),
+      createdBy: CU?.id||null
+    };
+    S.natLangRules.push(rule);
+    triggerSave();
+    if(typeof renderNatLangRules==='function') renderNatLangRules();
+    return { ok:true, message:`Created rule #${rule.id}: ${sentence}` };
+  }
+
+  if(name === 'list_natural_language_rules'){
+    const rules = S.natLangRules||[];
+    if(!rules.length) return { ok:true, data:{rules:[]}, message:'No natural-language rules defined.' };
+    return { ok:true, data:{rules:rules.map(r=>({
+      id:r.id, sentence:r.sentence, enabled:r.enabled,
+      when:r.when, then:r.then
+    }))}, message:`${rules.length} rule(s) defined.` };
+  }
+
+  if(name === 'delete_natural_language_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {ruleId} = input;
+    const before = (S.natLangRules||[]).length;
+    S.natLangRules = (S.natLangRules||[]).filter(r=>r.id!==ruleId);
+    if(S.natLangRules.length===before) return { ok:false, error:`Rule ID ${ruleId} not found.` };
+    triggerSave();
+    if(typeof renderNatLangRules==='function') renderNatLangRules();
+    return { ok:true, message:`Deleted rule ${ruleId}.` };
+  }
+
+  if(name === 'toggle_natural_language_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {ruleId, enabled} = input;
+    const r = (S.natLangRules||[]).find(x=>x.id===ruleId);
+    if(!r) return { ok:false, error:`Rule ID ${ruleId} not found.` };
+    r.enabled = !!enabled;
+    triggerSave();
+    if(typeof renderNatLangRules==='function') renderNatLangRules();
+    return { ok:true, message:`Rule ${ruleId} ${r.enabled?'enabled':'disabled'}.` };
+  }
+
   return { ok:false, error:`Unknown tool: ${name}` };
 }
 
@@ -7858,10 +8408,38 @@ Today is ${today}. Current month: ${ym}.
 Physicians in the system:
 ${phyList}
 
-You have tools to read schedule data, assign/remove shifts, add vacations, and perform bulk operations.
-When making changes, always confirm what you've done clearly. When analyzing data, be specific with numbers and names.
-If asked to make a change you cannot safely verify, explain what you need first.
+Current sites: ${(S.sites||[]).map(s=>`${s.name}${s.irGroup?' (IR '+s.irGroup+')':''}`).join(', ')||'(none)'}
+Current scheduling rules active: ${(S.natLangRules||[]).filter(r=>r.enabled!==false).length}
+
+Your tools fall into four categories:
+1. DATA ACCESS: get_schedule_data — always call this FIRST before analyzing or changing anything.
+2. DIRECT ASSIGNMENTS: assign_dr_shift, assign_ir_shift, remove_shift, add_vacation, add_ir_call_blackout, fill_dr_home_for_ir.
+3. PRACTICE CONFIGURATION: create_site / update_site / delete_site; update_physician; add_physician_site_rule / remove_physician_site_rule; add_physician_day_condition; set_physician_seq_rules; create_holiday_definition.
+4. IF/THEN SCHEDULING RULES: create_natural_language_rule, list_natural_language_rules, toggle_natural_language_rule, delete_natural_language_rule.
+
+When the admin describes a constraint in plain English, translate it into a structured rule with the create_natural_language_rule tool. Rules have:
+  - when: trigger conditions (physId, site, shift, sub, irGroup, dow[], dateRange)
+  - then.action: one of [block, require, prefer, limit]
+    - block: reject any assignment that matches the when clause
+    - require: if when matches, assignment MUST also satisfy requireSite and/or requireShift
+    - limit: cap occurrences via maxPerMonth / maxPerWeek / maxPerYear
+    - prefer: hint only (not enforced)
+
+Examples of natural-language rule translation:
+  User: "Dr. Chen cannot work at CHE"
+  → { when:{physId:<Chen_id>, site:"CHE"}, then:{action:"block"} }
+
+  User: "If Dr. Patel is at CHE, he must be on 1st shift only"
+  → { when:{physId:<Patel_id>, site:"CHE"}, then:{action:"require", requireShift:"1st"} }
+
+  User: "No one should have more than 3 weekend calls per month"
+  → { when:{shift:"wknd"}, then:{action:"limit", maxPerMonth:3} }
+
+  User: "Dr. Lee can only take IR call on Mondays"
+  → { when:{physId:<Lee_id>, shift:"ir-call"}, then:{action:"require"} } + a second rule blocking other days
+
 Always call get_schedule_data before analyzing or making changes — never assume what's in the schedule without reading it first.
+When the admin describes a scheduling rule, CONFIRM the structured form back to them before creating it, especially the physician ID, site name, and action type.
 Admin access is required for data-changing operations. The current user role is: ${CU?.role||'unknown'}.`;
 
   _aiHistory.push({ role: 'user', content: text });
@@ -8069,6 +8647,85 @@ function dayConditionSiteOk(p, siteName, date, context){
     if(c.schedType && c.schedType !== 'any' && c.schedType !== context) continue;
     // If a requiredSite is specified, the physician MUST be at that site
     if(c.requiredSite && c.requiredSite !== siteName) return false;
+  }
+  return true;
+}
+
+/**
+ * natLangRulesOk(ctx) — evaluate all enabled natural-language if/then rules.
+ * ctx = { physId, date, site?, shift?, sub?, irGroup?, kind }
+ *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
+ * Returns true if no enabled rule BLOCKS this assignment, false otherwise.
+ * Semantics:
+ *   - action='block': if when matches, block the assignment.
+ *   - action='require': if when matches AND the assignment does NOT satisfy
+ *     requireSite/requireShift, block. If when does NOT match, rule is silent.
+ *   - action='limit': if when matches and the physician is already at max for
+ *     the given period, block.
+ *   - action='prefer': ignored for eligibility — treated as a hint only.
+ */
+function natLangRulesOk(ctx){
+  const rules = (S.natLangRules||[]).filter(r=>r.enabled!==false);
+  if(!rules.length) return true;
+  // Basic guard — caller must supply physId and date. If missing, silently allow
+  // rather than throwing, so a misuse doesn't crash auto-assign.
+  if(!ctx||ctx.physId==null||!ctx.date) return true;
+  for(const r of rules){
+    const w = r.when||{}, t = r.then||{};
+    if(!t.action) continue;  // malformed rule — skip
+    // when-clause: all specified constraints must match the assignment
+    if(w.physId!=null && w.physId!==ctx.physId) continue;
+    if(w.site && w.site!==ctx.site) continue;
+    if(w.shift){
+      // Map auto-assign shift strings to rule-side strings
+      const sh=ctx.shift;
+      if(w.shift!==sh) continue;
+    }
+    if(w.sub && w.sub!==ctx.sub) continue;
+    if(w.irGroup && w.irGroup!==ctx.irGroup) continue;
+    if(Array.isArray(w.dow)&&w.dow.length){
+      const dow = parseDateLocal(ctx.date).getDay();
+      if(!w.dow.includes(dow)) continue;
+    }
+    if(w.dateRange){
+      if(w.dateRange.start && ctx.date<w.dateRange.start) continue;
+      if(w.dateRange.end   && ctx.date>w.dateRange.end)   continue;
+    }
+    // when-clause matched — apply the effect
+    if(t.action==='block')   return false;
+    if(t.action==='require'){
+      if(t.requireSite  && ctx.site  && ctx.site  !== t.requireSite)  return false;
+      if(t.requireShift && ctx.shift && ctx.shift !== t.requireShift) return false;
+    }
+    if(t.action==='limit'){
+      const monthKey=(ctx.date||'').slice(0,7);
+      const yearKey =(ctx.date||'').slice(0,4);
+      // Count existing assignments for this physician in the same "kind" bucket
+      const count = (period) => {
+        const inRange = d => {
+          if(!d) return false;
+          if(period==='month') return d.startsWith(monthKey);
+          if(period==='year')  return d.startsWith(yearKey);
+          if(period==='week'){
+            // ISO-ish: same Mon-Sun block
+            const d1=parseDateLocal(ctx.date), d2=parseDateLocal(d);
+            const toMon = dt => { const c=new Date(dt); c.setDate(c.getDate()-((c.getDay()+6)%7)); return fmtDate(c); };
+            return toMon(d1)===toMon(d2);
+          }
+          return false;
+        };
+        let n=0;
+        (S.drShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
+        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
+        (S.irCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.date)) n++; });
+        (S.weekendCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.satDate||c.date)) n++; });
+        return n;
+      };
+      if(t.maxPerMonth!=null && count('month')>=t.maxPerMonth) return false;
+      if(t.maxPerWeek!=null  && count('week') >=t.maxPerWeek)  return false;
+      if(t.maxPerYear!=null  && count('year') >=t.maxPerYear)  return false;
+    }
+    // prefer: no hard constraint
   }
   return true;
 }
@@ -8389,6 +9046,7 @@ function previewAA(){
               const vd=vacDays(p.id);if(vd.has(c.date))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
+              if(!natLangRulesOk({physId:p.id,date:c.date,site:st.name,shift:sh,sub:p.drSubs[0]||'',kind:'dr-shift'}))return false;
               return cnt[p.id].wd<effTarget[p.id];
             });
             const sorted=sortByDeficit(pool,st.name);
@@ -8413,6 +9071,7 @@ function previewAA(){
           if(!p.shiftElig.home)return false;
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
           if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
+          if(!natLangRulesOk({physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'}))return false;
           return cnt[p.id].wd<effTarget[p.id];
         }),'At Home / Remote');
         for(let i=0;i<hNeed-hEx;i++){const p=hpool[i];if(!p)break;
@@ -8447,6 +9106,7 @@ function previewAA(){
           const vd=vacDays(p.id);
           if(vd.has(c.date)||vd.has(sunDate))return false;
           const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
+          if(!natLangRulesOk({physId:p.id,date:c.date,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'}))return false;
           return cnt[p.id].wk<_wkCap;
         }).sort((a,b)=>{
           const rA=cnt[a.id].wk/maxDR(a,'wk'), rB=cnt[b.id].wk/maxDR(b,'wk');
@@ -8630,7 +9290,19 @@ function renderIRCal(){
 
     // ── HOLIDAYS & VACATIONS ──
     let metaEvs='';
-    S.holidays.filter(h=>h.date===c.date&&h.group==='IR'&&(!fpid||h.physId===fpid)).forEach(h=>{
+    S.holidays.filter(h=>{
+      if(h.date!==c.date) return false;
+      if(h.group!=='IR' && h.group!=='IR-North' && h.group!=='IR-South') return false;
+      if(fpid && h.physId!==fpid) return false;
+      if(fg){
+        // Filter by IR group: IR-North/IR-South match directly; legacy 'IR' falls back to physician's group
+        if(h.group==='IR-North') return fg==='North';
+        if(h.group==='IR-South') return fg==='South';
+        const ph=S.physicians.find(x=>x.id===h.physId);
+        return ph?.irGroup===fg;
+      }
+      return true;
+    }).forEach(h=>{
       metaEvs+=`<div class="ev ehol" title="${pname(h.physId)} — Holiday Call: ${h.name}">
         <div style="font-weight:700;font-size:11px">🏖 ${pshort(h.physId)}</div>
         <div style="font-size:9px;opacity:.85">Hol Call</div>
@@ -9138,6 +9810,7 @@ function previewIRAA(){
             // they are doing IR procedures that day. Sort prefers those WITH existing shifts.
             if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')) return false;
             if(!sequenceOk(p,date,date.slice(0,7))) return false;
+            if(!natLangRulesOk({physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})) return false;
             // Hard cap: once physician reaches their FTE quota, they are out of pool
             if(cntD[p.id] >= dailyCapFn(p)) return false;
             if(pass<=1){
@@ -9215,6 +9888,7 @@ function previewIRAA(){
             if(isSoldBackDate(p.id,friday)) return false;
             if(isIRCallBlackout(p.id,friday)) return false;
             if(span.some(d=>_has2ndOr3rdShift(p.id,d))) return false;
+            if(!natLangRulesOk({physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})) return false;
             // Hard cap: once physician reaches their FTE quota, out of pool
             if(cntW[p.id] >= wkndCapFn(p)) return false;
             if(pass===0){
@@ -11486,6 +12160,7 @@ async function _pushToSupabase(){
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
+        natLangRules:S.natLangRules||[],
         vacPicking:S.vacPicking,
         driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
