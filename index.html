@@ -30,6 +30,11 @@ body{font-family:'Georgia',serif;background:var(--bg);color:var(--txt);font-size
 .ir-week-phys-pill{display:flex;align-items:center;justify-content:space-between;border-radius:4px;padding:2px 5px;margin-bottom:2px;font-size:11px}
 .eirs2{background:#f0fdf4;color:#166534;border:1px solid #86efac}
 .e-home-auto{background:#fdf4ff;color:#6b21a8;border:1px dashed #d8b4fe}
+/* Communication preferences rows */
+.cp-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;cursor:pointer;border-top:1px solid var(--bdr);margin:0}
+.cp-row:first-of-type{border-top:none}
+.cp-row input[type=checkbox]{width:17px;height:17px;margin-top:2px;flex-shrink:0;cursor:pointer}
+.cp-desc{font-size:11px;color:var(--txt3);margin-top:2px}
 /* ── AUTH ── */
 #auth{display:flex;min-height:100vh;background:var(--navy3)}
 .auth-side{width:420px;flex-shrink:0;background:linear-gradient(160deg,var(--navy) 0%,var(--navy3) 100%);display:flex;flex-direction:column;justify-content:center;padding:52px 44px}
@@ -350,9 +355,11 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
       <div class="snav-sect">System</div>
       <div class="snav-item" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
+      <div class="snav-item" onclick="nav('comm-prefs',this)">🔔 Notifications</div>
       <div class="snav-item" onclick="nav('settings',document.querySelector('[onclick*=settings]'))">⚙ Settings</div>
       <div class="snav-sect admin-only">Admin</div>
       <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
+      <div class="snav-item admin-only" onclick="nav('broadcast',this)">📢 Broadcast Email</div>
       <div class="snav-item admin-only" onclick="nav('settings',this)">⚙ Settings</div>
       <div class="snav-item admin-only" onclick="nav('import',this)">📥 Import Excel</div>
       <div class="snav-item admin-only" onclick="nav('site-slots',this)">DR Site Slots</div>
@@ -451,6 +458,181 @@ tbody tr:hover{background:var(--bg3)}
   <div class="pg-title">User Profiles</div>
   <div class="pg-sub">All registered accounts in this practice.</div>
   <div id="profiles-list"></div>
+</div>
+
+<!-- COMMUNICATION PREFERENCES (user-accessible) -->
+<div id="page-comm-prefs" class="page">
+  <div class="pg-title">🔔 Notification Preferences</div>
+  <div class="pg-sub">Choose which notifications you'd like to receive by email. Notifications are sent to your registered email address.</div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Delivery Address</div>
+    <div class="fg" style="margin:0">
+      <label>Email</label>
+      <input id="cp-email" type="email" readonly style="background:var(--bg3);color:var(--txt2);font-family:monospace;font-size:12px">
+    </div>
+    <div class="note ni" style="font-size:11px;margin-top:6px">
+      To change your email, contact an administrator. Email is tied to your login account.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Master Switch</div>
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
+      <input type="checkbox" id="cp-master" onchange="saveCommPrefs()" style="width:18px;height:18px">
+      <div>
+        <div style="font-weight:700;font-size:13px">Email notifications enabled</div>
+        <div style="font-size:11px;color:var(--txt3)">Turn all email notifications on or off at once. Individual categories below still apply.</div>
+      </div>
+    </label>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Chat</div>
+    <label class="cp-row"><input type="checkbox" id="cp-chatDM" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Direct messages</div><div class="cp-desc">Someone sends you a 1-on-1 chat message</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-chatGroup" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Group messages</div><div class="cp-desc">A new message posts in a chat group you're in</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-chatMention" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Mentions only</div><div class="cp-desc">Someone @-mentions you in any chat (overrides group setting)</div></div></label>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Shift Swaps</div>
+    <label class="cp-row"><input type="checkbox" id="cp-swapReq" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Swap requested</div><div class="cp-desc">Another physician requests to swap with you</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-swapRes" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Swap approved/denied</div><div class="cp-desc">Admin resolves a swap you're involved in</div></div></label>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Schedule Changes</div>
+    <label class="cp-row"><input type="checkbox" id="cp-shiftAssign" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">New shift assigned</div><div class="cp-desc">A new DR or IR shift/call is added to your schedule</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-shiftRemove" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Shift removed or changed</div><div class="cp-desc">One of your shifts is deleted or reassigned</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-holiday" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Holiday call assignment</div><div class="cp-desc">You've been assigned holiday call via auto-assign or manually</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-vacation" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Vacation approved</div><div class="cp-desc">Admin logs a new vacation block for you</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-openShift" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Open shift posted</div><div class="cp-desc">A new open shift is posted that you're eligible to claim</div></div></label>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Admin Announcements</div>
+    <label class="cp-row"><input type="checkbox" id="cp-broadcast" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Practice-wide announcements</div><div class="cp-desc">Email broadcasts sent by administrators. Recommended: keep enabled.</div></div></label>
+  </div>
+
+  <div id="cp-status" style="margin-top:10px;font-size:11px;color:var(--txt3)"></div>
+</div>
+
+<!-- ADMIN BROADCAST (admin-only) -->
+<div id="page-broadcast" class="page admin-only">
+  <div class="pg-title">📢 Broadcast Email</div>
+  <div class="pg-sub">Send an email to everyone in this practice. Recipients who have disabled "Practice-wide announcements" in their preferences will not receive this message.</div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Compose</div>
+    <div class="fg"><label>Subject</label><input id="bc-subject" placeholder="e.g. Schedule update for next week"></div>
+    <div class="fg"><label>Message</label>
+      <textarea id="bc-body" rows="10" placeholder="Write your message. Plain text; line breaks are preserved. Markdown-style **bold** and *italic* are supported." style="width:100%;font-family:inherit;font-size:13px;resize:vertical"></textarea>
+    </div>
+    <div class="fg">
+      <label>Recipients</label>
+      <select id="bc-audience" onchange="updateBroadcastPreview()">
+        <option value="all">All users in this practice</option>
+        <option value="physicians">Physicians only (exclude admin-only accounts)</option>
+        <option value="admins">Administrators only</option>
+        <option value="dr">DR physicians only</option>
+        <option value="ir">IR physicians only</option>
+      </select>
+    </div>
+    <div id="bc-preview" class="note ni" style="font-size:11px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="bp" onclick="sendBroadcast()">📧 Send Broadcast</button>
+      <button class="bt bsm" onclick="sendBroadcastTest()">Send Test to Me</button>
+      <span id="bc-status" style="font-size:11px;color:var(--txt3)"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recent Broadcasts</div>
+    <div id="bc-history"><p style="color:var(--txt3);font-size:12px">No broadcasts sent yet.</p></div>
+  </div>
+
+  <details style="margin-top:14px">
+    <summary style="font-size:12px;font-weight:700;cursor:pointer;color:var(--txt2);padding:8px 12px;background:var(--bg3);border-radius:var(--r)">▶ One-time setup: deploy the send-notification edge function</summary>
+    <div style="margin-top:10px;padding:12px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r)">
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
+        To actually send emails, you need to deploy a Supabase Edge Function that connects to an email provider (recommended: <strong>Resend</strong> — free tier covers 3,000 emails/month and setup is minimal).
+      </div>
+      <ol style="font-size:12px;color:var(--txt2);line-height:1.8;padding-left:20px;margin-bottom:10px">
+        <li>Create an account at <strong>resend.com</strong> and verify your sending domain (or use their onboarding domain for testing).</li>
+        <li>Copy your Resend API key.</li>
+        <li>In your Supabase dashboard → <strong>Edge Functions</strong> → <strong>Create function</strong> → name it <code>send-notification</code>.</li>
+        <li>Paste the Deno code below.</li>
+        <li>In the function's <strong>Secrets</strong>, add:<br>
+          <code>RESEND_API_KEY</code> = your Resend API key<br>
+          <code>FROM_EMAIL</code> = e.g. <code>scheduler@yourdomain.com</code> (must be a verified sender)
+        </li>
+        <li>Deploy the function.</li>
+      </ol>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">Deno source code:</div>
+      <pre style="background:var(--navy3);color:#e2e8f0;border-radius:var(--r);padding:10px 12px;font-size:10.5px;overflow-x:auto;white-space:pre;line-height:1.5">import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const RESEND_KEY = Deno.env.get("RESEND_API_KEY");
+const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "noreply@example.com";
+const FROM_NAME  = Deno.env.get("FROM_NAME")  || "RadScheduler";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  try {
+    if (!RESEND_KEY) throw new Error("RESEND_API_KEY not configured");
+    const { subject, body, recipients, kind, from_practice } = await req.json();
+    if (!subject || !body || !Array.isArray(recipients) || !recipients.length)
+      throw new Error("subject, body, and recipients[] required");
+
+    // Simple markdown → HTML transform (bold, italic, line breaks)
+    const html = body
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\*\*([^*]+)\*\*/g, "&lt;strong&gt;$1&lt;/strong&gt;")
+      .replace(/\*([^*]+)\*/g, "&lt;em&gt;$1&lt;/em&gt;")
+      .replace(/\n/g, "&lt;br&gt;");
+
+    const unsubNote =
+      kind === "broadcast" || kind === "broadcast-test"
+        ? '&lt;hr style="margin-top:24px"&gt;&lt;p style="font-size:11px;color:#999"&gt;You received this because broadcast notifications are enabled on your account. Manage preferences in RadScheduler → Notifications.&lt;/p&gt;'
+        : "";
+
+    // Send to each recipient individually (Resend batch is also fine but keeps each delivery atomic)
+    const results = [];
+    for (const r of recipients) {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${RESEND_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: `${FROM_NAME} &lt;${FROM_EMAIL}&gt;`,
+          to: [r.email],
+          subject,
+          html: `&lt;div style="font-family:system-ui,-apple-system,sans-serif;max-width:600px"&gt;${html}${unsubNote}&lt;/div&gt;`,
+        }),
+      });
+      results.push({ email: r.email, ok: res.ok, status: res.status });
+    }
+    return new Response(JSON.stringify({ ok: true, sent: results.length, results }), {
+      headers: { ...CORS, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String(e.message || e) }), {
+      status: 500, headers: { ...CORS, "Content-Type": "application/json" },
+    });
+  }
+});</pre>
+      <div style="font-size:11px;color:var(--txt3);margin-top:10px;padding:8px;background:var(--amber-bg,#fffbeb);border-radius:var(--r)">
+        <strong>💡 Tip:</strong> Once deployed, notifications from chat, swaps, and schedule changes will start flowing automatically — each gated by the recipient's preferences. If the function isn't deployed, the app still works; notifications just silently skip.
+      </div>
+    </div>
+  </details>
 </div>
 
 <!-- PHYSICIANS -->
@@ -2169,6 +2351,7 @@ function _buildSaveHTML(){
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
     natLangRules:S.natLangRules||[],
+    broadcasts:S.broadcasts||[],
     _lastSaved:null,
   })+'/*S_END*/';
   const uData='let USERS = /*USERS_START*/'+JSON.stringify(USERS)+'/*USERS_END*/';
@@ -2559,7 +2742,7 @@ function _applyRemoteData(d){
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
-    'sites','drSubs','irSubs','holidayDefs','natLangRules'];
+    'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts'];
   KEYS.forEach(k=>{
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
@@ -2607,6 +2790,20 @@ function _applyRemoteData(d){
   });
   // 3) Default natLangRules to [] if loading an older DB row without this field
   if(!Array.isArray(S.natLangRules)) S.natLangRules=[];
+  // 4) Default notifPrefs on every user loaded from DB (back-compat)
+  const DEFAULT_NOTIF = {master:true,chatDM:true,chatGroup:false,chatMention:true,
+    swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,
+    holiday:true,vacation:true,openShift:false,broadcast:true};
+  USERS.forEach(u=>{
+    if(!u.notifPrefs||typeof u.notifPrefs!=='object') u.notifPrefs={...DEFAULT_NOTIF};
+    else {
+      // Fill in any missing fields without overwriting user's existing prefs
+      for(const k of Object.keys(DEFAULT_NOTIF))
+        if(u.notifPrefs[k]===undefined) u.notifPrefs[k]=DEFAULT_NOTIF[k];
+    }
+  });
+  // 5) Default broadcasts log
+  if(!Array.isArray(S.broadcasts)) S.broadcasts=[];
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
       // Ensure physId is always a number (Supabase JSON may return strings)
@@ -2699,6 +2896,7 @@ function _refreshCurrentPage(){
     'open-shifts':renderOpenShifts,'user-mgmt':renderUserMgmt,
     settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
     'ir-shift-slots':renderIRShiftSlots,'import':renderImportPage,
+    'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
   };
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
 }
@@ -2710,7 +2908,7 @@ function _refreshCurrentPage(){
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
   'openShifts','physicians','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs',
-  'sites','drSubs','irSubs','natLangRules'];
+  'sites','drSubs','irSubs','natLangRules','broadcasts'];
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
@@ -2842,6 +3040,8 @@ let S=/*S_START*/{
   holidayDefs:[],
   // Natural-language if/then rules — enforced during auto-assign
   natLangRules:[],
+  // Broadcast email history
+  broadcasts:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
@@ -3172,7 +3372,7 @@ async function switchPractice(id,name){
     // _isRestoring=true suppresses triggerSave from firing during the swap.
     ['physicians','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays',
      'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds',
-     'sites','drSubs','irSubs','holidayDefs','natLangRules'].forEach(k=>{ S[k]=[]; });
+     'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts'].forEach(k=>{ S[k]=[]; });
     ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
@@ -3264,6 +3464,7 @@ function nav(pg,el){
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
+    'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
   };
   if(fns[pg]) fns[pg]();
 }
@@ -6462,6 +6663,47 @@ function sendChatMessage(){
   inp.value='';
   triggerSave();
   _renderMessages();
+
+  // ── Notifications ──
+  // Collect mention targets from the message text
+  const mentionedUserIds = _detectMentions(text);
+  const senderName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
+  const channelLabel = (()=>{
+    if(_chatContext.type==='group'){
+      const g=(S.chatGroups||[]).find(x=>String(x.id)===String(_chatContext.id));
+      return g?('#'+g.name):'#group';
+    }
+    return 'Direct message';
+  })();
+
+  if(_chatContext.type==='dm'){
+    // DM — notify the recipient user directly
+    _notify('chatDM',{
+      userId:_chatContext.toUserId,
+      subject:`New direct message from ${senderName}`,
+      body:`${senderName} sent you a direct message in RadScheduler:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
+    });
+  } else if(_chatContext.type==='group'){
+    // Group — notify members. Mentions use chatMention pref; non-mentions use chatGroup.
+    const g=(S.chatGroups||[]).find(x=>String(x.id)===String(_chatContext.id));
+    const memberIds = new Set((g?.memberIds||[]).filter(id=>id!==CU?.id));
+    if(mentionedUserIds.length){
+      _notify('chatMention',{
+        userIds: mentionedUserIds.filter(id=>id!==CU?.id),
+        subject:`You were mentioned in ${channelLabel} by ${senderName}`,
+        body:`${senderName} mentioned you in ${channelLabel}:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
+      });
+    }
+    // Remaining group members (not already mentioned) get chatGroup-level notifs
+    const nonMention=[...memberIds].filter(id=>!mentionedUserIds.includes(id));
+    if(nonMention.length){
+      _notify('chatGroup',{
+        userIds: nonMention,
+        subject:`New message in ${channelLabel}`,
+        body:`${senderName} posted in ${channelLabel}:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
+      });
+    }
+  }
 }
 
 // ── Group editor ──────────────────────────────────────────────────────────
@@ -6588,6 +6830,13 @@ function requestSwap(){
   if(!toId||!date){alert('Select physician and date');return;}
   S.swapRequests.push({id:S.nextId++,fromPhysId:CU?.physId||null,toPhysId:toId,date,shiftType:'1st Shift',site:'',reason,status:'pending',ts:new Date().toISOString()});
   triggerSave();renderSwaps();
+  // Notify the target physician
+  const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
+  _notify('swapReq',{
+    physId:toId,
+    subject:`Shift swap requested by ${fromName}`,
+    body:`${fromName} requested to swap shifts with you on ${date}.${reason?'\n\nMessage: '+reason:''}\n\nReview and respond in RadScheduler → Shift Swaps.`
+  });
 }
 function resolveSwap(id,status){
   if(!_adminOnly('resolve swap'))return;
@@ -6626,6 +6875,16 @@ function resolveSwap(id,status){
   // Also refresh any calendar views that might be showing the swapped shift
   if(typeof renderDRCal==='function' && document.getElementById('page-dr-cal')?.classList.contains('on')) renderDRCal();
   if(typeof renderIRCal==='function' && document.getElementById('page-ir-cal')?.classList.contains('on')) renderIRCal();
+
+  // ── Notifications: tell both parties the outcome ──
+  const resolver = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'Admin';
+  const verdict  = status==='approved' ? 'APPROVED' : status==='denied' ? 'DENIED' : status;
+  const notifBody = `Your swap request for ${s.date} has been ${verdict.toLowerCase()} by ${resolver}.` +
+    (s.reason?`\n\nOriginal note: ${s.reason}`:'') +
+    `\n\nSee RadScheduler → Shift Swaps for details.`;
+  // Notify both physicians
+  if(s.fromPhysId) _notify('swapRes',{physId:s.fromPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody});
+  if(s.toPhysId&&s.toPhysId!==s.fromPhysId) _notify('swapRes',{physId:s.toPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody});
 }
 
 /* ─── SETTINGS ─── */
@@ -7138,6 +7397,19 @@ function submitSwapRequest(){
     ts:new Date().toISOString()
   });
   triggerSave();
+  // Notify the target physician
+  const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
+  const mDate = myShift?.date||'(date tbd)';
+  const tDate = theirShift?.date||'(date tbd)';
+  _notify('swapReq',{
+    physId:toId,
+    subject:`Shift swap requested by ${fromName}`,
+    body:`${fromName} is requesting a shift swap with you:\n\n` +
+      `Their shift: ${mDate} — ${myShift?.shift||''} at ${myShift?.site||''}\n` +
+      `Your shift: ${tDate} — ${theirShift?.shift||''} at ${theirShift?.site||''}\n` +
+      (message?('\nMessage: '+message+'\n'):'') +
+      `\nReview and respond in RadScheduler → Shift Swaps.`
+  });
   // Clear form
   ['sw-my-date','sw-msg'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   ['sw-my-shift','sw-their-shift'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML='<option value="">Select shift...</option>';});
@@ -7698,6 +7970,13 @@ function addHoliday(){
   _populateHolFilterName();
   renderHolTable();
   renderHolCounter();
+  // Notify the assigned physician
+  const grpLabel = grp==='DR'?'DR':grp==='IR-North'?'IR North':grp==='IR-South'?'IR South':grp;
+  _notify('holiday',{
+    physId:pid,
+    subject:`Holiday call assignment: ${name}`,
+    body:`You've been assigned holiday call:\n\nHoliday: ${name}\nDate: ${date}\nPool: ${grpLabel}\n${notes?'Notes: '+notes+'\n':''}\nView in RadScheduler → Holiday Call.`
+  });
 }
 
 
@@ -8058,6 +8337,11 @@ function _aiExecuteTool(name, input) {
     });
     triggerSave();
     if(document.getElementById('drb-tbody')) renderDRBuilder();
+    _notify('shiftAssign',{
+      physId,
+      subject:`New DR shift: ${date} (${shift})`,
+      body:`You've been assigned a new DR shift:\n\nDate: ${date}\nShift: ${shift}\nSite: ${siteName}\n${sub?'Subspecialty: '+sub+'\n':''}\nView in RadScheduler → My Schedule.`
+    });
     return { ok:true, message:`Assigned ${shift} DR shift to ${p.last} on ${date} at ${siteName}.` };
   }
 
@@ -8067,10 +8351,19 @@ function _aiExecuteTool(name, input) {
     const map = { drShift:'drShifts', irShift:'irShifts', irCall:'irCalls', weekendCall:'weekendCalls' };
     const arr = map[type];
     if(!arr) return { ok:false, error:'Unknown shift type.' };
-    const before = S[arr].length;
+    const removed = S[arr].find(x=>x.id===shiftId);
+    if(!removed) return { ok:false, error:`No ${type} with ID ${shiftId} found.` };
     S[arr] = S[arr].filter(x=>x.id!==shiftId);
-    if(S[arr].length === before) return { ok:false, error:`No ${type} with ID ${shiftId} found.` };
     triggerSave();
+    // Notify affected physician
+    if(removed.physId!=null){
+      const shiftDate = removed.date || removed.satDate || '';
+      _notify('shiftRemove',{
+        physId: removed.physId,
+        subject:`Shift removed: ${shiftDate}`,
+        body:`A ${type} on ${shiftDate} has been removed from your schedule.\n\n${removed.site?('Site: '+removed.site+'\n'):''}${removed.shift?('Shift: '+removed.shift+'\n'):''}${removed.notes?('Notes: '+removed.notes+'\n'):''}\nView in RadScheduler → My Schedule.`
+      });
+    }
     return { ok:true, message:`Removed ${type} ID ${shiftId}.` };
   }
 
@@ -8082,6 +8375,11 @@ function _aiExecuteTool(name, input) {
     if(end < start) return { ok:false, error:'End date must be after start date.' };
     S.vacations.push({id:S.nextId++, physId, start, end, type: type||'Vacation', notes: notes||'AI assigned'});
     triggerSave();
+    _notify('vacation',{
+      physId,
+      subject:`${type||'Vacation'} approved: ${start} to ${end}`,
+      body:`An administrator has logged time off for you:\n\nType: ${type||'Vacation'}\nFrom: ${start}\nTo: ${end}\n${notes?'Notes: '+notes+'\n':''}\nView in RadScheduler → My Schedule.`
+    });
     return { ok:true, message:`Added ${type} for ${p.last} from ${start} to ${end}.` };
   }
 
@@ -8135,6 +8433,11 @@ function _aiExecuteTool(name, input) {
       irGroup: p.irGroup||''
     });
     triggerSave();
+    _notify('shiftAssign',{
+      physId,
+      subject:`New IR shift: ${date} (${shift||'1st'})`,
+      body:`You've been assigned a new IR shift:\n\nDate: ${date}\nShift: ${shift||'1st'}\nSite: ${siteName}\n${sub?'Subspecialty: '+sub+'\n':''}\nView in RadScheduler → My Schedule.`
+    });
     return {ok:true, message:`Assigned IR ${shift} shift to ${p.last} on ${date} at ${siteName}.`};
   }
 
@@ -8570,6 +8873,296 @@ function clearAIChat(){
 
 function renderAIAgent(){
   // Nothing to pre-render — conversation is live
+}
+
+
+/* ═══════════════════════════════════════════════════
+   NOTIFICATIONS — email dispatch via Supabase edge function
+═══════════════════════════════════════════════════ */
+
+// Default preferences — used when seeding a new user or patching a loaded user
+const _NOTIF_DEFAULTS = {
+  master:true, chatDM:true, chatGroup:false, chatMention:true,
+  swapReq:true, swapRes:true, shiftAssign:true, shiftRemove:true,
+  holiday:true, vacation:true, openShift:false, broadcast:true
+};
+
+// Look up the user row for a given physId (returns null if no linked account)
+function _userForPhys(physId){
+  if(physId==null) return null;
+  return USERS.find(u=>u.physId===physId) || null;
+}
+
+/**
+ * _notify(kind, opts)
+ * Send an email notification to one or more users.
+ * kind: one of the notifPref keys (chatDM, swapReq, shiftAssign, ...)
+ * opts: {
+ *   userId?: string,        // specific user by user-id
+ *   physId?: number,        // or by physician id (resolved to linked user)
+ *   physIds?: number[],     // or many physicians
+ *   userIds?: string[],     // or many users
+ *   subject: string,
+ *   body: string,
+ *   skipPrefCheck?: bool    // only for internal use (e.g. test broadcasts)
+ * }
+ * Respects each recipient's notifPrefs[kind] AND notifPrefs.master.
+ * Silently no-ops if Supabase not configured or edge function not deployed.
+ */
+async function _notify(kind, opts){
+  if(!opts||!opts.subject||!opts.body) return;
+  // Collect target users
+  const targetUsers = new Set();
+  if(opts.userId){
+    const u=USERS.find(x=>x.id===opts.userId); if(u) targetUsers.add(u);
+  }
+  if(opts.physId!=null){
+    const u=_userForPhys(opts.physId); if(u) targetUsers.add(u);
+  }
+  (opts.physIds||[]).forEach(pid=>{const u=_userForPhys(pid); if(u) targetUsers.add(u);});
+  (opts.userIds||[]).forEach(uid=>{const u=USERS.find(x=>x.id===uid); if(u) targetUsers.add(u);});
+
+  // Filter by pref (unless skipPrefCheck)
+  const recipients=[...targetUsers].filter(u=>{
+    if(!u.email) return false;
+    if(opts.skipPrefCheck) return true;
+    const p=u.notifPrefs||_NOTIF_DEFAULTS;
+    if(!p.master) return false;
+    return p[kind]!==false;
+  });
+  if(!recipients.length) return;
+
+  // Don't send notifications to oneself for chat/swap actions (user is the actor)
+  if(CU && !opts.skipPrefCheck){
+    const final=recipients.filter(u=>u.id!==CU.id);
+    recipients.length=0; recipients.push(...final);
+  }
+  if(!recipients.length) return;
+
+  // Dispatch via Supabase edge function. Gracefully degrade if not configured.
+  try{
+    const url = (typeof _getUrl==='function')?_getUrl():'';
+    const key = (typeof _getKey==='function')?_getKey():'';
+    if(!url||!key) return; // no backend configured — silent no-op
+    await fetch(`${url}/functions/v1/send-notification`, {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':key,
+        'Authorization':`Bearer ${key}`
+      },
+      body: JSON.stringify({
+        kind,
+        subject: opts.subject,
+        body: opts.body,
+        recipients: recipients.map(u=>({email:u.email, name:`${u.first} ${u.last}`.trim()})),
+        from_practice: _PRACTICE_ID||'main'
+      })
+    }).catch(()=>{/* network errors silenced — don't block user actions */});
+  }catch(e){ /* silent — notifications are best-effort */ }
+}
+
+// Convenience: mention detection for chat (matches @FirstName or @Last)
+function _detectMentions(text){
+  if(!text) return [];
+  const mentioned=new Set();
+  USERS.forEach(u=>{
+    const first=(u.first||'').toLowerCase();
+    const last =(u.last ||'').toLowerCase();
+    const hay=text.toLowerCase();
+    if(first&&hay.includes('@'+first)) mentioned.add(u.id);
+    if(last &&hay.includes('@'+last))  mentioned.add(u.id);
+  });
+  return [...mentioned];
+}
+
+/* ─── COMMUNICATION PREFERENCES PAGE ─── */
+function renderCommPrefs(){
+  if(!CU) return;
+  const emailEl = document.getElementById('cp-email');
+  if(emailEl) emailEl.value = CU.email || '(no email on file)';
+  const prefs = CU.notifPrefs || {..._NOTIF_DEFAULTS};
+  const map = {
+    'cp-master':'master','cp-chatDM':'chatDM','cp-chatGroup':'chatGroup','cp-chatMention':'chatMention',
+    'cp-swapReq':'swapReq','cp-swapRes':'swapRes','cp-shiftAssign':'shiftAssign',
+    'cp-shiftRemove':'shiftRemove','cp-holiday':'holiday','cp-vacation':'vacation',
+    'cp-openShift':'openShift','cp-broadcast':'broadcast'
+  };
+  Object.entries(map).forEach(([elId,prefKey])=>{
+    const el=document.getElementById(elId);
+    if(el) el.checked = prefs[prefKey]!==false;
+  });
+  const st=document.getElementById('cp-status');
+  if(st) st.textContent='';
+}
+
+function saveCommPrefs(){
+  if(!CU) return;
+  if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
+  const map = {
+    'cp-master':'master','cp-chatDM':'chatDM','cp-chatGroup':'chatGroup','cp-chatMention':'chatMention',
+    'cp-swapReq':'swapReq','cp-swapRes':'swapRes','cp-shiftAssign':'shiftAssign',
+    'cp-shiftRemove':'shiftRemove','cp-holiday':'holiday','cp-vacation':'vacation',
+    'cp-openShift':'openShift','cp-broadcast':'broadcast'
+  };
+  Object.entries(map).forEach(([elId,prefKey])=>{
+    const el=document.getElementById(elId);
+    if(el) CU.notifPrefs[prefKey]=!!el.checked;
+  });
+  // Sync back to USERS array (CU and USERS row are separate refs)
+  const u=USERS.find(x=>x.id===CU.id);
+  if(u) u.notifPrefs={...CU.notifPrefs};
+  triggerSave();
+  const st=document.getElementById('cp-status');
+  if(st){
+    st.textContent='✓ Preferences saved';
+    st.style.color='var(--green-t)';
+    setTimeout(()=>{if(st.textContent==='✓ Preferences saved'){st.textContent='';}},2500);
+  }
+}
+
+/* ─── BROADCAST EMAIL PAGE (admin) ─── */
+function _broadcastAudience(){
+  const aud=document.getElementById('bc-audience')?.value||'all';
+  const inPractice = USERS.filter(u => !u.practiceId || u.practiceId===_PRACTICE_ID || u.practiceId==='main');
+  if(aud==='admins')     return inPractice.filter(u=>u.role==='admin');
+  if(aud==='physicians') return inPractice.filter(u=>u.role!=='admin' || u.physId!=null);
+  if(aud==='dr'){
+    return inPractice.filter(u=>{
+      if(u.physId==null) return false;
+      const p=S.physicians.find(x=>x.id===u.physId);
+      return p && p.drFte>0 && p.role!=='IR';
+    });
+  }
+  if(aud==='ir'){
+    return inPractice.filter(u=>{
+      if(u.physId==null) return false;
+      const p=S.physicians.find(x=>x.id===u.physId);
+      return p && p.irFte>0;
+    });
+  }
+  return inPractice;
+}
+
+function updateBroadcastPreview(){
+  const prev = document.getElementById('bc-preview'); if(!prev) return;
+  const all = _broadcastAudience();
+  const optedIn = all.filter(u=>{
+    const p=u.notifPrefs||_NOTIF_DEFAULTS;
+    return p.master!==false && p.broadcast!==false;
+  });
+  const optedOut = all.length - optedIn.length;
+  prev.innerHTML = `<strong>${optedIn.length}</strong> recipient(s) will receive this`
+    + (optedOut>0 ? ` &middot; ${optedOut} opted out of announcements` : '')
+    + (all.length===0 ? ' — no matching users in this practice.' : '');
+}
+
+function renderBroadcast(){
+  updateBroadcastPreview();
+  const hist = document.getElementById('bc-history'); if(!hist) return;
+  const list = (S.broadcasts||[]).slice().reverse();
+  if(!list.length){
+    hist.innerHTML='<p style="color:var(--txt3);font-size:12px">No broadcasts sent yet.</p>';
+    return;
+  }
+  hist.innerHTML = list.slice(0,20).map(b=>{
+    const when = new Date(b.ts).toLocaleString();
+    const sender = USERS.find(u=>u.id===b.sentBy);
+    const senderName = sender ? `${sender.first} ${sender.last}`.trim() : 'Admin';
+    return `<div style="padding:10px;border-bottom:1px solid var(--bdr);font-size:12px">
+      <div style="display:flex;gap:8px;margin-bottom:4px">
+        <div style="flex:1;font-weight:700">${escHtml(b.subject||'(no subject)')}</div>
+        <div style="color:var(--txt3);font-size:11px">${escHtml(when)}</div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:4px">
+        Sent by ${escHtml(senderName)} to ${b.recipientCount} recipient(s) · audience: ${escHtml(b.audience||'all')}
+      </div>
+      <div style="font-size:11px;color:var(--txt2);white-space:pre-wrap;max-height:80px;overflow:auto;background:var(--bg3);padding:6px;border-radius:4px">${escHtml(b.body||'').slice(0,500)}${(b.body||'').length>500?'…':''}</div>
+    </div>`;
+  }).join('');
+}
+
+async function sendBroadcast(){
+  if(!_adminOnly('send broadcast emails')) return;
+  const subject=document.getElementById('bc-subject')?.value.trim();
+  const body   =document.getElementById('bc-body')?.value.trim();
+  const audience=document.getElementById('bc-audience')?.value||'all';
+  const statusEl=document.getElementById('bc-status');
+  if(!subject){alert('Enter a subject.');return;}
+  if(!body){alert('Enter a message body.');return;}
+
+  const allTargets=_broadcastAudience();
+  const recipients=allTargets.filter(u=>{
+    if(!u.email) return false;
+    const p=u.notifPrefs||_NOTIF_DEFAULTS;
+    return p.master!==false && p.broadcast!==false;
+  });
+  if(!recipients.length){alert('No recipients in the selected audience (either empty, all opted out, or missing emails).');return;}
+  if(!confirm(`Send this email to ${recipients.length} recipient(s)?`)) return;
+
+  if(statusEl){statusEl.textContent='Sending…';statusEl.style.color='var(--txt3)';}
+  try{
+    const url=_getUrl(), key=_getKey();
+    if(!url||!key) throw new Error('Supabase not configured — cannot send email.');
+    const res=await fetch(`${url}/functions/v1/send-notification`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+      body:JSON.stringify({
+        kind:'broadcast',
+        subject, body,
+        recipients: recipients.map(u=>({email:u.email,name:`${u.first} ${u.last}`.trim()})),
+        from_practice:_PRACTICE_ID||'main'
+      })
+    });
+    if(!res.ok){
+      const err=await res.json().catch(()=>({}));
+      throw new Error(err.error||`HTTP ${res.status}`);
+    }
+    // Log history
+    if(!Array.isArray(S.broadcasts)) S.broadcasts=[];
+    S.broadcasts.push({
+      id:S.nextId++, subject, body, audience,
+      recipientCount:recipients.length,
+      sentBy:CU?.id, ts:new Date().toISOString()
+    });
+    triggerSave();
+    if(statusEl){statusEl.textContent=`✓ Sent to ${recipients.length} recipient(s)`;statusEl.style.color='var(--green-t)';}
+    document.getElementById('bc-subject').value='';
+    document.getElementById('bc-body').value='';
+    renderBroadcast();
+  }catch(e){
+    if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--red-t)';}
+  }
+}
+
+async function sendBroadcastTest(){
+  if(!_adminOnly('send broadcast test')) return;
+  const subject=document.getElementById('bc-subject')?.value.trim()||'[TEST] Broadcast preview';
+  const body   =document.getElementById('bc-body')?.value.trim()||'(empty body)';
+  const statusEl=document.getElementById('bc-status');
+  if(!CU?.email){alert('No email on file for your account.');return;}
+  if(statusEl){statusEl.textContent='Sending test…';statusEl.style.color='var(--txt3)';}
+  try{
+    const url=_getUrl(), key=_getKey();
+    if(!url||!key) throw new Error('Supabase not configured.');
+    const res=await fetch(`${url}/functions/v1/send-notification`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+      body:JSON.stringify({
+        kind:'broadcast-test',
+        subject:'[TEST] '+subject, body,
+        recipients:[{email:CU.email, name:`${CU.first} ${CU.last}`.trim()}],
+        from_practice:_PRACTICE_ID||'main'
+      })
+    });
+    if(!res.ok){
+      const err=await res.json().catch(()=>({}));
+      throw new Error(err.error||`HTTP ${res.status}`);
+    }
+    if(statusEl){statusEl.textContent='✓ Test sent to '+CU.email;statusEl.style.color='var(--green-t)';}
+  }catch(e){
+    if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--red-t)';}
+  }
 }
 
 
@@ -12012,6 +12605,9 @@ function applyHolRandom(){
   if(!_adminOnly('apply holiday auto-assign')) return;
   if(!_holRandomPreview.length) return;
 
+  // Capture assignments for notification AFTER the loop runs (to group dates per physician+holiday)
+  const notifByPhys = {}; // physId → [{name, group, dates:[]}]
+
   _holRandomPreview.forEach(a=>{
     // Create one S.holidays entry per date
     (a.dates||[]).forEach(date=>{
@@ -12028,6 +12624,20 @@ function applyHolRandom(){
     // Sync to calendars — IR-North and IR-South both use IR sync path
     if(a.group==='IR-North'||a.group==='IR-South') _syncHolIRDates(a.physId, a.dates, a.defName);
     if(a.group==='DR') _syncHolDRDates(a.physId, a.dates, a.defName);
+    // Queue notification
+    if(!notifByPhys[a.physId]) notifByPhys[a.physId]=[];
+    notifByPhys[a.physId].push({name:a.defName, group:a.group, dates:a.dates||[]});
+  });
+
+  // Send one email per physician listing all their new holiday assignments
+  Object.entries(notifByPhys).forEach(([physId, entries])=>{
+    const label = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+    const lines = entries.map(e=>`  • ${e.name} [${label(e.group)}] — ${e.dates.sort().join(', ')}`).join('\n');
+    _notify('holiday',{
+      physId: +physId,
+      subject: `Holiday call assignment${entries.length>1?'s':''} — ${entries.length} block${entries.length>1?'s':''}`,
+      body:`You've been assigned holiday call:\n\n${lines}\n\nView in RadScheduler → Holiday Call.`
+    });
   });
 
   const n=_holRandomPreview.length;
@@ -12161,6 +12771,7 @@ async function _pushToSupabase(){
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
         natLangRules:S.natLangRules||[],
+        broadcasts:S.broadcasts||[],
         vacPicking:S.vacPicking,
         driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
