@@ -7593,6 +7593,7 @@ async function adminCreateAccount(){
       throw new Error('Your admin session has expired. Sign out and sign back in, then try again.');
     }
     const url=_getUrl();
+    console.info('[RS createUser] POST', `${url}/functions/v1/create-user`, {email,first,last,role,physId,practiceId:_PRACTICE_ID||'main'});
     const res=await fetch(`${url}/functions/v1/create-user`,{
       method:'POST',
       headers:{
@@ -7603,18 +7604,22 @@ async function adminCreateAccount(){
       body:JSON.stringify({action:'create',email,password:pw,first,last,role,physId,practiceId:_PRACTICE_ID||'main'})
     });
 
-    // Parse response safely — some error modes return HTML/empty body
+    // Grab raw text first so we can log it even if JSON parsing fails
+    const rawText = await res.text();
+    console.info(`[RS createUser] HTTP ${res.status}`, rawText.slice(0,1000));
+
     let body={};
-    try{ body=await res.json(); }
+    try{ body = rawText ? JSON.parse(rawText) : {}; }
     catch(parseErr){
-      throw new Error(`Edge function returned invalid response (HTTP ${res.status}). Check that the 'create-user' edge function is deployed in your Supabase project.`);
+      throw new Error(`Edge function returned non-JSON response (HTTP ${res.status}). Raw: ${rawText.slice(0,180)}`);
     }
 
     if(!res.ok){
-      const errText = body?.error || body?.message || `HTTP ${res.status}`;
+      const errText = body?.error || body?.message || body?.msg || rawText || `HTTP ${res.status}`;
       // Common specific errors
       if(String(errText).toLowerCase().includes('already registered')||
-         String(errText).toLowerCase().includes('already exists')){
+         String(errText).toLowerCase().includes('already exists')||
+         String(errText).toLowerCase().includes('duplicate')){
         throw new Error(`That email (${email}) already has an account in Supabase Auth. Either use a different email or delete the existing one first.`);
       }
       if(res.status===404){
@@ -7623,7 +7628,8 @@ async function adminCreateAccount(){
       if(res.status===401||res.status===403){
         throw new Error(`Admin access denied by edge function (HTTP ${res.status}). Your account may not have service-role privileges.`);
       }
-      throw new Error(errText);
+      // Generic case — include status + full body
+      throw new Error(`${errText} (HTTP ${res.status}). Check browser console and Supabase → Edge Functions → create-user → Logs for details.`);
     }
 
     // Edge function succeeded — validate the response shape
