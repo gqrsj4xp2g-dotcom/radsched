@@ -1353,20 +1353,26 @@ tbody tr:hover{background:var(--bg3)}
   <div id="holt-define" style="display:none">
     <div class="ibox" style="margin-bottom:10px">
       <div class="card-title" id="holdef-form-title">Create New Holiday</div>
-      <div class="g3">
+      <div class="g2">
         <div class="fg"><label>Holiday Name</label>
           <input id="holdef-name" placeholder="e.g. Thanksgiving 2026"></div>
         <div class="fg"><label>Year</label>
           <input id="holdef-year" type="number" min="2024" max="2035" value="2026" style="width:90px"></div>
+      </div>
+      <div class="note ni" style="font-size:11px;margin-bottom:6px">
+        Three independent call pools. Set slots = <strong>1</strong> for each pool that needs a physician covering the whole block.
+        Leave <strong>0</strong> to skip that pool.
+      </div>
+      <div class="g3">
         <div class="fg"><label>DR Call Slots</label>
           <input id="holdef-dr" type="number" min="0" max="10" value="1" style="width:70px"></div>
+        <div class="fg"><label>IR North Slots</label>
+          <input id="holdef-ir-north" type="number" min="0" max="10" value="1" style="width:70px"></div>
+        <div class="fg"><label>IR South Slots</label>
+          <input id="holdef-ir-south" type="number" min="0" max="10" value="1" style="width:70px"></div>
       </div>
-      <div class="g2">
-        <div class="fg"><label>IR Call Slots</label>
-          <input id="holdef-ir" type="number" min="0" max="10" value="1" style="width:70px"></div>
-        <div class="fg"><label>Notes</label>
-          <input id="holdef-notes" placeholder="Optional"></div>
-      </div>
+      <div class="fg"><label>Notes</label>
+        <input id="holdef-notes" placeholder="Optional"></div>
       <div class="fg" style="margin-bottom:8px">
         <label>Holiday Dates <span style="font-size:11px;font-weight:400;color:var(--txt3)">(add all dates that are part of this holiday block)</span></label>
         <div class="flex" style="gap:6px;margin-top:4px">
@@ -1406,7 +1412,8 @@ tbody tr:hover{background:var(--bg3)}
         <div class="fg"><label>Group</label>
           <select id="hol-grp">
             <option value="DR">DR Call</option>
-            <option value="IR">IR Call</option>
+            <option value="IR-North">IR North Call</option>
+            <option value="IR-South">IR South Call</option>
           </select></div>
         <div class="fg"><label>Notes</label>
           <input id="hol-notes" placeholder="Optional"></div>
@@ -1420,8 +1427,11 @@ tbody tr:hover{background:var(--bg3)}
           <option>2024</option><option>2025</option><option>2026</option><option>2027</option>
         </select></div>
       <div class="fg" style="margin:0"><label>Filter Group</label>
-        <select id="holf-grp" onchange="renderHolTable()" style="width:90px">
-          <option value="">All</option><option value="DR">DR</option><option value="IR">IR</option>
+        <select id="holf-grp" onchange="renderHolTable()" style="width:110px">
+          <option value="">All</option>
+          <option value="DR">DR</option>
+          <option value="IR-North">IR North</option>
+          <option value="IR-South">IR South</option>
         </select></div>
       <div class="fg" style="margin:0"><label>Filter Holiday</label>
         <select id="holf-name" onchange="renderHolTable()" style="width:160px">
@@ -1450,10 +1460,11 @@ tbody tr:hover{background:var(--bg3)}
           <input id="haa-year" type="number" value="2026" min="2020" max="2035" style="width:90px"
             oninput="renderHolCareerTally()"></div>
         <div class="fg" style="margin:0"><label>Group</label>
-          <select id="haa-grp" onchange="renderHolCareerTally()" style="width:120px">
-            <option value="both">Both DR + IR</option>
+          <select id="haa-grp" onchange="renderHolCareerTally()" style="width:150px">
+            <option value="all">All pools</option>
             <option value="DR">DR only</option>
-            <option value="IR">IR only</option>
+            <option value="IR-North">IR North only</option>
+            <option value="IR-South">IR South only</option>
           </select></div>
         <div class="fg" style="margin:0"><label>Weighting</label>
           <select id="haa-mode" style="width:170px">
@@ -1483,7 +1494,10 @@ tbody tr:hover{background:var(--bg3)}
     <div class="flexe" style="margin-bottom:8px;gap:6px">
       <div class="fg" style="margin:0"><label>Group</label>
         <select id="hcg" onchange="renderHolCounter()">
-          <option value="ALL">All</option><option value="DR">DR</option><option value="IR">IR</option>
+          <option value="ALL">All</option>
+          <option value="DR">DR</option>
+          <option value="IR-North">IR North</option>
+          <option value="IR-South">IR South</option>
         </select></div>
       <div class="fg" style="margin:0"><label>Year</label>
         <select id="hcy" onchange="renderHolCounter()">
@@ -2531,6 +2545,25 @@ function _applyRemoteData(d){
   (S.sites||[]).forEach(st=>{
     if(!Array.isArray(st.irAnchors)) st.irAnchors=[];
     if(!Array.isArray(st.irFillins)) st.irFillins=[];
+  });
+  // ── Migrate legacy holiday data to 3-pool model ──────────────────────────
+  // 1) Holiday assignments: group: 'IR' → 'IR-North' / 'IR-South' by physician's irGroup
+  (S.holidays||[]).forEach(h=>{
+    if(h.group==='IR'){
+      const p=(S.physicians||[]).find(x=>x.id===h.physId);
+      if(p&&p.irGroup==='North') h.group='IR-North';
+      else if(p&&p.irGroup==='South') h.group='IR-South';
+      // else: leave as 'IR' — downstream code tolerates it
+    }
+  });
+  // 2) Holiday definitions: legacy irSlots → split onto irNorthSlots + irSouthSlots
+  (S.holidayDefs||[]).forEach(d=>{
+    if(d.irSlots!=null && d.irNorthSlots==null && d.irSouthSlots==null){
+      d.irNorthSlots=d.irSlots;
+      d.irSouthSlots=d.irSlots;
+    }
+    // Don't delete d.irSlots yet — keeps the file readable by older tabs if multi-window.
+    // The editor (submitHolDef) strips it on next save.
   });
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
@@ -5987,24 +6020,27 @@ function renderHolCounter(){
     return;
   }
 
-  // Per-physician totals + breakdown
-  const physicians = S.physicians.filter(p =>
-    (grp === 'ALL' ? (p.drFte > 0 || p.irFte > 0) :
-     grp === 'DR'  ?  p.drFte > 0 :
-                      p.irFte > 0));
+  // Physician pool by filter
+  const physicians = S.physicians.filter(p => {
+    if(grp === 'ALL')       return p.drFte > 0 || p.irFte > 0;
+    if(grp === 'DR')        return p.drFte > 0 && p.role !== 'IR';
+    if(grp === 'IR-North')  return p.irFte > 0 && p.irGroup === 'North';
+    if(grp === 'IR-South')  return p.irFte > 0 && p.irGroup === 'South';
+    return false;
+  });
 
-  // Build data: physId → {total, byYear:{yr:N}, byHol:{name:N}, byGroup:{DR:N,IR:N}}
+  // Build data: physId → {total, byYear:{yr:N}, byHol:{name:N}, byGroup:{DR:N,'IR-North':N,'IR-South':N}}
   const data = {};
   physicians.forEach(p => {
-    data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
+    data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:{'DR':0,'IR-North':0,'IR-South':0,'IR':0}};
   });
   // Deduplicate to blocks: name+year+group+physId = 1 assignment regardless of dates
   const seen=new Set();
   filtered.forEach(h => {
     const key=`${h.physId}|${h.name}|${h.year}|${h.group}`;
-    if(seen.has(key)) return; // already counted this block
+    if(seen.has(key)) return;
     seen.add(key);
-    if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:{DR:0,IR:0}};
+    if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:{'DR':0,'IR-North':0,'IR-South':0,'IR':0}};
     const d = data[h.physId];
     d.total++;
     d.byYear[h.year] = (d.byYear[h.year]||0) + 1;
@@ -6012,7 +6048,6 @@ function renderHolCounter(){
     d.byGroup[h.group] = (d.byGroup[h.group]||0) + 1;
   });
 
-  // Sort by total desc
   const sorted = Object.entries(data)
     .filter(([,v]) => v.total > 0)
     .sort((a,b) => b[1].total - a[1].total);
@@ -6031,10 +6066,9 @@ function renderHolCounter(){
       <div class="met-val" style="font-size:16px">${minTotal}–${maxTotal}</div></div>
   </div>`;
 
-  // Table view
   html += `<div style="overflow-x:auto"><table><thead><tr>
     <th>Physician</th>
-    ${grp === 'ALL' ? '<th>DR</th><th>IR</th>' : ''}
+    ${grp === 'ALL' ? '<th>DR</th><th>IR N</th><th>IR S</th>' : ''}
     ${showYears ? allYears.map(y => `<th style="text-align:center">${y}</th>`).join('') : ''}
     <th style="text-align:center;border-left:2px solid var(--bdr)">Total</th>
     <th style="min-width:200px">Holiday Breakdown</th>
@@ -6050,9 +6084,17 @@ function renderHolCounter(){
       .map(([n,c]) => `<span class="tag ta" style="font-size:9px">${n.split(' ')[0]}×${c}</span>`)
       .join(' ');
 
+    // Combine legacy 'IR' into North/South display cells — show under whichever matches the physician
+    const legacyIR = v.byGroup['IR']||0;
+    const isNorth = p && p.irGroup==='North';
+    const isSouth = p && p.irGroup==='South';
+    const cellN = (v.byGroup['IR-North']||0) + (isNorth?legacyIR:0);
+    const cellS = (v.byGroup['IR-South']||0) + (isSouth?legacyIR:0);
+    const cellDR = v.byGroup['DR']||0;
+
     html += `<tr>
       <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
-      ${grp === 'ALL' ? `<td style="text-align:center">${v.byGroup.DR||0}</td><td style="text-align:center">${v.byGroup.IR||0}</td>` : ''}
+      ${grp === 'ALL' ? `<td style="text-align:center">${cellDR}</td><td style="text-align:center">${cellN}</td><td style="text-align:center">${cellS}</td>` : ''}
       ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
       <td>
@@ -6066,13 +6108,12 @@ function renderHolCounter(){
     </tr>`;
   });
 
-  // Add physicians with zero assignments
   const zeroes = physicians.filter(p => !(data[p.id]?.total > 0));
   if(zeroes.length){
     zeroes.forEach(p => {
       html += `<tr style="opacity:.5">
         <td style="font-weight:600">${pname(p.id)}</td>
-        ${grp === 'ALL' ? '<td style="text-align:center">—</td><td style="text-align:center">—</td>' : ''}
+        ${grp === 'ALL' ? '<td style="text-align:center">—</td><td style="text-align:center">—</td><td style="text-align:center">—</td>' : ''}
         ${showYears ? allYears.map(() => '<td>—</td>').join('') : ''}
         <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);color:var(--txt3)">0</td>
         <td style="color:var(--txt3);font-size:11px">No assignments</td>
@@ -6098,7 +6139,14 @@ function reassignHoliday(id){
   const h = S.holidays.find(x => x.id === id);
   if(!h) return;
   const physOpts = S.physicians
-    .filter(p => h.group === 'DR' ? p.drFte > 0 : p.irFte > 0)
+    .filter(p => {
+      if(h.group === 'DR')       return p.drFte > 0 && p.role !== 'IR';
+      if(h.group === 'IR-North') return p.irFte > 0 && p.irGroup === 'North';
+      if(h.group === 'IR-South') return p.irFte > 0 && p.irGroup === 'South';
+      // Legacy 'IR' — show all IR physicians
+      if(h.group === 'IR')       return p.irFte > 0;
+      return false;
+    })
     .map(p => `<option value="${p.id}"${p.id === h.physId?' selected':''}>${p.last}, ${p.first}</option>`)
     .join('');
   document.getElementById('link-modal-title').textContent =
@@ -6118,11 +6166,10 @@ function doReassignHoliday(id){
   if(!newPhysId){ alert('Select a physician.'); return; }
   const h = S.holidays.find(x => x.id === id);
   if(!h) return;
-  // Remove old IR call if group is IR
-  if(h.group === 'IR') _removeHolidayIRCall(h.physId, h.date);
+  const isIR = h.group === 'IR' || h.group === 'IR-North' || h.group === 'IR-South';
+  if(isIR) _removeHolidayIRCall(h.physId, h.date);
   h.physId = newPhysId;
-  // Re-sync IR call with new physician
-  if(h.group === 'IR') _syncHolidayToIRCall(h.physId, h.date, h.name);
+  if(isIR) _syncHolidayToIRCall(h.physId, h.date, h.name);
   triggerSave();
   closeModal('link-modal');
   renderHolTable();
@@ -6564,6 +6611,9 @@ function saveCfg(){
 }
 function renderDRSList(){const el=document.getElementById('drs-list');if(!el)return;el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove DR sub')){S.drSubs.splice(${i},1);triggerSave();renderDRSList();}">X</button></div>`).join('');}
 function renderIRSList(){const el=document.getElementById('irs-list');if(!el)return;el.innerHTML=(S.irSubs||[]).map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove IR sub')){S.irSubs.splice(${i},1);triggerSave();renderIRSList();}">X</button></div>`).join('');}
+// Tracks which site's anchors/fill-ins panel is expanded in the Settings UI
+const _siteMixedExpanded = new Set();
+
 function renderSitesList(){
   const el=document.getElementById('sites-list');if(!el)return;
   const irPhys=(S.physicians||[]).filter(p=>p.irFte>0);
@@ -6572,7 +6622,8 @@ function renderSitesList(){
     const anchors=s.irAnchors||[], fillins=s.irFillins||[];
     const anchorNames=anchors.map(id=>pname(id)).join(', ')||'—';
     const fillinNames=fillins.map(id=>pname(id)).join(', ')||'—';
-    const showMixed=(anchors.length>0||fillins.length>0)||!s.irGroup;
+    // Panel visible if: user expanded it, OR anchors/fill-ins already populated, OR it's a non-IR site (no group)
+    const showMixed = _siteMixedExpanded.has(s.name) || anchors.length>0 || fillins.length>0 || !s.irGroup;
     let mixedUi='';
     if(showMixed){
       mixedUi=`<div style="padding:8px 10px;background:var(--bg3);border-radius:6px;margin-top:6px;font-size:11px">
@@ -6582,9 +6633,10 @@ function renderSitesList(){
           <button class="br bxs" style="float:right" onclick="editSiteFillins(${i})">Edit</button></div>
       </div>`;
     }
+    const gearTitle = showMixed ? 'Hide per-physician IR role panel' : 'Configure per-physician IR roles at this site';
     return`<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;margin-bottom:6px">
       <div class="row"><span style="font-size:13px;font-weight:600;flex:1">${s.name}</span>${g}
-        <button class="br bxs" onclick="toggleSiteMixed(${i})" title="Configure per-physician IR roles at this site">&#9881;</button>
+        <button class="br bxs" onclick="toggleSiteMixed(${i})" title="${gearTitle}">&#9881;</button>
         <button class="br bxs" onclick="removeSiteWithCascade(${i})">X</button>
       </div>
       ${mixedUi}
@@ -6593,9 +6645,17 @@ function renderSitesList(){
 }
 
 function toggleSiteMixed(i){
-  const s=S.sites[i];if(!s)return;
-  if(!s.irAnchors)s.irAnchors=[];
-  if(!s.irFillins)s.irFillins=[];
+  const s=S.sites[i]; if(!s) return;
+  if(!s.irAnchors) s.irAnchors=[];
+  if(!s.irFillins) s.irFillins=[];
+  // If panel is currently showing because of populated arrays on a non-IR site,
+  // or because user previously expanded it, collapse it (only meaningful if
+  // there are no populated anchors/fill-ins, since those force the panel open).
+  if(_siteMixedExpanded.has(s.name)){
+    _siteMixedExpanded.delete(s.name);
+  } else {
+    _siteMixedExpanded.add(s.name);
+  }
   renderSitesList();
 }
 
@@ -7356,19 +7416,20 @@ function renderHolSchedule(){
   const el=document.getElementById('hol-schedule-content');if(!el)return;
   const hols=S.holidays.filter(h=>h.year===yr).sort((a,b)=>a.date>b.date?1:-1);
   if(!hols.length){el.innerHTML='<div class="note ni">No holiday assignments for '+yr+'.</div>';return;}
-  // Group by holiday name
+  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+  const tagOf = g => g==='DR'?'tb':g==='IR-North'?'tt':g==='IR-South'?'tg':'tgr';
   const grouped={};
   hols.forEach(h=>{
-    const key=`${h.name}|${h.group}`;
+    const key=`${h.name}|${h.group}|${h.physId}`;
     if(!grouped[key]) grouped[key]={name:h.name,group:h.group,dates:[],physId:h.physId};
     grouped[key].dates.push(h.date);
   });
   el.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-    <th>Holiday</th><th>Group</th><th>Date(s)</th><th>Physician</th>
+    <th>Holiday</th><th>Pool</th><th>Date(s)</th><th>Physician</th>
   </tr></thead><tbody>
   ${Object.values(grouped).sort((a,b)=>a.dates[0]>b.dates[0]?1:-1).map(g=>`<tr>
     <td style="font-weight:700">${g.name}</td>
-    <td><span class="tag ${g.group==='DR'?'tb':'tt'}">${g.group}</span></td>
+    <td><span class="tag ${tagOf(g.group)}">${labelOf(g.group)}</span></td>
     <td style="font-size:11px">${g.dates.sort().join(', ')}</td>
     <td>${pname(g.physId)}</td>
   </tr>`).join('')}
@@ -7512,13 +7573,19 @@ function addHoliday(){
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
   if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
-  // Check for duplicate (same phys/date/group)
+  if(grp==='IR-North'){
+    if(!(p.irFte>0)) { alert(`${p.last} has no IR FTE and cannot take IR holiday call.`); return; }
+    if(p.irGroup!=='North' && !confirm(`${p.last} is not in the IR North group (currently: ${p.irGroup||'unassigned'}). Assign anyway?`)) return;
+  }
+  if(grp==='IR-South'){
+    if(!(p.irFte>0)) { alert(`${p.last} has no IR FTE and cannot take IR holiday call.`); return; }
+    if(p.irGroup!=='South' && !confirm(`${p.last} is not in the IR South group (currently: ${p.irGroup||'unassigned'}). Assign anyway?`)) return;
+  }
   if(S.holidays.find(h=>h.physId===pid&&h.date===date&&h.group===grp)){
     if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
   }
   S.holidays.push({id:S.nextId++, name, date, year:yr, physId:pid, group:grp, notes});
-  if(grp==='IR') _syncHolidayToIRCall(pid, date, name);
-  // Clear form
+  if(grp==='IR-North'||grp==='IR-South') _syncHolidayToIRCall(pid, date, name);
   ['hol-date','hol-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   triggerSave();
   _populateHolFilterName();
@@ -8368,13 +8435,16 @@ function previewAA(){
   }
   if(typ==='weekend'||typ==='both'){
     cells.filter(c=>c.day&&c.dow===6).forEach(c=>{
+      // Skip weekends whose Sat or Sun is a holiday blackout — holidays auto-assign handles these
+      const sunDate=addDays(c.date,1);
+      if(isHolidayBlackout(c.date)||isHolidayBlackout(sunDate)) return;
       Object.entries(S.wkndNeeds).forEach(([sub,need])=>{
         const ex=S.weekendCalls.filter(w=>(w.satDate||w.date)===c.date&&w.sub===sub).length
                 +preview.filter(a=>a.type==='wk'&&a.date===c.date&&a.sub===sub).length;
         if(ex>=1)return;
         const pool=drs.filter(p=>{
           if(!p.shiftElig.wknd||!p.drSubs.includes(sub))return false;
-          const vd=vacDays(p.id);const sunDate=addDays(c.date,1);
+          const vd=vacDays(p.id);
           if(vd.has(c.date)||vd.has(sunDate))return false;
           const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
           return cnt[p.id].wk<_wkCap;
@@ -8383,7 +8453,7 @@ function previewAA(){
           if(Math.abs(rA-rB)>0.005) return rA-rB;
           return cnt[b.id].wk-cnt[a.id].wk;
         });
-        if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate:addDays(c.date,1),sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
+        if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
         else{gaps.push(`Weekend ${c.date} ${sub}`);S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:''});}
       });
     });
@@ -9111,8 +9181,14 @@ function previewIRAA(){
 
     // ── WEEKEND CALLS — all Fridays ───────────────────────────────────────
     // Pass 0: full   Pass 1: relax preview conflicts   Pass 2: relax all adj
+    // Weekends whose Fri→Mon span touches a holiday blackout are skipped entirely —
+    // the Holiday Auto-Assign tool handles those days.
     if(typ==='weekend'||typ==='both'){
-      const wkndDates=allCells.filter(c=>c.dow===5).map(c=>c.date);
+      const wkndDates=allCells.filter(c=>c.dow===5).map(c=>c.date)
+        .filter(fri=>{
+          const span=[fri,addDays(fri,1),addDays(fri,2),addDays(fri,3)];
+          return !span.some(d=>isHolidayBlackout(d));
+        });
 
       const baseEligW={};
       wkndDates.forEach(fri=>{
@@ -10685,29 +10761,36 @@ function removeHaaNeed(id){
 /* ─── HOLIDAY AUTO-ASSIGN (FTE-weighted random lottery) ─── */
 
 // Returns per-physician career tally for holiday calls for a given group.
+// Helper: pool of physicians that participate in a given pool
+// pool = 'DR' | 'IR-North' | 'IR-South'
+function _holPoolPhysicians(pool){
+  if(pool==='DR')       return S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
+  if(pool==='IR-North') return S.physicians.filter(p=>p.irFte>0&&p.irGroup==='North');
+  if(pool==='IR-South') return S.physicians.filter(p=>p.irFte>0&&p.irGroup==='South');
+  return [];
+}
+
+// Helper: FTE-weighted proportion of this physician within their pool
+function _holPoolFteProp(p, pool){
+  const pool_phys=_holPoolPhysicians(pool);
+  const fteOf = x => pool==='DR' ? (x.drFte||0) : (x.irFte||0);
+  const tot = pool_phys.reduce((s,x)=>s+fteOf(x),0)||1;
+  return fteOf(p)/tot;
+}
+
 function _holCareerData(group){
-  const physicians=S.physicians.filter(p=>{
-    if(group==='DR') return p.drFte>0&&p.role!=='IR';
-    if(group==='IR') return p.irFte>0;
-    return p.drFte>0||p.irFte>0;
-  });
+  const physicians=_holPoolPhysicians(group);
   if(!physicians.length) return [];
+  // All years with assignments in this pool
   const allYears=[...new Set(
-    S.holidays.filter(h=>group==='both'||h.group===group).map(h=>String(h.year))
+    S.holidays.filter(h=>h.group===group).map(h=>String(h.year))
   )].sort();
-  function fteProp(p,grp){
-    const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
-    const tot=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
-    const my=grp==='DR'?(p.drFte||0):(p.irFte||0);
-    return my/tot;
-  }
   return physicians.map(p=>{
     let cumBalance=0;
     const byYear=allYears.map(yr=>{
-      const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
-      const act=_holBlockCount(p.id,group==='both'?'both':grp,+yr);
-      const totalSlots=_holBlockTotal(group==='both'?'both':grp,+yr);
-      const fs=fteProp(p,grp)*totalSlots;
+      const act=_holBlockCount(p.id,group,+yr);
+      const totalSlots=_holBlockTotal(group,+yr);
+      const fs=_holPoolFteProp(p,group)*totalSlots;
       const bal=act-fs;
       cumBalance+=bal;
       return{yr,act,fairShare:fs,balance:bal,snapBalance:cumBalance};
@@ -10720,27 +10803,16 @@ function _holCareerData(group){
 
 // Career data excluding a given year (weights use only prior history)
 function _holCareerDataBeforeYear(group,beforeYear){
-  const physicians=S.physicians.filter(p=>{
-    if(group==='DR') return p.drFte>0&&p.role!=='IR';
-    if(group==='IR') return p.irFte>0;
-    return p.drFte>0||p.irFte>0;
-  });
+  const physicians=_holPoolPhysicians(group);
   const allYears=[...new Set(
-    S.holidays.filter(h=>(group==='both'||h.group===group)&&h.year<beforeYear).map(h=>String(h.year))
+    S.holidays.filter(h=>h.group===group&&h.year<beforeYear).map(h=>String(h.year))
   )].sort();
-  function fteProp(p,grp){
-    const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
-    const tot=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
-    const my=grp==='DR'?(p.drFte||0):(p.irFte||0);
-    return my/tot;
-  }
   return physicians.map(p=>{
     let cumBalance=0;
     const byYear=allYears.map(yr=>{
-      const grp=group==='both'?(p.irFte>0?'IR':'DR'):group;
-      const act=_holBlockCount(p.id,group==='both'?'both':grp,+yr);
-      const totalSlots=_holBlockTotal(group==='both'?'both':grp,+yr);
-      const fs=fteProp(p,grp)*totalSlots;
+      const act=_holBlockCount(p.id,group,+yr);
+      const totalSlots=_holBlockTotal(group,+yr);
+      const fs=_holPoolFteProp(p,group)*totalSlots;
       cumBalance+=act-fs;
       return{yr,act,fairShare:fs,balance:act-fs};
     });
@@ -10751,11 +10823,7 @@ function _holCareerDataBeforeYear(group,beforeYear){
 // Lottery weight for one physician.
 // Weighted mode: adjusts FTE proportion by career balance so owed physicians draw higher.
 function _holLotteryWeight(careerDatum,grp,mode){
-  const p=careerDatum.p;
-  const pool=S.physicians.filter(x=>grp==='DR'?(x.drFte>0&&x.role!=='IR'):(x.irFte>0));
-  const totalFte=pool.reduce((s,x)=>s+(grp==='DR'?(x.drFte||0):(x.irFte||0)),0)||1;
-  const myFte=grp==='DR'?(p.drFte||0):(p.irFte||0);
-  const fteProp=myFte/totalFte;
+  const fteProp=_holPoolFteProp(careerDatum.p, grp);
   if(mode==='pure') return fteProp;
   const scale=Math.max(5,Math.abs(careerDatum.balance)*2+1);
   const adj=careerDatum.balance/scale;
@@ -10765,23 +10833,25 @@ function _holLotteryWeight(careerDatum,grp,mode){
 // Render career tally on the Auto-Assign tab
 function renderHolCareerTally(){
   const year=+document.getElementById('haa-year')?.value||new Date().getFullYear();
-  const group=document.getElementById('haa-grp')?.value||'both';
+  const group=document.getElementById('haa-grp')?.value||'all';
   const el=document.getElementById('haa-tally');
   if(!el) return;
-  const groups=group==='both'?['DR','IR']:[group];
+  const allGroups=['DR','IR-North','IR-South'];
+  const groups=group==='all'?allGroups:[group];
+  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
   let html='';
   groups.forEach(grp=>{
     const data=_holCareerData(grp);
-    if(!data.length){html+=`<div class="note ni">No ${grp} physicians configured.</div>`;return;}
+    if(!data.length){html+=`<div class="note ni" style="margin-bottom:10px">No ${labelOf(grp)} physicians configured.</div>`;return;}
     const allYears=[...new Set(S.holidays.filter(h=>h.group===grp).map(h=>String(h.year)))].sort();
     html+=`<div class="card" style="margin-bottom:12px">
-      <div class="card-title">${grp} Holiday Call — Career Balance
+      <div class="card-title">${labelOf(grp)} Holiday Call — Career Balance
         <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">
           amber = ahead of fair share &nbsp;·&nbsp; green = owed &nbsp;·&nbsp; % = lottery draw weight for ${year}
         </span>
       </div>`;
     if(!allYears.length){
-      html+=`<div style="font-size:12px;color:var(--txt3);padding:8px">No holiday call history yet — all start at balance 0.</div>`;
+      html+=`<div style="font-size:12px;color:var(--txt3);padding:8px">No ${labelOf(grp)} holiday call history yet — all start at balance 0.</div>`;
     } else {
       html+=`<div style="overflow-x:auto"><table><thead><tr>
         <th>Physician</th><th>FTE</th>
@@ -10794,7 +10864,6 @@ function renderHolCareerTally(){
         const fte=grp==='DR'?(d.p.drFte||0):(d.p.irFte||0);
         const balCls=d.balance>2?'color:var(--amber,#d97706)':d.balance<-2?'color:var(--green-t)':'color:var(--txt2)';
         const rowBg=d.balance>3?'background:var(--amber-bg,#fffbeb)':d.balance<-3?'background:#f0fdf4':'';
-        // Compute normalised weight across the group
         const allW=data.map(x=>_holLotteryWeight(x,grp,mode));
         const totW=allW.reduce((s,w)=>s+w,0)||1;
         const myW=_holLotteryWeight(d,grp,mode);
@@ -10821,11 +10890,12 @@ function renderHolCareerTally(){
 
 
 // Count distinct holiday BLOCKS assigned to a physician (name+year+group = 1 block, not per date)
+// group = 'DR' | 'IR-North' | 'IR-South' | 'all'
 function _holBlockCount(physId, group, year){
   const seen=new Set();
   S.holidays.filter(h=>
     h.physId===physId&&
-    (group==='both'||h.group===group)&&
+    (group==='all'||h.group===group)&&
     (year==null||h.year===+year)
   ).forEach(h=>seen.add(`${h.name}|${h.year}|${h.group}`));
   return seen.size;
@@ -10836,7 +10906,7 @@ function _holBlockCount(physId, group, year){
 function _holBlockTotal(group, year){
   const seen=new Set();
   S.holidays.filter(h=>
-    (group==='both'||h.group===group)&&
+    (group==='all'||h.group===group)&&
     (year==null||h.year===+year)
   ).forEach(h=>seen.add(`${h.name}|${h.year}|${h.group}`));
   return seen.size;
@@ -10891,11 +10961,21 @@ function renderHolDefList(){
     return;
   }
   el.innerHTML = defs.map(d=>{
+    // Resolve slot needs — back-fill legacy irSlots onto both IR pools for display
+    const needDR = d.drSlots||0;
+    const needN  = d.irNorthSlots!=null ? d.irNorthSlots : (d.irSlots||0);
+    const needS  = d.irSouthSlots!=null ? d.irSouthSlots : (d.irSlots||0);
     // Count distinct assignments (1 physician per block regardless of how many dates)
     const assignedDR = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='DR').map(h=>h.physId)).size;
-    const assignedIR = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR').map(h=>h.physId)).size;
-    const needDR = d.drSlots||0, needIR = d.irSlots||0;
-    const drFull = assignedDR>=needDR, irFull = assignedIR>=needIR;
+    const assignedN  = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR-North').map(h=>h.physId)).size;
+    const assignedS  = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR-South').map(h=>h.physId)).size;
+    const drFull = needDR===0 ? true : assignedDR>=needDR;
+    const nFull  = needN===0  ? true : assignedN>=needN;
+    const sFull  = needS===0  ? true : assignedS>=needS;
+    const pill = (label,assigned,need,full,colorClass)=>{
+      if(need===0) return `<span style="color:var(--txt3);opacity:.5">${label}: —</span>`;
+      return `<span>${label}: <strong style="color:${full?'var(--green-t)':'var(--amber,#d97706)'}">${assigned}/${need}</strong></span>`;
+    };
     return `<div class="card" style="margin-bottom:8px">
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="flex:1">
@@ -10905,9 +10985,10 @@ function renderHolDefList(){
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin:5px 0">
             ${(d.dates||[]).sort().map(dt=>`<span class="tag ta" style="font-size:10px">${dt}</span>`).join('')}
           </div>
-          <div style="font-size:11px;color:var(--txt3);display:flex;gap:12px">
-            <span>DR: <strong style="color:${drFull?'var(--green-t)':'var(--amber,#d97706)'}">${assignedDR}/${needDR}</strong></span>
-            <span>IR: <strong style="color:${irFull?'var(--green-t)':'var(--amber,#d97706)'}">${assignedIR}/${needIR}</strong></span>
+          <div style="font-size:11px;color:var(--txt3);display:flex;gap:14px;flex-wrap:wrap">
+            ${pill('DR',assignedDR,needDR,drFull)}
+            ${pill('IR North',assignedN,needN,nFull)}
+            ${pill('IR South',assignedS,needS,sFull)}
             ${d.notes?`<span>${d.notes}</span>`:''}
           </div>
         </div>
@@ -10952,17 +11033,27 @@ function submitHolDef(){
   const name  = document.getElementById('holdef-name')?.value.trim();
   const year  = +document.getElementById('holdef-year')?.value||2026;
   const drSlots = +document.getElementById('holdef-dr')?.value||0;
-  const irSlots = +document.getElementById('holdef-ir')?.value||0;
+  const irNorthSlots = +document.getElementById('holdef-ir-north')?.value||0;
+  const irSouthSlots = +document.getElementById('holdef-ir-south')?.value||0;
   const notes = document.getElementById('holdef-notes')?.value.trim()||'';
   if(!name){ alert('Enter a holiday name.'); return; }
   if(!_holdefDates.length){ alert('Add at least one date.'); return; }
+  if(!drSlots && !irNorthSlots && !irSouthSlots){
+    if(!confirm('No slots configured for any pool. Create this holiday as blackout-only?')) return;
+  }
   if(!S.holidayDefs) S.holidayDefs=[];
   if(_holdefEditId!=null){
     const d=S.holidayDefs.find(x=>x.id===_holdefEditId);
-    if(d){ d.name=name; d.year=year; d.dates=[..._holdefDates]; d.drSlots=drSlots; d.irSlots=irSlots; d.notes=notes; }
+    if(d){
+      d.name=name; d.year=year; d.dates=[..._holdefDates];
+      d.drSlots=drSlots; d.irNorthSlots=irNorthSlots; d.irSouthSlots=irSouthSlots;
+      d.notes=notes;
+      delete d.irSlots; // clear legacy field
+    }
     cancelHolDef();
   } else {
-    S.holidayDefs.push({id:S.nextId++,name,year,dates:[..._holdefDates],drSlots,irSlots,notes});
+    S.holidayDefs.push({id:S.nextId++,name,year,dates:[..._holdefDates],
+      drSlots,irNorthSlots,irSouthSlots,notes});
     ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
     _holdefDates=[];
     renderHoldefDatesChips();
@@ -10979,7 +11070,10 @@ function editHolDef(id){
   document.getElementById('holdef-name').value  = d.name;
   document.getElementById('holdef-year').value  = d.year;
   document.getElementById('holdef-dr').value    = d.drSlots||0;
-  document.getElementById('holdef-ir').value    = d.irSlots||0;
+  // Back-fill legacy irSlots onto both IR pools if new fields aren't present
+  const legacyIR = d.irSlots||0;
+  document.getElementById('holdef-ir-north').value = d.irNorthSlots!=null?d.irNorthSlots:legacyIR;
+  document.getElementById('holdef-ir-south').value = d.irSouthSlots!=null?d.irSouthSlots:legacyIR;
   document.getElementById('holdef-notes').value = d.notes||'';
   document.getElementById('holdef-edit-id').value = id;
   document.getElementById('holdef-form-title').textContent = 'Edit Holiday — '+d.name;
@@ -10994,7 +11088,8 @@ function cancelHolDef(){
   ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('holdef-year').value='2026';
   document.getElementById('holdef-dr').value='1';
-  document.getElementById('holdef-ir').value='1';
+  const nEl=document.getElementById('holdef-ir-north'); if(nEl) nEl.value='1';
+  const sEl=document.getElementById('holdef-ir-south'); if(sEl) sEl.value='1';
   document.getElementById('holdef-form-title').textContent='Create New Holiday';
   document.getElementById('holdef-submit-btn').textContent='Create Holiday';
   document.getElementById('holdef-cancel-btn').style.display='none';
@@ -11032,8 +11127,12 @@ function renderHolTable(){
     .filter(h=>(!fyr||String(h.year)===fyr)&&(!fgrp||h.group===fgrp)&&(!fname||h.name===fname))
     .sort((a,b)=>a.date>b.date?1:-1);
   const physOpts=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+  const tagOf = g => g==='DR'?'tb':g==='IR-North'?'tt':g==='IR-South'?'tg':'tgr';
   document.getElementById('hol-tbody').innerHTML=filtered.map(h=>{
     if(h.id===_editingHolId){
+      const groupOpts = ['DR','IR-North','IR-South','IR'].map(g=>
+        `<option value="${g}"${h.group===g?' selected':''}>${labelOf(g)}</option>`).join('');
       return`<tr style="background:var(--blue-bg)">
         <td><input id="hol-edit-name-${h.id}" value="${h.name}" style="width:100%;font-size:11px"></td>
         <td><input id="hol-edit-date-${h.id}" type="date" value="${h.date}" style="width:110px"></td>
@@ -11041,10 +11140,7 @@ function renderHolTable(){
         <td><select id="hol-edit-phys-${h.id}" style="width:100%;font-size:11px">
           ${physOpts.replace(`value="${h.physId}"`,`value="${h.physId}" selected`)}
         </select></td>
-        <td><select id="hol-edit-grp-${h.id}" style="font-size:11px">
-          <option value="DR"${h.group==='DR'?' selected':''}>DR</option>
-          <option value="IR"${h.group==='IR'?' selected':''}>IR</option>
-        </select></td>
+        <td><select id="hol-edit-grp-${h.id}" style="font-size:11px">${groupOpts}</select></td>
         <td><input id="hol-edit-notes-${h.id}" value="${h.notes||''}" style="width:100%;font-size:11px"></td>
         <td><button class="bg bsm" onclick="saveEditHoliday(${h.id})">✓</button></td>
         <td><button class="bsm" onclick="cancelEditHoliday()">✕</button></td>
@@ -11052,7 +11148,7 @@ function renderHolTable(){
     }
     return`<tr>
       <td>${h.name}</td><td>${h.date}</td><td>${h.year}</td><td>${pname(h.physId)}</td>
-      <td><span class="tag ${h.group==='DR'?'tb':'tt'}">${h.group}</span></td>
+      <td><span class="tag ${tagOf(h.group)}">${labelOf(h.group)}</span></td>
       <td>${h.notes||'—'}</td>
       <td style="white-space:nowrap">
         <button class="bsm" onclick="startEditHoliday(${h.id})">✏</button>
@@ -11076,15 +11172,16 @@ function saveEditHoliday(id){
   const grpEl =document.getElementById(`hol-edit-grp-${id}`);
   const notEl =document.getElementById(`hol-edit-notes-${id}`);
   if(!dateEl?.value){alert('Date required.');return;}
-  // Remove old IR call before changing
-  if(h.group==='IR') _removeHolidayIRCall(h.physId, h.date);
+  const wasIR = h.group==='IR'||h.group==='IR-North'||h.group==='IR-South';
+  if(wasIR) _removeHolidayIRCall(h.physId, h.date);
   h.name  =nameEl?.value||h.name;
   h.date  =dateEl.value;
   h.year  =+yrEl?.value||h.year;
   h.physId=+physEl?.value||h.physId;
   h.group =grpEl?.value||h.group;
   h.notes =notEl?.value||'';
-  if(h.group==='IR') _syncHolidayToIRCall(h.physId, h.date, h.name);
+  const isIR = h.group==='IR'||h.group==='IR-North'||h.group==='IR-South';
+  if(isIR) _syncHolidayToIRCall(h.physId, h.date, h.name);
   _editingHolId=null;
   triggerSave(); renderHolTable(); renderHolCounter();
 }
@@ -11093,7 +11190,7 @@ function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
   if(!confirm('Delete this assignment?'))return;
   const h=S.holidays.find(x=>x.id===id);
-  if(h&&h.group==='IR') _removeHolidayIRCall(h.physId, h.date);
+  if(h&&(h.group==='IR'||h.group==='IR-North'||h.group==='IR-South')) _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
   triggerSave(); renderHolTable(); renderHolCounter();
 }
@@ -11126,7 +11223,7 @@ let _holRandomPreview = [];
 function previewHolRandom(){
   if(!_adminOnly('preview holiday auto-assign')) return;
   const year  = +document.getElementById('haa-year')?.value||new Date().getFullYear();
-  const grpFilter=document.getElementById('haa-grp')?.value||'both';
+  const grpFilter=document.getElementById('haa-grp')?.value||'all';
   const mode  = document.getElementById('haa-mode')?.value||'weighted';
 
   const defs=(S.holidayDefs||[]).filter(d=>d.year===year);
@@ -11137,33 +11234,39 @@ function previewHolRandom(){
   }
 
   const preview=[], gaps=[];
-  const groups = grpFilter==='both'?['DR','IR']:[grpFilter];
+  const allGroups=['DR','IR-North','IR-South'];
+  const groups = grpFilter==='all'?allGroups:[grpFilter];
+  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+
+  // Slot count getter — handles legacy irSlots back-fill
+  function slotsFor(def, grp){
+    if(grp==='DR') return def.drSlots||0;
+    if(grp==='IR-North') return def.irNorthSlots!=null ? def.irNorthSlots : (def.irSlots||0);
+    if(grp==='IR-South') return def.irSouthSlots!=null ? def.irSouthSlots : (def.irSlots||0);
+    return 0;
+  }
 
   groups.forEach(grp=>{
     const careerData=_holCareerDataBeforeYear(grp, year);
 
     defs.forEach(def=>{
-      const slotsNeeded=grp==='DR'?(def.drSlots||0):(def.irSlots||0);
+      const slotsNeeded=slotsFor(def, grp);
       if(!slotsNeeded) return;
 
-      // Count already assigned for this def+group
-      const alreadyFilled=S.holidays.filter(h=>
-        h.name===def.name&&h.year===def.year&&h.group===grp).length
-        + preview.filter(a=>a.defId===def.id&&a.group===grp).length;
-      // Each def gets ONE physician per group who covers all dates
-      // (each date = 1 S.holidays entry, so slotsNeeded=1 means 1 physician × all dates)
-      const physSlotsToFill = slotsNeeded - Math.floor(alreadyFilled/(def.dates?.length||1));
+      // Count already assigned (distinct physicians) for this def+group
+      const alreadyPhys=new Set(S.holidays.filter(h=>
+        h.name===def.name&&h.year===def.year&&h.group===grp).map(h=>h.physId));
+      const previewPhys=preview.filter(a=>a.defId===def.id&&a.group===grp).map(a=>a.physId);
+      const physSlotsToFill = slotsNeeded - alreadyPhys.size - previewPhys.length;
       if(physSlotsToFill<=0) return;
 
       for(let slot=0;slot<physSlotsToFill;slot++){
         // Build eligible pool — physician must be available on ALL dates in the block
         const eligible=careerData.filter(d=>{
           const p=d.p;
-          if(grp==='DR'&&(p.drFte===0||p.role==='IR')) return false;
-          if(grp==='IR'&&p.irFte===0) return false;
-          // Not already assigned this holiday
+          // Already assigned?
+          if(alreadyPhys.has(p.id)) return false;
           if(preview.find(a=>a.defId===def.id&&a.group===grp&&a.physId===p.id)) return false;
-          if(S.holidays.find(h=>h.name===def.name&&h.year===def.year&&h.group===grp&&h.physId===p.id)) return false;
           // Free on all holiday dates
           const vd=vacDays(p.id);
           if((def.dates||[]).some(dt=>vd.has(dt))) return false;
@@ -11171,14 +11274,14 @@ function previewHolRandom(){
         });
 
         if(!eligible.length){
-          gaps.push(`${def.name} [${grp}]`);
+          gaps.push(`${def.name} [${labelOf(grp)}]`);
           continue;
         }
 
-        // Weighted draw
+        // Weighted draw — penalize physicians already picked in THIS run across any pool
         const wList=eligible.map(d=>{
           const base=_holLotteryWeight(d,grp,mode);
-          const extra=(preview.filter(a=>a.group===grp&&a.physId===d.p.id).length)*0.3;
+          const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
           return{d,w:Math.max(0.01,base-extra)};
         });
         const totW=wList.reduce((s,x)=>s+x.w,0);
@@ -11202,15 +11305,16 @@ function previewHolRandom(){
   let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} assignment(s) — ${gaps.length} gap(s)</div>`;
   if(preview.length){
     html+=`<div style="overflow-x:auto"><table><thead><tr>
-      <th>Holiday</th><th>Group</th><th>Physician</th><th>Dates Covered</th>
+      <th>Holiday</th><th>Pool</th><th>Physician</th><th>Dates Covered</th>
       <th title="Career balance before this lottery">Balance</th>
       <th title="Draw weight">Weight</th>
     </tr></thead><tbody>`;
     preview.forEach(a=>{
       const balCls=+a.balance<-0.5?'color:var(--green-t)':+a.balance>0.5?'color:var(--amber,#d97706)':'color:var(--txt3)';
+      const tagCls = a.group==='DR'?'tb':a.group==='IR-North'?'tt':'tg';
       html+=`<tr>
         <td style="font-weight:600">${a.defName}</td>
-        <td><span class="tag ${a.group==='DR'?'tb':'tt'}">${a.group}</span></td>
+        <td><span class="tag ${tagCls}">${labelOf(a.group)}</span></td>
         <td style="font-weight:600">${pname(a.physId)}</td>
         <td style="font-size:11px">${a.dates.sort().join(', ')}</td>
         <td style="${balCls};font-weight:700">${+a.balance>0?'+':''}${a.balance}</td>
@@ -11237,7 +11341,7 @@ function applyHolRandom(){
   _holRandomPreview.forEach(a=>{
     // Create one S.holidays entry per date
     (a.dates||[]).forEach(date=>{
-      // Skip if already assigned
+      // Skip if same physician already assigned this exact slot
       if(S.holidays.find(h=>h.name===a.defName&&h.date===date&&h.group===a.group&&h.physId===a.physId)) return;
       // Remove any existing assignment for this holiday+date+group by another physician
       S.holidays=S.holidays.filter(h=>
@@ -11247,8 +11351,8 @@ function applyHolRandom(){
         physId:a.physId, group:a.group, notes:a.notes
       });
     });
-    // Sync to calendars
-    if(a.group==='IR') _syncHolIRDates(a.physId, a.dates, a.defName);
+    // Sync to calendars — IR-North and IR-South both use IR sync path
+    if(a.group==='IR-North'||a.group==='IR-South') _syncHolIRDates(a.physId, a.dates, a.defName);
     if(a.group==='DR') _syncHolDRDates(a.physId, a.dates, a.defName);
   });
 
