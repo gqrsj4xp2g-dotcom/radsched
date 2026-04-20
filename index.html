@@ -365,6 +365,10 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('site-slots',this)">DR Site Slots</div>
       <div class="snav-item admin-only" onclick="nav('ir-slots',this)">IR Call Slots</div>
       <div class="snav-item admin-only" onclick="nav('ir-shift-slots',this)">IR Shift Slots</div>
+      <div class="snav-sect su-only" style="color:#a855f7">⚡ Superuser</div>
+      <div class="snav-item su-only" onclick="nav('su-dashboard',this)" style="color:#a855f7">Cross-Practice Dashboard</div>
+      <div class="snav-item su-only" onclick="nav('su-practices',this)" style="color:#a855f7">All Practices</div>
+      <div class="snav-item su-only" onclick="nav('su-users',this)" style="color:#a855f7">Global User Directory</div>
     </nav>
 
     <main class="main" id="main-content">
@@ -463,16 +467,24 @@ tbody tr:hover{background:var(--bg3)}
 <!-- COMMUNICATION PREFERENCES (user-accessible) -->
 <div id="page-comm-prefs" class="page">
   <div class="pg-title">🔔 Notification Preferences</div>
-  <div class="pg-sub">Choose which notifications you'd like to receive by email. Notifications are sent to your registered email address.</div>
+  <div class="pg-sub">Choose which notifications you'd like to receive by email. Set a delivery email below if your login email isn't a real inbox.</div>
 
   <div class="card" style="margin-bottom:12px">
     <div class="card-title">Delivery Address</div>
-    <div class="fg" style="margin:0">
-      <label>Email</label>
+    <div class="fg" style="margin-bottom:8px">
+      <label>Login email <span style="font-weight:400;color:var(--txt3);font-size:10px">(used for sign-in only)</span></label>
       <input id="cp-email" type="email" readonly style="background:var(--bg3);color:var(--txt2);font-family:monospace;font-size:12px">
     </div>
-    <div class="note ni" style="font-size:11px;margin-top:6px">
-      To change your email, contact an administrator. Email is tied to your login account.
+    <div class="fg" style="margin:0">
+      <label>📬 Delivery email <span style="font-weight:400;color:var(--txt3);font-size:10px">(where alerts actually go — edit freely)</span></label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="cp-notify-email" type="email" placeholder="your.real.email@gmail.com" style="flex:1;font-family:monospace;font-size:12px">
+        <button class="bp bsm" onclick="saveDeliveryEmail()">Save</button>
+      </div>
+    </div>
+    <div class="note ni" style="font-size:11px;margin-top:8px;line-height:1.5">
+      If left blank, alerts go to your login email. Use this field if your login email isn't a real inbox
+      (e.g., <code>admin@rad.com</code>) — set this to your personal or work email (like Gmail) to actually receive alerts.
     </div>
   </div>
 
@@ -512,6 +524,16 @@ tbody tr:hover{background:var(--bg3)}
   <div class="card">
     <div class="card-title">Admin Announcements</div>
     <label class="cp-row"><input type="checkbox" id="cp-broadcast" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Practice-wide announcements</div><div class="cp-desc">Email broadcasts sent by administrators. Recommended: keep enabled.</div></div></label>
+  </div>
+
+  <div class="card" style="border:1px dashed var(--bdr2)">
+    <div class="card-title">🧪 Test Delivery</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:8px">
+      Click this to send yourself a test email and confirm that notifications are wired up end-to-end.
+      If nothing arrives, check the browser console (F12) and your spam folder.
+    </div>
+    <button class="bt bsm" onclick="sendTestNotification()">📧 Send Test Email to Me</button>
+    <span id="cp-test-status" style="font-size:11px;margin-left:10px"></span>
   </div>
 
   <div id="cp-status" style="margin-top:10px;font-size:11px;color:var(--txt3)"></div>
@@ -2018,6 +2040,23 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div class="card-title">Weekend Call Needs by Subspecialty (per month)</div>
         <div id="wknd-needs"></div>
       </div>
+      <div class="card" style="border:1px dashed var(--bdr2)">
+        <div class="card-title">📬 Admin Alert Inbox</div>
+        <div class="note ni" style="font-size:11px;margin-bottom:8px;line-height:1.55">
+          A single email address that gets <strong>CC'd on every outgoing notification</strong>
+          (chat, swap, shift assignment, holiday, broadcast). Useful when you want an audit trail
+          in a monitored inbox, or when admin accounts don't have real email addresses.
+          Leave blank to disable.
+        </div>
+        <div class="fg" style="margin:0">
+          <label>Email address</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="cfg-admin-inbox" type="email" placeholder="alerts@yourpractice.com" style="flex:1;font-family:monospace;font-size:12px">
+            <button class="bp bsm" onclick="saveAdminInbox()">Save</button>
+          </div>
+        </div>
+        <div id="cfg-admin-inbox-status" style="font-size:11px;margin-top:6px"></div>
+      </div>
     </div>
   </div>
 
@@ -2289,8 +2328,13 @@ let _ROW_ID='main';          // set at login to the user's practiceId
 
 // Supabase functions defined in SUPABASE SETTINGS section below
 
+// Superuser check — superusers have cross-practice authority and all admin privileges
+function _isSU(){ return CU?.role==='superuser'; }
+// Admin OR superuser — for UI gating and internal permission checks
+function _isAdminOrSU(){ return CU?.role==='admin'||CU?.role==='superuser'; }
+
 function _adminOnly(action){
-  if(CU?.role!=='admin'){alert('Only administrators can '+action+'.');return false;}
+  if(!_isAdminOrSU()){alert('Only administrators can '+action+'.');return false;}
   return true;
 }
 
@@ -2403,6 +2447,7 @@ function clearAllData(){
   S.swapRequests=[];S.nextId=200;
   USERS.length=0;
   USERS.push(
+    {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
     {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
     {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
     {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
@@ -2433,6 +2478,7 @@ const ADMIN_CODE = 'RAD2025';
 let _regRole = 'user';
 
 let USERS = /*USERS_START*/[
+  {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
   {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
   {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
   {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
@@ -2528,7 +2574,8 @@ function _hydrateUserFromSession(sbUser){
     u={id:sbUser.id,email,pw:'',role:meta.role||'user',practiceId:meta.practiceId||'main',
       first:meta.first||email.split('@')[0],last:meta.last||'',
       physId:metaPhysId,
-      joined:meta.joined||new Date().toISOString().slice(0,10)};
+      joined:meta.joined||new Date().toISOString().slice(0,10),
+      notifPrefs:{master:true,chatDM:true,chatGroup:false,chatMention:true,swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,holiday:true,vacation:true,openShift:false,broadcast:true}};
     USERS.push(u);
   } else {
     // Sync authoritative fields from Supabase metadata
@@ -2590,7 +2637,8 @@ async function doRegister(){
   if(!sb){
     // Fallback: local registration
     if(USERS.find(x=>x.email===email)){showErr('An account with this email already exists.');if(btn)btn.textContent='Create Account';return;}
-    const nu={id:'u'+Date.now(),email,pw,role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10)};
+    const nu={id:'u'+Date.now(),email,pw,role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10),
+      notifPrefs:{master:true,chatDM:true,chatGroup:false,chatMention:true,swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,holiday:true,vacation:true,openShift:false,broadcast:true}};
     USERS.push(nu); CU=nu; if(btn)btn.textContent='Create Account'; launchApp(); return;
   }
   try{
@@ -2647,9 +2695,14 @@ async function launchApp(){
   try{
     document.getElementById('auth').style.display='none';
     document.getElementById('app').style.display='flex';
-    const adm=CU.role==='admin';
+    const isSU = CU.role==='superuser';
+    const adm = CU.role==='admin' || isSU;  // superusers get all admin UI + more
   document.getElementById('tb-nm').textContent=CU.first+' '+CU.last;
-  document.getElementById('tb-rl').textContent=adm?'Administrator':'Physician / User';
+  document.getElementById('tb-rl').textContent=isSU?'Superuser (all practices)':adm?'Administrator':'Physician / User';
+  // Show the superuser section in the sidebar only for superusers
+  document.querySelectorAll('.su-only').forEach(el=>{
+    el.style.display = isSU ? '' : 'none';
+  });
   const tbPrac=document.getElementById('tb-practice');
   // Preliminary label using just the practice ID until _PRACTICES is loaded from DB (below);
   // then we re-label with the proper practice name. Prevents "RadScheduler" placeholder flicker.
@@ -3442,9 +3495,14 @@ function ancBar(pct){
 function nav(pg,el){
   // Role gate: admin-only pages are inaccessible to non-admins (UI defense in depth; DB access
   // should still be controlled at the auth layer for a true guarantee).
+  // Superusers pass the admin gate; superuser-only pages are further restricted below.
   const pageEl=document.getElementById('page-'+pg);
-  if(pageEl && pageEl.classList.contains('admin-only') && CU?.role!=='admin'){
+  if(pageEl && pageEl.classList.contains('admin-only') && !_isAdminOrSU()){
     alert('That page is restricted to administrators.');
+    return;
+  }
+  if(pageEl && pageEl.classList.contains('su-only') && !_isSU()){
+    alert('That page is restricted to superusers.');
     return;
   }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
@@ -3718,17 +3776,49 @@ function renderUserMgmt(){
   const lm=document.getElementById('lm-phys');
   if(lm) lm.innerHTML=physOpts;
 
-  document.getElementById('user-mgmt-list').innerHTML='<div class="card"><div class="card-title">Registered Users ('+USERS.length+')</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked Physician</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+
-  USERS.map(u=>{const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
-    return`<tr><td>${u.first} ${u.last}</td><td style="font-size:11px">${u.email}</td>
+  document.getElementById('user-mgmt-list').innerHTML='<div class="card"><div class="card-title">Registered Users ('+USERS.length+')</div>'+
+    '<div class="note ni" style="font-size:11px;margin-bottom:10px">📬 <strong>Delivery Email</strong> is where notifications actually go. Leave blank to use the login email. Click a row\'s delivery email to edit it.</div>'+
+    '<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Login Email</th><th>📬 Delivery Email</th><th>Role</th><th>Linked Physician</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+
+  USERS.map(u=>{
+    const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
+    const deliveryAddr = u.notifyEmail || '';
+    const addrDisplay = deliveryAddr
+      ? `<span style="font-family:monospace;font-size:11px;color:var(--green-t)">${escHtml(deliveryAddr)}</span>`
+      : `<span style="font-size:11px;color:var(--txt3);font-style:italic">→ login email</span>`;
+    const placeholderWarn = _looksPlaceholder(u.notifyEmail||u.email||'')
+      ? ` <span title="This address looks like a placeholder and will be skipped" style="color:var(--amber-t)">⚠</span>` : '';
+    return`<tr><td>${escHtml(u.first||'')} ${escHtml(u.last||'')}</td><td style="font-size:11px">${escHtml(u.email||'')}</td>
+    <td>${addrDisplay}${placeholderWarn} <button class="bxs" title="Edit delivery email" onclick="openDeliveryEmailEditor('${u.id}')">✎</button></td>
     <td><span class="tag ${u.role==='admin'?'tnv':''}">${u.role}</span></td>
     <td>${p?p.last+', '+p.first:'<span style="color:var(--txt3)">—</span>'}</td>
-    <td style="font-size:11px;color:var(--txt3)">${u.joined}</td>
+    <td style="font-size:11px;color:var(--txt3)">${u.joined||''}</td>
     <td style="display:flex;gap:4px">
       <button class="bxs" onclick="openLinkModal('${u.id}')">Link</button>
       <button class="bxs" onclick="toggleRole('${u.id}')">${u.role==='admin'?'↓User':'↑Admin'}</button>
       ${u.id!==CU?.id?`<button class="br bxs" onclick="delUser('${u.id}')">Del</button>`:''}
     </td></tr>`;}).join('')+'</tbody></table></div></div>';
+}
+
+// Admin helper: edit another user's delivery email (the address where their notifications go)
+function openDeliveryEmailEditor(uid){
+  if(!_adminOnly('edit delivery email')) return;
+  const u=USERS.find(x=>x.id===uid);
+  if(!u) return;
+  const current = u.notifyEmail || '';
+  const label = `${u.first||''} ${u.last||''}`.trim() || u.email;
+  const prompt_msg = `Set delivery email for ${label}\n\nNotifications will be sent to this address. Leave blank to use their login email (${u.email}).`;
+  const v = prompt(prompt_msg, current);
+  if(v===null) return; // user cancelled
+  const val = v.trim().toLowerCase();
+  if(val && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val)){
+    alert('Invalid email format.');
+    return;
+  }
+  u.notifyEmail = val || null;
+  // If the current user is editing themselves, sync CU too
+  if(CU?.id===uid) CU.notifyEmail = u.notifyEmail;
+  triggerSave();
+  renderUserMgmt();
 }
 
 function toggleRole(uid){if(!_adminOnly('change roles'))return;const u=USERS.find(x=>x.id===uid);if(!u||u.id===CU?.id)return;u.role=u.role==='admin'?'user':'admin';triggerSave();renderUserMgmt();_updateUserAuthMeta(u.id,{role:u.role}).catch(()=>{});}
@@ -6899,9 +6989,35 @@ function renderSettings(){
     const el=document.getElementById(id);
     if(el) el.value=S.cfg[k]??S.cfg.irMax??0;
   });
+  // Admin alert inbox
+  const inboxEl=document.getElementById('cfg-admin-inbox');
+  if(inboxEl) inboxEl.value = S.cfg?.adminAlertEmail || '';
+  const inboxStatus=document.getElementById('cfg-admin-inbox-status');
+  if(inboxStatus) inboxStatus.textContent='';
   renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
   renderNatLangRules();
   if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
+}
+
+function saveAdminInbox(){
+  if(!_adminOnly('change admin alert inbox')) return;
+  const el=document.getElementById('cfg-admin-inbox');
+  const val=(el?.value||'').trim().toLowerCase();
+  const statusEl=document.getElementById('cfg-admin-inbox-status');
+  if(val && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val)){
+    if(statusEl){statusEl.textContent='✕ Invalid email format.';statusEl.style.color='var(--red-t)';}
+    return;
+  }
+  if(!S.cfg) S.cfg={};
+  S.cfg.adminAlertEmail = val || null;
+  triggerSave();
+  if(statusEl){
+    statusEl.textContent = val
+      ? `✓ All outgoing alerts will now also be CC'd to ${val}`
+      : '✓ Admin alert inbox cleared';
+    statusEl.style.color='var(--green-t)';
+    setTimeout(()=>{if(statusEl) statusEl.textContent='';}, 4000);
+  }
 }
 
 // Render the natural-language rules list in Settings
@@ -7426,36 +7542,116 @@ async function adminCreateAccount(){
   const email=(document.getElementById('ca-email')?.value||'').trim().toLowerCase();
   const pw=document.getElementById('ca-pw')?.value||'';
   const role=document.getElementById('ca-role')?.value||'user';
-  // Basic email shape check (Supabase will also validate)
+  const msgEl=document.getElementById('ca-msg');
+  const setMsg=(html)=>{if(msgEl) msgEl.innerHTML=html;};
+
+  // Basic email shape check
   if(email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
-    const msgElPre=document.getElementById('ca-msg');
-    if(msgElPre)msgElPre.innerHTML='<span style="color:var(--red-t)">Invalid email format.</span>';
+    setMsg('<span style="color:var(--red-t)">Invalid email format.</span>');
     return;
   }
   const physId=parseInt(document.getElementById('ca-phys')?.value)||null;
-  const msgEl=document.getElementById('ca-msg');
-  if(!first||!last||!email||!pw){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">All fields required.</span>';return;}
-  if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Creating…</span>';
+  if(!first||!last||!email||!pw){
+    setMsg('<span style="color:var(--red-t)">All fields required.</span>');
+    return;
+  }
+  if(pw.length<8){
+    setMsg('<span style="color:var(--red-t)">Password must be at least 8 characters.</span>');
+    return;
+  }
+  if(USERS.find(u=>(u.email||'').toLowerCase()===email)){
+    setMsg('<span style="color:var(--red-t)">A user with that email already exists in this practice.</span>');
+    return;
+  }
+
+  const defaultPrefs={master:true,chatDM:true,chatGroup:false,chatMention:true,
+    swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,
+    holiday:true,vacation:true,openShift:false,broadcast:true};
+
+  // If Supabase isn't configured, fall back to a local-only account so the
+  // admin can at least roster the user. They won't be able to log in remotely
+  // until Supabase is wired up, but the local record exists.
+  const sb=_initAuthClient();
+  if(!sb){
+    setMsg('<span style="color:var(--amber,#d97706)">Supabase not configured — created as a local-only account.</span>');
+    const localUser={
+      id:'u'+Date.now(), email, first, last, role, physId,
+      practiceId:_PRACTICE_ID||'main',
+      joined:new Date().toISOString().slice(0,10),
+      notifPrefs:{...defaultPrefs}
+    };
+    USERS.push(localUser);
+    triggerSave();
+    renderUserMgmt();
+    return;
+  }
+
+  setMsg('<span style="color:var(--txt2)">Creating…</span>');
   try{
-    const sb=_initAuthClient();if(!sb)throw new Error('Supabase not configured');
     const {data:{session}}=await sb.auth.getSession();
-    if(!session?.access_token) throw new Error('Not authenticated');
+    if(!session?.access_token){
+      throw new Error('Your admin session has expired. Sign out and sign back in, then try again.');
+    }
     const url=_getUrl();
     const res=await fetch(`${url}/functions/v1/create-user`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+session.access_token,
+        'apikey':_getKey()
+      },
       body:JSON.stringify({action:'create',email,password:pw,first,last,role,physId,practiceId:_PRACTICE_ID||'main'})
     });
-    const body=await res.json();
-    if(!res.ok||body.error) throw new Error(body.error||'Failed');
+
+    // Parse response safely — some error modes return HTML/empty body
+    let body={};
+    try{ body=await res.json(); }
+    catch(parseErr){
+      throw new Error(`Edge function returned invalid response (HTTP ${res.status}). Check that the 'create-user' edge function is deployed in your Supabase project.`);
+    }
+
+    if(!res.ok){
+      const errText = body?.error || body?.message || `HTTP ${res.status}`;
+      // Common specific errors
+      if(String(errText).toLowerCase().includes('already registered')||
+         String(errText).toLowerCase().includes('already exists')){
+        throw new Error(`That email (${email}) already has an account in Supabase Auth. Either use a different email or delete the existing one first.`);
+      }
+      if(res.status===404){
+        throw new Error(`Edge function 'create-user' not found (404). It needs to be deployed in your Supabase project.`);
+      }
+      if(res.status===401||res.status===403){
+        throw new Error(`Admin access denied by edge function (HTTP ${res.status}). Your account may not have service-role privileges.`);
+      }
+      throw new Error(errText);
+    }
+
+    // Edge function succeeded — validate the response shape
+    const newUserId = body.id || body.userId || body.user?.id;
+    if(!newUserId){
+      throw new Error(`Edge function returned success but no user id. Response: ${JSON.stringify(body).slice(0,200)}`);
+    }
+
     // Add to local USERS list
-    const newUser={id:body.id,email,first,last,role,physId,practiceId:_PRACTICE_ID||'main',joined:new Date().toISOString().slice(0,10)};
+    const newUser={
+      id:newUserId, email, first, last, role, physId,
+      practiceId:_PRACTICE_ID||'main',
+      joined:new Date().toISOString().slice(0,10),
+      notifPrefs:{...defaultPrefs}
+    };
     USERS.push(newUser);
     triggerSave();
-    if(msgEl)msgEl.innerHTML=`<span style="color:var(--green-t)">✓ Account created for ${escHtml(email)}</span>`;
+    setMsg(`<span style="color:var(--green-t)">✓ Account created for ${escHtml(email)}</span>`);
+
+    // Clear form for next entry
+    ['ca-first','ca-last','ca-email','ca-pw'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.value='';
+    });
+
     renderUserMgmt();
   }catch(e){
-    if(msgEl)msgEl.innerHTML=`<span style="color:var(--red-t)">Error: ${escHtml(e.message||'Unknown error')}</span>`;
+    console.error('[RS] adminCreateAccount error:', e);
+    setMsg(`<span style="color:var(--red-t)">Error: ${escHtml(e.message||String(e)||'Unknown error')}</span>`);
   }
 }
 
@@ -8893,6 +9089,30 @@ function _userForPhys(physId){
   return USERS.find(u=>u.physId===physId) || null;
 }
 
+// Resolve the actual inbox where notifications should go.
+// Priority: explicit notifyEmail override → login email → null
+function _deliveryEmail(u){
+  if(!u) return null;
+  const v = (u.notifyEmail||'').trim().toLowerCase();
+  if(v) return v;
+  const e = (u.email||'').trim().toLowerCase();
+  return e || null;
+}
+
+// Looks like an email placeholder that won't reach a real inbox
+// (e.g., @rad.com, @example.com, @test, @local). Purely heuristic.
+function _looksPlaceholder(email){
+  if(!email) return true;
+  const m = email.match(/@([^@]+)$/);
+  if(!m) return true;
+  const domain = m[1].toLowerCase();
+  const fakeDomains = ['rad.com','example.com','example.org','test','localhost','local','invalid','placeholder.com'];
+  if(fakeDomains.includes(domain)) return true;
+  // No TLD at all
+  if(!domain.includes('.')) return true;
+  return false;
+}
+
 /**
  * _notify(kind, opts)
  * Send an email notification to one or more users.
@@ -8907,10 +9127,13 @@ function _userForPhys(physId){
  *   skipPrefCheck?: bool    // only for internal use (e.g. test broadcasts)
  * }
  * Respects each recipient's notifPrefs[kind] AND notifPrefs.master.
- * Silently no-ops if Supabase not configured or edge function not deployed.
+ * Logs failures to console so setup issues are visible in F12 dev tools.
  */
 async function _notify(kind, opts){
-  if(!opts||!opts.subject||!opts.body) return;
+  if(!opts||!opts.subject||!opts.body){
+    console.warn('[RS notify] skip — missing subject/body', kind, opts);
+    return;
+  }
   // Collect target users
   const targetUsers = new Set();
   if(opts.userId){
@@ -8922,29 +9145,71 @@ async function _notify(kind, opts){
   (opts.physIds||[]).forEach(pid=>{const u=_userForPhys(pid); if(u) targetUsers.add(u);});
   (opts.userIds||[]).forEach(uid=>{const u=USERS.find(x=>x.id===uid); if(u) targetUsers.add(u);});
 
+  if(!targetUsers.size){
+    console.warn('[RS notify] no target users resolved', kind, opts);
+    return;
+  }
+
   // Filter by pref (unless skipPrefCheck)
-  const recipients=[...targetUsers].filter(u=>{
-    if(!u.email) return false;
+  const preFilter=[...targetUsers];
+  const recipients=preFilter.filter(u=>{
+    const addr = _deliveryEmail(u);
+    if(!addr){
+      console.warn('[RS notify] user has no delivery email', u.id, u.first, u.last);
+      return false;
+    }
+    if(_looksPlaceholder(addr)){
+      console.warn(`[RS notify] skip — address looks like a placeholder: ${addr} (user ${u.first||u.id}). Set a real delivery email in 🔔 Notifications.`);
+      return false;
+    }
     if(opts.skipPrefCheck) return true;
     const p=u.notifPrefs||_NOTIF_DEFAULTS;
-    if(!p.master) return false;
-    return p[kind]!==false;
+    if(!p.master){
+      console.info('[RS notify] skip — user disabled master switch:', addr);
+      return false;
+    }
+    if(p[kind]===false){
+      console.info(`[RS notify] skip — user opted out of ${kind}:`, addr);
+      return false;
+    }
+    return true;
   });
-  if(!recipients.length) return;
+  if(!recipients.length){
+    console.info('[RS notify] no recipients after pref filter', kind);
+    return;
+  }
 
   // Don't send notifications to oneself for chat/swap actions (user is the actor)
   if(CU && !opts.skipPrefCheck){
     const final=recipients.filter(u=>u.id!==CU.id);
     recipients.length=0; recipients.push(...final);
   }
-  if(!recipients.length) return;
+  if(!recipients.length){
+    console.info('[RS notify] all recipients were self — nothing to send', kind);
+    return;
+  }
 
-  // Dispatch via Supabase edge function. Gracefully degrade if not configured.
+  // Dispatch via Supabase edge function
+  const url = (typeof _getUrl==='function')?_getUrl():'';
+  const key = (typeof _getKey==='function')?_getKey():'';
+  if(!url||!key){
+    console.warn('[RS notify] skip — Supabase not configured (no URL or key)');
+    return;
+  }
   try{
-    const url = (typeof _getUrl==='function')?_getUrl():'';
-    const key = (typeof _getKey==='function')?_getKey():'';
-    if(!url||!key) return; // no backend configured — silent no-op
-    await fetch(`${url}/functions/v1/send-notification`, {
+    // Map recipients with their resolved delivery address
+    const recipList = recipients.map(u=>({email:_deliveryEmail(u), name:`${u.first||''} ${u.last||''}`.trim()}));
+
+    // Admin alert inbox — a global CC address that gets a copy of every outgoing alert.
+    // Useful when no admin users have real email addresses set but you still want
+    // an audit trail / catch-all in a monitored inbox. Configured in Settings.
+    const adminInbox = (typeof S!=='undefined' && S?.cfg?.adminAlertEmail) ? String(S.cfg.adminAlertEmail).trim() : '';
+    if(adminInbox && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminInbox) &&
+       !recipList.some(r=>r.email===adminInbox.toLowerCase())){
+      recipList.push({email: adminInbox.toLowerCase(), name: 'Admin Alerts'});
+    }
+
+    const res = await fetch(`${url}/functions/v1/send-notification`, {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -8955,11 +9220,89 @@ async function _notify(kind, opts){
         kind,
         subject: opts.subject,
         body: opts.body,
-        recipients: recipients.map(u=>({email:u.email, name:`${u.first} ${u.last}`.trim()})),
+        recipients: recipList,
         from_practice: _PRACTICE_ID||'main'
       })
-    }).catch(()=>{/* network errors silenced — don't block user actions */});
-  }catch(e){ /* silent — notifications are best-effort */ }
+    });
+    if(!res.ok){
+      let errBody={};
+      try{errBody=await res.json();}catch(e){errBody={raw:await res.text().catch(()=>'')};}
+      console.error(`[RS notify] send-notification failed HTTP ${res.status}:`, errBody,
+        `\n→ Kind: ${kind} · Recipients: ${recipList.map(r=>r.email).join(', ')}`);
+      return {ok:false, status:res.status, error:errBody};
+    }
+    const body=await res.json().catch(()=>({}));
+    console.info(`[RS notify] ✓ sent "${opts.subject}" to ${recipList.length} recipient(s):`,
+      recipList.map(r=>r.email).join(', '));
+    return {ok:true, result:body};
+  }catch(e){
+    console.error('[RS notify] network error calling send-notification:', e.message||e);
+    return {ok:false, error:e.message||String(e)};
+  }
+}
+
+// Send a test email to the current user. Surfaces any config/setup error clearly.
+async function sendTestNotification(){
+  const statusEl = document.getElementById('cp-test-status');
+  const setStatus = (msg, color='var(--txt3)') => {
+    if(statusEl){ statusEl.innerHTML = msg; statusEl.style.color = color; }
+  };
+  const deliveryAddr = _deliveryEmail(CU);
+  if(!deliveryAddr){
+    setStatus('✕ No delivery email set. Enter one above and click Save first.', 'var(--red-t)');
+    return;
+  }
+  if(_looksPlaceholder(deliveryAddr)){
+    setStatus(`✕ Your delivery email (${escHtml(deliveryAddr)}) looks like a placeholder — set a real inbox above first.`, 'var(--red-t)');
+    return;
+  }
+  const url = _getUrl(), key = _getKey();
+  if(!url || !key){
+    setStatus('✕ Supabase is not configured (see Settings → Supabase).', 'var(--red-t)');
+    return;
+  }
+  setStatus('Sending test email to '+deliveryAddr+'…');
+  try{
+    const res = await fetch(`${url}/functions/v1/send-notification`, {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':key,
+        'Authorization':`Bearer ${key}`
+      },
+      body: JSON.stringify({
+        kind: 'test',
+        subject: 'RadScheduler notification test',
+        body: `Hello ${CU.first||''},\n\nThis is a test notification from RadScheduler confirming that email delivery is working for your account.\n\nYou can adjust which notifications you receive in RadScheduler → 🔔 Notifications.\n\nIf you didn't expect this email, you can ignore it.`,
+        recipients: [{email: deliveryAddr, name: `${CU.first||''} ${CU.last||''}`.trim()}],
+        from_practice: _PRACTICE_ID||'main'
+      })
+    });
+
+    if(!res.ok){
+      let errBody={};
+      try{errBody=await res.json();}catch(e){errBody={raw:await res.text().catch(()=>'')};}
+      console.error('[RS test-notify] HTTP '+res.status, errBody);
+      if(res.status===404){
+        setStatus(`✕ Edge function <code>send-notification</code> not deployed. See Broadcast Email page for setup instructions.`, 'var(--red-t)');
+      } else if(res.status===401||res.status===403){
+        setStatus(`✕ Auth rejected (HTTP ${res.status}). Check Supabase anon key and function's verify_jwt setting.`, 'var(--red-t)');
+      } else if(res.status===500){
+        const em = errBody?.error || errBody?.message || errBody?.raw || `HTTP 500`;
+        setStatus(`✕ Edge function error: ${escHtml(String(em).slice(0,200))}`, 'var(--red-t)');
+      } else {
+        setStatus(`✕ HTTP ${res.status}: ${escHtml(JSON.stringify(errBody).slice(0,200))}`, 'var(--red-t)');
+      }
+      return;
+    }
+
+    const body=await res.json().catch(()=>({}));
+    setStatus(`✓ Test sent to ${escHtml(deliveryAddr)}. If nothing arrives in 1–2 min, check spam and the Supabase edge function logs.`, 'var(--green-t)');
+    console.info('[RS test-notify] ✓', body);
+  }catch(e){
+    console.error('[RS test-notify] network error:', e);
+    setStatus(`✕ Network error: ${escHtml(e.message||String(e))}`, 'var(--red-t)');
+  }
 }
 
 // Convenience: mention detection for chat (matches @FirstName or @Last)
@@ -8981,6 +9324,8 @@ function renderCommPrefs(){
   if(!CU) return;
   const emailEl = document.getElementById('cp-email');
   if(emailEl) emailEl.value = CU.email || '(no email on file)';
+  const notifEl = document.getElementById('cp-notify-email');
+  if(notifEl) notifEl.value = CU.notifyEmail || '';
   const prefs = CU.notifPrefs || {..._NOTIF_DEFAULTS};
   const map = {
     'cp-master':'master','cp-chatDM':'chatDM','cp-chatGroup':'chatGroup','cp-chatMention':'chatMention',
@@ -8994,6 +9339,26 @@ function renderCommPrefs(){
   });
   const st=document.getElementById('cp-status');
   if(st) st.textContent='';
+}
+
+function saveDeliveryEmail(){
+  if(!CU) return;
+  const el = document.getElementById('cp-notify-email');
+  const val = (el?.value||'').trim().toLowerCase();
+  const st  = document.getElementById('cp-status');
+  if(val && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val)){
+    if(st){ st.textContent='✕ Invalid email format.'; st.style.color='var(--red-t)'; }
+    return;
+  }
+  CU.notifyEmail = val || null;
+  const u=USERS.find(x=>x.id===CU.id);
+  if(u) u.notifyEmail = CU.notifyEmail;
+  triggerSave();
+  if(st){
+    st.textContent = val ? `✓ Alerts will now be sent to ${val}` : '✓ Delivery email cleared — using login email';
+    st.style.color = 'var(--green-t)';
+    setTimeout(()=>{if(st) st.textContent='';}, 4000);
+  }
 }
 
 function saveCommPrefs(){
@@ -9048,13 +9413,20 @@ function updateBroadcastPreview(){
   const prev = document.getElementById('bc-preview'); if(!prev) return;
   const all = _broadcastAudience();
   const optedIn = all.filter(u=>{
+    const addr = _deliveryEmail(u);
+    if(!addr || _looksPlaceholder(addr)) return false;
     const p=u.notifPrefs||_NOTIF_DEFAULTS;
     return p.master!==false && p.broadcast!==false;
   });
-  const optedOut = all.length - optedIn.length;
-  prev.innerHTML = `<strong>${optedIn.length}</strong> recipient(s) will receive this`
-    + (optedOut>0 ? ` &middot; ${optedOut} opted out of announcements` : '')
-    + (all.length===0 ? ' — no matching users in this practice.' : '');
+  const noEmail = all.filter(u=>{
+    const addr = _deliveryEmail(u);
+    return !addr || _looksPlaceholder(addr);
+  }).length;
+  const optedOut = all.length - optedIn.length - noEmail;
+  const parts = [`<strong>${optedIn.length}</strong> recipient(s) will receive this`];
+  if(optedOut>0) parts.push(`${optedOut} opted out`);
+  if(noEmail>0)  parts.push(`${noEmail} without a valid delivery email`);
+  prev.innerHTML = parts.join(' &middot; ') + (all.length===0 ? ' — no matching users in this practice.' : '');
 }
 
 function renderBroadcast(){
@@ -9093,24 +9465,33 @@ async function sendBroadcast(){
 
   const allTargets=_broadcastAudience();
   const recipients=allTargets.filter(u=>{
-    if(!u.email) return false;
+    const addr = _deliveryEmail(u);
+    if(!addr || _looksPlaceholder(addr)) return false;
     const p=u.notifPrefs||_NOTIF_DEFAULTS;
     return p.master!==false && p.broadcast!==false;
   });
-  if(!recipients.length){alert('No recipients in the selected audience (either empty, all opted out, or missing emails).');return;}
+  if(!recipients.length){alert('No recipients in the selected audience (either empty, all opted out, or missing valid delivery emails).');return;}
   if(!confirm(`Send this email to ${recipients.length} recipient(s)?`)) return;
 
   if(statusEl){statusEl.textContent='Sending…';statusEl.style.color='var(--txt3)';}
   try{
     const url=_getUrl(), key=_getKey();
     if(!url||!key) throw new Error('Supabase not configured — cannot send email.');
+    // Build recipient list using delivery emails
+    const recipList = recipients.map(u=>({email:_deliveryEmail(u), name:`${u.first||''} ${u.last||''}`.trim()}));
+    // CC the admin alert inbox if configured
+    const adminInbox = (S?.cfg?.adminAlertEmail||'').trim().toLowerCase();
+    if(adminInbox && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminInbox) &&
+       !recipList.some(r=>r.email===adminInbox)){
+      recipList.push({email: adminInbox, name: 'Admin Alerts'});
+    }
     const res=await fetch(`${url}/functions/v1/send-notification`,{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
       body:JSON.stringify({
         kind:'broadcast',
         subject, body,
-        recipients: recipients.map(u=>({email:u.email,name:`${u.first} ${u.last}`.trim()})),
+        recipients: recipList,
         from_practice:_PRACTICE_ID||'main'
       })
     });
@@ -9140,7 +9521,9 @@ async function sendBroadcastTest(){
   const subject=document.getElementById('bc-subject')?.value.trim()||'[TEST] Broadcast preview';
   const body   =document.getElementById('bc-body')?.value.trim()||'(empty body)';
   const statusEl=document.getElementById('bc-status');
-  if(!CU?.email){alert('No email on file for your account.');return;}
+  const deliveryAddr = _deliveryEmail(CU);
+  if(!deliveryAddr){alert('No delivery email set for your account. Visit 🔔 Notifications to set one.');return;}
+  if(_looksPlaceholder(deliveryAddr)){alert(`Your delivery email (${deliveryAddr}) looks like a placeholder. Set a real inbox in 🔔 Notifications first.`);return;}
   if(statusEl){statusEl.textContent='Sending test…';statusEl.style.color='var(--txt3)';}
   try{
     const url=_getUrl(), key=_getKey();
@@ -9151,7 +9534,7 @@ async function sendBroadcastTest(){
       body:JSON.stringify({
         kind:'broadcast-test',
         subject:'[TEST] '+subject, body,
-        recipients:[{email:CU.email, name:`${CU.first} ${CU.last}`.trim()}],
+        recipients:[{email:deliveryAddr, name:`${CU.first||''} ${CU.last||''}`.trim()}],
         from_practice:_PRACTICE_ID||'main'
       })
     });
@@ -9159,7 +9542,7 @@ async function sendBroadcastTest(){
       const err=await res.json().catch(()=>({}));
       throw new Error(err.error||`HTTP ${res.status}`);
     }
-    if(statusEl){statusEl.textContent='✓ Test sent to '+CU.email;statusEl.style.color='var(--green-t)';}
+    if(statusEl){statusEl.textContent='✓ Test sent to '+deliveryAddr;statusEl.style.color='var(--green-t)';}
   }catch(e){
     if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--red-t)';}
   }
