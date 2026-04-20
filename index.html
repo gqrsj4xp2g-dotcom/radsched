@@ -590,66 +590,11 @@ tbody tr:hover{background:var(--bg3)}
         </li>
         <li>Deploy the function.</li>
       </ol>
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">Deno source code:</div>
-      <pre style="background:var(--navy3);color:#e2e8f0;border-radius:var(--r);padding:10px 12px;font-size:10.5px;overflow-x:auto;white-space:pre;line-height:1.5">import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const RESEND_KEY = Deno.env.get("RESEND_API_KEY");
-const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "noreply@example.com";
-const FROM_NAME  = Deno.env.get("FROM_NAME")  || "RadScheduler";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  try {
-    if (!RESEND_KEY) throw new Error("RESEND_API_KEY not configured");
-    const { subject, body, recipients, kind, from_practice } = await req.json();
-    if (!subject || !body || !Array.isArray(recipients) || !recipients.length)
-      throw new Error("subject, body, and recipients[] required");
-
-    // Simple markdown → HTML transform (bold, italic, line breaks)
-    const html = body
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/\*\*([^*]+)\*\*/g, "&lt;strong&gt;$1&lt;/strong&gt;")
-      .replace(/\*([^*]+)\*/g, "&lt;em&gt;$1&lt;/em&gt;")
-      .replace(/\n/g, "&lt;br&gt;");
-
-    const unsubNote =
-      kind === "broadcast" || kind === "broadcast-test"
-        ? '&lt;hr style="margin-top:24px"&gt;&lt;p style="font-size:11px;color:#999"&gt;You received this because broadcast notifications are enabled on your account. Manage preferences in RadScheduler → Notifications.&lt;/p&gt;'
-        : "";
-
-    // Send to each recipient individually (Resend batch is also fine but keeps each delivery atomic)
-    const results = [];
-    for (const r of recipients) {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${RESEND_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: `${FROM_NAME} &lt;${FROM_EMAIL}&gt;`,
-          to: [r.email],
-          subject,
-          html: `&lt;div style="font-family:system-ui,-apple-system,sans-serif;max-width:600px"&gt;${html}${unsubNote}&lt;/div&gt;`,
-        }),
-      });
-      results.push({ email: r.email, ok: res.ok, status: res.status });
-    }
-    return new Response(JSON.stringify({ ok: true, sent: results.length, results }), {
-      headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: String(e.message || e) }), {
-      status: 500, headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  }
-});</pre>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:11px;color:var(--txt3)">Deno source code:</div>
+        <button class="bp bsm" onclick="copyEdgeFuncCode('send-notification', this)">📋 Copy code</button>
+      </div>
+      <pre id="ef-send-notification-code" style="background:var(--navy3);color:#e2e8f0;border-radius:var(--r);padding:10px 12px;font-size:10.5px;overflow-x:auto;white-space:pre;line-height:1.5;max-height:380px;overflow-y:auto">Loading…</pre>
       <div style="font-size:11px;color:var(--txt3);margin-top:10px;padding:8px;background:var(--amber-bg,#fffbeb);border-radius:var(--r)">
         <strong>💡 Tip:</strong> Once deployed, notifications from chat, swaps, and schedule changes will start flowing automatically — each gated by the recipient's preferences. If the function isn't deployed, the app still works; notifications just silently skip.
       </div>
@@ -1825,6 +1770,91 @@ serve(async (req) => {
   </div>
 
   <div id="user-mgmt-list"></div>
+
+  <details style="margin-top:14px">
+    <summary style="font-size:12px;font-weight:700;cursor:pointer;color:var(--txt2);padding:8px 12px;background:var(--bg3);border-radius:var(--r)">▶ One-time setup: deploy the create-user edge function</summary>
+    <div style="margin-top:10px;padding:12px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r)">
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
+        To create physician accounts directly (so they can log in without self-registering),
+        you need a Supabase Edge Function with admin privileges. This function runs with the
+        <strong>service role key</strong> so it can create auth users on your behalf, and verifies
+        the caller is an admin before doing so.
+      </div>
+      <div style="background:var(--amber-bg,#fffbeb);border:1px solid #fde68a;color:var(--amber-t,#92400e);padding:8px 10px;border-radius:var(--r);font-size:11px;margin-bottom:10px;line-height:1.55">
+        <strong>⚠ Security:</strong> This function uses your service role key, which bypasses
+        Row-Level Security. The function verifies the caller is an admin by checking Supabase Auth
+        user metadata (<code>role: 'admin'</code>) before performing any admin action. Never expose
+        the service role key in the browser — it only lives as a secret on the edge function.
+      </div>
+      <ol style="font-size:12px;color:var(--txt2);line-height:1.8;padding-left:20px;margin-bottom:10px">
+        <li>In your Supabase dashboard → <strong>Edge Functions</strong> → <strong>Create function</strong> → name it <code>create-user</code>.</li>
+        <li>Paste the Deno code below into the function editor.</li>
+        <li>In the function's <strong>Secrets</strong> settings, add:
+          <ul style="margin-top:4px">
+            <li><code>SUPABASE_SERVICE_ROLE_KEY</code> = your project's service role key<br>
+              <span style="font-size:10.5px;color:var(--txt3)">(Found in Project Settings → API → service_role secret — the one marked "secret")</span></li>
+          </ul>
+        </li>
+        <li>In function settings, ensure <strong>verify_jwt</strong> is enabled (default).</li>
+        <li>Deploy the function.</li>
+        <li>Make sure your own admin account in Supabase Auth has <code>role: 'admin'</code> in its user_metadata. If you're not sure, expand the "Bootstrap first admin" section below after deploying.</li>
+      </ol>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:11px;color:var(--txt3)">Deno source code:</div>
+        <button class="bp bsm" onclick="copyEdgeFuncCode('create-user', this)">📋 Copy code</button>
+      </div>
+      <pre id="ef-create-user-code" style="background:var(--navy3);color:#e2e8f0;border-radius:var(--r);padding:10px 12px;font-size:10.5px;overflow-x:auto;white-space:pre;line-height:1.5;max-height:380px;overflow-y:auto">Loading…</pre>
+      <div style="font-size:11px;color:var(--txt3);margin-top:10px;padding:8px;background:var(--green-bg,#ecfdf5);border:1px solid #a7f3d0;border-radius:var(--r);color:var(--green-t,#065f46)">
+        <strong>💡 After deploying:</strong> the "Create Physician Account" form above will work. Any error returned now includes a specific reason (caller not admin, email already registered, password too short, etc.) instead of the generic "Failed".
+      </div>
+    </div>
+  </details>
+
+  <details style="margin-top:10px">
+    <summary style="font-size:12px;font-weight:700;cursor:pointer;color:var(--txt2);padding:8px 12px;background:var(--bg3);border-radius:var(--r)">▶ Bootstrap first admin — grant yourself admin role in Supabase Auth</summary>
+    <div style="margin-top:10px;padding:12px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r)">
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
+        If you're seeing <code>HTTP 403: Caller is not an admin</code> when creating users, your
+        Supabase Auth user is missing the <code>role: 'admin'</code> tag in its user_metadata.
+        The app's local USERS array says you're an admin, but Supabase Auth doesn't know that.
+        Fix it in one of three ways:
+      </div>
+
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
+        <strong>Method A — Supabase dashboard (easiest, ~30 seconds):</strong>
+        <ol style="padding-left:20px;margin-top:4px">
+          <li>Go to Supabase dashboard → <strong>Authentication</strong> → <strong>Users</strong>.</li>
+          <li>Find your admin email, click the row.</li>
+          <li>Scroll down to <strong>User Metadata</strong> (or "Raw User Meta Data").</li>
+          <li>Edit the JSON to include <code>"role": "admin"</code>. Example:
+            <pre style="background:var(--navy3);color:#e2e8f0;padding:8px 10px;border-radius:var(--r);font-size:10.5px;margin-top:4px">{
+  "role": "admin",
+  "first": "Your",
+  "last": "Name"
+}</pre>
+          </li>
+          <li>Save. Then sign out of RadScheduler and sign back in so your new token carries the admin role.</li>
+        </ol>
+      </div>
+
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
+        <strong>Method B — SQL editor (if you have many admins):</strong>
+        <pre style="background:var(--navy3);color:#e2e8f0;padding:8px 10px;border-radius:var(--r);font-size:10.5px;overflow-x:auto">-- Run in Supabase → SQL Editor. Replace the email first.
+UPDATE auth.users
+SET raw_user_meta_data = raw_user_meta_data || '{"role":"admin"}'::jsonb
+WHERE email = 'your-admin@example.com';</pre>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">Then sign out and sign back in.</div>
+      </div>
+
+      <div style="font-size:12px;color:var(--txt2);line-height:1.65">
+        <strong>Method C — Temporary open-bootstrap endpoint:</strong> Modify the
+        <code>create-user</code> function to skip the admin check on a one-time call,
+        promote yourself, then restore the check. Only use this if Methods A and B aren't
+        available to you. Not recommended for production deployments.
+      </div>
+    </div>
+  </details>
 </div>
 
 <!-- FTE MONITOR -->
@@ -7623,10 +7653,13 @@ async function adminCreateAccount(){
         throw new Error(`That email (${email}) already has an account in Supabase Auth. Either use a different email or delete the existing one first.`);
       }
       if(res.status===404){
-        throw new Error(`Edge function 'create-user' not found (404). It needs to be deployed in your Supabase project.`);
+        throw new Error(`Edge function 'create-user' not found (404). Expand the "deploy the create-user edge function" section on this page for 6-step setup.`);
       }
-      if(res.status===401||res.status===403){
-        throw new Error(`Admin access denied by edge function (HTTP ${res.status}). Your account may not have service-role privileges.`);
+      if(res.status===401){
+        throw new Error(`Auth failed (401): your session token couldn't be verified. Sign out and sign back in, then retry. Full error: ${errText}`);
+      }
+      if(res.status===403){
+        throw new Error(`Your Supabase Auth account isn't tagged as admin (HTTP 403). Expand "Bootstrap first admin" below and follow Method A. Full error: ${errText}`);
       }
       // Generic case — include status + full body
       throw new Error(`${errText} (HTTP ${res.status}). Check browser console and Supabase → Edge Functions → create-user → Logs for details.`);
@@ -9075,6 +9108,243 @@ function clearAIChat(){
 
 function renderAIAgent(){
   // Nothing to pre-render — conversation is live
+}
+
+
+/* ═══════════════════════════════════════════════════
+   EDGE FUNCTION SOURCES — Deno/TypeScript code served to admins
+   as copyable text, with a Copy button. Strings are stored raw
+   so copy-paste preserves all characters (especially <, >, &).
+═══════════════════════════════════════════════════ */
+
+const _EDGE_FN_SOURCES = {
+  'send-notification': [
+    'import { serve } from "https://deno.land/std@0.168.0/http/server.ts";',
+    '',
+    'const RESEND_KEY = Deno.env.get("RESEND_API_KEY");',
+    'const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "onboarding@resend.dev";',
+    'const FROM_NAME  = Deno.env.get("FROM_NAME")  || "RadScheduler";',
+    '',
+    'const CORS = {',
+    '  "Access-Control-Allow-Origin": "*",',
+    '  "Access-Control-Allow-Methods": "POST, OPTIONS",',
+    '  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
+    '};',
+    '',
+    'function escapeHtml(s) {',
+    '  return String(s)',
+    '    .replace(/&/g, "&amp;")',
+    '    .replace(/</g, "&lt;")',
+    '    .replace(/>/g, "&gt;");',
+    '}',
+    '',
+    'serve(async (req) => {',
+    '  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });',
+    '  try {',
+    '    if (!RESEND_KEY) throw new Error("RESEND_API_KEY not configured in function secrets");',
+    '    const payload = await req.json();',
+    '    const { subject, body, recipients, kind } = payload;',
+    '    if (!subject || !body || !Array.isArray(recipients) || !recipients.length) {',
+    '      throw new Error("subject, body, and recipients[] required");',
+    '    }',
+    '',
+    '    // Simple markdown-to-HTML transform for line breaks, bold, italic.',
+    '    // Body is escaped first, then markers are reintroduced as real HTML tags.',
+    '    let html = escapeHtml(body)',
+    String.raw`      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")`,
+    String.raw`      .replace(/\*([^*]+)\*/g, "<em>$1</em>")`,
+    String.raw`      .replace(/\n/g, "<br>");`,
+    '',
+    '    const unsubNote = (kind === "broadcast" || kind === "broadcast-test")',
+    '      ? \'<hr style="margin-top:24px;border:none;border-top:1px solid #eee"><p style="font-size:11px;color:#999">You received this because broadcast notifications are enabled on your account. Manage preferences in RadScheduler → Notifications.</p>\'',
+    '      : "";',
+    '',
+    '    const htmlWrapped = \'<div style="font-family:system-ui,-apple-system,sans-serif;max-width:600px;line-height:1.6">\' + html + unsubNote + \'</div>\';',
+    '',
+    '    const results = [];',
+    '    for (const r of recipients) {',
+    '      if (!r || !r.email) { results.push({ ok:false, error:"missing email" }); continue; }',
+    '      const resp = await fetch("https://api.resend.com/emails", {',
+    '        method: "POST",',
+    '        headers: {',
+    '          "Authorization": "Bearer " + RESEND_KEY,',
+    '          "Content-Type": "application/json",',
+    '        },',
+    '        body: JSON.stringify({',
+    '          from: FROM_NAME + " <" + FROM_EMAIL + ">",',
+    '          to: [r.email],',
+    '          subject: subject,',
+    '          html: htmlWrapped,',
+    '        }),',
+    '      });',
+    '      const respBody = await resp.json().catch(() => ({}));',
+    '      results.push({ email: r.email, ok: resp.ok, status: resp.status, id: respBody.id, error: respBody.message });',
+    '    }',
+    '    return new Response(JSON.stringify({ ok: true, sent: results.length, results }), {',
+    '      headers: { ...CORS, "Content-Type": "application/json" },',
+    '    });',
+    '  } catch (e) {',
+    '    console.error("[send-notification] error:", e);',
+    '    return new Response(JSON.stringify({ error: String(e && e.message ? e.message : e) }), {',
+    '      status: 500,',
+    '      headers: { ...CORS, "Content-Type": "application/json" },',
+    '    });',
+    '  }',
+    '});',
+  ].join('\n'),
+
+  'create-user': [
+    'import { serve } from "https://deno.land/std@0.168.0/http/server.ts";',
+    'import { createClient } from "https://esm.sh/@supabase/supabase-js@2";',
+    '',
+    'const SUPABASE_URL = Deno.env.get("SUPABASE_URL");',
+    'const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");',
+    'const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");',
+    '',
+    'const CORS = {',
+    '  "Access-Control-Allow-Origin": "*",',
+    '  "Access-Control-Allow-Methods": "POST, OPTIONS",',
+    '  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
+    '};',
+    '',
+    'function json(body, status) {',
+    '  return new Response(JSON.stringify(body), {',
+    '    status: status || 200,',
+    '    headers: { ...CORS, "Content-Type": "application/json" },',
+    '  });',
+    '}',
+    '',
+    'serve(async (req) => {',
+    '  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });',
+    '  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);',
+    '',
+    '  try {',
+    '    if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {',
+    '      return json({ error: "Missing required env vars. Ensure SUPABASE_SERVICE_ROLE_KEY secret is set (SUPABASE_URL and SUPABASE_ANON_KEY are auto-provided by Supabase)." }, 500);',
+    '    }',
+    '',
+    '    // 1. Verify caller is an authenticated admin',
+    '    const authHeader = req.headers.get("Authorization") || "";',
+    String.raw`    const token = authHeader.replace(/^Bearer\s+/i, "");` + '',
+    '    if (!token) return json({ error: "Missing Authorization bearer token" }, 401);',
+    '',
+    '    const userClient = createClient(SUPABASE_URL, ANON_KEY, {',
+    '      global: { headers: { Authorization: "Bearer " + token } },',
+    '    });',
+    '    const userRes = await userClient.auth.getUser();',
+    '    if (userRes.error || !userRes.data || !userRes.data.user) {',
+    '      return json({ error: "Invalid or expired session token", detail: userRes.error && userRes.error.message }, 401);',
+    '    }',
+    '    const caller = userRes.data.user;',
+    '    const meta = caller.user_metadata || {};',
+    '    const appMeta = caller.app_metadata || {};',
+    '    const callerRole = meta.role || appMeta.role;',
+    '    if (callerRole !== "admin") {',
+    '      return json({',
+    '        error: "Caller is not an admin (current role: " + (callerRole || "none") + "). Update your Supabase Auth user_metadata to set role=admin, sign out, then sign back in to refresh your token.",',
+    '      }, 403);',
+    '    }',
+    '',
+    '    // 2. Parse request body',
+    '    const body = await req.json().catch(() => ({}));',
+    '    const action = body.action || "create";',
+    '',
+    '    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {',
+    '      auth: { autoRefreshToken: false, persistSession: false },',
+    '    });',
+    '',
+    '    if (action === "delete") {',
+    '      if (!body.userId) return json({ error: "userId required for delete" }, 400);',
+    '      const delRes = await admin.auth.admin.deleteUser(body.userId);',
+    '      if (delRes.error) return json({ error: "Delete failed: " + delRes.error.message }, 500);',
+    '      return json({ ok: true, deleted: body.userId });',
+    '    }',
+    '',
+    '    // Default: create a new auth user',
+    '    const { email, password, first, last, role, physId, practiceId } = body;',
+    '    if (!email || !password) return json({ error: "email and password required" }, 400);',
+    '    if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);',
+    '',
+    '    const createRes = await admin.auth.admin.createUser({',
+    '      email: email,',
+    '      password: password,',
+    '      email_confirm: true,',
+    '      user_metadata: {',
+    '        role: role || "user",',
+    '        first: first || "",',
+    '        last: last || "",',
+    '        physId: physId == null ? null : physId,',
+    '        practiceId: practiceId || "main",',
+    '        joined: new Date().toISOString().slice(0, 10),',
+    '      },',
+    '    });',
+    '',
+    '    if (createRes.error) {',
+    '      return json({ error: createRes.error.message, status: createRes.error.status }, createRes.error.status || 400);',
+    '    }',
+    '    if (!createRes.data || !createRes.data.user) {',
+    '      return json({ error: "createUser returned no user object" }, 500);',
+    '    }',
+    '',
+    '    return json({',
+    '      ok: true,',
+    '      id: createRes.data.user.id,',
+    '      email: createRes.data.user.email,',
+    '    });',
+    '  } catch (e) {',
+    '    console.error("[create-user] unhandled error:", e);',
+    '    return json({ error: "Unhandled error: " + (e && e.message ? e.message : String(e)) }, 500);',
+    '  }',
+    '});',
+  ].join('\n'),
+};
+
+// Populate the <pre> with raw source + wire the Copy button.
+function copyEdgeFuncCode(fnName, btn){
+  const src = _EDGE_FN_SOURCES[fnName];
+  if(!src){ alert('Unknown function: '+fnName); return; }
+  // Use a textarea-based fallback for browsers without Clipboard API
+  const doCopy = async () => {
+    try{
+      if(navigator.clipboard && window.isSecureContext){
+        await navigator.clipboard.writeText(src);
+        return true;
+      }
+    }catch(e){/* fall through */}
+    // Fallback: execCommand
+    const ta=document.createElement('textarea');
+    ta.value=src; ta.style.position='fixed'; ta.style.left='-9999px';
+    document.body.appendChild(ta); ta.select();
+    let ok=false;
+    try{ ok=document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta);
+    return ok;
+  };
+  doCopy().then(ok=>{
+    if(btn){
+      const orig=btn.textContent;
+      btn.textContent = ok ? '✓ Copied!' : '✕ Copy failed';
+      btn.style.background = ok ? 'var(--green,#10b981)' : 'var(--red,#dc2626)';
+      setTimeout(()=>{btn.textContent=orig;btn.style.background='';},2200);
+    }
+  });
+}
+
+// Render both code blocks when the containing page is shown (and once on load
+// so they're populated even if admins open the details before navigating).
+function _populateEdgeFnPres(){
+  for(const [name, src] of Object.entries(_EDGE_FN_SOURCES)){
+    const el = document.getElementById('ef-'+name+'-code');
+    if(el && el.textContent === 'Loading…'){
+      el.textContent = src; // textContent auto-escapes — no HTML injection
+    }
+  }
+}
+// Populate on DOM ready (covers the case where the details panel is already expanded)
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', _populateEdgeFnPres);
+} else {
+  _populateEdgeFnPres();
 }
 
 
