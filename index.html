@@ -11842,21 +11842,18 @@ function previewAA(){
   if(typ==='weekend'||typ==='both'){
     const excludedWeekends = []; // {satDate, matchedDate, reason} for diagnostic output
     cells.filter(c=>c.day&&c.dow===6).forEach(c=>{
-      // Skip any weekend that's part of a holiday weekend — these are handled by
-      // Holiday Auto-Assign, not the regular weekend distributor. A weekend counts
-      // as "part of a holiday weekend" if ANY of the following four days is a
-      // holiday (from Holiday Definitions) or legacy blackout: Friday before,
-      // Saturday, Sunday, or Monday after. This prevents double-coverage when a
-      // Friday or Monday holiday creates a 3-day long weekend whose Sat-Sun would
-      // otherwise also get a regular call.
-      const friBefore = addDays(c.date, -1);
-      const sunDate   = addDays(c.date,  1);
-      const monAfter  = addDays(c.date,  2);
-      const holidayCheckSpan = [friBefore, c.date, sunDate, monAfter];
-      const matchedDate = holidayCheckSpan.find(d => isHolidayBlackout(d));
-      if(matchedDate){
-        const reason = _holidayReasonFor(matchedDate);
-        excludedWeekends.push({satDate: c.date, matchedDate, reason});
+      // Skip a weekend ONLY when BOTH Saturday and Sunday are defined holidays.
+      // A single-day holiday (only Sat or only Sun) still needs the OTHER day
+      // covered by regular weekend call — holiday call handles the holiday day
+      // and weekend call handles the non-holiday day. A Friday-before or
+      // Monday-after holiday does NOT affect the Sat-Sun weekend assignment.
+      // The Holiday Definitions tab is authoritative for what's a holiday.
+      const sunDate = addDays(c.date, 1);
+      const satIsHoliday = isHolidayBlackout(c.date);
+      const sunIsHoliday = isHolidayBlackout(sunDate);
+      if(satIsHoliday && sunIsHoliday){
+        const reason = _holidayReasonFor(c.date);
+        excludedWeekends.push({satDate: c.date, matchedDate: c.date, reason, allHoliday: true});
         return;
       }
       Object.entries(S.wkndNeeds).forEach(([sub,need])=>{
@@ -11889,17 +11886,17 @@ function previewAA(){
   let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} assignments — ${gaps.length} gap(s)<br>
     <span style="font-weight:400;font-size:11px;color:var(--txt2)">${hospPrev.length} hospital · ${homePrev.length} at-home · ${wkPrev.length} weekend</span></div>`;
 
-  // Holiday-excluded weekends panel — shows which weekends were intentionally skipped
-  // because they fall within a holiday span defined on the Holiday Definitions tab.
+  // Holiday-excluded weekends panel — weekends where BOTH Sat and Sun are defined
+  // holidays (no regular weekend call needed; holiday call handles both days).
   const excluded = S._lastAAExcludedHolidayWknds || [];
   if(excluded.length){
     html += `<div class="note ni" style="margin-bottom:10px;font-size:11px">
-      <strong>🏖 ${excluded.length} weekend${excluded.length>1?'s':''} skipped (holiday coverage)</strong> — these are handled by Holiday Auto-Assign, not the regular weekend distributor:
+      <strong>🏖 ${excluded.length} weekend${excluded.length>1?'s':''} skipped (both Sat + Sun are defined holidays)</strong> — fully covered by Holiday Auto-Assign:
       <div style="margin-top:6px;font-family:monospace;line-height:1.6;max-height:120px;overflow-y:auto">
         ${excluded.map(x=>{
           const name = x.reason?.name || '—';
           const src  = x.reason?.source==='definition' ? 'Holiday Definitions' : 'legacy blackout';
-          return `Sat ${x.satDate} → skipped because <strong>${escHtml(x.matchedDate)}</strong> is "${escHtml(name)}" (${src})`;
+          return `Sat ${escHtml(x.satDate)} + Sun ${escHtml(addDays(x.satDate,1))} → both part of "${escHtml(name)}" (${src})`;
         }).join('<br>')}
       </div>
     </div>`;
@@ -12674,11 +12671,22 @@ function previewIRAA(){
       const excludedIRWknds = []; // holiday-skipped Fridays for diagnostic output
       const wkndDates=allCells.filter(c=>c.dow===5).map(c=>c.date)
         .filter(fri=>{
-          const span=[fri,addDays(fri,1),addDays(fri,2),addDays(fri,3)];
-          const matched = span.find(d => isHolidayBlackout(d));
-          if(matched){
+          // Skip ONLY when every day of the Fri→Mon span is covered by a holiday
+          // definition. If even one day (e.g. Monday after a Fri-Sun holiday) is
+          // NOT a holiday, we still need an IR weekend call person — they cover
+          // the non-holiday portion while the holiday call person covers the
+          // defined holiday days. Holiday call takes precedence on its specific
+          // dates; the weekend call person fills the gap.
+          // Example: Holiday def = [7/3, 7/4, 7/5]. Span for Fri 7/3 = [7/3, 7/4,
+          // 7/5, 7/6]. Only 3 of 4 days are in the def, so Mon 7/6 needs weekend
+          // call coverage → DO NOT skip. Assign the IR weekend call person.
+          const span = [fri, addDays(fri,1), addDays(fri,2), addDays(fri,3)];
+          const allHoliday = span.every(d => isHolidayBlackout(d));
+          if(allHoliday){
+            // Find the holiday def that matched for diagnostic output
+            const matched = span[0];
             const reason = _holidayReasonFor(matched);
-            excludedIRWknds.push({friday: fri, matchedDate: matched, reason, group: g});
+            excludedIRWknds.push({friday: fri, matchedDate: matched, reason, group: g, allHoliday: true});
             return false;
           }
           return true;
@@ -12804,9 +12812,9 @@ function previewIRAA(){
   if(relaxedFills>0)
     html+=`<div class="note nw" style="margin-bottom:8px">&#9888; ${relaxedFills} slot(s) could only be filled by waiving back-to-back rest rules (highlighted below). Review before applying.</div>`;
 
-  // Holiday-excluded weekends panel — IR weekends (Fri→Mon spans) skipped because
-  // at least one day in the span is a defined holiday. Holiday Auto-Assign handles
-  // those weekends instead of the regular IR weekend distributor.
+  // Holiday-excluded weekends panel — IR weekends skipped only when EVERY day of
+  // the Fri→Mon span is a defined holiday. Mixed spans (some holiday + some non-
+  // holiday) still get a weekend call assignment for the non-holiday coverage.
   const irExcluded = S._lastIRAAExcludedHolidayWknds || [];
   if(irExcluded.length){
     // Group by irGroup for a cleaner breakdown
@@ -12816,14 +12824,14 @@ function previewIRAA(){
       (byGroup[g] = byGroup[g] || []).push(x);
     });
     html += `<div class="note ni" style="margin-bottom:10px;font-size:11px">
-      <strong>🏖 ${irExcluded.length} IR weekend${irExcluded.length>1?'s':''} skipped (holiday coverage)</strong> — these Fri→Mon spans touch a defined holiday and are handled by Holiday Auto-Assign:
+      <strong>🏖 ${irExcluded.length} IR weekend${irExcluded.length>1?'s':''} skipped (entire Fri→Mon span is holiday)</strong> — fully covered by Holiday Auto-Assign:
       <div style="margin-top:6px;font-family:monospace;line-height:1.6;max-height:140px;overflow-y:auto">
         ${Object.entries(byGroup).map(([g, xs]) => `
           <div style="margin-top:4px"><strong style="font-family:sans-serif">${escHtml(g)}:</strong></div>
           ${xs.map(x => {
             const name = x.reason?.name || '—';
             const src  = x.reason?.source==='definition' ? 'Holiday Definitions' : 'legacy blackout';
-            return `&nbsp;&nbsp;Fri ${escHtml(x.friday)} → skipped because <strong>${escHtml(x.matchedDate)}</strong> is "${escHtml(name)}" (${src})`;
+            return `&nbsp;&nbsp;Fri ${escHtml(x.friday)} → all 4 days of Fri→Mon span are in "${escHtml(name)}" (${src})`;
           }).join('<br>')}
         `).join('')}
       </div>
