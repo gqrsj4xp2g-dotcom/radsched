@@ -2124,20 +2124,42 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         </div>
         <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
           <div style="font-weight:700;font-size:12px;margin-bottom:6px">Shift Departure & Return Times
-            <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format</span>
+            <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format · used for daily traffic queries</span>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;font-size:11px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;font-size:11px;align-items:center">
             <span style="font-weight:700;color:var(--txt3)">Shift</span>
             <span style="font-weight:700;color:var(--txt3)">Depart (home→hospital)</span>
             <span style="font-weight:700;color:var(--txt3)">Return (hospital→home)</span>
+
             <span>DR 1st Shift</span>
             <input id="st-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
+
+            <span>DR 2nd Shift</span>
+            <input id="st-2nd-dep" type="time" value="14:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-2nd-ret" type="time" value="23:00" style="font-size:11px;padding:2px 4px">
+
+            <span>DR 3rd Shift</span>
+            <input id="st-3rd-dep" type="time" value="22:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-3rd-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
+
             <span>IR 1st Shift</span>
             <input id="st-ir-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-ir-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
+
+            <span>IR Call</span>
+            <input id="st-ircall-dep" type="time" value="16:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-ircall-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
+
+            <span>Weekend Call</span>
+            <input id="st-wknd-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-wknd-ret" type="time" value="18:00" style="font-size:11px;padding:2px 4px">
+
+            <span>Holiday Call</span>
+            <input id="st-hol-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
+            <input id="st-hol-ret" type="time" value="18:00" style="font-size:11px;padding:2px 4px">
           </div>
-          <button class="bt bsm" style="margin-top:6px" onclick="saveShiftTimes()">💾 Save Times</button>
+          <button class="bt bsm" style="margin-top:8px" onclick="saveShiftTimes()">💾 Save Times</button>
           <span id="shift-times-msg" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2152,6 +2174,26 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <button class="bt bsm" onclick="refreshUpcomingDailyTraffic(1)" title="Today + tomorrow only">🚀 Quick (2 days)</button>
         </div>
         <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:4px;display:block;margin-top:6px"></span>
+
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bdr)">
+          <div style="font-size:11px;color:var(--txt2);margin-bottom:4px">🔍 <strong>Look up drive time</strong> — fetch or view the traffic-adjusted drive time for any physician to any site on a specific date.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;align-items:end">
+            <div class="fg" style="margin:0">
+              <label style="font-size:10px">Physician</label>
+              <select id="dtq-phys" style="font-size:11px"></select>
+            </div>
+            <div class="fg" style="margin:0">
+              <label style="font-size:10px">Site</label>
+              <select id="dtq-site" style="font-size:11px"></select>
+            </div>
+            <div class="fg" style="margin:0">
+              <label style="font-size:10px">Date</label>
+              <input id="dtq-date" type="date" style="font-size:11px">
+            </div>
+            <button class="bp bsm" onclick="lookupDriveTime()" title="Opens a detail panel. Fetches live traffic if not already cached.">🔍 Look up</button>
+          </div>
+          <div id="dtq-status" style="font-size:11px;color:var(--txt3);margin-top:4px;min-height:14px"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -2513,6 +2555,7 @@ function clearIRCalls(mode){
 function triggerSave(){
   if(_isRestoring)return;
   _hasUnsavedChanges=true;
+  S._lastLocalChange = Date.now(); // used by _applyRemoteData's stale-remote guard
   // Debounce: push to Supabase 1s after last change
   clearTimeout(_saveTimeout);
   _saveTimeout=setTimeout(()=>{
@@ -2999,6 +3042,18 @@ function _applyRemoteData(d){
     console.warn('[RS] _applyRemoteData called with invalid data:',typeof d);
     return;
   }
+  // Stale-remote guard: if we've mutated locally since the remote's savedAt timestamp,
+  // and the push for those mutations hasn't landed yet, skip applying the remote copy
+  // because it would clobber fresh local changes. _lastLocalChange is updated on every
+  // triggerSave(); _lastSaved is updated on successful push. If there are local changes
+  // newer than both the remote data AND the last successful push, bail.
+  const remoteSaved = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+  const localSaved  = S._lastSaved ? S._lastSaved.getTime() : 0;
+  const localChange = S._lastLocalChange || 0;
+  if(localChange > remoteSaved && localChange > localSaved){
+    console.log('[RS] Skipping remote apply — local has pending unsaved changes newer than remote');
+    return;
+  }
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
@@ -3067,13 +3122,31 @@ function _applyRemoteData(d){
   // 6) Default shiftListings
   if(!Array.isArray(S.shiftListings)) S.shiftListings=[];
   if(d.users&&Array.isArray(d.users)){
-    d.users.forEach(u=>{
-      // Ensure physId is always a number (Supabase JSON may return strings)
-      if(u.physId!=null) u.physId=parseInt(u.physId)||null;
-      const ex=USERS.find(x=>x.id===u.id||x.email===u.email);
-      if(ex)Object.assign(ex,u);
-      else USERS.push(u);
+    // AUTHORITATIVE replacement — the remote `users` array is the source of truth for
+    // who exists in this practice. A local user delete that has been persisted will
+    // be absent from `d.users`, so we must REPLACE rather than merge-additively.
+    // Previously this loop only added/updated, which meant deleted users kept coming
+    // back whenever _applyRemoteData ran (page load, poll, realtime echo).
+    //
+    // Edge protection: if for some reason the currently-logged-in user (CU) is not in
+    // the remote copy (e.g. race between their own first login push and someone else's
+    // subsequent save), keep them so they don't get kicked out of their active session.
+    const normalized = d.users.map(u => {
+      if(u.physId!=null) u.physId = parseInt(u.physId)||null;
+      return u;
     });
+    const cuId = CU?.id;
+    if(cuId && !normalized.some(u => u.id===cuId)){
+      const keep = USERS.find(x => x.id===cuId);
+      if(keep) normalized.push(keep);
+    }
+    USERS.length = 0;
+    normalized.forEach(u => USERS.push(u));
+    // Keep CU reference in sync with the (possibly updated) object in USERS
+    if(cuId){
+      const fresh = USERS.find(x => x.id===cuId);
+      if(fresh) CU = fresh;
+    }
   }
   // Track when this data was saved so poll can detect remote changes
   if(d.savedAt) S._remoteSavedAt = d.savedAt;
@@ -4980,22 +5053,52 @@ function _trafficForShift(shiftEntry, qtrSel){
 
 /* ─── SHIFT TIME SETTINGS ─── */
 function saveShiftTimes(){
+  if(!S.cfg) S.cfg={};
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
-  const depEl=document.getElementById('st-1st-dep');
-  const retEl=document.getElementById('st-1st-ret');
-  if(depEl&&retEl) S.cfg.shiftTimes['1st']={dep:depEl.value||'06:30',ret:retEl.value||'15:00'};
+  // Map of shift-key → input element IDs. Keys match what refreshDailyDriveTimes and
+  // _shiftsForDailyDriveTimes use to look up times from cfg.
+  const map = [
+    {key:'1st',          dep:'st-1st-dep',      ret:'st-1st-ret',      defDep:'06:30', defRet:'15:00'},
+    {key:'2nd',          dep:'st-2nd-dep',      ret:'st-2nd-ret',      defDep:'14:30', defRet:'23:00'},
+    {key:'3rd',          dep:'st-3rd-dep',      ret:'st-3rd-ret',      defDep:'22:30', defRet:'07:00'},
+    {key:'IR 1st',       dep:'st-ir-1st-dep',   ret:'st-ir-1st-ret',   defDep:'06:30', defRet:'15:00'},
+    {key:'IR Call',      dep:'st-ircall-dep',   ret:'st-ircall-ret',   defDep:'16:30', defRet:'07:00'},
+    {key:'Weekend Call', dep:'st-wknd-dep',     ret:'st-wknd-ret',     defDep:'06:30', defRet:'18:00'},
+    {key:'Holiday Call', dep:'st-hol-dep',      ret:'st-hol-ret',      defDep:'06:30', defRet:'18:00'},
+  ];
+  map.forEach(m=>{
+    const dep = document.getElementById(m.dep)?.value || m.defDep;
+    const ret = document.getElementById(m.ret)?.value || m.defRet;
+    S.cfg.shiftTimes[m.key] = {dep, ret};
+  });
+  // Proxy doesn't fire on nested mutations, so call triggerSave explicitly
   triggerSave();
   const msg=document.getElementById('shift-times-msg');
-  if(msg){msg.textContent='\u2713 Saved. Run \u201cUpdate All Shift Traffic\u201d to recalculate.';
-    setTimeout(()=>{msg.textContent='';},4000);}
+  if(msg){
+    msg.textContent='✓ Saved. Use "Refresh Next N Days" below to pick up the new times.';
+    msg.style.color='var(--green-t)';
+    setTimeout(()=>{if(msg)msg.textContent='';},4000);
+  }
 }
 
 function _loadShiftTimesUI(){
-  const v=S.cfg.shiftTimes?.['1st']||{dep:'06:30',ret:'15:00'};
-  const depEl=document.getElementById('st-1st-dep');
-  const retEl=document.getElementById('st-1st-ret');
-  if(depEl) depEl.value=v.dep||'06:30';
-  if(retEl) retEl.value=v.ret||'15:00';
+  const st = S.cfg?.shiftTimes||{};
+  const map = [
+    {key:'1st',          dep:'st-1st-dep',      ret:'st-1st-ret',      defDep:'06:30', defRet:'15:00'},
+    {key:'2nd',          dep:'st-2nd-dep',      ret:'st-2nd-ret',      defDep:'14:30', defRet:'23:00'},
+    {key:'3rd',          dep:'st-3rd-dep',      ret:'st-3rd-ret',      defDep:'22:30', defRet:'07:00'},
+    {key:'IR 1st',       dep:'st-ir-1st-dep',   ret:'st-ir-1st-ret',   defDep:'06:30', defRet:'15:00'},
+    {key:'IR Call',      dep:'st-ircall-dep',   ret:'st-ircall-ret',   defDep:'16:30', defRet:'07:00'},
+    {key:'Weekend Call', dep:'st-wknd-dep',     ret:'st-wknd-ret',     defDep:'06:30', defRet:'18:00'},
+    {key:'Holiday Call', dep:'st-hol-dep',      ret:'st-hol-ret',      defDep:'06:30', defRet:'18:00'},
+  ];
+  map.forEach(m=>{
+    const saved = st[m.key] || {};
+    const depEl = document.getElementById(m.dep);
+    const retEl = document.getElementById(m.ret);
+    if(depEl) depEl.value = saved.dep || m.defDep;
+    if(retEl) retEl.value = saved.ret || m.defRet;
+  });
 }
 
 /* ─── GOOGLE MAPS / DRIVE TIMES ─── */
@@ -5238,9 +5341,11 @@ function _shiftsForDailyDriveTimes(startDate, endDate){
   });
   (S.irShifts||[]).forEach(s => {
     if(!inRange(s.date) || !s.site) return;
-    const t = resolveTimes(s.shift || '1st');
+    // Prefer IR-specific config keys (e.g. "IR 1st"); fall back to DR's if unset
+    const irKey = `IR ${s.shift||'1st'}`;
+    const t = resolveTimes(irKey) || resolveTimes(s.shift || '1st');
     if(!t) return;
-    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:`IR ${s.shift||'1st'}`, depTime:t.dep, retTime:t.ret, shiftId:`ir-${s.id}`});
+    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:irKey, depTime:t.dep, retTime:t.ret, shiftId:`ir-${s.id}`});
   });
   (S.irCalls||[]).forEach(c => {
     if(!inRange(c.date) || !c.site) return;
@@ -5493,6 +5598,122 @@ async function refreshUpcomingDailyTraffic(days){
   setStatus(`Scanning ${days||7}-day schedule for shifts to refresh…`);
   await refreshDailyDriveTimes(start, end, (p) => { setStatus(p.msg); });
   if(_fteActiveTab==='commute') renderCommuteMatrix();
+}
+
+// Populate the "Look up drive time" dropdowns when Settings is rendered.
+// Only physicians/sites with addresses are listed — others can't be looked up.
+function populateDtqSelects(){
+  const physSel = document.getElementById('dtq-phys');
+  const siteSel = document.getElementById('dtq-site');
+  const dateEl  = document.getElementById('dtq-date');
+  if(physSel){
+    const physWith = (S.physicians||[]).filter(p => p.address?.trim())
+      .sort((a,b) => (a.last+a.first).localeCompare(b.last+b.first));
+    physSel.innerHTML = '<option value="">— Select physician —</option>' +
+      physWith.map(p => `<option value="${p.id}">${escHtml(p.last+', '+p.first)}</option>`).join('');
+    if(!physWith.length) physSel.innerHTML = '<option disabled>No physicians with addresses</option>';
+  }
+  if(siteSel){
+    const sitesWith = (S.sites||[]).filter(s => s.address?.trim() && s.name!=='At Home / Remote')
+      .sort((a,b) => a.name.localeCompare(b.name));
+    siteSel.innerHTML = '<option value="">— Select site —</option>' +
+      sitesWith.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+    if(!sitesWith.length) siteSel.innerHTML = '<option disabled>No sites with addresses</option>';
+  }
+  if(dateEl && !dateEl.value) dateEl.value = fmtDate(new Date());
+}
+
+// Admin can pick physician + site + date, and either view cached data (if any)
+// or fetch fresh traffic data just for that one pair. Opens the details modal
+// after the fetch so the admin sees the rich breakdown.
+async function lookupDriveTime(){
+  const physId = +document.getElementById('dtq-phys')?.value;
+  const site   = document.getElementById('dtq-site')?.value;
+  const date   = document.getElementById('dtq-date')?.value;
+  const status = document.getElementById('dtq-status');
+  const setStatus = (msg, color='var(--txt3)') => {
+    if(status){ status.textContent = msg; status.style.color = color; }
+  };
+  if(!physId){ setStatus('✕ Pick a physician.', 'var(--red-t)'); return; }
+  if(!site){   setStatus('✕ Pick a site.',      'var(--red-t)'); return; }
+  if(!date){   setStatus('✕ Pick a date.',      'var(--red-t)'); return; }
+  const phys = S.physicians.find(p => p.id === physId);
+  const siteObj = S.sites.find(s => s.name === site);
+  if(!phys?.address?.trim()){
+    setStatus('✕ This physician has no address configured.', 'var(--red-t)');
+    return;
+  }
+  if(!siteObj?.address?.trim()){
+    setStatus('✕ This site has no address configured.', 'var(--red-t)');
+    return;
+  }
+  // Check if cached daily data exists for this date
+  const key = `${physId}|${site}`;
+  const cached = S.driveTimes?.[key]?.daily?.[date];
+  if(cached){
+    setStatus(`✓ Using cached data from ${new Date(cached.fetchedAt).toLocaleString()}.`, 'var(--green-t)');
+    showDriveTimeDetails(physId, site, date);
+    return;
+  }
+  // No cache — fetch live for just this pair+date
+  if(!_getGMapsKey()){
+    setStatus('✕ No Google Maps API key. Add one in Settings to fetch live traffic.', 'var(--red-t)');
+    // Still show whatever base/snapshot data exists
+    showDriveTimeDetails(physId, site, date);
+    return;
+  }
+  setStatus('Fetching live Google Maps traffic…');
+  try {
+    // Figure out a reasonable default departure/return. If this physician has a shift
+    // on this date, use that shift's times. Otherwise use DR 1st shift as fallback.
+    const st = S.cfg?.shiftTimes || {};
+    let depTime = st['1st']?.dep || '06:30';
+    let retTime = st['1st']?.ret || '15:00';
+    const hit = (S.drShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date)
+             || (S.irShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date);
+    if(hit){
+      const key2 = hit.shift?.startsWith?.('IR') ? `IR ${hit.shift}` : hit.shift;
+      const t = st[key2] || st[hit.shift] || st['1st'] || {};
+      depTime = t.dep || depTime;
+      retTime = t.ret || retTime;
+    }
+    const depTs = _dateTimeToUnix(date, depTime);
+    const retTs = _dateTimeToUnix(date, retTime);
+    const [outRes, retRes] = await Promise.all([
+      _mapsProxyCallWithTimestamp([phys.address.trim()], [siteObj.address.trim()], depTs),
+      _mapsProxyCallWithTimestamp([siteObj.address.trim()], [phys.address.trim()], retTs),
+    ]);
+    const outEl = outRes?.rows?.[0]?.elements?.[0];
+    const retEl = retRes?.rows?.[0]?.elements?.[0];
+    if(!outEl || outEl.status !== 'OK'){
+      setStatus('✕ Google Maps could not compute this route. Check addresses.', 'var(--red-t)');
+      return;
+    }
+    const outD = outEl.duration_in_traffic || outEl.duration;
+    const retD = retEl?.status==='OK' ? (retEl.duration_in_traffic||retEl.duration) : outD;
+    const baseOut = outEl.duration;
+    const baseRet = retEl?.duration || outEl.duration;
+    if(!S.driveTimes) S.driveTimes={};
+    if(!S.driveTimes[key]) S.driveTimes[key]={mins:null,text:'N/A',dist:'',updated:''};
+    if(!S.driveTimes[key].daily) S.driveTimes[key].daily={};
+    S.driveTimes[key].daily[date] = {
+      outMins: Math.round(outD.value/60),
+      outText: outD.text,
+      retMins: Math.round(retD.value/60),
+      retText: retD.text,
+      baseOutMins: Math.round(baseOut.value/60),
+      baseRetMins: Math.round(baseRet.value/60),
+      depTime, retTime,
+      shiftKind: hit?.shift ? (hit.shift.startsWith?.('IR')?'IR '+hit.shift:hit.shift) : 'Custom lookup',
+      dist: outEl.distance?.text || '',
+      fetchedAt: new Date().toISOString(),
+    };
+    triggerSave();
+    setStatus('✓ Fetched live traffic data.', 'var(--green-t)');
+    showDriveTimeDetails(physId, site, date);
+  } catch(e){
+    setStatus('✕ '+e.message, 'var(--red-t)');
+  }
 }
 
 
@@ -7796,6 +8017,7 @@ function renderSettings(){
   renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
   renderNatLangRules();
   if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
+  if(typeof populateDtqSelects==='function') populateDtqSelects();
 }
 
 function saveAdminInbox(){
@@ -14723,6 +14945,7 @@ async function _pushToSupabase(){
     const {error}=await _supabase.from(_TABLE).upsert(payload);
     if(error)throw error;
     S._lastSaved=new Date();
+    S._lastLocalChange=0; // successful push — stale-remote guard may resume blocking again only when NEW local mutations happen
     _updateSaveUI('✓ Synced','var(--green-t)');
     return true;
   }catch(e){
