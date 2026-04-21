@@ -1505,11 +1505,17 @@ tbody tr:hover{background:var(--bg3)}
 <!-- IR CALL REBALANCER -->
 <div id="page-ir-rebalance" class="page admin-only">
   <div class="pg-title">⚖ IR Call Rebalancer</div>
-  <div class="pg-sub">Move assignments around to hit 100% FTE for every physician. For calls: redistributes all Daily and Weekend IR calls across the period. For shifts: redistributes existing procedure shifts or fills all available slots to FTE targets. Select a mode and click Preview.</div>
+  <div class="pg-sub">Move assignments around to hit 100% FTE for every physician across a 6-month period. For calls: redistributes all Daily and Weekend IR calls. For shifts: redistributes existing procedure shifts or fills all available slots to FTE targets. Select a mode and click Preview.</div>
 
   <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
-    <div class="fg" style="margin:0"><label>Month</label>
-      <input id="irr-mo" type="month" onchange="renderIRRebalancePrep()" style="width:160px">
+    <div class="fg" style="margin:0"><label>Year</label>
+      <select id="irr-yr" onchange="renderIRRebalancePrep()" style="width:90px"></select>
+    </div>
+    <div class="fg" style="margin:0"><label>Period</label>
+      <select id="irr-period" onchange="renderIRRebalancePrep()" style="width:175px">
+        <option value="H1">H1 (Jan – Jun)</option>
+        <option value="H2">H2 (Jul – Dec)</option>
+      </select>
     </div>
     <div class="fg" style="margin:0"><label>Group</label>
       <select id="irr-grp" onchange="renderIRRebalancePrep()" style="width:130px">
@@ -12676,15 +12682,19 @@ function removeIRCallBlackout(physId, idx){
 
 let _irrPlan = null; // holds the last preview plan
 
-// Returns the array of 6 YM strings for the selected period
+// Returns the array of 6 YM strings for the selected period (H1 = Jan–Jun, H2 = Jul–Dec)
 function _irrMonths(){
-  const mo = document.getElementById('irr-mo')?.value || new Date().toISOString().slice(0,7);
-  return [mo]; // monthly rebalancer — single month
+  const yr = parseInt(document.getElementById('irr-yr')?.value || new Date().getFullYear());
+  const period = document.getElementById('irr-period')?.value || 'H1';
+  const startM = period==='H1' ? 1 : 7;
+  return Array.from({length:6}, (_,i)=>`${yr}-${String(startM+i).padStart(2,'0')}`);
 }
 
 function _irrPeriodLabel(months){
-  const [y,m]=months[0].split('-').map(Number);
-  return new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
+  const [y, m0] = months[0].split('-').map(Number);
+  const [, m1]  = months[5].split('-').map(Number);
+  const fmt = m => new Date(y, m-1, 1).toLocaleString('default',{month:'short'});
+  return `${fmt(m0)}–${fmt(m1)} ${y}`;
 }
 
 // 6-month targets: sum of monthly targets across the period
@@ -12696,9 +12706,20 @@ function irWkndTargetPeriod(p, months){
 }
 
 function renderIRRebalancePrep(){
-  // Default month picker to current month on first open
-  const moEl = document.getElementById('irr-mo');
-  if(moEl && !moEl.value) moEl.value = new Date().toISOString().slice(0,7);
+  // Populate year dropdown if empty; default to current period (H1 if month <=6, H2 otherwise)
+  const yrEl = document.getElementById('irr-yr');
+  if(yrEl && !yrEl.options.length){
+    const curYr = new Date().getFullYear();
+    const years = [];
+    for(let y=curYr-1; y<=curYr+2; y++) years.push(y);
+    yrEl.innerHTML = years.map(y => `<option value="${y}"${y===curYr?' selected':''}>${y}</option>`).join('');
+  }
+  const periodEl = document.getElementById('irr-period');
+  if(periodEl && !periodEl.dataset.inited){
+    const now = new Date();
+    periodEl.value = now.getMonth() < 6 ? 'H1' : 'H2';
+    periodEl.dataset.inited = '1';
+  }
   const months = _irrMonths();
   const label  = _irrPeriodLabel(months);
   const grp    = document.getElementById('irr-grp')?.value||'both';
@@ -12728,7 +12749,7 @@ function renderIRRebalancePrep(){
   irPs.forEach(p=>{
     if(isShifts){
       const s=months.reduce((acc,ym)=>acc+irProcShiftCnt(p.id,ym),0);
-      const ts=irShiftTargetMonth(p,months[0]);
+      const ts=irShiftTargetPeriod(p,months);
       if(s>0) anyData=true;
       const ps=ts>0?Math.round(s/ts*100):0;
       const sCls=ps>110?'color:var(--red-t)':ps>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
@@ -12826,11 +12847,14 @@ function previewIRRebalance(){
         .filter(s=>inPeriod(s.date)&&s.irGroup===g&&s.shift!=='Home')
         .sort((a,b)=>a.date>b.date?1:-1);
 
-      // If no existing shifts (e.g. month not yet scheduled), fall back to
+      // If no existing shifts (e.g. period not yet scheduled), fall back to
       // building slots from irShiftSlots config — same source as auto-assign.
-      // Includes mixed-role sites owned by this group.
+      // Iterates all 6 months of the period so synthetic slots reflect the
+      // full window, not just the first month.
       if(!gShiftEntries.length){
-        const slotCells=buildCal(months[0]).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
+        const slotCells = months.flatMap(ym =>
+          buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date))
+        );
         const synthId=1000000;let sid=synthId;
         const siteList=S.sites.filter(s=>{
           if(s.irGroup===g||s.irGroup==='Both') return true;
@@ -12873,7 +12897,7 @@ function previewIRRebalance(){
         const gFteTot=gPhys.reduce((s,x)=>s+x.irFte,0)||1;
         return gShiftEntries.length*(p.irFte/gFteTot);
       });
-      const shiftCapFn=p=>(shiftQuotas[p.id]!=null&&shiftQuotas[p.id]>0)?shiftQuotas[p.id]:Math.max(Math.round(irShiftTargetMonth(p,months[0])),1);
+      const shiftCapFn=p=>(shiftQuotas[p.id]!=null&&shiftQuotas[p.id]>0)?shiftQuotas[p.id]:Math.max(Math.round(irShiftTargetPeriod(p,months)),1);
       const gSAsgn=[];
 
       // On-call lookup: if a physician is on daily call on a date, they must have a shift
@@ -12941,8 +12965,8 @@ function previewIRRebalance(){
             const fitB=b.anchorSite===entry.site?ancNeedB:-ancNeedB;
             if(fitA!==fitB) return fitB-fitA;
             // Highest deficit first
-            const defA=irShiftTargetMonth(a,months[0])-cntS[a.id];
-            const defB=irShiftTargetMonth(b,months[0])-cntS[b.id];
+            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
+            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
             if(Math.abs(defA-defB)>1e-9) return defB-defA;
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
@@ -12989,7 +13013,7 @@ function previewIRRebalance(){
     irPs.forEach(p=>{
       const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
       const newS=plan.shifts.filter(a=>a.physId===p.id).length;
-      const ts=irShiftTargetMonth(p,months[0]);
+      const ts=irShiftTargetPeriod(p,months);
       const pct=ts>0?Math.round(newS/ts*100):0;
       const chg=newS-oldS;
       const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
@@ -13617,7 +13641,7 @@ function _irrUpdateDistribution(){
     irPs.forEach(p=>{
       const oldS=months.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
       const newS=(_irrPlan.shifts||[]).filter(a=>effectivePid(a)===p.id).length;
-      const ts=irShiftTargetMonth(p,months[0]);
+      const ts=irShiftTargetPeriod(p,months);
       const pct=ts>0?Math.round(newS/ts*100):0;
       const chg=newS-oldS;
       const arrow=chg>0?`<span style="color:var(--green-t)"> ▲${chg}</span>`:chg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(chg)}</span>`:'';
