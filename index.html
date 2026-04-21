@@ -368,7 +368,6 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-sect">Compliance & Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
       <div class="snav-item" onclick="nav('holidays',this)">Holiday Call</div>
-      <div class="snav-item admin-only" onclick="nav('holiday-auto',this)">Holiday Auto-Assign</div>
       <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
       <div class="snav-sect">System</div>
       <div class="snav-item" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
@@ -413,7 +412,6 @@ tbody tr:hover{background:var(--bg3)}
       <button class="bsm" onclick="nav('auto-assign',document.querySelector('[onclick*=auto-assign]'))">DR Auto-Assign</button>
       <button class="bsm" onclick="nav('ir-auto',document.querySelector('[onclick*=ir-auto]'))">IR Auto-Assign</button>
       <button class="bsm" onclick="nav('holidays',document.querySelector('[onclick*=holidays]'))">Holiday Call</button>
-      <button class="bsm" onclick="nav('holiday-auto',document.querySelector('[onclick*=holiday-auto]'))">Holiday Auto-Assign</button>
       <button class="bsm" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))">Open Shifts</button>
       <button class="bsm" onclick="nav('anchor-report',document.querySelector('[onclick*=anchor-report]'))">Anchor Report</button>
     </div>
@@ -1498,62 +1496,11 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 </div>
 
-<!-- HOLIDAY AUTO-ASSIGN PAGE (LEGACY — superseded by Holiday Call → Auto-Assign tab) -->
-<div id="page-holiday-auto" class="page admin-only">
-  <div class="pg-title">Holiday Auto-Assign <span style="font-size:11px;font-weight:400;color:var(--amber-t,#92400e);margin-left:8px">(Legacy)</span></div>
-  <div class="pg-sub">Automatically assign physicians to holiday call slots, balancing across the team.</div>
-
-  <div class="card" style="background:var(--amber-bg,#fffbeb);border:1px solid #fde68a;margin-bottom:12px">
-    <div style="display:flex;align-items:flex-start;gap:10px">
-      <div style="font-size:20px">⚠️</div>
-      <div style="flex:1;font-size:12px;color:var(--amber-t,#92400e);line-height:1.55">
-        <strong>This page is deprecated.</strong> It uses the old 2-pool (DR / IR) model and is kept only for backward compatibility.
-        The current holiday system supports three pools (DR, IR North, IR South) with explicit holiday date blocks.
-        <br><br>
-        <strong>Go to </strong><a href="#" onclick="nav('holidays',document.querySelector('[onclick*=holidays]'));return false;" style="color:var(--blue);font-weight:700">Holiday Call → Define Holidays + Auto-Assign</a>
-        <strong> instead.</strong>
-      </div>
-    </div>
-  </div>
-
-  <div class="g2" style="margin-bottom:10px">
-    <div class="card">
-      <div class="card-title">Holiday Blackout Dates</div>
-      <div class="note ni" style="font-size:11px">On these dates, the auto-assign engines will skip normal shift assignments. Only holiday call can be assigned.</div>
-      <div class="flex" style="gap:6px;margin-bottom:8px">
-        <input id="hb-name" placeholder="Holiday name" style="flex:1">
-        <input id="hb-date" type="date" style="width:140px">
-        <button class="bp bsm" onclick="addBlackout()">Add</button>
-      </div>
-      <div id="hb-list"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Holiday Call Needs</div>
-      <div class="note ni" style="font-size:11px">Configure how many physicians are needed per holiday per group.</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        <select id="hn-name" style="flex:1;min-width:130px"><option>New Year's Day</option><option>MLK Day</option><option>Memorial Day</option><option>Independence Day</option><option>Labor Day</option><option>Thanksgiving</option><option>Christmas Eve</option><option>Christmas Day</option><option>New Year's Eve</option><option>Other</option></select>
-        <select id="hn-grp" style="width:90px"><option value="DR">DR</option><option value="IR">IR</option><option value="Both">Both</option></select>
-        <input id="hn-slots" type="number" min="1" max="10" value="1" style="width:60px">
-        <button class="bp bsm" onclick="addHolidayNeed()">Add</button>
-      </div>
-      <div id="hn-list"></div>
-    </div>
-  </div>
-
-  <div class="ibox">
-    <div class="card-title">Auto-Assign Holiday Call</div>
-    <div class="g3">
-      <div class="fg"><label>Year</label><input id="ha-year" type="number" value="2025" min="2024" max="2030" style="width:90px"></div>
-      <div class="fg"><label>Group</label><select id="ha-grp"><option value="both">Both DR + IR</option><option value="DR">DR Only</option><option value="IR">IR Only</option></select></div>
-      <div class="fg"><label>Balance By</label><select id="ha-bal"><option value="holidays">Holiday count</option><option value="shifts">Total shifts</option></select></div>
-    </div>
-    <div class="flexe" style="gap:8px">
-      <button class="ba" onclick="previewHolidayAA()">Preview</button>
-      <button class="bp" id="ha-apply" style="display:none" onclick="applyHolidayAA()">Apply All</button>
-    </div>
-  </div>
-  <div class="card" id="ha-box"><p style="color:var(--txt3)">Configure and click Preview.</p></div>
-</div>
+<!-- HOLIDAY AUTO-ASSIGN PAGE REMOVED — holidays are now managed entirely on the
+     Holiday Call tab (page-holidays). Define Holidays sub-tab populates
+     S.holidayDefs, which is the single source of truth for what dates are
+     considered holidays (and therefore blacked out from regular call auto-assign).
+     The 2-pool (DR/IR) legacy model is no longer supported. -->
 
 <!-- IR CALL REBALANCER -->
 <div id="page-ir-rebalance" class="page admin-only">
@@ -3210,7 +3157,7 @@ function _refreshCurrentPage(){
     'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRWeekBuilder,
     'ir-shift-auto':renderIRShiftAutoPage,'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
-    holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,
+    holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,
     'open-shifts':renderOpenShifts,'user-mgmt':renderUserMgmt,
     settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
     'ir-shift-slots':renderIRShiftSlots,'import':renderImportPage,
@@ -3787,7 +3734,7 @@ function nav(pg,el){
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
     'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
-    'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,'holiday-auto':renderHolidayAuto,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
+    'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
     'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
   };
@@ -3810,7 +3757,7 @@ function renderDash(){
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
-  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','holiday-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations']);
+  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations']);
   document.getElementById('dash-metrics').innerHTML=[
     {l:'DR Physicians',v:drPs.length,s:'incl. mixed',pg:'physicians'},
     {l:'IR Physicians',v:irPs.length,s:'incl. mixed',pg:'ir-cal'},
@@ -9242,322 +9189,12 @@ function addShiftTypeRule(){
   r.allowedShifts=allowed;
   triggerSave();renderSiteRulesList();
 }
-function addBlackout(){
-  // Called from page-holiday-auto: add a holiday blackout date
-  const name=document.getElementById('hb-name')?.value.trim();
-  const date=document.getElementById('hb-date')?.value;
-  if(!date){alert('Select a date.');return;}
-  if(!S.holidayBlackouts) S.holidayBlackouts=[];
-  S.holidayBlackouts.push({id:S.nextId++,name:name||date,date});
-  const nameEl=document.getElementById('hb-name');
-  const dateEl=document.getElementById('hb-date');
-  if(nameEl) nameEl.value='';
-  if(dateEl) dateEl.value='';
-  triggerSave();
-  renderHolidayAuto();
-}
-function addSiteBlackout(){
-  // Called from physician site-rules panel
-  const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
-  const site=document.getElementById('sr-blk-site')?.value;
-  const start=document.getElementById('sr-blk-start')?.value;
-  const end=document.getElementById('sr-blk-end')?.value;
-  if(!start||!end){alert('Select start and end dates');return;}
-  if(!Array.isArray(p.siteRules)) p.siteRules=[];
-  const r=p.siteRules.find(x=>x.site===site)||{site};
-  if(!p.siteRules.find(x=>x.site===site)) p.siteRules.push(r);
-  if(!r.blackouts) r.blackouts=[];
-  r.blackouts.push({start,end});
-  triggerSave();renderConditionsList();
-}
-
-/* ─── HOLIDAY AUTO-ASSIGN (page handler) ─── */
-function renderHolidayAuto(){
-  // Render holiday blackout list
-  const hbEl=document.getElementById('hb-list');
-  if(hbEl){
-    const bkts=S.holidayBlackouts||[];
-    hbEl.innerHTML=bkts.length
-      ?bkts.sort((a,b)=>a.date>b.date?1:-1).map(b=>`<div class="row">
-        <div style="flex:1;font-size:12px"><strong>${b.date}</strong>${b.name&&b.name!==b.date?' — '+b.name:''}</div>
-        <button class="br bxs" onclick="if(_adminOnly('remove holiday blackout')){S.holidayBlackouts=S.holidayBlackouts.filter(x=>x.id!==${b.id});triggerSave();renderHolidayAuto();}">✕</button>
-      </div>`).join('')
-      :'<div style="color:var(--txt3);font-size:12px">No blackout dates added.</div>';
-  }
-  // Render holiday needs list
-  const hnEl=document.getElementById('hn-list');
-  if(hnEl){
-    const needs=S.holidayNeeds||[];
-    hnEl.innerHTML=needs.length
-      ?needs.sort((a,b)=>a.name>b.name?1:-1).map(n=>`<div class="row">
-        <div style="flex:1;font-size:12px">
-          <strong>${n.name}</strong>
-          <span class="tag ${n.group==='DR'?'tb':n.group==='IR'?'tt':'tg'}" style="font-size:9px;margin-left:4px">${n.group}</span>
-          <span style="color:var(--txt3)"> · ${n.slots} slot${n.slots!==1?'s':''}</span>
-        </div>
-        <button class="br bxs" onclick="if(_adminOnly('remove holiday need')){S.holidayNeeds=S.holidayNeeds.filter(x=>x.id!==${n.id});triggerSave();renderHolidayAuto();}">✕</button>
-      </div>`).join('')
-      :'<div style="color:var(--txt3);font-size:12px">No holiday needs configured.</div>';
-  }
-  // Reset preview box
-  const haBox=document.getElementById('ha-box');
-  if(haBox&&haBox.innerHTML==='') haBox.innerHTML='<p style="color:var(--txt3)">Configure and click Preview.</p>';
-}
-function previewHolidayAA(){
-  if(!_adminOnly('preview holiday auto-assign')) return;
-  const year =+document.getElementById('ha-year')?.value||new Date().getFullYear();
-  const grp  = document.getElementById('ha-grp')?.value||'both';
-  const needs=(S.holidayNeeds||[]).filter(n=>grp==='both'||n.group===grp||n.group==='Both');
-  if(!needs.length){
-    const box=document.getElementById('ha-box');
-    if(box) box.innerHTML='<div class="note nw">No holiday needs configured. Add them above first.</div>';
-    return;
-  }
-  const preview=[];
-  const groups=grp==='both'?['DR','IR']:[grp];
-  // Track physician-per-holiday already picked in THIS preview run to avoid double-booking
-  // the same physician for the same holiday across DR+IR (for MIXED physicians with both roles).
-  const pickedInRun=new Set(); // keys of "physId|holidayName"
-  const warnings=[];
-  groups.forEach(g=>{
-    const gNeeds=needs.filter(n=>n.group===g||n.group==='Both');
-    if(!gNeeds.length) return;
-    const gPhys=S.physicians.filter(p=>g==='DR'?p.drFte>0:p.irFte>0);
-    if(!gPhys.length) return;
-    const cnt={};
-    gPhys.forEach(p=>{ cnt[p.id]=S.holidays.filter(h=>h.group===g&&h.physId===p.id&&h.year===year).length; });
-    gNeeds.forEach(need=>{
-      const alreadyAssigned=S.holidays.filter(h=>h.name===need.name&&h.year===year&&h.group===g).length;
-      const toAssign=Math.max(0,(need.slots||1)-alreadyAssigned);
-      // Resolve the holiday date once per need (may fall back to Dec 25 if unconfigured)
-      const hbDate=(S.holidayBlackouts||[]).find(b=>b.name===need.name)?.date||`${year}-12-25`;
-      for(let s=0;s<toAssign;s++){
-        // Filter eligible physicians — respect vacations, individual blackouts, and
-        // avoid double-booking this holiday for the same physician in this run.
-        const pool=gPhys.filter(p=>{
-          if(pickedInRun.has(p.id+'|'+need.name)) return false;       // avoid cross-group dupe
-          if(vacDays(p.id).has(hbDate)) return false;                  // physician on vacation
-          if(typeof isIRCallBlackout==='function' && g==='IR' && isIRCallBlackout(p.id,hbDate)) return false; // IR individual blackout
-          // Prefer physicians not currently on 2nd/3rd shift this date (but don't hard-exclude — holidays normally aren't shift days)
-          return true;
-        });
-        if(!pool.length){
-          warnings.push(`No eligible physician for "${need.name}" (${g}) on ${hbDate} — all candidates on vacation or blackout.`);
-          break;
-        }
-        const eligible=pool.slice().sort((a,b)=>{
-          const aFte=g==='DR'?a.drFte:a.irFte;
-          const bFte=g==='DR'?b.drFte:b.irFte;
-          return (cnt[a.id]/(aFte||0.01))-(cnt[b.id]/(bFte||0.01));
-        });
-        const picked=eligible[0];if(!picked)break;
-        cnt[picked.id]=(cnt[picked.id]||0)+1;
-        pickedInRun.add(picked.id+'|'+need.name);
-        preview.push({physId:picked.id,name:need.name,date:hbDate,year,group:g,notes:'Auto-assigned'});
-      }
-    });
-  });
-  const box=document.getElementById('ha-box');
-  const applyBtn=document.getElementById('ha-apply');
-  if(!preview.length){
-    if(box) box.innerHTML='<div class="note ns">✓ All holiday slots already assigned for '+year+'.</div>';
-    if(applyBtn) applyBtn.style.display='none';
-    return;
-  }
-  let html='';
-  if(warnings.length){
-    html+='<div class="note nw" style="margin-bottom:10px"><strong>⚠ Warnings:</strong><ul style="margin:4px 0 0 18px;padding:0">';
-    warnings.forEach(w=>{ html+='<li>'+w.replace(/</g,'&lt;')+'</li>'; });
-    html+='</ul></div>';
-  }
-  html+=`<div class="card"><div class="card-title">Preview — ${preview.length} assignment(s) for ${year}</div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Holiday</th><th>Group</th><th>Date</th><th>Physician</th></tr></thead><tbody>`;
-  preview.forEach(p=>{
-    html+=`<tr><td>${p.name}</td><td><span class="tag ${p.group==='DR'?'tb':'tt'}">${p.group}</span></td>
-      <td>${p.date}</td><td style="font-weight:600">${pname(p.physId)}</td></tr>`;
-  });
-  html+='</tbody></table></div></div>';
-  if(box) box.innerHTML=html;
-  if(applyBtn) applyBtn.style.display='inline-block';
-  window._holidayAAPreview=preview;
-}
-
-function applyHolidayAA(){
-  if(!_adminOnly('apply holiday auto-assign')) return;
-  const preview=window._holidayAAPreview||[];
-  if(!preview.length){alert('Run Preview first.');return;}
-  // Dedup: preview may be stale if someone else assigned holidays after preview was generated.
-  // Skip any preview item where the same physician is already assigned to this
-  // (name, year, group) combination.
-  let added=0, skipped=0;
-  preview.forEach(p=>{
-    const already=(S.holidays||[]).some(h=>
-      h.name===p.name && h.year===p.year && h.group===p.group && h.physId===p.physId);
-    if(already){skipped++;return;}
-    S.holidays.push({id:S.nextId++,name:p.name,date:p.date,year:p.year,physId:p.physId,group:p.group,notes:p.notes||''});
-    if(p.group==='IR'||p.group==='IR-North'||p.group==='IR-South') _syncHolidayToIRCall(p.physId,p.date,p.name);
-    added++;
-  });
-  triggerSave();
-  window._holidayAAPreview=[];
-  const box=document.getElementById('ha-box');
-  const applyBtn=document.getElementById('ha-apply');
-  const skipMsg = skipped>0 ? ` (${skipped} skipped — already assigned)` : '';
-  if(box) box.innerHTML=`<div class="note ns">✓ Applied ${added} holiday assignment(s)${skipMsg}.</div>`;
-  if(applyBtn) applyBtn.style.display='none';
-  // Re-render holiday-dependent views
-  if(typeof renderHolidays==='function' && document.getElementById('page-holidays')?.classList.contains('on')) renderHolidays();
-}
-
-/* ─── HOLIDAY SCHEDULE VIEW ─── */
-function renderHolSchedule(){
-  const yr=+document.getElementById('holsched-yr')?.value||new Date().getFullYear();
-  const el=document.getElementById('hol-schedule-content');if(!el)return;
-  const hols=S.holidays.filter(h=>h.year===yr).sort((a,b)=>a.date>b.date?1:-1);
-  if(!hols.length){el.innerHTML='<div class="note ni">No holiday assignments for '+yr+'.</div>';return;}
-  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
-  const tagOf = g => g==='DR'?'tb':g==='IR-North'?'tt':g==='IR-South'?'tg':'tgr';
-  const grouped={};
-  hols.forEach(h=>{
-    const key=`${h.name}|${h.group}|${h.physId}`;
-    if(!grouped[key]) grouped[key]={name:h.name,group:h.group,dates:[],physId:h.physId};
-    grouped[key].dates.push(h.date);
-  });
-  el.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-    <th>Holiday</th><th>Pool</th><th>Date(s)</th><th>Physician</th>
-  </tr></thead><tbody>
-  ${Object.values(grouped).sort((a,b)=>a.dates[0]>b.dates[0]?1:-1).map(g=>`<tr>
-    <td style="font-weight:700">${g.name}</td>
-    <td><span class="tag ${tagOf(g.group)}">${labelOf(g.group)}</span></td>
-    <td style="font-size:11px">${g.dates.sort().join(', ')}</td>
-    <td>${pname(g.physId)}</td>
-  </tr>`).join('')}
-  </tbody></table></div>`;
-}
-
-/* ─── IMPORT PAGE ─── */
-function downloadTemplate(type){
-  let csv='';
-  if(type==='shifts'){
-    csv='date,shift,site,subspecialty,notes\n2026-01-02,1st,CHS,,\n2026-01-03,2nd,CHN,,';
-  } else if(type==='vacations'){
-    csv='physician_last,start,end,type,notes\nSmith,2026-06-01,2026-06-07,Vacation,';
-  } else {
-    csv='date,shift,site\n2026-01-02,1st,CHS';
-  }
-  const blob=new Blob([csv],{type:'text/csv'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`template_${type}.csv`;
-  a.click();
-}
-function previewVacImport(input){
-  if(!_adminOnly('preview vacation import')) return;
-  const file=input?.files?.[0];if(!file)return;
-  const el=document.getElementById('vac-import-preview');if(!el)return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    try{
-      const lines=e.target.result.split('\n').filter(l=>l.trim());
-      const header=lines[0].toLowerCase().split(',').map(h=>h.trim());
-      const rows=lines.slice(1).map(l=>l.split(',').map(c=>c.trim()));
-      let html=`<table style="font-size:11px"><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}<th>Status</th></tr></thead><tbody>`;
-      const toImport=[];
-      rows.forEach(row=>{
-        const obj={};header.forEach((h,i)=>obj[h]=row[i]||'');
-        const p=S.physicians.find(x=>x.last.toLowerCase()===obj['physician_last']?.toLowerCase());
-        const ok=p&&obj['start']&&obj['end'];
-        if(ok) toImport.push({physId:p.id,start:obj['start'],end:obj['end'],type:obj['type']||'Vacation',notes:obj['notes']||''});
-        html+=`<tr>${header.map(h=>`<td>${obj[h]||'—'}</td>`).join('')}<td>${ok?'<span class="tag tg">✓</span>':'<span class="tag tr">✗</span>'}</td></tr>`;
-      });
-      html+='</tbody></table>';
-      el.innerHTML=html;
-      el.dataset.rows=JSON.stringify(toImport);
-      const applyBtn=document.getElementById('vac-import-apply');
-      if(applyBtn) applyBtn.style.display=toImport.length?'inline-block':'none';
-    }catch(err){el.innerHTML=`<div class="note ne">Parse error: ${err.message}</div>`;}
-  };
-  reader.readAsText(file);
-}
-function applyVacImport(){
-  if(!_adminOnly('apply vacation import')) return;
-  const el=document.getElementById('vac-import-preview');if(!el)return;
-  try{
-    const rows=JSON.parse(el.dataset.rows||'[]');
-    rows.forEach(r=>S.vacations.push({id:S.nextId++,...r}));
-    triggerSave();
-    el.innerHTML=`<div class="note ns">✓ Imported ${rows.length} vacation entries.</div>`;
-    const applyBtn=document.getElementById('vac-import-apply');
-    if(applyBtn) applyBtn.style.display='none';
-  }catch(e){alert('Import failed: '+e.message);}
-}
-function previewShiftsImport(input){
-  if(!_adminOnly('preview shifts import')) return;
-  const file=input?.files?.[0];if(!file)return;
-  const el=document.getElementById('shifts-import-preview');if(!el)return;
-  const pid=+document.getElementById('import-phys')?.value;
-  if(!pid){el.innerHTML='<div class="note nw">Select a physician first.</div>';return;}
-  const reader=new FileReader();
-  reader.onload=e=>{
-    try{
-      const lines=e.target.result.split('\n').filter(l=>l.trim());
-      const header=lines[0].toLowerCase().split(',').map(h=>h.trim());
-      const rows=lines.slice(1).map(l=>l.split(',').map(c=>c.trim()));
-      const p=S.physicians.find(x=>x.id===pid);
-      let html=`<table style="font-size:11px"><thead><tr>${header.map(h=>`<th>${h}</th>`).join('')}<th>Status</th></tr></thead><tbody>`;
-      const toImport=[];
-      rows.forEach(row=>{
-        const obj={};header.forEach((h,i)=>obj[h]=row[i]||'');
-        const ok=obj['date']&&obj['shift'];
-        if(ok) toImport.push({physId:pid,date:obj['date'],shift:obj['shift'],site:obj['site']||p?.anchorSite||'',sub:obj['subspecialty']||'',notes:obj['notes']||'',autoHome:false});
-        html+=`<tr>${header.map(h=>`<td>${obj[h]||'—'}</td>`).join('')}<td>${ok?'<span class="tag tg">✓</span>':'<span class="tag tr">✗</span>'}</td></tr>`;
-      });
-      html+='</tbody></table>';
-      el.innerHTML=html;
-      el.dataset.rows=JSON.stringify(toImport);
-      const applyBtn=document.getElementById('shifts-import-apply');
-      if(applyBtn) applyBtn.style.display=toImport.length?'inline-block':'none';
-    }catch(err){el.innerHTML=`<div class="note ne">Parse error: ${err.message}</div>`;}
-  };
-  reader.readAsText(file);
-}
-function applyShiftsImport(){
-  if(!_adminOnly('apply shifts import')) return;
-  const el=document.getElementById('shifts-import-preview');if(!el)return;
-  try{
-    const rows=JSON.parse(el.dataset.rows||'[]');
-    rows.forEach(r=>S.drShifts.push({id:S.nextId++,...r}));
-    triggerSave();
-    el.innerHTML=`<div class="note ns">✓ Imported ${rows.length} shift entries.</div>`;
-    const applyBtn=document.getElementById('shifts-import-apply');
-    if(applyBtn) applyBtn.style.display='none';
-  }catch(e){alert('Import failed: '+e.message);}
-}
-
-/* ─── MY VACATION SAVE ─── */
-function saveMyVacNote(){
-  const el=document.getElementById('myvac-save-msg');
-  if(el){el.textContent='✓ Saved';el.style.color='var(--green-t)';setTimeout(()=>{el.textContent='';},2000);}
-  triggerSave();
-}
-
-/* ─── HOLIDAY NEEDS (legacy stubs) ─── */
-function addHolidayNeed(){
-  const name=document.getElementById('hn-name')?.value||'';
-  const grp=document.getElementById('hn-grp')?.value||'DR';
-  const slots=+document.getElementById('hn-slots')?.value||1;
-  if(!name){alert('Select a holiday');return;}
-  if(!S.holidayNeeds) S.holidayNeeds=[];
-  // Replace existing entry for same name+group if present
-  const existing=S.holidayNeeds.findIndex(h=>h.name===name&&h.group===grp);
-  if(existing>=0) S.holidayNeeds[existing].slots=slots;
-  else S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
-  triggerSave();
-  renderHolidayAuto();
-}
-
-
-
+/* ─── LEGACY HOLIDAY AUTO-ASSIGN FUNCTIONS REMOVED ───
+   Holidays are now managed entirely on the Holiday Call tab. The Define Holidays
+   sub-tab populates S.holidayDefs which is the single source of truth.
+   Deleted: addBlackout, renderHolidayAuto, previewHolidayAA, applyHolidayAA,
+            addHolidayNeed (5 functions, ~315 lines of dead code).
+──────────────────────────────────────────────────────────────────── */
 function addHoliday(){
   if(!_adminOnly('assign holiday call')) return;
   const pid   = +document.getElementById('hol-phys')?.value;
@@ -11895,8 +11532,7 @@ function previewAA(){
       <div style="margin-top:6px;font-family:monospace;line-height:1.6;max-height:120px;overflow-y:auto">
         ${excluded.map(x=>{
           const name = x.reason?.name || '—';
-          const src  = x.reason?.source==='definition' ? 'Holiday Definitions' : 'legacy blackout';
-          return `Sat ${escHtml(x.satDate)} + Sun ${escHtml(addDays(x.satDate,1))} → both part of "${escHtml(name)}" (${src})`;
+          return `Sat ${escHtml(x.satDate)} + Sun ${escHtml(addDays(x.satDate,1))} → both part of "${escHtml(name)}" (Holiday Call → Define Holidays)`;
         }).join('<br>')}
       </div>
     </div>`;
@@ -12830,8 +12466,7 @@ function previewIRAA(){
           <div style="margin-top:4px"><strong style="font-family:sans-serif">${escHtml(g)}:</strong></div>
           ${xs.map(x => {
             const name = x.reason?.name || '—';
-            const src  = x.reason?.source==='definition' ? 'Holiday Definitions' : 'legacy blackout';
-            return `&nbsp;&nbsp;Fri ${escHtml(x.friday)} → all 4 days of Fri→Mon span are in "${escHtml(name)}" (${src})`;
+            return `&nbsp;&nbsp;Fri ${escHtml(x.friday)} → all 4 days of Fri→Mon span are in "${escHtml(name)}" (Holiday Call → Define Holidays)`;
           }).join('<br>')}
         `).join('')}
       </div>
@@ -14195,41 +13830,26 @@ function renderAnchorReport(){
   el.innerHTML = html;
 }
 
-// A date is a "holiday" and should be excluded from regular auto-assigners if it
-// appears in ANY of these sources:
+// A date is a "holiday" and should be excluded from regular auto-assigners if
+// it appears in any holiday defined on the Holiday Call → Define Holidays tab.
+// That tab is the SINGLE source of truth for what counts as a holiday — it
+// populates S.holidayDefs[*].dates (an explicit date-array per holiday block).
 //
-//   1. S.holidayDefs[*].dates  — the PRIMARY source, set on the Holiday Definitions tab
-//      (Physicians → Holiday Auto-Assign → Holiday Definitions). This is the canonical
-//      list of days that are considered holidays.
-//   2. S.holidayBlackouts      — legacy blackout entries, range-aware. Kept for back-compat.
-//
-// The regular DR + IR weekend auto-assigners skip any weekend whose Fri→Mon span
-// touches a date returned `true` by this function. Holiday Auto-Assign handles those days.
+// The regular DR + IR weekend auto-assigners skip any weekend where BOTH
+// Sat+Sun (DR) or the ENTIRE Fri→Mon span (IR) is holiday-defined, so that
+// Holiday Call coverage handles those days instead of the regular distributor.
 function isHolidayBlackout(date){
   if(!date) return false;
-  // 1) Primary: holiday definitions (Holiday Definitions tab). Any def whose
-  //    explicit dates[] array contains this date counts as a holiday.
-  if((S.holidayDefs||[]).some(d => (d.dates||[]).includes(date))) return true;
-  // 2) Legacy blackouts — support both single-day (b.date) and range (b.startDate/b.endDate)
-  //    forms, since older records may have only `date` populated.
-  for(const b of (S.holidayBlackouts||[])){
-    if(b.date === date) return true;
-    if(b.startDate && b.endDate && date >= b.startDate && date <= b.endDate) return true;
-  }
-  return false;
+  return (S.holidayDefs||[]).some(d => (d.dates||[]).includes(date));
 }
 
-// Debug helper — returns the holiday def or blackout that matched, if any.
-// Used by diagnostic output so users can see which holiday definition is
-// excluding a weekend. Returns null if the date isn't a holiday.
+// Debug helper — returns the matched holiday def for diagnostic messages.
+// Always {source:'definition', name, year} format now since there's only one
+// source (the Holiday Call → Define Holidays tab).
 function _holidayReasonFor(date){
   if(!date) return null;
   for(const d of (S.holidayDefs||[])){
     if((d.dates||[]).includes(date)) return {source:'definition', name:d.name, year:d.year};
-  }
-  for(const b of (S.holidayBlackouts||[])){
-    if(b.date === date) return {source:'blackout', name:b.name};
-    if(b.startDate && b.endDate && date >= b.startDate && date <= b.endDate) return {source:'blackout-range', name:b.name, range:`${b.startDate}→${b.endDate}`};
   }
   return null;
 }
@@ -14286,98 +13906,9 @@ function _irCallPhysOnDate(date,irGroup){
 }
 
 
-/* ─── AUTO-ASSIGN TAB — inline blackout/needs helpers ─── */
-let _editingBlackoutId=null;
-function renderHaaBlackoutList(){
-  const el=document.getElementById('haa-hb-list'); if(!el) return;
-  const list=S.holidayBlackouts||[];
-  if(!list.length){el.innerHTML='<p style="color:var(--txt3);font-size:12px">No blackout dates yet.</p>';return;}
-  el.innerHTML=list.slice().sort((a,b)=>(a.startDate||a.date)>(b.startDate||b.date)?1:-1).map(b=>{
-    const sd=b.startDate||b.date||'';
-    const ed=b.endDate||sd;
-    const rangeLabel=sd===ed?sd:`${sd} \u2013 ${ed}`;
-    const dayCount=sd&&ed?Math.round((new Date(ed)-new Date(sd))/86400000)+1:1;
-    if(b.id===_editingBlackoutId){
-      return`<div style="border:1px solid var(--blue);border-radius:var(--r);padding:6px 8px;margin-bottom:4px;background:var(--blue-bg)">
-        <div class="flex" style="gap:6px;flex-wrap:wrap;align-items:center">
-          <select id="hbe-name-${b.id}" style="flex:1;min-width:100px;font-size:11px">
-            ${['New Year\'s Day','MLK Day','Memorial Day','Independence Day','Labor Day','Thanksgiving','Christmas Eve','Christmas Day','New Year\'s Eve']
-              .map(n=>`<option${n===b.name?' selected':''}>${n}</option>`).join('')}
-          </select>
-          <label style="font-size:10px;color:var(--txt3)">From</label>
-          <input id="hbe-start-${b.id}" type="date" value="${sd}" style="font-size:11px;padding:2px 4px">
-          <label style="font-size:10px;color:var(--txt3)">To</label>
-          <input id="hbe-end-${b.id}" type="date" value="${ed}" style="font-size:11px;padding:2px 4px">
-          <button class="bg bsm" onclick="saveBlackoutEdit(${b.id})">✓</button>
-          <button class="bsm" onclick="_editingBlackoutId=null;renderHaaBlackoutList()">✕</button>
-        </div>
-      </div>`;
-    }
-    return`<div class="row" style="margin-bottom:3px">
-      <span class="tag ta" style="min-width:${sd===ed?'90px':'130px'};font-size:10px">${rangeLabel}</span>
-      <span style="flex:1;font-size:12px">${b.name}${dayCount>1?` <span style="color:var(--txt3);font-size:10px">(${dayCount} days)</span>`:''}</span>
-      <button class="bsm" style="margin-right:2px" onclick="_editingBlackoutId=${b.id};renderHaaBlackoutList()">✏</button>
-      <button class="br bxs" onclick="removeHaaBlackout(${b.id})">X</button>
-    </div>`;
-  }).join('');
-}
-function saveBlackoutEdit(id){
-  const b=S.holidayBlackouts?.find(x=>x.id===id); if(!b) return;
-  const nameEl=document.getElementById(`hbe-name-${id}`);
-  const startEl=document.getElementById(`hbe-start-${id}`);
-  const endEl=document.getElementById(`hbe-end-${id}`);
-  if(!startEl?.value){alert('Start date required');return;}
-  b.name=nameEl?.value||b.name;
-  b.startDate=startEl.value;
-  b.endDate=endEl?.value||startEl.value;
-  b.date=b.startDate; // keep legacy field in sync
-  if(b.endDate<b.startDate){alert('End date cannot be before start date');return;}
-  _editingBlackoutId=null;
-  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
-}
-function addHaaBlackout(){
-  const name=document.getElementById('haa-hb-name')?.value;
-  const startDate=document.getElementById('haa-hb-start')?.value;
-  const endDate=document.getElementById('haa-hb-end')?.value||startDate;
-  if(!name||!startDate){alert('Select a holiday name and start date.');return;}
-  if(endDate<startDate){alert('End date cannot be before start date.');return;}
-  if(!S.holidayBlackouts) S.holidayBlackouts=[];
-  S.holidayBlackouts.push({id:S.nextId++,name,startDate,endDate,
-    date:startDate}); // keep .date for legacy compat
-  document.getElementById('haa-hb-start').value='';
-  document.getElementById('haa-hb-end').value='';
-  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
-}
-function removeHaaBlackout(id){
-  S.holidayBlackouts=(S.holidayBlackouts||[]).filter(x=>x.id!==id);
-  triggerSave(); renderHaaBlackoutList(); renderBlackoutList();
-}
 
-function renderHaaNeedsList(){
-  const el=document.getElementById('haa-hn-list'); if(!el) return;
-  const list=S.holidayNeeds||[];
-  if(!list.length){el.innerHTML='<p style="color:var(--txt3);font-size:12px">No staffing needs yet.</p>';return;}
-  el.innerHTML=list.map(n=>`
-    <div class="row">
-      <span style="flex:1;font-size:12px">${n.name}</span>
-      <span class="tag ${n.group==='DR'?'tb':n.group==='IR'?'tt':'tp'}">${n.group}</span>
-      <span class="tag tgr">${n.slots} slot${n.slots!==1?'s':''}</span>
-      <button class="br bxs" onclick="removeHaaNeed(${n.id})">X</button>
-    </div>`).join('');
-}
-function addHaaNeed(){
-  const name=document.getElementById('haa-hn-name')?.value;
-  const grp=document.getElementById('haa-hn-grp')?.value||'DR';
-  const slots=+document.getElementById('haa-hn-slots')?.value||1;
-  if(!name) return;
-  if(!S.holidayNeeds) S.holidayNeeds=[];
-  S.holidayNeeds.push({id:S.nextId++,name,group:grp,slots});
-  triggerSave(); renderHaaNeedsList(); renderHolidayNeedsList();
-}
-function removeHaaNeed(id){
-  S.holidayNeeds=(S.holidayNeeds||[]).filter(x=>x.id!==id);
-  triggerSave(); renderHaaNeedsList(); renderHolidayNeedsList();
-}
+/* Legacy S.holidayBlackouts / S.holidayNeeds helpers removed — Holiday Call
+   tab uses S.holidayDefs exclusively now. */
 
 /* ─── HOLIDAY AUTO-ASSIGN (FTE-weighted random lottery) ─── */
 
@@ -15004,10 +14535,6 @@ function applyHolRandom(){
   if(document.getElementById('irc-mo')) renderIRCal();
   if(document.getElementById('drc-mo')) renderDRCal();
 }
-
-// Stubs kept for backward compat (old page-holiday-auto used these)
-function renderBlackoutList(){ renderHaaBlackoutList(); }
-function renderHolidayNeedsList(){ renderHaaNeedsList(); }
 
 
 /* ─── OPEN SHIFTS MANAGEMENT ─── */
