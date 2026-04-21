@@ -7551,24 +7551,50 @@ function populateSwapColleagues(){
   if(preserved && others.some(p=>String(p.id)===preserved)) sel.value = preserved;
 }
 
+// Find every assignment (DR shift, IR shift, IR call, weekend call) belonging to
+// the given physician on the given date. Returns options suitable for a <select>.
+// Used by both loadMyShifts and loadTheirShifts so every flavor of assignment is selectable.
+function _physShiftOptionsFor(physId, date){
+  if(!physId || !date) return [];
+  const opts = [];
+  (S.drShifts||[]).filter(s => s.physId===physId && s.date===date).forEach(s => {
+    opts.push({key:`dr:${s.id}`, label:`DR ${s.shift||''} @ ${s.site||'(TBD)'}${s.sub?' ('+s.sub+')':''}`});
+  });
+  (S.irShifts||[]).filter(s => s.physId===physId && s.date===date).forEach(s => {
+    opts.push({key:`ir:${s.id}`, label:`IR ${s.shift||'1st'} @ ${s.site||'(TBD)'}${s.sub?' ('+s.sub+')':''}`});
+  });
+  (S.irCalls||[]).filter(c => c.physId===physId && c.date===date).forEach(c => {
+    opts.push({key:`irc:${c.id}`, label:`IR Call ${c.callType||'daily'} @ ${c.site||'(TBD)'}`});
+  });
+  (S.weekendCalls||[]).filter(w => w.physId===physId && (w.satDate===date || w.sunDate===date || w.date===date)).forEach(w => {
+    opts.push({key:`wk:${w.id}`, label:`Weekend Call ${w.satDate||w.date}${w.sub?' — '+w.sub:''}`});
+  });
+  return opts;
+}
+
 function loadMyShifts(){
   const date=document.getElementById('sw-my-date')?.value;
   const el=document.getElementById('sw-my-shift');if(!el)return;
-  if(!date||!CU?.physId){el.innerHTML='';return;}
-  const shifts=S.drShifts.filter(s=>s.physId===CU.physId&&s.date===date);
-  el.innerHTML=shifts.length
-    ?shifts.map(s=>`<option value="${s.id}">${s.shift} @ ${s.site}</option>`).join('')
-    :'<option disabled>No shifts on this date</option>';
+  if(!date||!CU?.physId){el.innerHTML='<option value="">Select your shift...</option>';return;}
+  const opts = _physShiftOptionsFor(CU.physId, date);
+  el.innerHTML = opts.length
+    ? '<option value="">Select your shift...</option>' +
+      opts.map(o=>`<option value="${o.key}">${escHtml(o.label)}</option>`).join('')
+    : '<option disabled>No shifts assigned to you on this date</option>';
 }
 function loadTheirShifts(){
   const pid=+document.getElementById('sw-their-phys')?.value;
-  const date=document.getElementById('sw-my-date')?.value;
+  // Use the colleague's own date input — falling back to your date if they haven't set one yet
+  const theirDate = document.getElementById('sw-their-date')?.value;
+  const myDate    = document.getElementById('sw-my-date')?.value;
+  const date = theirDate || myDate;
   const el=document.getElementById('sw-their-shift');if(!el)return;
-  if(!pid||!date){el.innerHTML='';return;}
-  const shifts=S.drShifts.filter(s=>s.physId===pid&&s.date===date);
-  el.innerHTML=shifts.length
-    ?shifts.map(s=>`<option value="${s.id}">${s.shift} @ ${s.site}</option>`).join('')
-    :'<option disabled>No shifts on this date</option>';
+  if(!pid||!date){el.innerHTML='<option value="">Select their shift...</option>';return;}
+  const opts = _physShiftOptionsFor(pid, date);
+  el.innerHTML = opts.length
+    ? '<option value="">Select their shift...</option>' +
+      opts.map(o=>`<option value="${o.key}">${escHtml(o.label)}</option>`).join('')
+    : '<option disabled>No shifts on this date</option>';
 }
 
 /* ─── SHIFT MARKETPLACE ("For Sale") ─── */
@@ -7892,22 +7918,42 @@ function cancelMyListing(listingId){
 }
 
 function submitSwapRequest(){
-  const myShiftId=+document.getElementById('sw-my-shift')?.value;
+  const myKey=document.getElementById('sw-my-shift')?.value||'';
   const toId=+document.getElementById('sw-their-phys')?.value;
-  const theirShiftId=+document.getElementById('sw-their-shift')?.value;
+  const theirKey=document.getElementById('sw-their-shift')?.value||'';
   const message=document.getElementById('sw-msg')?.value.trim()||'';
-  if(!myShiftId){alert('Select your shift first.');return;}
+  if(!myKey){alert('Select your shift first.');return;}
   if(!toId){alert('Select a colleague.');return;}
-  const myShift=S.drShifts.find(s=>s.id===myShiftId);
-  const theirShift=S.drShifts.find(s=>s.id===theirShiftId);
+  // Parse keyed shift values: format is "kind:id" (dr|ir|irc|wk).
+  // Lookup helper to resolve the actual shift row across all four collections.
+  const resolveShift = (key) => {
+    if(!key) return null;
+    const [kind, idStr] = key.split(':');
+    const id = +idStr;
+    if(kind==='dr')  return S.drShifts.find(x=>x.id===id);
+    if(kind==='ir')  return S.irShifts.find(x=>x.id===id);
+    if(kind==='irc') return S.irCalls.find(x=>x.id===id);
+    if(kind==='wk')  return S.weekendCalls.find(x=>x.id===id);
+    return null;
+  };
+  const myShift = resolveShift(myKey);
+  const theirShift = resolveShift(theirKey);
+  // For weekend calls, the date lives on satDate; use that for display
+  const dateOf = s => s ? (s.date || s.satDate || '') : '';
+  const shiftLabelOf = s => {
+    if(!s) return '';
+    if(s.callType) return `IR Call (${s.callType})`;
+    if(s.satDate || s.sunDate) return 'Weekend Call';
+    return s.shift || 'Shift';
+  };
   S.swapRequests.push({
     id:S.nextId++,
     fromPhysId:CU?.physId||null,
     toPhysId:toId,
-    date:myShift?.date||'',
-    theirDate:theirShift?.date||'',
-    shiftType:myShift?.shift||'1st Shift',
-    site:myShift?.site||'',
+    date: dateOf(myShift),
+    theirDate: dateOf(theirShift),
+    shiftType: shiftLabelOf(myShift),
+    site: myShift?.site||'',
     reason:message,
     status:'pending',
     ts:new Date().toISOString()
@@ -7915,23 +7961,25 @@ function submitSwapRequest(){
   triggerSave();
   // Notify the target physician
   const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
-  const mDate = myShift?.date||'(date tbd)';
-  const tDate = theirShift?.date||'(date tbd)';
+  const mDate = dateOf(myShift) || '(date tbd)';
+  const tDate = dateOf(theirShift) || '(date tbd)';
   _notify('swapReq',{
     physId:toId,
     subject:`Shift swap requested by ${fromName}`,
     body:`${fromName} is requesting a shift swap with you:\n\n` +
-      `Their shift: ${mDate} — ${myShift?.shift||''} at ${myShift?.site||''}\n` +
-      `Your shift: ${tDate} — ${theirShift?.shift||''} at ${theirShift?.site||''}\n` +
+      `Their shift: ${mDate} — ${shiftLabelOf(myShift)} at ${myShift?.site||''}\n` +
+      `Your shift: ${tDate} — ${shiftLabelOf(theirShift)} at ${theirShift?.site||''}\n` +
       (message?('\nMessage: '+message+'\n'):'') +
       `\nReview and respond in RadScheduler → Shift Swaps.`
   });
   // Clear form
-  ['sw-my-date','sw-msg'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['sw-my-date','sw-their-date','sw-msg'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   ['sw-my-shift','sw-their-shift'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML='<option value="">Select shift...</option>';});
-  // Show confirmation and switch to pending tab
+  // Show confirmation and switch to pending tab. Find it by its onclick rather than
+  // by position, since adding the For Sale tab shifted positions.
   alert('✓ Swap request submitted!');
-  swapTab('pending',document.querySelector('#page-swaps .tabs .tab:nth-child(2)'));
+  const pendingTab = Array.from(document.querySelectorAll('#page-swaps > .tabs .tab')).find(t => /swapTab\('pending'/.test(t.getAttribute('onclick')||''));
+  swapTab('pending', pendingTab);
 }
 
 /* ─── USER MANAGEMENT ─── */
