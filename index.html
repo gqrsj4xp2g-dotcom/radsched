@@ -2243,12 +2243,33 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 <!-- SITE SLOTS -->
 <div id="page-site-slots" class="page admin-only">
   <div class="pg-title">Site Management</div>
-  <div class="note ni">Configure physician slot needs per site and shift type. Adjust by week. The auto-assign engine reads these values to determine daily demand.</div>
-  <div class="flexe" style="margin-bottom:10px;gap:8px">
-    <div class="fg" style="margin:0"><label>Month</label><input id="ss-mo" type="month" oninput="renderSiteSlots()"></div>
-    <div id="ss-week-tabs" class="flex" style="flex-wrap:wrap;gap:3px"></div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Hospital Sites</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:8px">
+      Full site editor — click ⚙ on any row to edit name, address, IR group, DR/IR specialties offered, and per-site IR anchors/fill-ins.
+      Changes cascade through every shift, call, and assignment record that references the site.
+    </div>
+    <div class="flex" style="margin-bottom:4px;flex-wrap:wrap;gap:4px">
+      <input id="new-site-ssl" placeholder="Site name..." style="flex:1;min-width:120px">
+      <select id="new-site-irg-ssl" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Both">IR Both</option></select>
+      <button class="bp bsm" onclick="addSiteFromSlots()">Add</button>
+    </div>
+    <div class="flex" style="margin-bottom:6px;gap:4px">
+      <input id="new-site-address-ssl" placeholder="🏠 Hospital address (for drive times)..." style="flex:1;font-size:12px">
+    </div>
+    <div id="sites-list-ssl"></div>
   </div>
-  <div id="ss-content"></div>
+
+  <div class="card">
+    <div class="card-title">Slot Configuration</div>
+    <div class="note ni" style="margin-bottom:8px">Configure physician slot needs per site and shift type. Adjust by week. The auto-assign engine reads these values to determine daily demand.</div>
+    <div class="flexe" style="margin-bottom:10px;gap:8px">
+      <div class="fg" style="margin:0"><label>Month</label><input id="ss-mo" type="month" oninput="renderSiteSlots()"></div>
+      <div id="ss-week-tabs" class="flex" style="flex-wrap:wrap;gap:3px"></div>
+    </div>
+    <div id="ss-content"></div>
+  </div>
 </div>
 
 
@@ -8610,9 +8631,17 @@ function siteIRSubsByName(name){ return siteIRSubs((S.sites||[]).find(s=>s.name=
 const _siteMixedExpanded = new Set();
 
 function renderSitesList(){
-  const el=document.getElementById('sites-list');if(!el)return;
+  // Render into whichever anchors currently exist in the DOM. This lets the
+  // site editor live in BOTH the Settings tab's "Hospital Sites" card AND the
+  // Site Management (DR Site Slots) tab, staying in sync. Users naturally
+  // look for site configuration on the tab labelled "Site Management", so it
+  // needs to be accessible there — not buried inside Settings.
+  const anchors = ['sites-list', 'sites-list-ssl']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  if(!anchors.length) return;
   const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  el.innerHTML=(S.sites||[]).map((s,i)=>{
+  const html=(S.sites||[]).map((s,i)=>{
     const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';
     const anchors=s.irAnchors||[], fillins=s.irFillins||[];
     const anchorNames=anchors.map(id=>pname(id)).join(', ')||'—';
@@ -8723,6 +8752,7 @@ function renderSitesList(){
       ${editor}
     </div>`;
   }).join('');
+  anchors.forEach(el => { el.innerHTML = html; });
 }
 
 // Expand/collapse a site's inline editor.
@@ -9077,7 +9107,13 @@ function saveSiteRoles(siteName){
   renderSiteRoles();
 }
 function renderSiteSlots(){
-  renderSiteRoles();
+  // The "Site Management" tab now also hosts the full site editor (previously
+  // the editor only existed in Settings → Hospital Sites, which users didn't
+  // discover because they naturally looked under the tab labeled "Site
+  // Management"). renderSitesList writes to BOTH anchors — sites-list (in
+  // Settings) and sites-list-ssl (on this tab) — so they stay in sync.
+  renderSitesList();
+  renderSiteRoles(); // legacy orphan anchor; no-op if element missing
   const ym=document.getElementById('ss-mo')?.value||new Date().toISOString().slice(0,7);
   const [y,m]=ym.split('-').map(Number);
   const first=new Date(y,m-1,1);
@@ -9087,6 +9123,28 @@ function renderSiteSlots(){
   tabsEl.innerHTML='';
   for(let w=1;w<=weeks;w++){const b=document.createElement('button');b.className='wktab'+(w===aw?' on':'');b.textContent='Wk '+w;b.dataset.w=w;b.onclick=function(){document.querySelectorAll('.wktab').forEach(x=>x.classList.remove('on'));this.classList.add('on');renderSlotGrid(ym,+this.dataset.w);};tabsEl.appendChild(b);}
   renderSlotGrid(ym,aw);
+}
+
+// Sister function of addSite() wired to the Site Management tab's add-form.
+// Uses the -ssl suffixed input IDs so it doesn't collide with the original
+// form on the Settings tab.
+function addSiteFromSlots(){
+  if(!_adminOnly('add sites')) return;
+  const rawName = document.getElementById('new-site-ssl')?.value || '';
+  const name    = String(rawName).replace(/[<>&"|]/g,'').trim();
+  const grp     = document.getElementById('new-site-irg-ssl')?.value || null;
+  const addr    = (document.getElementById('new-site-address-ssl')?.value || '').trim();
+  if(!name){ alert('Enter a site name.'); return; }
+  if((S.sites||[]).find(s => s.name === name)){ alert('A site with that name already exists.'); return; }
+  const newSite = {name, irGroup:grp||null, irAnchors:[], irFillins:[]};
+  if(addr) newSite.address = addr;
+  S.sites.push(newSite);
+  const ne=document.getElementById('new-site-ssl'); if(ne) ne.value='';
+  const ae=document.getElementById('new-site-address-ssl'); if(ae) ae.value='';
+  triggerSave();
+  S.sites.forEach(st=>{['1st','2nd','3rd','Home'].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
+  renderSitesList();
+  renderSiteSlots();
 }
 function renderSlotGrid(ym,week){
   const el=document.getElementById('ss-content');if(!el)return;
