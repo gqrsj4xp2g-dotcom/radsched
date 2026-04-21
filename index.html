@@ -367,12 +367,11 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)">⚖ IR Call Rebalancer</div>
       <div class="snav-sect">Compliance & Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
-      <div class="snav-item" onclick="nav('holidays',this)">Holiday Call</div>
+      <div class="snav-item admin-only" onclick="nav('holidays',this)">Holiday Call</div>
       <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
       <div class="snav-sect">System</div>
-      <div class="snav-item" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
+      <div class="snav-item admin-only" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
       <div class="snav-item" onclick="nav('comm-prefs',this)">🔔 Notifications</div>
-      <div class="snav-item" onclick="nav('settings',document.querySelector('[onclick*=settings]'))">⚙ Settings</div>
       <div class="snav-sect admin-only">Admin</div>
       <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
       <div class="snav-item admin-only" onclick="nav('broadcast',this)">📢 Broadcast Email</div>
@@ -566,6 +565,25 @@ tbody tr:hover{background:var(--bg3)}
     <div class="note ni" style="font-size:11px;margin-top:8px;line-height:1.5">
       If left blank, alerts go to your login email. Use this field if your login email isn't a real inbox
       (e.g., <code>admin@rad.com</code>) — set this to your personal or work email (like Gmail) to actually receive alerts.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">🔐 Change Password</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px;line-height:1.5">
+      Update the password you use to sign in. Minimum 8 characters. You'll stay signed in on this device — no need to log out.
+    </div>
+    <div class="fg" style="margin-bottom:8px">
+      <label>New password</label>
+      <input id="cp-new-pw" type="password" autocomplete="new-password" placeholder="at least 8 characters" style="font-family:monospace;font-size:13px">
+    </div>
+    <div class="fg" style="margin-bottom:8px">
+      <label>Confirm new password</label>
+      <input id="cp-new-pw2" type="password" autocomplete="new-password" placeholder="re-type the password" style="font-family:monospace;font-size:13px">
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="bp bsm" onclick="changeMyPassword()">Update Password</button>
+      <span id="cp-pw-status" style="font-size:11px"></span>
     </div>
   </div>
 
@@ -3527,12 +3545,26 @@ function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.sta
 
 // Holiday-only counters — reads from S.holidays (the Holiday Call tab's list) rather
 // than S.irCalls, so the source of truth is the authoritative holiday assignment.
-// Used for Holiday Counter tab totals.
+// Each holiday BLOCK (name+year+group) counts as 1 regardless of how many dates
+// the block spans — e.g. Thanksgiving covering 4 days is still 1 assignment.
+// Used for Holiday Counter tab totals and dashboard displays.
 function holCnt(pid, ym){
-  return (S.holidays||[]).filter(h => h.physId===pid && (h.date||'').startsWith(ym)).length;
+  const seen=new Set();
+  (S.holidays||[]).forEach(h=>{
+    if(h.physId!==pid) return;
+    if(!(h.date||'').startsWith(ym)) return;
+    seen.add(`${h.name}|${h.year}|${h.group}`);
+  });
+  return seen.size;
 }
 function holCntYear(pid, year){
-  return (S.holidays||[]).filter(h => h.physId===pid && h.year===year).length;
+  const seen=new Set();
+  (S.holidays||[]).forEach(h=>{
+    if(h.physId!==pid) return;
+    if(h.year!==year) return;
+    seen.add(`${h.name}|${h.year}|${h.group}`);
+  });
+  return seen.size;
 }
 
 /* ─── IR CALL FAIR-SHARE TARGETS ───────────────────────────────────────────
@@ -3855,7 +3887,17 @@ function renderDash(){
       <span style="font-weight:700;color:${pct>=S.cfg.anchorPct?'var(--green)':pct>=40?'var(--amber)':'var(--red)'}">${pct}%</span>
     </div>${ancBar(pct)}</div>`;}).join('');
   document.getElementById('dash-anc').innerHTML=ancHtml||'<p style="color:var(--txt3);font-size:12px">No anchor sites configured.</p>';
-  const hc={};S.holidays.forEach(h=>{if(!hc[h.physId])hc[h.physId]=0;hc[h.physId]++;});
+  // Each holiday block (name+year+group) = 1 assignment regardless of how many
+  // dates it spans. A multi-day holiday like Thanksgiving shouldn't count 4x.
+  const hc={};
+  const _hcSeen=new Set();
+  S.holidays.forEach(h=>{
+    const key=`${h.physId}|${h.name}|${h.year}|${h.group}`;
+    if(_hcSeen.has(key)) return;
+    _hcSeen.add(key);
+    if(!hc[h.physId])hc[h.physId]=0;
+    hc[h.physId]++;
+  });
   document.getElementById('dash-hols').innerHTML=Object.entries(hc).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([id,n])=>
     `<div class="row"><span style="flex:1;font-size:12px">${pname(+id)}</span><span class="tag tp">${n} holidays</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None recorded.</p>';
@@ -6796,23 +6838,75 @@ function copyCalendarFeedUrl(btn){
   const el = document.getElementById('cs-feed-url');
   const val = el?.value;
   if(!val){alert('Generate a URL first.');return;}
+
+  // Safari iOS reliability notes:
+  //  - navigator.clipboard.writeText requires HTTPS + user gesture; works on
+  //    modern iOS but silently throws on older versions
+  //  - document.execCommand('copy') requires the source element to be NOT
+  //    readonly and NOT contenteditable=false; Safari iOS also needs
+  //    setSelectionRange (.select() is unreliable there)
+  //  - If both paths fail, surface the URL in a prompt() so the user can
+  //    long-press → Copy from the native dialog
   const doCopy = async () => {
+    // Strategy 1: Clipboard API
     try{
-      if(navigator.clipboard && window.isSecureContext){
+      if(navigator.clipboard && navigator.clipboard.writeText){
         await navigator.clipboard.writeText(val);
         return true;
       }
     }catch(e){}
-    el.select();
-    let ok=false;
-    try{ ok=document.execCommand('copy'); }catch(e){}
-    return ok;
+
+    // Strategy 2: execCommand via a temporary, fully-selectable input.
+    // Safari iOS can't select inside a readonly input reliably. Create a
+    // throwaway input, populate it, make it visible+selectable, copy, remove.
+    try{
+      const tmp = document.createElement('input');
+      tmp.type = 'text';
+      tmp.value = val;
+      // Off-screen but still selectable — display:none blocks selection on iOS
+      tmp.style.position = 'fixed';
+      tmp.style.left = '-9999px';
+      tmp.style.top = '0';
+      tmp.setAttribute('readonly', '');        // prevents virtual keyboard
+      tmp.contentEditable = 'true';            // enables selection on iOS
+      document.body.appendChild(tmp);
+      const range = document.createRange();
+      range.selectNodeContents(tmp);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      tmp.setSelectionRange(0, val.length);    // required on iOS
+      const ok = document.execCommand('copy');
+      sel.removeAllRanges();
+      document.body.removeChild(tmp);
+      if(ok) return true;
+    }catch(e){}
+
+    // Strategy 3: old-school select+copy on the original element, removing
+    // readonly temporarily. Some browsers block this on readonly fields.
+    try{
+      const wasReadOnly = el.hasAttribute('readonly');
+      el.removeAttribute('readonly');
+      el.focus();
+      el.setSelectionRange(0, el.value.length);
+      const ok = document.execCommand('copy');
+      if(wasReadOnly) el.setAttribute('readonly', '');
+      if(ok) return true;
+    }catch(e){}
+
+    return false;
   };
+
   doCopy().then(ok => {
     if(btn){
       const orig = btn.textContent;
-      btn.textContent = ok ? '✓ Copied' : '✕ Failed';
+      btn.textContent = ok ? '✓ Copied' : '✕ Copy failed';
       setTimeout(()=>{btn.textContent=orig;}, 2000);
+    }
+    if(!ok){
+      // Final fallback — show the URL so the user can copy manually.
+      // prompt() on iOS lets the user tap into the text field and long-press Copy.
+      prompt('Copy failed automatically. Tap and hold the text below, then Copy:', val);
     }
   });
 }
@@ -8608,11 +8702,17 @@ function renderImportPage(){
 
 /* ─── DASHBOARD NAV ─── */
 function dashNavMonth(dir){
-  const el=document.getElementById('dash-mo');
-  if(!el)return;
-  const [y,m]=(el.value||new Date().toISOString().slice(0,7)).split('-').map(Number);
+  // The dashboard tracks its "viewed month" in the module-level _dashYm
+  // variable (not a DOM input). Mutate that directly, then re-render.
+  // Previously this function read a non-existent #dash-mo input, so clicks
+  // on ◀ / ▶ did nothing.
+  if(!_dashYm){
+    const now=new Date();
+    _dashYm=fmtDate(new Date(now.getFullYear(),now.getMonth(),1)).slice(0,7);
+  }
+  const [y,m]=_dashYm.split('-').map(Number);
   const d=new Date(y,m-1+dir,1);
-  el.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  _dashYm=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
   renderDash();
 }
 
@@ -11042,6 +11142,50 @@ function saveDeliveryEmail(){
     st.textContent = val ? `✓ Alerts will now be sent to ${val}` : '✓ Delivery email cleared — using login email';
     st.style.color = 'var(--green-t)';
     setTimeout(()=>{if(st) st.textContent='';}, 4000);
+  }
+}
+
+// User-initiated password change. Uses sb.auth.updateUser({password}) which
+// modifies the CURRENT session's own password — no admin privileges needed.
+// The session token stays valid so the user keeps their login on this device.
+async function changeMyPassword(){
+  const pw  = document.getElementById('cp-new-pw')?.value  || '';
+  const pw2 = document.getElementById('cp-new-pw2')?.value || '';
+  const st  = document.getElementById('cp-pw-status');
+  const setStatus = (txt, color) => {
+    if(st){ st.textContent = txt; st.style.color = color; }
+  };
+  if(!pw || !pw2){ setStatus('Fill in both password fields.','var(--red-t)'); return; }
+  if(pw.length < 8){ setStatus('Password must be at least 8 characters.','var(--red-t)'); return; }
+  if(pw !== pw2){ setStatus('Passwords do not match.','var(--red-t)'); return; }
+
+  const sb = _initAuthClient();
+  if(!sb){
+    setStatus('Supabase not configured — cannot change password from this device.','var(--red-t)');
+    return;
+  }
+  setStatus('Updating…','var(--txt3)');
+  try{
+    const { data, error } = await sb.auth.updateUser({ password: pw });
+    if(error) throw error;
+    setStatus('✓ Password updated. Use it next time you sign in.','var(--green-t)');
+    // Clear the inputs so the new password isn't left hanging on screen
+    const e1 = document.getElementById('cp-new-pw');  if(e1) e1.value = '';
+    const e2 = document.getElementById('cp-new-pw2'); if(e2) e2.value = '';
+    setTimeout(()=>{ if(st) st.textContent = ''; }, 5000);
+  }catch(e){
+    console.error('[RS] changeMyPassword error:', e);
+    const msg = e?.message || 'Unknown error';
+    // Friendlier guidance for the most common failure modes
+    if(/weak|pwned|compromised/i.test(msg)){
+      setStatus('✕ Password is too weak or has appeared in a breach. Try a stronger one.','var(--red-t)');
+    } else if(/same.*password|matches/i.test(msg)){
+      setStatus('✕ That matches your current password. Use a different one.','var(--red-t)');
+    } else if(/session|jwt|expired/i.test(msg)){
+      setStatus('✕ Your session has expired. Sign out and back in, then retry.','var(--red-t)');
+    } else {
+      setStatus(`✕ ${msg}`,'var(--red-t)');
+    }
   }
 }
 
