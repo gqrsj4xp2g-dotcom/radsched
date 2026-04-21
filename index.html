@@ -1709,10 +1709,13 @@ tbody tr:hover{background:var(--bg3)}
             <option value="IR-South">IR South only</option>
           </select></div>
         <div class="fg" style="margin:0"><label>Weighting</label>
-          <select id="haa-mode" style="width:170px">
+          <select id="haa-mode" style="width:220px">
             <option value="weighted">Weighted (career balance)</option>
             <option value="pure">Pure FTE proportion</option>
           </select></div>
+      </div>
+      <div class="note ni" style="font-size:11px;margin-top:6px">
+        Generates assignments for one year at a time. Weighted mode considers career history from prior years — physicians who've been over-assigned get lower weight, owed physicians get higher weight, so long-run fairness emerges as you run the lottery each year. See the Counter tab for the multi-year career view.
       </div>
       <button class="bp bsm" style="margin-top:8px" onclick="renderHolCareerTally()">↺ Refresh Tally</button>
     </div>
@@ -1720,7 +1723,7 @@ tbody tr:hover{background:var(--bg3)}
     <div class="ibox" style="margin:10px 0">
       <div class="card-title">Run Lottery</div>
       <div class="note nw" style="font-size:12px;margin-bottom:8px">
-        Only unassigned holiday slots for the selected year are filled. Already-assigned dates are skipped.
+        Only unassigned holiday slots for the selected year are filled. Already-assigned dates are skipped. Weighted mode uses career history from prior years to tilt the draw toward owed physicians.
       </div>
       <button class="bp" onclick="previewHolRandom()">🎲 Generate Assignment</button>
     </div>
@@ -2450,13 +2453,18 @@ Once set, ask me anything about your schedule!</div>
    AUTH STATE
 ═══════════════════════════════════════════════════ */
 
-// ── Persistence: Supabase shared database ──
+// Persistence: Supabase shared database ──
 // All users share the same live data. Configure your Supabase project below.
 let _isRestoring=true;
 let _dataRestored=false;
 let _hasUnsavedChanges=false;
 let _SRC=''; // kept for offline/export fallback
 let _supabase=null;
+// Tracks user-ids added to USERS locally in the last N seconds that haven't
+// yet echoed back from the remote. Used by _applyRemoteData to avoid dropping
+// a just-created user when a concurrent poll/realtime event pulls a pre-push
+// snapshot. Entries auto-expire after 30s.
+let _recentlyAddedUsers=[];
 let _saveTimeout=null;
 const _SUPABASE_URL=/*CREDS_URL_START*/'https://tpbgwvisikbuqhmlqtky.supabase.co'
 /*CREDS_URL_END*/;  // set by Settings → auto-embedded on Save
@@ -3083,17 +3091,36 @@ function _applyRemoteData(d){
     // Previously this loop only added/updated, which meant deleted users kept coming
     // back whenever _applyRemoteData ran (page load, poll, realtime echo).
     //
-    // Edge protection: if for some reason the currently-logged-in user (CU) is not in
+    // Edge protection 1: if for some reason the currently-logged-in user (CU) is not in
     // the remote copy (e.g. race between their own first login push and someone else's
     // subsequent save), keep them so they don't get kicked out of their active session.
+    //
+    // Edge protection 2: if a user was added locally within the last 30 seconds AND
+    // does not appear in the remote copy, keep them. This covers the narrow window
+    // between local USERS.push and the push landing in the DB — a concurrent poll/
+    // realtime event could otherwise pull a pre-push snapshot and drop the just-
+    // created user. Stored as a Set of {id, addedAt} tuples on a module-level array.
     const normalized = d.users.map(u => {
       if(u.physId!=null) u.physId = parseInt(u.physId)||null;
       return u;
     });
+    const remoteIds = new Set(normalized.map(u => u.id));
     const cuId = CU?.id;
-    if(cuId && !normalized.some(u => u.id===cuId)){
+    if(cuId && !remoteIds.has(cuId)){
       const keep = USERS.find(x => x.id===cuId);
-      if(keep) normalized.push(keep);
+      if(keep){ normalized.push(keep); remoteIds.add(cuId); }
+    }
+    // Protect locally-added users (<30s old) that haven't echoed back from remote
+    const GRACE_MS = 30000;
+    const nowMs = Date.now();
+    if(Array.isArray(_recentlyAddedUsers)){
+      _recentlyAddedUsers = _recentlyAddedUsers.filter(r => nowMs - r.addedAt < GRACE_MS);
+      _recentlyAddedUsers.forEach(r => {
+        if(!remoteIds.has(r.id)){
+          const keep = USERS.find(x => x.id === r.id);
+          if(keep) normalized.push(keep);
+        }
+      });
     }
     USERS.length = 0;
     normalized.forEach(u => USERS.push(u));
@@ -3489,9 +3516,24 @@ function maxDR(p,t){
 }
 function drCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
 function wkCnt(pid,ym){return S.weekendCalls.filter(w=>(w.satDate||w.date||"").startsWith(ym)&&w.physId===pid).length;}
-function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
-function irDailyCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='daily').length;}
-function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='weekend').length;}
+// Regular IR call counters — exclude holiday-synced entries so they don't inflate
+// a physician's day/weekend totals. Those entries are created by _syncHolidayToIRCall
+// (tagged with "(Holiday)" in notes) and should only be reflected in the Holiday
+// Counter tab, not in regular IR call FTE tallies / rebalancer quotas.
+function _isHolidaySyncedCall(c){ return (c && c.notes || '').includes('(Holiday)'); }
+function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsWith(ym)&&!_isHolidaySyncedCall(s)).length;}
+function irDailyCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='daily'&&!_isHolidaySyncedCall(c)).length;}
+function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='weekend'&&!_isHolidaySyncedCall(c)).length;}
+
+// Holiday-only counters — reads from S.holidays (the Holiday Call tab's list) rather
+// than S.irCalls, so the source of truth is the authoritative holiday assignment.
+// Used for Holiday Counter tab totals.
+function holCnt(pid, ym){
+  return (S.holidays||[]).filter(h => h.physId===pid && (h.date||'').startsWith(ym)).length;
+}
+function holCntYear(pid, year){
+  return (S.holidays||[]).filter(h => h.physId===pid && h.year===year).length;
+}
 
 /* ─── IR CALL FAIR-SHARE TARGETS ───────────────────────────────────────────
    Targets are computed from actual finite slots available in the period,
@@ -3852,7 +3894,7 @@ function renderMySched(){
   if(!p){document.getElementById('my-content').innerHTML='<div class="note ni">No physician profile linked to your account. Contact an administrator.</div>';return;}
   const shifts=S.drShifts.filter(s=>s.physId===p.id&&s.date.startsWith(ym)&&!s.autoHome);
   const wk=S.weekendCalls.filter(s=>s.physId===p.id&&(s.satDate||s.date||'').startsWith(ym));
-  const ir=S.irCalls.filter(s=>s.physId===p.id&&s.date.startsWith(ym));
+  const ir=S.irCalls.filter(s=>s.physId===p.id&&s.date.startsWith(ym)&&!_isHolidaySyncedCall(s));
   const irSh=(S.irShifts||[]).filter(s=>s.physId===p.id&&s.date.startsWith(ym));
   const hols=S.holidays.filter(h=>h.physId===p.id&&h.date.startsWith(ym));
   const vacs=S.vacations.filter(v=>v.physId===p.id&&v.start.slice(0,7)<=ym&&v.end.slice(0,7)>=ym);
@@ -4799,14 +4841,15 @@ function renderFTECareer(){
   const allYears=[...new Set(S.irCalls.map(c=>c.date.slice(0,4)))].sort();
   if(!allYears.length){el.innerHTML='<div class="note ni">No IR call data recorded yet. Assign and apply IR calls to start building the career tally.</div>';return;}
 
-  // Per-year, per-group totals
+  // Per-year, per-group totals — excludes holiday-synced calls (those are tracked
+  // separately in the Holiday Call career balance, not counted toward regular FTE).
   function yearGroupTotals(yr,g,callType){
-    return S.irCalls.filter(c=>c.date.startsWith(yr)&&c.irGroup===g&&c.callType===callType).length;
+    return S.irCalls.filter(c=>c.date.startsWith(yr)&&c.irGroup===g&&c.callType===callType&&!_isHolidaySyncedCall(c)).length;
   }
 
-  // For each physician, per-year counts
+  // For each physician, per-year counts — same exclusion.
   function physYearCnt(pid,yr,callType){
-    return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(yr)&&c.callType===callType).length;
+    return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(yr)&&c.callType===callType&&!_isHolidaySyncedCall(c)).length;
   }
 
   // FTE-proportional fair share: physician's share = (their irFte / group total irFte) × group total calls
@@ -7363,6 +7406,24 @@ function deleteIRShift(id){
 /* ─── HOLIDAY COUNTER — MULTI-YEAR EQUITY ─── */
 
 function renderHolCounter(){
+  // Populate year dropdown dynamically — include all years with assignments,
+  // all years with holiday definitions, and a few future years for planning.
+  const yrEl=document.getElementById('hcy');
+  if(yrEl){
+    const curSel=yrEl.value;
+    const defYears=(S.holidayDefs||[]).map(d=>d.year).filter(Boolean);
+    const holYears=(S.holidays||[]).map(h=>h.year).filter(Boolean);
+    const curYr=new Date().getFullYear();
+    const allYrs=[...new Set([...defYears, ...holYears, curYr-1, curYr, curYr+1, curYr+2])]
+      .filter(Boolean).sort((a,b)=>b-a); // newest first
+    const expectedHTML='<option value="all">All Years (Career)</option>'+
+      allYrs.map(y=>`<option value="${y}">${y}</option>`).join('');
+    if(yrEl.innerHTML.replace(/\s/g,'') !== expectedHTML.replace(/\s/g,'')){
+      yrEl.innerHTML=expectedHTML;
+      // Restore prior selection if still valid
+      if(curSel && [...yrEl.options].some(o=>o.value===curSel)) yrEl.value=curSel;
+    }
+  }
   const grp = document.getElementById('hcg')?.value || 'ALL';
   const yr  = document.getElementById('hcy')?.value || 'all';
 
@@ -7414,6 +7475,45 @@ function renderHolCounter(){
   const maxTotal  = sorted.length ? Math.max(...sorted.map(([,v]) => v.total)) : 0;
   const minTotal  = sorted.length ? Math.min(...sorted.map(([,v]) => v.total)) : 0;
 
+  // Career fair-share balance per physician — cumulative actual vs FTE-weighted
+  // fair share across all visible years. Positive = ahead of fair share,
+  // negative = owed. Used to color-code long-run imbalance.
+  const isCareer = yr === 'all';
+  const fairByPhys = {};
+  if(isCareer){
+    // For each group and each year, compute total slots and per-physician fair share
+    physicians.forEach(p=>{ fairByPhys[p.id]={actTot:0, fairTot:0, bal:0}; });
+    const groupsToConsider = grp==='ALL' ? ['DR','IR-North','IR-South'] : [grp];
+    groupsToConsider.forEach(g=>{
+      const poolPhys = physicians.filter(p=>{
+        if(g==='DR') return p.drFte>0 && p.role!=='IR';
+        if(g==='IR-North') return p.irFte>0 && p.irGroup==='North';
+        if(g==='IR-South') return p.irFte>0 && p.irGroup==='South';
+        return false;
+      });
+      const gFteTot = poolPhys.reduce((s,p)=>s+(g==='DR'?p.drFte:p.irFte), 0) || 1;
+      allYears.forEach(year=>{
+        // Total slots for this group in this year = distinct (defName+physId) from S.holidays for that group/year
+        const slotsThisYear = new Set(
+          S.holidays.filter(h=>h.group===g && h.year===year).map(h=>`${h.name}|${h.physId}`)
+        ).size;
+        if(!slotsThisYear) return;
+        poolPhys.forEach(p=>{
+          const myFte = g==='DR' ? p.drFte : p.irFte;
+          const fairShare = slotsThisYear * (myFte / gFteTot);
+          const actual = (new Set(
+            S.holidays.filter(h=>h.group===g && h.year===year && h.physId===p.id).map(h=>h.name)
+          )).size;
+          if(fairByPhys[p.id]){
+            fairByPhys[p.id].actTot += actual;
+            fairByPhys[p.id].fairTot += fairShare;
+            fairByPhys[p.id].bal += (actual - fairShare);
+          }
+        });
+      });
+    });
+  }
+
   let html = `<div class="g3" style="margin-bottom:12px">
     <div class="met"><div class="met-lbl">Total Assignments</div>
       <div class="met-val">${filtered.length}</div></div>
@@ -7428,6 +7528,7 @@ function renderHolCounter(){
     ${grp === 'ALL' ? '<th>DR</th><th>IR N</th><th>IR S</th>' : ''}
     ${showYears ? allYears.map(y => `<th style="text-align:center">${y}</th>`).join('') : ''}
     <th style="text-align:center;border-left:2px solid var(--bdr)">Total</th>
+    ${isCareer ? '<th style="text-align:center" title="Actual minus FTE-weighted fair share across all visible years. Negative = owed more holidays, positive = ahead of fair share.">Balance</th>' : ''}
     <th style="min-width:200px">Holiday Breakdown</th>
   </tr></thead><tbody>`;
 
@@ -7449,11 +7550,22 @@ function renderHolCounter(){
     const cellS = (v.byGroup['IR-South']||0) + (isSouth?legacyIR:0);
     const cellDR = v.byGroup['DR']||0;
 
+    // Career balance cell
+    let balCell='';
+    if(isCareer){
+      const b = fairByPhys[+id]?.bal || 0;
+      const balTxt = (b>0?'+':'')+b.toFixed(1);
+      const balCol = b > 1.5 ? 'var(--amber,#d97706)' : b < -1.5 ? 'var(--blue-t)' : 'var(--green-t)';
+      const fair = (fairByPhys[+id]?.fairTot || 0).toFixed(1);
+      balCell = `<td style="text-align:center;font-weight:700;color:${balCol}" title="Fair share: ${fair}">${balTxt}</td>`;
+    }
+
     html += `<tr>
       <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
       ${grp === 'ALL' ? `<td style="text-align:center">${cellDR}</td><td style="text-align:center">${cellN}</td><td style="text-align:center">${cellS}</td>` : ''}
       ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
+      ${balCell}
       <td>
         <div style="display:flex;align-items:center;gap:6px">
           <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;min-width:60px">
@@ -7468,11 +7580,20 @@ function renderHolCounter(){
   const zeroes = physicians.filter(p => !(data[p.id]?.total > 0));
   if(zeroes.length){
     zeroes.forEach(p => {
+      let zBal='';
+      if(isCareer){
+        const b = fairByPhys[p.id]?.bal || 0;
+        const fair = (fairByPhys[p.id]?.fairTot || 0).toFixed(1);
+        const balTxt = (b>0?'+':'')+b.toFixed(1);
+        const balCol = b < -1.5 ? 'var(--blue-t)' : 'var(--txt3)';
+        zBal = `<td style="text-align:center;font-weight:700;color:${balCol}" title="Fair share: ${fair}">${fair==='0.0'?'—':balTxt}</td>`;
+      }
       html += `<tr style="opacity:.5">
         <td style="font-weight:600">${pname(p.id)}</td>
         ${grp === 'ALL' ? '<td style="text-align:center">—</td><td style="text-align:center">—</td><td style="text-align:center">—</td>' : ''}
         ${showYears ? allYears.map(() => '<td>—</td>').join('') : ''}
         <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);color:var(--txt3)">0</td>
+        ${zBal}
         <td style="color:var(--txt3);font-size:11px">No assignments</td>
       </tr>`;
     });
@@ -9071,7 +9192,26 @@ async function adminCreateAccount(){
       notifPrefs:{...defaultPrefs}
     };
     USERS.push(newUser);
-    triggerSave();
+    _recentlyAddedUsers.push({id:newUserId, addedAt:Date.now()});
+
+    // Force IMMEDIATE synchronous push to Supabase — don't wait for the
+    // debounced triggerSave. If we return before the row is written, a
+    // concurrent poll/realtime fetch could load stale data that doesn't
+    // include the new user, and _applyRemoteData would silently drop them
+    // from USERS. Bumping _lastLocalChange first also blocks any in-flight
+    // remote apply from clobbering us while the push is in progress.
+    S._lastLocalChange = Date.now();
+    _hasUnsavedChanges = true;
+    clearTimeout(_saveTimeout);
+    const pushOk = await _pushToSupabase();
+    if(!pushOk){
+      // Roll back local add so the form doesn't lie about a failed save
+      const idx = USERS.findIndex(u => u.id === newUserId);
+      if(idx >= 0) USERS.splice(idx, 1);
+      setMsg(`<span style="color:var(--red-t)">Auth user created but failed to save to practice database. Check console and retry. The Supabase Auth account exists — you may need to delete it before retrying with the same email.</span>`);
+      renderUserMgmt();
+      return;
+    }
     setMsg(`<span style="color:var(--green-t)">✓ Account created for ${escHtml(email)}</span>`);
 
     // Clear form for next entry
@@ -14590,13 +14730,17 @@ function previewHolRandom(){
   }
 
   groups.forEach(grp=>{
+    // Career data before the target year — weighted mode uses cumulative balance
+    // from all prior years. This is where multi-year fairness enters: a physician
+    // who took on more than their FTE share in past years has a lower draw weight
+    // here; an "owed" physician has a higher weight. Run fresh lottery each year
+    // and long-run totals converge toward each physician's FTE proportion.
     const careerData=_holCareerDataBeforeYear(grp, year);
 
     defs.forEach(def=>{
       const slotsNeeded=slotsFor(def, grp);
       if(!slotsNeeded) return;
 
-      // Count already assigned (distinct physicians) for this def+group
       const alreadyPhys=new Set(S.holidays.filter(h=>
         h.name===def.name&&h.year===def.year&&h.group===grp).map(h=>h.physId));
       const previewPhys=preview.filter(a=>a.defId===def.id&&a.group===grp).map(a=>a.physId);
@@ -14604,13 +14748,10 @@ function previewHolRandom(){
       if(physSlotsToFill<=0) return;
 
       for(let slot=0;slot<physSlotsToFill;slot++){
-        // Build eligible pool — physician must be available on ALL dates in the block
         const eligible=careerData.filter(d=>{
           const p=d.p;
-          // Already assigned?
           if(alreadyPhys.has(p.id)) return false;
           if(preview.find(a=>a.defId===def.id&&a.group===grp&&a.physId===p.id)) return false;
-          // Free on all holiday dates
           const vd=vacDays(p.id);
           if((def.dates||[]).some(dt=>vd.has(dt))) return false;
           return true;
