@@ -9159,6 +9159,76 @@ async function adminCreateAccount(){
 
     if(!res.ok){
       const errText = body?.error || body?.message || body?.msg || rawText || `HTTP ${res.status}`;
+
+      // Special case: auth user already exists. The edge function returns
+      // email_exists:true + existing_id + existing_metadata so we can offer
+      // the admin a recovery path instead of a dead-end 422.
+      if(body?.email_exists && body?.existing_id){
+        const existingPracticeId = body.existing_metadata?.practiceId || null;
+        const currentPractice = _PRACTICE_ID || 'main';
+        const samePractice = !existingPracticeId || existingPracticeId === currentPractice;
+        const existingId = body.existing_id;
+        const existingMeta = body.existing_metadata || {};
+
+        let adoptPrompt;
+        if(samePractice){
+          adoptPrompt =
+`An account for ${email} already exists in Supabase Auth from a prior attempt.
+
+It belongs to this practice ("${currentPractice}") but isn't in the current user list — likely because a previous creation succeeded on the auth side but the sync back to this practice's data didn't land.
+
+Click OK to adopt the existing account into this user list (no new auth user is created; the password from the prior attempt is unchanged).
+
+Click Cancel to abort — you can then either use a different email, or have a different admin delete the orphaned auth user via Supabase Dashboard → Authentication → Users.`;
+        } else {
+          adoptPrompt =
+`An account for ${email} already exists in Supabase Auth, but it belongs to a different practice ("${existingPracticeId}"). This practice is "${currentPractice}".
+
+Click OK to MOVE that account to this practice (existing practice loses access to them).
+Click Cancel to abort.`;
+        }
+
+        if(!confirm(adoptPrompt)){
+          setMsg('<span style="color:var(--txt3)">Cancelled. Use a different email, or contact Supabase Dashboard → Authentication → Users to clean up the orphan.</span>');
+          return;
+        }
+
+        // If practice mismatch, update the auth user's practiceId to the current one
+        if(!samePractice){
+          await _updateUserAuthMeta(existingId, {practiceId: currentPractice, role, physId, first, last}).catch(()=>{});
+        } else {
+          // Same practice — still ensure the auth user's role/physId/first/last match what admin just entered
+          await _updateUserAuthMeta(existingId, {role, physId, first, last}).catch(()=>{});
+        }
+
+        // Adopt: add to local USERS and push
+        const adoptedUser={
+          id: existingId, email, first, last, role, physId,
+          practiceId: currentPractice,
+          joined: (existingMeta.joined) || new Date().toISOString().slice(0,10),
+          notifPrefs: {...defaultPrefs}
+        };
+        USERS.push(adoptedUser);
+        _recentlyAddedUsers.push({id:existingId, addedAt:Date.now()});
+        S._lastLocalChange = Date.now();
+        _hasUnsavedChanges = true;
+        clearTimeout(_saveTimeout);
+        const ok = await _pushToSupabase();
+        if(!ok){
+          const idx = USERS.findIndex(u => u.id === existingId);
+          if(idx >= 0) USERS.splice(idx, 1);
+          setMsg('<span style="color:var(--red-t)">Adopt succeeded in Auth but practice save failed. Refresh and try again.</span>');
+          renderUserMgmt();
+          return;
+        }
+        setMsg(`<span style="color:var(--green-t)">✓ Adopted existing account for ${escHtml(email)}. They can log in with the password from the prior attempt (or use Supabase → Auth → Users to send a password reset).</span>`);
+        ['ca-first','ca-last','ca-email','ca-pw'].forEach(id=>{
+          const el=document.getElementById(id); if(el) el.value='';
+        });
+        renderUserMgmt();
+        return;
+      }
+
       // Common specific errors
       if(String(errText).toLowerCase().includes('already registered')||
          String(errText).toLowerCase().includes('already exists')||
