@@ -1106,7 +1106,7 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-auto-assign" class="page admin-only">
   <div class="pg-title">DR Auto-Assign</div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-    <button class="br bsm" onclick="if(_adminOnly('reset DR auto-assign'))S.aaPreview=[],S.drShifts=S.drShifts.filter(s=>s.notes!='Auto'&&s.notes!='Auto-home'),triggerSave(),renderDRBuilder()" title="Clear all entries from this schedule">🗑 Reset All</button>
+    <button class="br bsm" onclick="if(_adminOnly('reset DR auto-assign')){S.aaPreview=[];S.drShifts=S.drShifts.filter(s=>s.notes!='Auto'&&s.notes!='Auto-home');triggerSave();_afterMutation();}" title="Clear all entries from this schedule">🗑 Reset All</button>
   </div>
 
   <div class="ibox">
@@ -3252,6 +3252,42 @@ function _refreshCurrentPage(){
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
 }
 
+// Called after ANY mutation that could affect schedule data. Refreshes the
+// current page (via _refreshCurrentPage) AND invalidates the render of every
+// schedule view — DR calendar, IR calendar, builders, tables, tally, etc. —
+// regardless of whether they're the currently-active page. This catches the
+// common failure pattern where a user deletes a row on page A, switches to
+// page B, and sees stale data because B's render function wasn't re-run.
+//
+// Uses try/catch around each call so one render failure (e.g. a not-yet-
+// initialized DOM element on a page that hasn't been opened) doesn't block
+// the rest. Only calls a render if its anchor DOM element actually exists,
+// so first-time-opening-a-page still lazy-initializes normally.
+function _afterMutation(){
+  try{ _refreshCurrentPage(); }catch(e){}
+  // Schedule-adjacent views that might be holding stale snapshots
+  const renders = [
+    ['drc-mo', 'renderDRCal'],
+    ['drb-tbody', 'renderDRBuilder'],
+    ['wk-tbody', 'renderWkBuilder'],
+    ['irc-mo', 'renderIRCal'],
+    ['irs-tbody', 'renderIRShiftTable'],
+    ['irl-tbody', 'renderIRList'],
+    ['vac-tbody', 'renderVacations'],
+    ['hol-tbody', 'renderHolTable'],
+    ['hol-counter', 'renderHolCounter'],
+    ['dash-metrics', 'renderDash'],
+    ['my-content', 'renderMySched'],
+  ];
+  renders.forEach(([anchorId, fnName])=>{
+    if(!document.getElementById(anchorId)) return;
+    try{
+      const fn = window[fnName];
+      if(typeof fn === 'function') fn();
+    }catch(e){ /* non-fatal — this is best-effort */ }
+  });
+}
+
 /* ═══════════════════════════════════════════════════
    MAIN DATA STATE
 ═══════════════════════════════════════════════════ */
@@ -4432,7 +4468,7 @@ function renderVacations(){
   document.getElementById('v-phys').innerHTML=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   document.getElementById('vac-tbody').innerHTML=S.vacations.sort((a,b)=>a.start>b.start?1:-1).map(v=>{
     const d=Math.round((parseDateLocal(v.end)-parseDateLocal(v.start))/86400000)+1;
-    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="if(_adminOnly('delete vacation'))S.vacations=S.vacations.filter(x=>x.id!==${v.id}),renderVacations()">X</button></td></tr>`;
+    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="deleteVacation(${v.id})">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addVac(){
@@ -4480,7 +4516,8 @@ function clearDRShifts(mode){
   if(!confirm(`Delete ${targets.length} ${desc}? This cannot be undone.`))return;
   const ids=new Set(targets.map(s=>s.id));
   S.drShifts=S.drShifts.filter(s=>!ids.has(s.id));
-  triggerSave();renderDRBuilder();
+  triggerSave();
+  _afterMutation();
   const si=document.getElementById('save-indicator');
   if(si){si.textContent=`✓ Cleared ${ids.size} DR shift(s)`;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},3000);}
 }
@@ -4510,7 +4547,8 @@ function clearIRShifts(mode){
   if(!confirm(`Delete ${targets.length} ${desc}? This cannot be undone.`))return;
   const ids=new Set(targets.map(s=>s.id));
   S.irShifts=S.irShifts.filter(s=>!ids.has(s.id));
-  triggerSave();renderIRShiftTable();
+  triggerSave();
+  _afterMutation();
   const si=document.getElementById('save-indicator');
   if(si){si.textContent=`✓ Cleared ${ids.size} IR shift(s)`;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},3000);}
 }
@@ -7396,7 +7434,7 @@ function addIRShift(){
 
   S.irShifts.push({id:S.nextId++, physId, date, shift, site, sub, notes, irGroup:p.irGroup||''});
   triggerSave();
-  renderIRShiftTable();
+  _afterMutation();
   // Clear date and notes
   const dateEl = document.getElementById('irs-date');
   const notesEl = document.getElementById('irs-notes');
@@ -7494,7 +7532,39 @@ function deleteIRShift(id){
   if(!_adminOnly('delete IR shift')) return;
   S.irShifts = (S.irShifts||[]).filter(s => s.id !== id);
   triggerSave();
-  renderIRShiftTable();
+  _afterMutation();
+}
+
+// Named deletion helpers for the remaining shift/call/vacation tables so that
+// every delete path goes through a single function that handles cascade, save,
+// and cross-view refresh. Previously these were inline onclick handlers in the
+// table HTML that only called their own render fn — a deleted DR shift would
+// linger on the IR calendar until page navigation, a deleted weekend call
+// would linger on the DR calendar, etc.
+function deleteDRShift(id){
+  if(!_adminOnly('delete DR shift')) return;
+  const s = S.drShifts.find(x => x.id === id);
+  if(!s) return;
+  S.drShifts = S.drShifts.filter(x => x.id !== id);
+  // Auto-home shifts sometimes have a mirrored entry from holiday sync — if
+  // this shift was auto-created by holiday sync (notes include 'Holiday'),
+  // the holiday itself remains; user must delete via Holiday tab to clean up.
+  triggerSave();
+  _afterMutation();
+}
+
+function deleteWkCall(id){
+  if(!_adminOnly('delete weekend call')) return;
+  S.weekendCalls = S.weekendCalls.filter(x => x.id !== id);
+  triggerSave();
+  _afterMutation();
+}
+
+function deleteVacation(id){
+  if(!_adminOnly('delete vacation')) return;
+  S.vacations = S.vacations.filter(x => x.id !== id);
+  triggerSave();
+  _afterMutation();
 }
 
 /* ─── HOLIDAY COUNTER — MULTI-YEAR EQUITY ─── */
@@ -11612,7 +11682,22 @@ function logImport(msg, type='info'){
 function renderDRCal(){
   const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
   const fp=document.getElementById('drc-phys');
-  if(fp&&fp.options.length<2) S.physicians.filter(p=>p.drFte>0).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.text=p.last+', '+p.first;fp.appendChild(o);});
+  if(fp&&fp.options.length<2){
+    // Include DR + MIXED + any IR physician who has at least one existing DR
+    // shift, so admins can filter the DR calendar to view that IR physician's
+    // DR coverage. (Keeps the dropdown uncluttered when IR physicians have
+    // no DR shifts at all.)
+    const irWithDR = new Set(S.drShifts.map(s => s.physId));
+    const cands = S.physicians.filter(p => p.drFte > 0 || irWithDR.has(p.id));
+    cands.sort((a,b) => (a.last||'').localeCompare(b.last||''));
+    cands.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      const tag = p.role === 'IR' ? ' [IR]' : p.role === 'MIXED' ? ' [MIX]' : '';
+      o.text = p.last + ', ' + p.first + tag;
+      fp.appendChild(o);
+    });
+  }
   const fpid=fp?.value?+fp.value:null;
   const fsh=document.getElementById('drc-shift')?.value||'';
   const vm=vacMap();const cells=buildCal(ym);const today=fmtDate(new Date());
@@ -11674,8 +11759,23 @@ function renderDRBuilder(){
     document.getElementById('drbt-2nd').style.display='none';
     document.getElementById('drbt-3rd').style.display='none';
   }
-  const drs=S.physicians.filter(p=>p.drFte>0);
-  document.getElementById('sb-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  // Include everyone with DR capacity (DR + MIXED roles) plus IR-role
+  // physicians — the latter are allowed as occasional DR coverage and get a
+  // marker so admins can spot them. Previously IR-only physicians were
+  // completely absent from the dropdown even when they were validly being
+  // covered for DR work.
+  const allCands = S.physicians.filter(p => p.drFte > 0 || p.role === 'IR');
+  const drs = allCands.slice().sort((a,b) => {
+    // DR / MIXED first (alphabetical), then IR-only (alphabetical)
+    const ak = a.role === 'IR' ? 1 : 0;
+    const bk = b.role === 'IR' ? 1 : 0;
+    if(ak !== bk) return ak - bk;
+    return (a.last||'').localeCompare(b.last||'');
+  });
+  document.getElementById('sb-phys').innerHTML = drs.map(p => {
+    const tag = p.role === 'IR' ? ' [IR-only]' : p.role === 'MIXED' ? ' [MIXED]' : '';
+    return `<option value="${p.id}">${p.last}, ${p.first}${tag}</option>`;
+  }).join('');
   populateSel('sb-sub',S.drSubs,'— any —');populateSel('sb-site',S.sites.map(s=>s.name),'');
   // Keep bulk panel dropdowns fresh
   ['2nd','3rd'].forEach(sh=>{
@@ -11699,7 +11799,7 @@ function _renderDRTable(){
     return`<tr><td>${pname(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
     <td>${s.sub||'—'}</td><td>${s.notes||'—'}</td>
-    <td><button class="br bxs" onclick="if(_adminOnly('delete shifts'))S.drShifts=S.drShifts.filter(x=>x.id!==${s.id}),_renderDRTable()">X</button></td></tr>`;
+    <td><button class="br bxs" onclick="deleteDRShift(${s.id})">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No shifts match filters</td></tr>';
 }
 function updateSbInfo(){
@@ -11737,7 +11837,11 @@ function addDRShift(){
     return;
   }
   const p=S.physicians.find(x=>x.id===pid);
-  if(p.role==='IR'){alert('IR-only physicians cannot be assigned DR shifts.');return;}
+  if(!p){alert('Physician not found.');return;}
+  // IR-role physicians normally don't cover DR shifts, but some practices use
+  // them for occasional coverage. Warn rather than block so the admin can
+  // decide. (MIXED role already allowed.)
+  if(p.role==='IR' && !confirm(`${p.last} is an IR-only physician (no DR FTE allocation). DR shifts for IR physicians are unusual — they typically cover only IR work. Continue assigning this DR shift anyway?`)) return;
   // Hard block: physician is on vacation this date
   if(vacDays(pid).has(date)){alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);return;}
   const kMap={s1:'1st',s2:'2nd',s3:'3rd',home:'Home'};
@@ -11746,7 +11850,8 @@ function addDRShift(){
   if(p.allowedSites?.length&&!p.allowedSites.includes(site)&&!confirm(`${p.last} is not normally assigned to ${site}. Continue?`))return;
   if(drCnt(pid,date.slice(0,7))>=maxDR(p,'wd')&&!confirm(`${p.last} at FTE cap. Add anyway?`))return;
   S.drShifts.push({id:S.nextId++,physId:pid,date,shift,site,sub:document.getElementById('sb-sub').value,notes:document.getElementById('sb-notes').value,autoHome:false});
-  triggerSave();updateSbInfo();renderDRBuilder();
+  triggerSave();updateSbInfo();
+  _afterMutation();
 }
 // Fill unscheduled DR physicians with auto-home shifts for selected date (bypasses home max)
 function fillDRHomeShifts(){
@@ -11776,7 +11881,7 @@ function renderWkBuilder(){
   populateSel('wk-sub',S.drSubs,'');populateSel('wk-site',S.sites.map(s=>s.name),'');
   document.getElementById('wk-tbody').innerHTML=S.weekendCalls.sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
-    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="if(_adminOnly('delete weekend call'))S.weekendCalls=S.weekendCalls.filter(x=>x.id!==${w.id}),renderWkBuilder()">X</button></td></tr>`;
+    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="deleteWkCall(${w.id})">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addWkCall(){
@@ -11819,7 +11924,12 @@ function previewAA(){
   const typ=document.getElementById('aa-type').value;
   const preview=[],gaps=[];
   const cells=buildCal(ym);
-  const drs=S.physicians.filter(p=>p.drFte>0&&p.role==='DR');
+  // DR auto-assign candidate pool: DR-role and MIXED-role physicians with
+  // drFte > 0. Previously this filter used `role === 'DR'` which silently
+  // excluded MIXED physicians from auto-assign, leaving them out of new
+  // schedules even when their drFte called for coverage. Switching to
+  // `role !== 'IR'` keeps DR+MIXED in and strict-IR out.
+  const drs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
   // Per-physician effective target (vacation-adjusted) for this month
   const effTarget={};
   drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym)||1; });
@@ -12136,15 +12246,37 @@ function renderIRCal(){
           </div>`;
         }
       });
-      // Auto-home DR shifts for IR physicians
-      S.drShifts.filter(s=>s.date===c.date&&s.autoHome&&(!fpid||s.physId===fpid)).forEach(s=>{
+      // DR shifts for IR/MIXED physicians — any DR assignment (1st/2nd/3rd/Home,
+      // whether autoHome or manually added) should appear on the IR calendar so
+      // the physician and admin can see the complete day schedule for that person.
+      // Previously this only surfaced autoHome shifts, hiding legitimate regular
+      // DR assignments made via the Schedule Builder or import.
+      S.drShifts.filter(s=>s.date===c.date&&(!fpid||s.physId===fpid)).forEach(s=>{
         const p=S.physicians.find(x=>x.id===s.physId);
-        if(!p||p.irFte===0)return;
-        if(fg&&p.irGroup!==fg)return;
-        shiftEvs+=`<div class="ev e-home-auto" title="${pname(s.physId)} — Auto-Home (DR)">
-          <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
-          <div style="font-size:9px;opacity:.8">Auto-Home</div>
-        </div>`;
+        if(!p||p.irFte===0)return;             // only IR-eligible physicians
+        if(fg&&p.irGroup!==fg)return;          // respect IR group filter
+
+        if(s.autoHome || s.shift==='Home'){
+          const lbl = s.autoHome ? 'Auto-Home' : 'Home';
+          const cls = s.autoHome ? 'e-home-auto' : 'ehome';
+          shiftEvs+=`<div class="ev ${cls}" title="${pname(s.physId)} — ${lbl} (DR)">
+            <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
+            <div style="font-size:9px;opacity:.8">${lbl} (DR)</div>
+          </div>`;
+        } else {
+          // Regular DR shift (1st / 2nd / 3rd). Use a purple-tinged style so it's
+          // visually distinct from IR shifts but still blends with the calendar.
+          const drStyle = s.shift==='1st' ? 'background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd'
+                        : s.shift==='2nd' ? 'background:#fae8ff;color:#6b21a8;border:1px solid #e9d5ff'
+                        :                   'background:#fdf4ff;color:#7e22ce;border:1px solid #f0abfc';
+          const siteSh = (s.site||'').split(' ')[0];
+          const subLbl = s.sub ? ` · ${s.sub.slice(0,6)}` : '';
+          shiftEvs+=`<div class="ev" style="${drStyle}" title="${pname(s.physId)} — DR ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+            <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
+            <div style="font-size:9px;opacity:.85">DR ${s.shift}</div>
+            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}</div>
+          </div>`;
+        }
       });
     }
 
@@ -12527,7 +12659,12 @@ function addIRCallManual(){
   alert('Added. Refresh the list tab to see all entries.');
 }
 
-function removeIRCall(id){if(!_adminOnly('remove IR call'))return;S.irCalls=S.irCalls.filter(x=>x.id!==id);triggerSave();}
+function removeIRCall(id){
+  if(!_adminOnly('remove IR call')) return;
+  S.irCalls=S.irCalls.filter(x=>x.id!==id);
+  triggerSave();
+  _afterMutation();
+}
 
 function renderIRList(){
   const ym=document.getElementById('irl-mo')?.value||new Date().toISOString().slice(0,7);const grp=document.getElementById('irl-grp')?.value||'';
@@ -12539,7 +12676,7 @@ function renderIRList(){
     <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}</td>
     <td style="text-align:center">${dt||'—'}</td>
     <td>${ic.notes||'—'}</td>
-    <td><button class="br bxs" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRList()">X</button></td></tr>`;
+    <td><button class="br bxs" onclick="removeIRCall(${ic.id})">X</button></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 
@@ -14747,10 +14884,36 @@ function cancelHolDef(){
 function deleteHolDef(id){
   if(!_adminOnly('delete holiday definition')) return;
   const d = S.holidayDefs?.find(x=>x.id===id); if(!d) return;
-  if(!confirm(`Delete "${d.name}"? This will NOT remove existing assignments.`)) return;
+  // Find orphan-candidates: all holiday assignments that share this def's
+  // name + year. Offering the user a choice — delete JUST the def (leaves
+  // orphan assignments intact for historical/counter purposes) or also
+  // delete all assignments (and their synced IR calls) in one pass.
+  const affected = (S.holidays||[]).filter(h => h.name === d.name && h.year === d.year);
+  let cascade = false;
+  if(affected.length){
+    cascade = confirm(
+      `"${d.name}" (${d.year}) has ${affected.length} existing assignment(s).\n\n` +
+      `Click OK to delete the definition AND all ${affected.length} assignment(s) ` +
+      `(also cleans up any IR call entries that were synced from those assignments).\n\n` +
+      `Click Cancel to keep the assignments for historical records — the definition will be deleted either way.`
+    );
+  } else if(!confirm(`Delete "${d.name}"?`)) {
+    return;
+  }
+  // Always delete the def
   S.holidayDefs = S.holidayDefs.filter(x=>x.id!==id);
+  if(cascade && affected.length){
+    // Clean up synced IR calls first (before we lose the physId/date info)
+    affected.forEach(h => {
+      if(h.group==='IR'||h.group==='IR-North'||h.group==='IR-South'){
+        _removeHolidayIRCall(h.physId, h.date);
+      }
+    });
+    const gone = new Set(affected.map(h => h.id));
+    S.holidays = S.holidays.filter(h => !gone.has(h.id));
+  }
   triggerSave();
-  renderHolDefList();
+  _afterMutation();
 }
 
 // ── Assignment table ─────────────────────────────────────────────────────────
@@ -14840,7 +15003,8 @@ function deleteHoliday(id){
   const h=S.holidays.find(x=>x.id===id);
   if(h&&(h.group==='IR'||h.group==='IR-North'||h.group==='IR-South')) _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
-  triggerSave(); renderHolTable(); renderHolCounter();
+  triggerSave();
+  _afterMutation();
 }
 
 
