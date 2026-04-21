@@ -1637,6 +1637,25 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <button class="bp" onclick="addHoliday()" style="margin-top:8px">Assign Holiday Call</button>
     </div>
+
+    <!-- Resync control — normally automatic on app load. The button re-runs the
+         sync explicitly in case a user wants to repair drift or confirm sync. -->
+    <div class="ibox" style="margin-bottom:10px;background:var(--bg2)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <div style="font-weight:700;font-size:12px">🔄 Sync Preassigned Holidays to Calendars</div>
+          <div style="font-size:11px;color:var(--txt2);margin-top:2px">
+            Runs <strong>automatically on every app load</strong> — every entry on this tab
+            is pushed into the DR and IR calendars. Click the button to re-run manually
+            (useful after direct-state edits or for verification). Idempotent and safe
+            to repeat.
+          </div>
+        </div>
+        <button class="bp" onclick="resyncAllHolidaysToCalendars()">🔄 Sync Now</button>
+        <span id="hol-resync-status" style="font-size:11px;color:var(--txt2);min-width:140px"></span>
+      </div>
+    </div>
+
     <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
       <div class="fg" style="margin:0"><label>Filter Year</label>
         <select id="holf-yr" onchange="renderHolTable()" style="width:90px">
@@ -3081,6 +3100,22 @@ function _applyRemoteData(d){
   // Track when this data was saved so poll can detect remote changes
   if(d.savedAt) S._remoteSavedAt = d.savedAt;
   _isRestoring=false;
+
+  // One-shot auto-sync: preassigned holidays in S.holidays should already be
+  // reflected in DR/IR calendars. Re-running the sync here is idempotent and
+  // repairs any drift caused by manual state edits, older code versions, or
+  // direct DB modifications. Runs once per _applyRemoteData call — cheap since
+  // the helpers short-circuit on no-op updates.
+  try {
+    if(typeof _resyncAllHolidaysCore === 'function'){
+      const res = _resyncAllHolidaysCore();
+      if(res.drCount + res.irCount > 0){
+        console.log(`[RS] Holiday auto-sync: ${res.drCount} DR + ${res.irCount} IR date(s) reflected on calendars.`);
+      }
+    }
+  } catch(e) {
+    console.warn('[RS] Holiday auto-sync skipped:', e.message||e);
+  }
 }
 
 let _realtimeSub=null;
@@ -9221,12 +9256,18 @@ function addHoliday(){
     if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
   }
   S.holidays.push({id:S.nextId++, name, date, year:yr, physId:pid, group:grp, notes});
-  if(grp==='IR-North'||grp==='IR-South') _syncHolidayToIRCall(pid, date, name);
+  // Auto-sync to the correct calendar — removes conflicting auto-assignments on
+  // that date so the holiday call physician "owns" the day across the app.
+  if(grp==='IR-North' || grp==='IR-South') _syncHolidayToIRCall(pid, date, name);
+  if(grp==='DR') _syncHolDRDates(pid, [date], name);
   ['hol-date','hol-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   triggerSave();
   _populateHolFilterName();
   renderHolTable();
   renderHolCounter();
+  // Re-render any open calendars so the Hol Call badge appears immediately
+  if(document.getElementById('drc-mo') && typeof renderDRCal==='function') renderDRCal();
+  if(document.getElementById('irc-mo') && typeof renderIRCal==='function') renderIRCal();
   // Notify the assigned physician
   const grpLabel = grp==='DR'?'DR':grp==='IR-North'?'IR North':grp==='IR-South'?'IR South':grp;
   _notify('holiday',{
@@ -14367,6 +14408,55 @@ function _syncHolIRDates(physId, dates, holName){
   dates.forEach(date=>{
     _syncHolidayToIRCall(physId, date, holName);
   });
+}
+
+// Core logic: push every S.holidays entry through the DR + IR sync pipelines.
+// DOM-free so the bootstrap path can call it before any UI exists. Returns
+// {drCount, irCount} describing how many date-assignments were processed.
+function _resyncAllHolidaysCore(){
+  if(!Array.isArray(S.holidays) || !S.holidays.length) return {drCount:0, irCount:0};
+  const irBatches = {};
+  const drBatches = {};
+  S.holidays.forEach(h => {
+    if(!h.physId || !h.date || !h.group) return;
+    const key = `${h.physId}|${h.group}|${h.name||''}`;
+    const bucket = (h.group==='DR') ? drBatches : irBatches;
+    if(!bucket[key]) bucket[key] = {physId:h.physId, group:h.group, name:h.name||'Holiday', dates:[]};
+    bucket[key].dates.push(h.date);
+  });
+  let irCount = 0, drCount = 0;
+  Object.values(irBatches).forEach(b => {
+    _syncHolIRDates(b.physId, b.dates, b.name);
+    irCount += b.dates.length;
+  });
+  Object.values(drBatches).forEach(b => {
+    _syncHolDRDates(b.physId, b.dates, b.name);
+    drCount += b.dates.length;
+  });
+  return {drCount, irCount};
+}
+
+// Bulk resync: iterate every S.holidays entry and push to the correct calendar.
+// Idempotent — safe to run repeatedly. Clears any conflicting auto DR shifts for
+// DR-pool holidays and ensures IR-pool holidays have a matching S.irCalls entry
+// so downstream schedulers (daily/weekend auto-assign) know those dates are taken.
+function resyncAllHolidaysToCalendars(){
+  if(!_adminOnly('resync holiday call to calendars')) return;
+  const status = document.getElementById('hol-resync-status');
+  const setStatus = (msg, color='var(--txt2)') => {
+    if(status){ status.textContent = msg; status.style.color = color; }
+  };
+  if(!Array.isArray(S.holidays) || !S.holidays.length){
+    setStatus('No holiday assignments to sync.', 'var(--txt3)');
+    return;
+  }
+  const {drCount, irCount} = _resyncAllHolidaysCore();
+  triggerSave();
+  // Refresh any visible calendars immediately
+  if(document.getElementById('drc-mo') && typeof renderDRCal==='function') renderDRCal();
+  if(document.getElementById('irc-mo') && typeof renderIRCal==='function') renderIRCal();
+  setStatus(`✓ Synced ${drCount} DR + ${irCount} IR holiday date(s) to calendars.`, 'var(--green-t)');
+  setTimeout(()=>{ if(status) status.textContent=''; }, 6000);
 }
 
 // ── Auto-assign (FTE-weighted lottery per holidayDef) ───────────────────────
