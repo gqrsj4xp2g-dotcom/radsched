@@ -1349,9 +1349,10 @@ tbody tr:hover{background:var(--bg3)}
 <!-- SHIFT SWAPS PAGE -->
 <div id="page-swaps" class="page">
   <div class="pg-title">Shift Swap Requests</div>
-  <div class="pg-sub">Request to swap a shift with a colleague. Both parties must approve before the swap is finalized.</div>
+  <div class="pg-sub">Request to swap a shift with a colleague, list your shift for anyone to claim, or review pending requests.</div>
   <div class="tabs">
     <div class="tab on" onclick="swapTab('request',this)">New Request</div>
+    <div class="tab" onclick="swapTab('forsale',this)">🏷 For Sale</div>
     <div class="tab" onclick="swapTab('pending',this)">Pending Approval</div>
     <div class="tab" onclick="swapTab('history',this)">History</div>
   </div>
@@ -1376,6 +1377,30 @@ tbody tr:hover{background:var(--bg3)}
       <div class="fg"><label>Message (optional)</label><input id="sw-msg" placeholder="e.g. Family event on that date, can cover your Friday shift"></div>
       <button class="bp" onclick="submitSwapRequest()">Submit Swap Request</button>
     </div>
+  </div>
+
+  <!-- FOR SALE MARKETPLACE -->
+  <div id="swpt-forsale" style="display:none">
+    <div class="note ni">List one of your shifts for anyone to claim. If multiple physicians request it, you pick who gets it. Accepted claims reassign the shift and notify both parties.</div>
+
+    <div class="ibox" style="margin-bottom:14px">
+      <div class="card-title">🏷 List One of Your Shifts</div>
+      <div class="g2" style="margin-bottom:8px">
+        <div class="fg"><label>Date</label><input id="sl-date" type="date" oninput="loadListableShifts()"></div>
+        <div class="fg"><label>Shift to sell</label><select id="sl-shift"><option value="">Select a shift...</option></select></div>
+      </div>
+      <div class="fg"><label>Note (optional)</label><input id="sl-note" placeholder="e.g. Available to anyone who can cover — happy to return the favor"></div>
+      <button class="bp" onclick="submitShiftListing()">📋 Post for Sale</button>
+      <span id="sl-status" style="font-size:11px;margin-left:10px"></span>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="tab on" onclick="listingsTab('market',this)" style="background:var(--bg3);padding:6px 12px;border-radius:var(--r);cursor:pointer;font-size:12px;font-weight:700">🛒 Marketplace</div>
+      <div class="tab" onclick="listingsTab('mine',this)" style="padding:6px 12px;border-radius:var(--r);cursor:pointer;font-size:12px;font-weight:700;color:var(--txt2)">👤 My Listings</div>
+    </div>
+
+    <div id="sl-market"><div class="note ni" style="font-size:12px">Loading shifts for sale…</div></div>
+    <div id="sl-mine" style="display:none"><div class="note ni" style="font-size:12px">Loading your listings…</div></div>
   </div>
 
   <!-- PENDING -->
@@ -2426,6 +2451,7 @@ function _buildSaveHTML(){
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
     natLangRules:S.natLangRules||[],
     broadcasts:S.broadcasts||[],
+    shiftListings:S.shiftListings||[],
     _lastSaved:null,
   })+'/*S_END*/';
   const uData='let USERS = /*USERS_START*/'+JSON.stringify(USERS)+'/*USERS_END*/';
@@ -2825,7 +2851,7 @@ function _applyRemoteData(d){
   _isRestoring=true;
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
-    'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts'];
+    'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'];
   KEYS.forEach(k=>{
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
@@ -2887,6 +2913,8 @@ function _applyRemoteData(d){
   });
   // 5) Default broadcasts log
   if(!Array.isArray(S.broadcasts)) S.broadcasts=[];
+  // 6) Default shiftListings
+  if(!Array.isArray(S.shiftListings)) S.shiftListings=[];
   if(d.users&&Array.isArray(d.users)){
     d.users.forEach(u=>{
       // Ensure physId is always a number (Supabase JSON may return strings)
@@ -2991,7 +3019,7 @@ function _refreshCurrentPage(){
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
   'openShifts','physicians','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs',
-  'sites','drSubs','irSubs','natLangRules','broadcasts'];
+  'sites','drSubs','irSubs','natLangRules','broadcasts','shiftListings'];
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
@@ -3125,6 +3153,8 @@ let S=/*S_START*/{
   natLangRules:[],
   // Broadcast email history
   broadcasts:[],
+  // Shift marketplace listings ("for sale")
+  shiftListings:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
@@ -3455,7 +3485,7 @@ async function switchPractice(id,name){
     // _isRestoring=true suppresses triggerSave from firing during the swap.
     ['physicians','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays',
      'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds',
-     'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts'].forEach(k=>{ S[k]=[]; });
+     'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'].forEach(k=>{ S[k]=[]; });
     ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
@@ -6917,6 +6947,8 @@ function _countUnread(type,id){
 
 /* ─── SWAPS ─── */
 function renderSwaps(){
+  // Ensure the colleague dropdown is always fresh when the page opens
+  populateSwapColleagues();
   const allSwaps=(S.swapRequests||[]).sort((a,b)=>b.ts>a.ts?1:-1);
   const pending=allSwaps.filter(s=>s.status==='pending');
   const history=allSwaps.filter(s=>s.status!=='pending');
@@ -7494,14 +7526,31 @@ function dashNavMonth(dir){
 
 /* ─── SWAPS ─── */
 function swapTab(t,el){
-  ['request','pending','history'].forEach(tab=>{
+  ['request','forsale','pending','history'].forEach(tab=>{
     const p=document.getElementById('swpt-'+tab);
     if(p) p.style.display=tab===t?'block':'none';
   });
-  document.querySelectorAll('#page-swaps .tabs .tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('#page-swaps > .tabs .tab').forEach(x=>x.classList.remove('on'));
   if(el)el.classList.add('on');
+  if(t==='request') populateSwapColleagues();
+  if(t==='forsale'){ renderListingsMarket(); renderListingsMine(); }
   if(t==='pending'||t==='history') renderSwaps();
 }
+
+// Populate the colleague dropdown on the swap request tab with all other physicians.
+// This was previously empty, which is why the dropdown never had options.
+function populateSwapColleagues(){
+  const sel=document.getElementById('sw-their-phys'); if(!sel) return;
+  const myPhysId = CU?.physId;
+  const others = (S.physicians||[])
+    .filter(p => p.id !== myPhysId)
+    .sort((a,b) => (a.last+a.first).localeCompare(b.last+b.first));
+  const preserved = sel.value;
+  sel.innerHTML = '<option value="">Select colleague...</option>' +
+    others.map(p => `<option value="${p.id}">${p.last}, ${p.first}${p.role?' ('+p.role+')':''}</option>`).join('');
+  if(preserved && others.some(p=>String(p.id)===preserved)) sel.value = preserved;
+}
+
 function loadMyShifts(){
   const date=document.getElementById('sw-my-date')?.value;
   const el=document.getElementById('sw-my-shift');if(!el)return;
@@ -7521,6 +7570,327 @@ function loadTheirShifts(){
     ?shifts.map(s=>`<option value="${s.id}">${s.shift} @ ${s.site}</option>`).join('')
     :'<option disabled>No shifts on this date</option>';
 }
+
+/* ─── SHIFT MARKETPLACE ("For Sale") ─── */
+
+// When a user picks a date in the "list shift" form, populate their shifts for that date.
+// Includes DR shifts, IR shifts, weekend calls, and IR calls so any assignment can be listed.
+function loadListableShifts(){
+  const date=document.getElementById('sl-date')?.value;
+  const el=document.getElementById('sl-shift'); if(!el) return;
+  if(!date||!CU?.physId){el.innerHTML='<option value="">Select a shift...</option>';return;}
+  const myId = CU.physId;
+  const options = [];
+  (S.drShifts||[]).filter(s=>s.physId===myId&&s.date===date).forEach(s=>{
+    options.push({key:`dr:${s.id}`, label:`DR ${s.shift} @ ${s.site||'(TBD)'}${s.sub?' ('+s.sub+')':''}`});
+  });
+  (S.irShifts||[]).filter(s=>s.physId===myId&&s.date===date).forEach(s=>{
+    options.push({key:`ir:${s.id}`, label:`IR ${s.shift||'1st'} @ ${s.site||'(TBD)'}${s.sub?' ('+s.sub+')':''}`});
+  });
+  (S.irCalls||[]).filter(c=>c.physId===myId&&c.date===date).forEach(c=>{
+    options.push({key:`irc:${c.id}`, label:`IR Call ${c.callType||'daily'} @ ${c.site||'(TBD)'}`});
+  });
+  (S.weekendCalls||[]).filter(w=>w.physId===myId&&(w.satDate===date||w.sunDate===date||w.date===date)).forEach(w=>{
+    options.push({key:`wk:${w.id}`, label:`Weekend Call ${w.satDate||w.date} — ${w.sub||''}`});
+  });
+  el.innerHTML = options.length
+    ? '<option value="">Select a shift...</option>' +
+      options.map(o=>`<option value="${o.key}">${escHtml(o.label)}</option>`).join('')
+    : '<option disabled>No shifts assigned to you on this date</option>';
+}
+
+// Post a shift for sale to the marketplace.
+function submitShiftListing(){
+  const date=document.getElementById('sl-date')?.value;
+  const key =document.getElementById('sl-shift')?.value;
+  const note=document.getElementById('sl-note')?.value.trim()||'';
+  const st  =document.getElementById('sl-status');
+  const setStatus=(msg,color='var(--txt3)')=>{if(st){st.textContent=msg;st.style.color=color;}};
+  if(!CU?.physId){setStatus('✕ You must be linked to a physician profile.', 'var(--red-t)');return;}
+  if(!date||!key){setStatus('✕ Pick a date and shift first.', 'var(--red-t)');return;}
+  const [kind, idStr] = key.split(':');
+  const id = +idStr;
+  // Resolve the actual shift row to snapshot metadata for display
+  let shiftMeta=null;
+  if(kind==='dr'){ const s=S.drShifts.find(x=>x.id===id); if(s) shiftMeta={kind,id,date,shift:s.shift,site:s.site,sub:s.sub||''}; }
+  else if(kind==='ir'){ const s=S.irShifts.find(x=>x.id===id); if(s) shiftMeta={kind,id,date,shift:s.shift||'1st',site:s.site,sub:s.sub||''}; }
+  else if(kind==='irc'){ const s=S.irCalls.find(x=>x.id===id); if(s) shiftMeta={kind,id,date,shift:'IR Call',site:s.site||'',callType:s.callType||'daily'}; }
+  else if(kind==='wk'){ const s=S.weekendCalls.find(x=>x.id===id); if(s) shiftMeta={kind,id,date,shift:'Weekend Call',sub:s.sub||'',satDate:s.satDate,sunDate:s.sunDate}; }
+  if(!shiftMeta){setStatus('✕ Shift not found — may have been reassigned.', 'var(--red-t)');return;}
+  // Prevent duplicate listing of the same shift
+  if((S.shiftListings||[]).some(l => l.status==='open' && l.shift.kind===kind && l.shift.id===id)){
+    setStatus('✕ This shift is already listed for sale.', 'var(--red-t)');return;
+  }
+  S.shiftListings.push({
+    id: S.nextId++,
+    sellerPhysId: CU.physId,
+    shift: shiftMeta,
+    note,
+    ts: new Date().toISOString(),
+    status: 'open', // open | completed | cancelled
+    claims: [],
+    acceptedClaimId: null,
+  });
+  triggerSave();
+  setStatus(`✓ Posted for sale. Colleagues can now request to claim.`, 'var(--green-t)');
+  // Clear the form
+  ['sl-date','sl-note'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  const shiftSel=document.getElementById('sl-shift');if(shiftSel) shiftSel.innerHTML='<option value="">Select a shift...</option>';
+  // Re-render so the listing appears in "My Listings"
+  renderListingsMine();
+  renderListingsMarket();
+  setTimeout(()=>{if(st&&st.textContent.startsWith('✓')) st.textContent='';}, 4000);
+}
+
+// Toggle the Marketplace / My Listings sub-tabs
+function listingsTab(t, el){
+  document.getElementById('sl-market').style.display = t==='market' ? 'block' : 'none';
+  document.getElementById('sl-mine').style.display   = t==='mine'   ? 'block' : 'none';
+  if(el){
+    el.parentElement.querySelectorAll('.tab').forEach(x=>{
+      x.classList.remove('on');
+      x.style.background='';
+      x.style.color='var(--txt2)';
+    });
+    el.classList.add('on');
+    el.style.background='var(--bg3)';
+    el.style.color='';
+  }
+  if(t==='market') renderListingsMarket();
+  if(t==='mine')   renderListingsMine();
+}
+
+function _listingShiftLabel(l){
+  const s = l.shift || {};
+  const kindLabel = s.kind==='dr'?'DR Shift':s.kind==='ir'?'IR Shift':s.kind==='irc'?'IR Call':s.kind==='wk'?'Weekend Call':s.kind;
+  const detail = [s.shift, s.site, s.sub].filter(Boolean).join(' · ');
+  return `<strong>${escHtml(kindLabel)}</strong> on <strong>${escHtml(s.date||'')}</strong>${detail?' — '+escHtml(detail):''}`;
+}
+
+// Marketplace: listings posted by OTHER physicians that are still open
+function renderListingsMarket(){
+  const el = document.getElementById('sl-market'); if(!el) return;
+  const myPhysId = CU?.physId;
+  const listings = (S.shiftListings||[])
+    .filter(l => l.status==='open' && l.sellerPhysId !== myPhysId)
+    .sort((a,b) => b.ts.localeCompare(a.ts));
+  if(!listings.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No shifts for sale right now. Check back later, or post your own above.</div>';
+    return;
+  }
+  el.innerHTML = listings.map(l => {
+    const seller = S.physicians.find(p => p.id===l.sellerPhysId);
+    const sellerName = seller ? `${seller.last}, ${seller.first}` : '(unknown)';
+    const iAlreadyClaimed = (l.claims||[]).some(c => c.claimantPhysId === myPhysId);
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div style="font-size:13px;margin-bottom:3px">${_listingShiftLabel(l)}</div>
+          <div style="font-size:11px;color:var(--txt3)">Listed by <strong>${escHtml(sellerName)}</strong> · ${new Date(l.ts).toLocaleString()}</div>
+          ${l.note?`<div style="font-size:11px;color:var(--txt2);margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px">"${escHtml(l.note)}"</div>`:''}
+          ${(l.claims||[]).length?`<div style="font-size:10px;color:var(--txt3);margin-top:6px">${l.claims.length} claim${l.claims.length>1?'s':''} so far${iAlreadyClaimed?' (including yours)':''}</div>`:''}
+        </div>
+        <div>
+          ${iAlreadyClaimed
+            ? `<button class="bsm" disabled style="opacity:.55;cursor:not-allowed">✓ Claim submitted</button>`
+            : `<button class="bp bsm" onclick="requestClaim(${l.id})">🙋 Request to claim</button>`
+          }
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// My Listings: things I posted, with incoming claims and accept/reject controls
+function renderListingsMine(){
+  const el = document.getElementById('sl-mine'); if(!el) return;
+  const myPhysId = CU?.physId;
+  if(!myPhysId){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">You need a linked physician profile to post shifts for sale.</div>';
+    return;
+  }
+  const mine = (S.shiftListings||[])
+    .filter(l => l.sellerPhysId === myPhysId)
+    .sort((a,b) => b.ts.localeCompare(a.ts));
+  if(!mine.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">You haven\'t posted any shifts for sale yet. Use the form above to list one.</div>';
+    return;
+  }
+  el.innerHTML = mine.map(l => {
+    const statusTag = l.status==='open'
+      ? '<span class="tag ta">Open</span>'
+      : l.status==='completed'
+        ? '<span class="tag tg">Completed</span>'
+        : '<span class="tag tr">Cancelled</span>';
+    const acceptedPhys = l.status==='completed' && l.acceptedClaimId
+      ? l.claims?.find(c=>c.id===l.acceptedClaimId)
+      : null;
+    const acceptedNote = acceptedPhys
+      ? `<div style="font-size:11px;color:var(--green-t);margin-top:6px">✓ Accepted: ${escHtml(pname(acceptedPhys.claimantPhysId))}</div>`
+      : '';
+    const claimsBlock = l.status==='open' && (l.claims||[]).length
+      ? `<div style="margin-top:10px;border-top:1px solid var(--bdr);padding-top:10px">
+          <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:var(--txt2)">${l.claims.length} claim${l.claims.length>1?'s':''} — pick one to accept:</div>
+          ${l.claims.map(c => `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:6px 8px;background:var(--bg3);border-radius:4px;margin-bottom:5px">
+              <div style="flex:1">
+                <div style="font-size:12px;font-weight:700">${escHtml(pname(c.claimantPhysId))}</div>
+                <div style="font-size:10px;color:var(--txt3)">${new Date(c.ts).toLocaleString()}</div>
+                ${c.message?`<div style="font-size:11px;color:var(--txt2);margin-top:3px">"${escHtml(c.message)}"</div>`:''}
+              </div>
+              <button class="bp bxs" onclick="acceptClaim(${l.id}, ${c.id})">Accept</button>
+            </div>
+          `).join('')}
+        </div>`
+      : l.status==='open'
+        ? '<div style="font-size:11px;color:var(--txt3);margin-top:6px">No claims yet. Waiting for colleagues to request.</div>'
+        : '';
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div style="font-size:13px;margin-bottom:3px">${_listingShiftLabel(l)}</div>
+          <div style="font-size:11px;color:var(--txt3)">Posted ${new Date(l.ts).toLocaleString()}</div>
+          ${l.note?`<div style="font-size:11px;color:var(--txt2);margin-top:4px">"${escHtml(l.note)}"</div>`:''}
+          ${acceptedNote}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          ${statusTag}
+          ${l.status==='open'?`<button class="br bxs" onclick="cancelMyListing(${l.id})">Cancel</button>`:''}
+        </div>
+      </div>
+      ${claimsBlock}
+    </div>`;
+  }).join('');
+}
+
+// A colleague requests to claim a listed shift.
+function requestClaim(listingId){
+  if(!CU?.physId){alert('You must be linked to a physician profile to claim shifts.');return;}
+  const l = (S.shiftListings||[]).find(x=>x.id===listingId);
+  if(!l){alert('Listing not found.');return;}
+  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  if(l.sellerPhysId===CU.physId){alert('You cannot claim your own listing.');return;}
+  if((l.claims||[]).some(c=>c.claimantPhysId===CU.physId)){alert('You have already claimed this shift.');return;}
+  const message = (prompt(`Add a note to ${pname(l.sellerPhysId)} (optional):`, '')||'').trim();
+  if(message===null) return;
+  if(!Array.isArray(l.claims)) l.claims=[];
+  l.claims.push({
+    id: S.nextId++,
+    claimantPhysId: CU.physId,
+    message,
+    ts: new Date().toISOString(),
+  });
+  triggerSave();
+  // Notify the seller that a new claim came in
+  const claimantName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
+  _notify('swapReq',{
+    physId: l.sellerPhysId,
+    subject: `${claimantName} wants to claim your shift (${l.shift.date})`,
+    body: `${claimantName} has requested to claim the shift you listed for sale:\n\n` +
+          `${l.shift.kind?.toUpperCase()} shift on ${l.shift.date}${l.shift.site?' at '+l.shift.site:''}${l.shift.shift?' ('+l.shift.shift+')':''}\n` +
+          (message?`\nTheir note: ${message}\n`:'') +
+          `\nYou now have ${l.claims.length} claim${l.claims.length>1?'s':''} to choose from. Review and pick one in RadScheduler → Shift Swaps → 🏷 For Sale → 👤 My Listings.`
+  });
+  renderListingsMarket();
+  renderListingsMine();
+  alert(`✓ Claim submitted. ${pname(l.sellerPhysId)} will decide which claim to accept.`);
+}
+
+// The seller picks one of the claims — shift reassigns to that claimant, others are declined.
+function acceptClaim(listingId, claimId){
+  const l = (S.shiftListings||[]).find(x=>x.id===listingId);
+  if(!l){alert('Listing not found.');return;}
+  if(l.sellerPhysId !== CU?.physId){alert('Only the seller can accept claims on this listing.');return;}
+  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  const claim = (l.claims||[]).find(c=>c.id===claimId);
+  if(!claim){alert('Claim not found.');return;}
+  if(!confirm(`Accept ${pname(claim.claimantPhysId)}'s claim?\n\nThis will reassign your shift on ${l.shift.date} to them, decline all other claims, and notify everyone involved.`)) return;
+
+  // Reassign the actual shift from seller to claimant
+  const {kind, id} = l.shift;
+  let reassigned = false;
+  if(kind==='dr'){
+    const s = S.drShifts.find(x=>x.id===id);
+    if(s && s.physId===l.sellerPhysId){ s.physId = claim.claimantPhysId; s.notes=(s.notes?s.notes+' ':'')+'[marketplace]'; reassigned=true; }
+  } else if(kind==='ir'){
+    const s = S.irShifts.find(x=>x.id===id);
+    if(s && s.physId===l.sellerPhysId){ s.physId = claim.claimantPhysId; s.notes=(s.notes?s.notes+' ':'')+'[marketplace]'; reassigned=true; }
+  } else if(kind==='irc'){
+    const s = S.irCalls.find(x=>x.id===id);
+    if(s && s.physId===l.sellerPhysId){
+      s.physId = claim.claimantPhysId;
+      const claimant = S.physicians.find(p=>p.id===claim.claimantPhysId);
+      if(claimant?.irGroup) s.irGroup = claimant.irGroup;
+      s.notes=(s.notes?s.notes+' ':'')+'[marketplace]';
+      reassigned=true;
+    }
+  } else if(kind==='wk'){
+    const s = S.weekendCalls.find(x=>x.id===id);
+    if(s && s.physId===l.sellerPhysId){ s.physId = claim.claimantPhysId; s.notes=(s.notes?s.notes+' ':'')+'[marketplace]'; reassigned=true; }
+  }
+  if(!reassigned){
+    if(!confirm('The underlying shift could not be found or no longer belongs to you. The listing will be marked completed but no schedule change will occur. Continue?')) return;
+  }
+
+  l.status = 'completed';
+  l.acceptedClaimId = claim.id;
+  triggerSave();
+
+  // Notify the accepted claimant
+  const sellerName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'The seller';
+  _notify('shiftAssign',{
+    physId: claim.claimantPhysId,
+    subject: `✓ Your claim was accepted — ${l.shift.date}`,
+    body: `${sellerName} accepted your claim on their listed shift:\n\n` +
+          `${l.shift.kind?.toUpperCase()} shift on ${l.shift.date}${l.shift.site?' at '+l.shift.site:''}${l.shift.shift?' ('+l.shift.shift+')':''}\n\n` +
+          `The shift is now yours. View in RadScheduler → My Schedule.`
+  });
+  // Notify all other claimants that they were not selected
+  const others = (l.claims||[]).filter(c => c.id !== claim.id);
+  others.forEach(c => {
+    _notify('swapRes',{
+      physId: c.claimantPhysId,
+      subject: `Shift claim not selected — ${l.shift.date}`,
+      body: `${sellerName} chose another colleague's claim on the shift you requested:\n\n` +
+            `${l.shift.kind?.toUpperCase()} shift on ${l.shift.date}${l.shift.site?' at '+l.shift.site:''}\n\n` +
+            `Keep an eye on the marketplace — more shifts may be listed in the future.`
+    });
+  });
+
+  // Refresh related UI
+  renderListingsMine();
+  renderListingsMarket();
+  if(typeof renderDRCal==='function' && document.getElementById('page-dr-cal')?.classList.contains('on')) renderDRCal();
+  if(typeof renderIRCal==='function' && document.getElementById('page-ir-cal')?.classList.contains('on')) renderIRCal();
+  if(typeof renderMySched==='function' && document.getElementById('page-my-schedule')?.classList.contains('on')) renderMySched();
+  alert(`✓ Claim accepted. Shift reassigned to ${pname(claim.claimantPhysId)}.`);
+}
+
+// Seller can pull their own listing back as long as nobody's claimed it yet (or with confirmation)
+function cancelMyListing(listingId){
+  const l = (S.shiftListings||[]).find(x=>x.id===listingId);
+  if(!l){alert('Listing not found.');return;}
+  if(l.sellerPhysId !== CU?.physId){alert('Only the seller can cancel their listing.');return;}
+  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  const claimCount = (l.claims||[]).length;
+  const msg = claimCount
+    ? `Cancel this listing? ${claimCount} colleague${claimCount>1?'s have':' has'} requested to claim it — they will be notified.`
+    : 'Cancel this listing?';
+  if(!confirm(msg)) return;
+  l.status = 'cancelled';
+  triggerSave();
+  // Notify claimants
+  (l.claims||[]).forEach(c => {
+    _notify('swapRes',{
+      physId: c.claimantPhysId,
+      subject: `Shift listing cancelled — ${l.shift.date}`,
+      body: `${pname(l.sellerPhysId)} cancelled the listing you requested to claim (${l.shift.date}). The shift is not being reassigned.`
+    });
+  });
+  renderListingsMine();
+  renderListingsMarket();
+}
+
 function submitSwapRequest(){
   const myShiftId=+document.getElementById('sw-my-shift')?.value;
   const toId=+document.getElementById('sw-their-phys')?.value;
@@ -8522,6 +8892,34 @@ const _AI_TOOLS = [
       },
       required: ['ruleId','enabled']
     }
+  },
+  {
+    name: 'send_notification',
+    description: 'Send an email notification to one or more physicians via the app\'s built-in notification system. Use this to confirm actions, inform physicians of schedule changes, announce something, etc. The email is sent to each recipient\'s configured delivery email (falls back to login email) and respects their notification preferences. Common kinds: shiftAssign (new/changed shift), shiftRemove (shift removed), swapRes (swap outcome), holiday (holiday assignment), vacation (vacation logged), broadcast (general announcement). Note: many tools like assign_dr_shift, assign_ir_shift, add_vacation, and remove_shift already send automatic notifications — only call send_notification explicitly when you want to send a custom message or confirm an action that used multiple tools (e.g. a manual swap involving assign + remove).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physIds: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'List of physician IDs to notify. Each physician must have a linked user account with a delivery email set.'
+        },
+        subject: {
+          type: 'string',
+          description: 'Email subject line (under 120 chars). Should be specific and actionable, e.g. "Shift swap confirmed — July 14".'
+        },
+        body: {
+          type: 'string',
+          description: 'Email body text. Plain text; line breaks are preserved. Keep it clear and professional. Markdown-style **bold** and *italic* are supported.'
+        },
+        kind: {
+          type: 'string',
+          enum: ['shiftAssign','shiftRemove','swapRes','swapReq','holiday','vacation','broadcast'],
+          description: 'Notification category — determines which recipient preference gates the email. Default: shiftAssign for assignment confirmations, swapRes for swap-related announcements, broadcast for general messages.'
+        }
+      },
+      required: ['physIds','subject','body']
+    }
   }
 ];
 
@@ -8919,6 +9317,41 @@ function _aiExecuteTool(name, input) {
     return { ok:true, message:`Rule ${ruleId} ${r.enabled?'enabled':'disabled'}.` };
   }
 
+  if(name === 'send_notification'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const {physIds, subject, body, kind} = input;
+    if(!Array.isArray(physIds) || !physIds.length) return { ok:false, error:'physIds must be a non-empty array of physician IDs.' };
+    if(!subject || !body) return { ok:false, error:'subject and body are required.' };
+    const kindVal = kind || 'shiftAssign';
+    // Resolve to real physicians and check which have linked users
+    const resolved = [];
+    const missing = [];
+    const noEmail = [];
+    physIds.forEach(pid => {
+      const p = S.physicians.find(x => x.id === pid);
+      if(!p){ missing.push(`ID ${pid}`); return; }
+      const u = _userForPhys(pid);
+      if(!u){ missing.push(`${p.last}, ${p.first} (no linked user)`); return; }
+      const addr = _deliveryEmail(u);
+      if(!addr || _looksPlaceholder(addr)){ noEmail.push(`${p.last}, ${p.first}`); return; }
+      resolved.push({physId: pid, name: `${p.last}, ${p.first}`, email: addr});
+    });
+    if(!resolved.length){
+      return { ok:false, error:`No notifiable physicians. Missing/unlinked: ${missing.join('; ')||'none'}. No valid delivery email: ${noEmail.join('; ')||'none'}. Add delivery emails in 🔔 Notifications or User Management.` };
+    }
+    // Dispatch — _notify handles the actual edge-function call, pref filtering, admin CC, and logging
+    _notify(kindVal, {
+      physIds: resolved.map(r => r.physId),
+      subject,
+      body
+    });
+    const parts = [`Sent to ${resolved.length} physician(s): ${resolved.map(r=>r.name).join(', ')}.`];
+    if(missing.length)  parts.push(`Skipped (no linked account): ${missing.join('; ')}.`);
+    if(noEmail.length)  parts.push(`Skipped (no valid delivery email): ${noEmail.join('; ')}.`);
+    parts.push(`Note: recipients who disabled "${kindVal}" in their notification preferences will not receive the email.`);
+    return { ok:true, message: parts.join(' ') };
+  }
+
   return { ok:false, error:`Unknown tool: ${name}` };
 }
 
@@ -8949,11 +9382,20 @@ ${phyList}
 Current sites: ${(S.sites||[]).map(s=>`${s.name}${s.irGroup?' (IR '+s.irGroup+')':''}`).join(', ')||'(none)'}
 Current scheduling rules active: ${(S.natLangRules||[]).filter(r=>r.enabled!==false).length}
 
-Your tools fall into four categories:
+Your tools fall into five categories:
 1. DATA ACCESS: get_schedule_data — always call this FIRST before analyzing or changing anything.
 2. DIRECT ASSIGNMENTS: assign_dr_shift, assign_ir_shift, remove_shift, add_vacation, add_ir_call_blackout, fill_dr_home_for_ir.
 3. PRACTICE CONFIGURATION: create_site / update_site / delete_site; update_physician; add_physician_site_rule / remove_physician_site_rule; add_physician_day_condition; set_physician_seq_rules; create_holiday_definition.
 4. IF/THEN SCHEDULING RULES: create_natural_language_rule, list_natural_language_rules, toggle_natural_language_rule, delete_natural_language_rule.
+5. NOTIFICATIONS: send_notification — send an email to one or more physicians via the app's built-in email system.
+
+IMPORTANT — email notifications are built into this app:
+- The app HAS an email notification system powered by a Supabase edge function. You do NOT need to tell the admin to send emails manually.
+- Many tools send notifications AUTOMATICALLY when called: assign_dr_shift, assign_ir_shift, add_vacation, remove_shift, and the holiday assignment tools all trigger an email to the affected physician(s) with no extra action needed.
+- For custom messages, multi-step confirmations (e.g. "I just swapped shift A and B — please confirm to both physicians"), or general announcements, use the send_notification tool explicitly.
+- Example: after swapping two shifts via remove_shift + assign_dr_shift + assign_dr_shift, you can call send_notification with both physicians' IDs, a subject like "Shift swap confirmed — July 14", and a body describing what changed. This sends a single clear confirmation email to both of them.
+- If a physician doesn't receive an email, it's usually one of: (a) they have no delivery email configured in 🔔 Notifications, (b) they disabled that notification category in their preferences, or (c) their login email is a placeholder like @rad.com with no override set. You can check these in User Management.
+- Never tell the admin "RadScheduler does not have an email system" or suggest they send emails manually — the system exists and works.
 
 When the admin describes a constraint in plain English, translate it into a structured rule with the create_natural_language_rule tool. Rules have:
   - when: trigger conditions (physId, site, shift, sub, irGroup, dow[], dateRange)
@@ -13431,6 +13873,7 @@ async function _pushToSupabase(){
         holidayDefs:S.holidayDefs||[],
         natLangRules:S.natLangRules||[],
         broadcasts:S.broadcasts||[],
+        shiftListings:S.shiftListings||[],
         vacPicking:S.vacPicking,
         driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
