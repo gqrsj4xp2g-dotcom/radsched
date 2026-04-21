@@ -251,6 +251,17 @@ tbody tr:hover{background:var(--bg3)}
 <body>
 
 <!-- ═══════════════════ AUTH SCREEN ═══════════════════ -->
+<!-- Session-restore loading overlay. Shown during page-load while we check
+     for an existing Supabase session. Prevents the auth screen from flashing
+     before we know whether the user is already logged in. Hidden by default
+     and toggled on by the script if there's any session indication. -->
+<div id="session-restore-overlay" style="display:none;position:fixed;inset:0;background:linear-gradient(160deg,var(--navy,#1e3a5f) 0%,var(--navy3,#0f1f33) 100%);z-index:9999;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:system-ui,-apple-system,sans-serif">
+  <div style="width:48px;height:48px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:18px"></div>
+  <div style="font-size:14px;font-weight:600;letter-spacing:.02em">Restoring your session…</div>
+  <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:6px">RadScheduler</div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</div>
+
 <div id="auth">
   <div class="auth-side">
     <h1>Radiology Practice Scheduler</h1>
@@ -449,12 +460,58 @@ tbody tr:hover{background:var(--bg3)}
   <div class="tabs" id="mysched-tabs" style="margin-bottom:10px">
     <div class="tab on" onclick="mySchedTab('shifts',this)">📋 My Shifts</div>
     <div class="tab" onclick="mySchedTab('vacation',this)">🌴 Vacation Picks</div>
+    <div class="tab" onclick="mySchedTab('sync',this)">📲 Calendar Sync</div>
   </div>
   <div id="mysched-shifts-ctrl" style="margin-bottom:10px">
     <div class="flexe"><div class="fg" style="margin:0"><label>Month</label><input id="my-mo" type="month" oninput="renderMySched()"></div></div>
   </div>
   <div id="mysched-vacation-ctrl" style="display:none;margin-bottom:10px"></div>
   <div id="my-content"></div>
+
+  <!-- Calendar Sync tab content (hidden by default; shown via mySchedTab('sync')) -->
+  <div id="mysched-sync" style="display:none">
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">📥 Download as .ics file</div>
+      <div class="note ni" style="font-size:11px;margin-bottom:10px">
+        Get a one-time snapshot of your schedule as an iCalendar file. Open it in
+        Apple Calendar, Outlook, or import into Google Calendar to add all your shifts at once.
+        Doesn't auto-update — re-download anytime your schedule changes.
+      </div>
+      <div class="g3" style="margin-bottom:10px">
+        <div class="fg"><label>Start date</label><input id="cs-start" type="date"></div>
+        <div class="fg"><label>End date</label><input id="cs-end" type="date"></div>
+        <div class="fg"><label>&nbsp;</label><button class="bp" onclick="downloadMyCalendar()" style="width:100%">📥 Download .ics</button></div>
+      </div>
+      <div id="cs-download-status" style="font-size:11px;color:var(--txt3)"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔗 Subscribe (auto-updating)</div>
+      <div class="note ni" style="font-size:11px;margin-bottom:10px">
+        Add a subscription URL to your calendar app. Your phone or computer's calendar
+        will check for updates periodically (typically every few hours) and pull in any
+        schedule changes automatically — no need to re-download.
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label>Your private subscription URL</label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="cs-feed-url" readonly style="flex:1;font-family:monospace;font-size:11px;background:var(--bg3)" placeholder="Click 'Generate URL' to create one">
+          <button class="bp bsm" onclick="generateCalendarFeedUrl()">Generate URL</button>
+          <button class="bt bsm" onclick="copyCalendarFeedUrl(this)">📋 Copy</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.7;background:var(--bg3);padding:10px 12px;border-radius:var(--r);margin-top:8px">
+        <strong>How to use it:</strong>
+        <ul style="padding-left:20px;margin:6px 0">
+          <li><strong>iPhone / Apple Calendar:</strong> Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar → paste URL</li>
+          <li><strong>Google Calendar:</strong> calendar.google.com → "Other calendars" + → "From URL" → paste</li>
+          <li><strong>Outlook:</strong> Calendar → Add calendar → Subscribe from web → paste URL</li>
+        </ul>
+        <strong style="color:var(--amber-t,#92400e)">⚠ Privacy:</strong> This URL contains a token that lets anyone view your schedule. Don't share it. To revoke access (if leaked), click "Generate URL" again — old URL stops working.
+      </div>
+      <div id="cs-feed-status" style="font-size:11px;color:var(--txt3);margin-top:6px"></div>
+    </div>
+  </div>
 </div>
 
 <!-- PROFILES -->
@@ -2567,20 +2624,67 @@ function _initAuthClient(){
   if(_supabase) return _supabase;
   const url=_getUrl(), key=_getKey();
   if(!url||!key) return null;
-  try{ _supabase=supabase.createClient(url,key); }catch(e){ console.warn('[RS] Auth client init failed:',e); }
+  try{
+    // Explicitly enable session persistence + auto-refresh. Defaults are usually
+    // these values, but being explicit guards against future SDK changes that
+    // might flip defaults. storageKey is scoped to this app so we don't collide
+    // with any other Supabase apps the user may use in the same browser.
+    _supabase=supabase.createClient(url,key,{
+      auth:{
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: window.localStorage,
+        storageKey: 'radscheduler-auth',
+      },
+    });
+  }catch(e){ console.warn('[RS] Auth client init failed:',e); }
   return _supabase;
 }
 
-// On page load: check for an existing Supabase session — auto-login returning users
+// On page load: check for an existing Supabase session — auto-login returning users.
+// We show a session-restore overlay during this check so the auth screen doesn't
+// flash before we know whether the user is already signed in. The overlay is
+// only displayed if there's any sign of a stored session (storage key present),
+// to avoid showing it to genuine first-time visitors.
 (async function _checkSession(){
+  // Make sure the latest Supabase config (URL, anon key) is loaded from localStorage
+  // BEFORE we try to init the auth client. Without this, _SB_CFG could still be empty
+  // and _getUrl()/_getKey() fall back to the baked-in constants — which is fine if
+  // they're set, but the call ordering needs to happen this way for instances where
+  // an admin overrode the URL/key in Settings.
+  if(typeof _loadSupabaseConfig==='function') {
+    try{ _loadSupabaseConfig(); }catch(e){/* config load is best-effort */}
+  }
+
+  // Detect the storage key the SDK uses. If it exists, there's likely a session
+  // to restore — show the overlay to suppress the auth screen flash.
+  const overlay = document.getElementById('session-restore-overlay');
+  let storedSession = null;
+  try{
+    storedSession = localStorage.getItem('radscheduler-auth')
+                 || localStorage.getItem('sb-' + (_getUrl()||'').replace(/https?:\/\//,'').split('.')[0] + '-auth-token');
+  }catch(e){/* localStorage may be blocked */}
+  if(storedSession && overlay) overlay.style.display='flex';
+
   const sb=_initAuthClient();
-  if(!sb) return;
+  if(!sb){
+    if(overlay) overlay.style.display='none';
+    return;
+  }
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(session?.user){
       _hydrateUserFromSession(session.user);
-      if(CU) launchApp();
+      if(CU){
+        // Hide overlay just before launchApp swaps the screens, so the transition
+        // is from "Restoring..." → app, never flashing the auth screen.
+        if(overlay) overlay.style.display='none';
+        launchApp();
+        return;
+      }
     }
+    if(overlay) overlay.style.display='none';
     // Listen for cross-tab signouts and silent token refresh failures. If another tab
     // signs out, or our token can't be refreshed (user disabled / expired / revoked),
     // this fires with SIGNED_OUT and we tear down cleanly.
@@ -2589,9 +2693,20 @@ function _initAuthClient(){
         console.log('[RS] Auth state changed to SIGNED_OUT — logging out');
         doLogout();
       }
-      // TOKEN_REFRESHED is handled automatically by the SDK; we don't need to intervene
+      if(event==='TOKEN_REFRESHED'){
+        console.log('[RS] Auth token refreshed silently');
+      }
+      if(event==='SIGNED_IN' && !CU && sess?.user){
+        // E.g. user signed in from another tab — pick up the session here too
+        console.log('[RS] Cross-tab SIGNED_IN detected, hydrating');
+        _hydrateUserFromSession(sess.user);
+        if(CU) launchApp();
+      }
     });
-  }catch(e){ console.warn('[RS] Session check failed:',e); }
+  }catch(e){
+    console.warn('[RS] Session check failed:',e);
+    if(overlay) overlay.style.display='none';
+  }
 })();
 
 // Best-effort save on tab close. Modern browsers block synchronous XHR in unload handlers,
@@ -5814,10 +5929,283 @@ function mySchedTab(t, el){
   if(el) el.classList.add('on');
   const shCtrl=document.getElementById('mysched-shifts-ctrl');
   const vCtrl=document.getElementById('mysched-vacation-ctrl');
+  const myContent=document.getElementById('my-content');
+  const syncTab=document.getElementById('mysched-sync');
   if(shCtrl) shCtrl.style.display=t==='shifts'?'block':'none';
   if(vCtrl)  vCtrl.style.display=t==='vacation'?'block':'none';
+  if(myContent) myContent.style.display=t==='sync'?'none':'block';
+  if(syncTab)   syncTab.style.display  =t==='sync'?'block':'none';
   if(t==='shifts') renderMySched();
-  else renderMyVacPicks();
+  else if(t==='vacation') renderMyVacPicks();
+  else if(t==='sync') renderCalendarSync();
+}
+
+/* ─── CALENDAR SYNC ──────────────────────────────────────────────────────
+   Two ways for users to get their schedule into their phone/desktop calendar:
+
+   1. Download .ics file — generates a snapshot the user imports manually.
+      Works offline, no infra needed, but doesn't auto-update.
+
+   2. Subscribe URL — exposes a hosted iCal feed (via the calendar-feed edge
+      function) that calendar apps poll periodically. Auto-updating, works
+      forever once added. Requires the calendar-feed edge function to be
+      deployed (one-time admin setup).
+─────────────────────────────────────────────────────────────────────────── */
+
+function renderCalendarSync(){
+  // Pre-fill date range to "today through end of next month"
+  const startEl=document.getElementById('cs-start');
+  const endEl  =document.getElementById('cs-end');
+  if(startEl && !startEl.value){
+    startEl.value = fmtDate(new Date());
+  }
+  if(endEl && !endEl.value){
+    const d=new Date(); d.setMonth(d.getMonth()+2); d.setDate(0);
+    endEl.value = fmtDate(d);
+  }
+  // Show existing feed URL if user already generated one
+  const u = USERS.find(x=>x.id===CU?.id);
+  const feedEl=document.getElementById('cs-feed-url');
+  if(feedEl && u?.calFeedToken){
+    feedEl.value = _calendarFeedUrlFor(u.calFeedToken);
+  }
+}
+
+// Pull every assignment for the current user across all four shift collections,
+// limited to the given date range. Returns a flat array of normalized events.
+function _myEventsInRange(startISO, endISO){
+  if(!CU?.physId) return [];
+  const myId = CU.physId;
+  const inRange = d => d && d >= startISO && d <= endISO;
+  const events = [];
+  // Helper: get the shift time window for a label, with sensible fallbacks
+  const timesFor = (kind, shiftLabel) => {
+    // Pull configured shift times if available
+    const tcfg = (S.shiftTimes||{})[shiftLabel] || {};
+    if(tcfg.start && tcfg.end) return {start: tcfg.start, end: tcfg.end, allDay: false};
+    // Heuristic defaults
+    const defs = {
+      '1st':       {start:'07:00', end:'15:00'},
+      '2nd':       {start:'15:00', end:'23:00'},
+      '3rd':       {start:'23:00', end:'07:00'},
+      'Home':      {start:'07:00', end:'17:00'},
+      'IR Call':   {start:'17:00', end:'07:00'},
+      'Holiday Call': {start:'07:00', end:'07:00'},
+    };
+    if(defs[shiftLabel]) return {...defs[shiftLabel], allDay: false};
+    return {start:'00:00', end:'23:59', allDay: true};
+  };
+  (S.drShifts||[]).filter(s => s.physId===myId && inRange(s.date)).forEach(s => {
+    const t = timesFor('dr', s.shift);
+    events.push({
+      uid: `dr-${s.id}@radscheduler`,
+      date: s.date,
+      summary: `DR ${s.shift||''}${s.site?' @ '+s.site:''}`,
+      description: `RadScheduler · DR shift${s.sub?' · '+s.sub:''}${s.notes?'\\n'+s.notes:''}`,
+      location: s.site||'',
+      ...t,
+    });
+  });
+  (S.irShifts||[]).filter(s => s.physId===myId && inRange(s.date)).forEach(s => {
+    const t = timesFor('ir', s.shift||'1st');
+    events.push({
+      uid: `ir-${s.id}@radscheduler`,
+      date: s.date,
+      summary: `IR ${s.shift||'1st'}${s.site?' @ '+s.site:''}`,
+      description: `RadScheduler · IR shift${s.sub?' · '+s.sub:''}${s.notes?'\\n'+s.notes:''}`,
+      location: s.site||'',
+      ...t,
+    });
+  });
+  (S.irCalls||[]).filter(c => c.physId===myId && inRange(c.date)).forEach(c => {
+    const t = timesFor('ircall', 'IR Call');
+    events.push({
+      uid: `irc-${c.id}@radscheduler`,
+      date: c.date,
+      summary: `IR Call (${c.callType||'daily'})${c.site?' @ '+c.site:''}`,
+      description: `RadScheduler · IR call · ${c.irGroup||''}${c.notes?'\\n'+c.notes:''}`,
+      location: c.site||'',
+      ...t,
+    });
+  });
+  (S.weekendCalls||[]).filter(w => w.physId===myId && (inRange(w.satDate) || inRange(w.sunDate) || inRange(w.date))).forEach(w => {
+    [w.satDate, w.sunDate, w.date].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).forEach(d => {
+      if(!inRange(d)) return;
+      events.push({
+        uid: `wk-${w.id}-${d}@radscheduler`,
+        date: d,
+        summary: `Weekend Call${w.sub?' · '+w.sub:''}`,
+        description: `RadScheduler · Weekend call${w.notes?'\\n'+w.notes:''}`,
+        location: w.site||'',
+        start:'07:00', end:'07:00', allDay: false,
+      });
+    });
+  });
+  // Holidays (where the user is the assigned physician)
+  (S.holidays||[]).filter(h => h.physId===myId && inRange(h.date)).forEach(h => {
+    events.push({
+      uid: `hol-${h.id}@radscheduler`,
+      date: h.date,
+      summary: `🏖 Holiday Call: ${h.name}`,
+      description: `RadScheduler · ${h.group||'Holiday'}${h.notes?'\\n'+h.notes:''}`,
+      location: '',
+      start:'00:00', end:'23:59', allDay: true,
+    });
+  });
+  // Vacations
+  (S.vacations||[]).filter(v => v.physId===myId && (inRange(v.start) || inRange(v.end))).forEach(v => {
+    events.push({
+      uid: `vac-${v.id}@radscheduler`,
+      date: v.start,
+      endDate: v.end,
+      summary: `🌴 ${v.type||'Vacation'}${v.notes?': '+v.notes:''}`,
+      description: `RadScheduler · ${v.type||'Vacation'}`,
+      location: '',
+      allDay: true, start:'00:00', end:'23:59',
+    });
+  });
+  return events.sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start));
+}
+
+// Convert events to RFC 5545 iCalendar format. Returns the full .ics file body.
+function _eventsToICS(events, calName){
+  const pad = n => String(n).padStart(2,'0');
+  const fmtDateOnly = d => d.replace(/-/g,'');
+  const fmtDateTime = (date, time) => {
+    const [h,m] = time.split(':');
+    return `${fmtDateOnly(date)}T${pad(h)}${pad(m)}00`;
+  };
+  const escapeText = s => String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
+  const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//RadScheduler//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    `X-WR-CALNAME:${escapeText(calName||'My RadScheduler Schedule')}`,
+    'X-WR-TIMEZONE:UTC',
+  ];
+  for(const ev of events){
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:${ev.uid}`);
+    lines.push(`DTSTAMP:${stamp}`);
+    if(ev.allDay && ev.endDate){
+      // Multi-day all-day (vacation block); DTEND is exclusive so add 1 day
+      const end = new Date(ev.endDate); end.setDate(end.getDate()+1);
+      lines.push(`DTSTART;VALUE=DATE:${fmtDateOnly(ev.date)}`);
+      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(fmtDate(end))}`);
+    } else if(ev.allDay){
+      const next = new Date(ev.date); next.setDate(next.getDate()+1);
+      lines.push(`DTSTART;VALUE=DATE:${fmtDateOnly(ev.date)}`);
+      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(fmtDate(next))}`);
+    } else {
+      const startDT = fmtDateTime(ev.date, ev.start);
+      // If end < start (overnight shift like 23:00 → 07:00), end is on next day
+      let endDate = ev.date;
+      if(ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00')){
+        const nxt = new Date(ev.date); nxt.setDate(nxt.getDate()+1);
+        endDate = fmtDate(nxt);
+      }
+      const endDT = fmtDateTime(endDate, ev.end);
+      lines.push(`DTSTART:${startDT}`);
+      lines.push(`DTEND:${endDT}`);
+    }
+    lines.push(`SUMMARY:${escapeText(ev.summary)}`);
+    if(ev.description) lines.push(`DESCRIPTION:${escapeText(ev.description)}`);
+    if(ev.location)    lines.push(`LOCATION:${escapeText(ev.location)}`);
+    lines.push('END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
+function downloadMyCalendar(){
+  const start = document.getElementById('cs-start')?.value;
+  const end   = document.getElementById('cs-end')?.value;
+  const status= document.getElementById('cs-download-status');
+  const setStatus=(msg,color='var(--txt3)')=>{if(status){status.textContent=msg;status.style.color=color;}};
+  if(!CU?.physId){setStatus('✕ No physician profile linked to your account.','var(--red-t)');return;}
+  if(!start||!end){setStatus('✕ Pick start and end dates.','var(--red-t)');return;}
+  if(end < start){setStatus('✕ End date must be after start date.','var(--red-t)');return;}
+  const events = _myEventsInRange(start, end);
+  if(!events.length){setStatus('No events in that date range.','var(--amber-t,#92400e)');return;}
+  const calName = `${CU.first} ${CU.last} — RadScheduler`;
+  const ics = _eventsToICS(events, calName);
+  // Trigger download
+  const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `radscheduler-${(CU.first||'me').toLowerCase()}-${start}-${end}.ics`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  setStatus(`✓ Downloaded ${events.length} events. Open the .ics file to import into your calendar app.`,'var(--green-t)');
+}
+
+// Build the subscription URL for a given token.
+function _calendarFeedUrlFor(token){
+  const base = _getUrl();
+  if(!base || !token) return '';
+  // webcal:// scheme makes most calendar apps recognize this as a subscribable feed
+  return base.replace(/^https?:\/\//,'webcal://') + '/functions/v1/calendar-feed?token=' + encodeURIComponent(token);
+}
+
+// Generate (or rotate) the user's calendar feed token. Saves to USERS row,
+// triggers a save so it persists, and updates the URL field in the UI.
+function generateCalendarFeedUrl(){
+  if(!CU?.id){alert('No user logged in.');return;}
+  if(!CU?.physId){alert('Your account is not linked to a physician profile. Contact an administrator.');return;}
+  const u = USERS.find(x=>x.id===CU.id);
+  if(!u){alert('Could not locate your user record.');return;}
+  const existing = u.calFeedToken;
+  if(existing && !confirm('You already have a calendar subscription URL.\n\nGenerating a new one will REVOKE the old URL — any calendar app using it will stop receiving updates. You\'ll need to update your calendar app with the new URL.\n\nContinue?')) return;
+  // Generate a random 32-char token. Crypto-strong if available.
+  const bytes = new Uint8Array(24);
+  if(window.crypto?.getRandomValues){
+    crypto.getRandomValues(bytes);
+  } else {
+    for(let i=0;i<bytes.length;i++) bytes[i]=Math.floor(Math.random()*256);
+  }
+  const token = Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join('');
+  u.calFeedToken = token;
+  if(CU) CU.calFeedToken = token;
+  triggerSave();
+  const feedEl=document.getElementById('cs-feed-url');
+  const url = _calendarFeedUrlFor(token);
+  if(feedEl) feedEl.value = url;
+  const status = document.getElementById('cs-feed-status');
+  if(status){
+    status.textContent = '✓ Subscription URL generated. Copy it and add to your calendar app.';
+    status.style.color = 'var(--green-t)';
+    setTimeout(()=>{if(status.textContent.startsWith('✓')) status.textContent='';}, 6000);
+  }
+}
+
+function copyCalendarFeedUrl(btn){
+  const el = document.getElementById('cs-feed-url');
+  const val = el?.value;
+  if(!val){alert('Generate a URL first.');return;}
+  const doCopy = async () => {
+    try{
+      if(navigator.clipboard && window.isSecureContext){
+        await navigator.clipboard.writeText(val);
+        return true;
+      }
+    }catch(e){}
+    el.select();
+    let ok=false;
+    try{ ok=document.execCommand('copy'); }catch(e){}
+    return ok;
+  };
+  doCopy().then(ok => {
+    if(btn){
+      const orig = btn.textContent;
+      btn.textContent = ok ? '✓ Copied' : '✕ Failed';
+      setTimeout(()=>{btn.textContent=orig;}, 2000);
+    }
+  });
 }
 
 function renderMyVacPicks(){
