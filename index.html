@@ -1093,7 +1093,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="fg"><label>Subspecialty</label><select id="wk-sub"></select></div>
     </div>
     <div class="g3">
-      <div class="fg"><label>Site</label><select id="wk-site"></select></div>
+      <div class="fg"><label>Site</label><select id="wk-site" onchange="_refreshWkSubs()"></select></div>
       <div class="fg"><label>Call Type</label><select id="wk-ctype"><option>Primary</option><option>Backup</option></select></div>
       <div class="fg"><label>Notes</label><input id="wk-notes"></div>
     </div>
@@ -7391,9 +7391,11 @@ function updateIRSbInfo(){
   siteSel.innerHTML = irSites.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
   if(curSite && irSites.find(s => s.name === curSite)) siteSel.value = curSite;
 
-  // Subspecialty from global irSubs
-  const subs = S.irSubs || [];
+  // Subspecialty from per-site list if configured, else global irSubs
+  const subs = siteIRSubsByName(siteSel.value);
+  const curSub = subSel.value;
   subSel.innerHTML = '<option value="">—</option>' + subs.map(s => `<option>${s}</option>`).join('');
+  if(curSub && subs.includes(curSub)) subSel.value = curSub;
 
   // Info box: capacity check
   const infoEl = document.getElementById('irs-info');
@@ -8414,52 +8416,281 @@ function saveCfg(){
 }
 function renderDRSList(){const el=document.getElementById('drs-list');if(!el)return;el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove DR sub')){S.drSubs.splice(${i},1);triggerSave();renderDRSList();}">X</button></div>`).join('');}
 function renderIRSList(){const el=document.getElementById('irs-list');if(!el)return;el.innerHTML=(S.irSubs||[]).map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove IR sub')){S.irSubs.splice(${i},1);triggerSave();renderIRSList();}">X</button></div>`).join('');}
-// Tracks which site's anchors/fill-ins panel is expanded in the Settings UI
+
+// Per-site specialty helpers. When a site has its own `drSubs`/`irSubs` array
+// populated, those are the specialties offered AT that site. Otherwise falls
+// back to the global list — maintains backwards compatibility with sites that
+// were created before per-site subs existed.
+function siteDRSubs(site){
+  if(!site) return S.drSubs || [];
+  if(Array.isArray(site.drSubs) && site.drSubs.length) return site.drSubs.slice();
+  return S.drSubs || [];
+}
+function siteIRSubs(site){
+  if(!site) return S.irSubs || [];
+  if(Array.isArray(site.irSubs) && site.irSubs.length) return site.irSubs.slice();
+  return S.irSubs || [];
+}
+function siteDRSubsByName(name){ return siteDRSubs((S.sites||[]).find(s=>s.name===name)); }
+function siteIRSubsByName(name){ return siteIRSubs((S.sites||[]).find(s=>s.name===name)); }
+
+// Tracks which site's full-editor panel is expanded in the Settings UI. Using
+// a single source of truth (previously this was split across _siteMixedExpanded
+// and an ad-hoc toggle) keeps the render deterministic.
 const _siteMixedExpanded = new Set();
 
 function renderSitesList(){
   const el=document.getElementById('sites-list');if(!el)return;
-  const irPhys=(S.physicians||[]).filter(p=>p.irFte>0);
+  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   el.innerHTML=(S.sites||[]).map((s,i)=>{
     const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';
     const anchors=s.irAnchors||[], fillins=s.irFillins||[];
     const anchorNames=anchors.map(id=>pname(id)).join(', ')||'—';
     const fillinNames=fillins.map(id=>pname(id)).join(', ')||'—';
-    // Panel visible if: user expanded it, OR anchors/fill-ins already populated, OR it's a non-IR site (no group)
-    const showMixed = _siteMixedExpanded.has(s.name) || anchors.length>0 || fillins.length>0 || !s.irGroup;
-    let mixedUi='';
-    if(showMixed){
-      mixedUi=`<div style="padding:8px 10px;background:var(--bg3);border-radius:6px;margin-top:6px;font-size:11px">
-        <div style="margin-bottom:6px"><strong>IR Anchors</strong> <small style="color:var(--txt3)">(counts toward their IR FTE)</small>: <span style="color:var(--green-t)">${anchorNames}</span>
-          <button class="br bxs" style="float:right" onclick="editSiteAnchors(${i})">Edit</button></div>
-        <div><strong>IR Fill-ins</strong> <small style="color:var(--txt3)">(doesn't count toward their IR FTE)</small>: <span style="color:var(--blue-t)">${fillinNames}</span>
-          <button class="br bxs" style="float:right" onclick="editSiteFillins(${i})">Edit</button></div>
+    const expanded = _siteMixedExpanded.has(s.name);
+
+    // Subspecialty status hints shown on the collapsed row so admins can tell
+    // at a glance whether per-site filtering is configured
+    const drSubCount = Array.isArray(s.drSubs) ? s.drSubs.length : 0;
+    const irSubCount = Array.isArray(s.irSubs) ? s.irSubs.length : 0;
+    const drSubHint = drSubCount>0 ? `<span class="tag tb" style="font-size:10px" title="DR specialties: ${escHtml((s.drSubs||[]).join(', '))}">${drSubCount} DR subs</span>` : '';
+    const irSubHint = irSubCount>0 ? `<span class="tag tt" style="font-size:10px" title="IR specialties: ${escHtml((s.irSubs||[]).join(', '))}">${irSubCount} IR subs</span>` : '';
+    const addrHint = s.address ? `<span class="tag" style="font-size:10px;background:var(--bg3);color:var(--txt2)" title="${escHtml(s.address)}">📍 Address</span>` : '';
+
+    let editor='';
+    if(expanded){
+      // Full inline editor: name, address, IR group, specialties, anchors, fill-ins
+      const nameLit = JSON.stringify(s.name);
+      const allDRSubs = S.drSubs || [];
+      const allIRSubs = S.irSubs || [];
+      const drSet = new Set(Array.isArray(s.drSubs) ? s.drSubs : []);
+      const irSet = new Set(Array.isArray(s.irSubs) ? s.irSubs : []);
+      const drSubUseAll = !Array.isArray(s.drSubs) || s.drSubs.length===0;
+      const irSubUseAll = !Array.isArray(s.irSubs) || s.irSubs.length===0;
+
+      const groupOpts = [
+        ['', 'DR / General'],
+        ['North', 'IR North'],
+        ['South', 'IR South'],
+        ['Both', 'IR Both']
+      ].map(([v,lbl]) => `<option value="${v}"${(s.irGroup||'')===v?' selected':''}>${lbl}</option>`).join('');
+
+      const drSubsChk = allDRSubs.length
+        ? allDRSubs.map(sub => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:var(--bg2);border-radius:4px">
+            <input type="checkbox" class="site-drsub-${i}" value="${escHtml(sub)}" ${drSet.has(sub)?'checked':''} onchange="saveSiteSubs(${i},'dr')">
+            ${escHtml(sub)}
+          </label>`).join(' ')
+        : '<em style="color:var(--txt3);font-size:11px">No DR specialties defined — add some under DR Subspecialties below.</em>';
+      const irSubsChk = allIRSubs.length
+        ? allIRSubs.map(sub => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:var(--bg2);border-radius:4px">
+            <input type="checkbox" class="site-irsub-${i}" value="${escHtml(sub)}" ${irSet.has(sub)?'checked':''} onchange="saveSiteSubs(${i},'ir')">
+            ${escHtml(sub)}
+          </label>`).join(' ')
+        : '<em style="color:var(--txt3);font-size:11px">No IR specialties defined — add some under IR Subspecialties below.</em>';
+
+      editor = `<div style="padding:10px;background:var(--bg3);border-radius:6px;margin-top:6px;font-size:12px">
+
+        <div class="g2" style="gap:8px;margin-bottom:8px">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px">Site name</label>
+            <input id="site-edit-name-${i}" value="${escHtml(s.name)}" style="font-size:12px;width:100%" onblur="saveSiteName(${i}, this.value)">
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px">IR group</label>
+            <select id="site-edit-grp-${i}" onchange="saveSiteGroup(${i}, this.value)" style="font-size:12px;width:100%">${groupOpts}</select>
+          </div>
+        </div>
+
+        <div class="fg" style="margin:0 0 8px">
+          <label style="font-size:11px">Street address <small style="color:var(--txt3)">(for drive-time calculation)</small></label>
+          <input id="site-edit-addr-${i}" value="${escHtml(s.address||'')}" placeholder="e.g. 123 Main St, City, ST" style="font-size:12px;width:100%" onblur="saveSiteAddress(${i}, this.value)">
+        </div>
+
+        <div style="margin-bottom:8px;padding-top:6px;border-top:1px solid var(--bdr2)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="font-size:11px">DR Specialties offered here</strong>
+            <label style="font-size:10px;color:var(--txt3);display:flex;align-items:center;gap:4px">
+              <input type="checkbox" id="site-dr-all-${i}" ${drSubUseAll?'checked':''} onchange="toggleSiteSubsAll(${i},'dr',this.checked)">
+              All (no per-site filter)
+            </label>
+          </div>
+          <div id="site-drsubs-wrap-${i}" style="${drSubUseAll?'opacity:.45;pointer-events:none':''};display:flex;flex-wrap:wrap;gap:4px">${drSubsChk}</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:3px">When specific boxes are checked, only those specialties appear in the DR shift builder when this site is selected.</div>
+        </div>
+
+        <div style="margin-bottom:8px;padding-top:6px;border-top:1px solid var(--bdr2)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="font-size:11px">IR Specialties offered here</strong>
+            <label style="font-size:10px;color:var(--txt3);display:flex;align-items:center;gap:4px">
+              <input type="checkbox" id="site-ir-all-${i}" ${irSubUseAll?'checked':''} onchange="toggleSiteSubsAll(${i},'ir',this.checked)">
+              All (no per-site filter)
+            </label>
+          </div>
+          <div id="site-irsubs-wrap-${i}" style="${irSubUseAll?'opacity:.45;pointer-events:none':''};display:flex;flex-wrap:wrap;gap:4px">${irSubsChk}</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:3px">When specific boxes are checked, only those specialties appear in the IR shift builder when this site is selected.</div>
+        </div>
+
+        <div style="padding-top:6px;border-top:1px solid var(--bdr2)">
+          <div style="margin-bottom:6px"><strong style="font-size:11px">IR Anchors</strong> <small style="color:var(--txt3)">(counts toward their IR FTE)</small>: <span style="color:var(--green-t)">${anchorNames}</span>
+            <button class="br bxs" style="float:right" onclick="editSiteAnchors(${i})">Edit</button>
+          </div>
+          <div><strong style="font-size:11px">IR Fill-ins</strong> <small style="color:var(--txt3)">(doesn't count toward their IR FTE)</small>: <span style="color:var(--blue-t)">${fillinNames}</span>
+            <button class="br bxs" style="float:right" onclick="editSiteFillins(${i})">Edit</button>
+          </div>
+        </div>
+
       </div>`;
     }
-    const gearTitle = showMixed ? 'Hide per-physician IR role panel' : 'Configure per-physician IR roles at this site';
+
+    const gearTitle = expanded ? 'Collapse editor' : 'Edit site (name, address, specialties, IR roles)';
     return`<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;margin-bottom:6px">
-      <div class="row"><span style="font-size:13px;font-weight:600;flex:1">${s.name}</span>${g}
-        <button class="br bxs" onclick="toggleSiteMixed(${i})" title="${gearTitle}">&#9881;</button>
+      <div class="row" style="flex-wrap:wrap;gap:4px">
+        <span style="font-size:13px;font-weight:600;flex:1">${escHtml(s.name)}</span>
+        ${g}${addrHint}${drSubHint}${irSubHint}
+        <button class="br bxs" onclick="toggleSiteMixed(${i})" title="${gearTitle}">${expanded?'▲':'⚙'}</button>
         <button class="br bxs" onclick="removeSiteWithCascade(${i})">X</button>
       </div>
-      ${mixedUi}
+      ${editor}
     </div>`;
   }).join('');
 }
 
+// Expand/collapse a site's inline editor.
 function toggleSiteMixed(i){
   const s=S.sites[i]; if(!s) return;
   if(!s.irAnchors) s.irAnchors=[];
   if(!s.irFillins) s.irFillins=[];
-  // If panel is currently showing because of populated arrays on a non-IR site,
-  // or because user previously expanded it, collapse it (only meaningful if
-  // there are no populated anchors/fill-ins, since those force the panel open).
   if(_siteMixedExpanded.has(s.name)){
     _siteMixedExpanded.delete(s.name);
   } else {
     _siteMixedExpanded.add(s.name);
   }
   renderSitesList();
+}
+
+// Rename a site. Cascades to every reference that stores the site by name:
+// drShifts, irShifts, weekendCalls, irCalls, openShifts, physician anchor/
+// allowed/siteRules/dayConditions, holidayDefs, holidays, and the siteSlot/
+// irSlot/irShiftSlot keys (which embed the site name in their key).
+function saveSiteName(i, newName){
+  if(!_adminOnly('rename site')) return;
+  const s = S.sites[i]; if(!s) return;
+  const oldName = s.name;
+  const name = String(newName||'').replace(/[<>&"|]/g,'').trim();
+  if(!name || name === oldName){
+    // revert the input if name was cleared or unchanged — avoids a blank name
+    const el = document.getElementById(`site-edit-name-${i}`);
+    if(el) el.value = oldName;
+    return;
+  }
+  if((S.sites||[]).some(x => x !== s && x.name === name)){
+    alert(`A site called "${name}" already exists. Pick a different name.`);
+    const el = document.getElementById(`site-edit-name-${i}`);
+    if(el) el.value = oldName;
+    return;
+  }
+  // Cascade rename through all reference locations
+  s.name = name;
+  (S.physicians||[]).forEach(p => {
+    if(p.anchorSite === oldName) p.anchorSite = name;
+    if(p.drSite === oldName) p.drSite = name;
+    if(p.irSitePrim === oldName) p.irSitePrim = name;
+    if(Array.isArray(p.allowedSites)) p.allowedSites = p.allowedSites.map(x => x===oldName ? name : x);
+    if(Array.isArray(p.siteRules)) p.siteRules.forEach(r => { if(r.site === oldName) r.site = name; });
+    if(Array.isArray(p.dayConditions)) p.dayConditions.forEach(d => {
+      if(d.site === oldName) d.site = name;
+      if(d.thenSite === oldName) d.thenSite = name;
+    });
+  });
+  ['drShifts','irShifts','weekendCalls','irCalls','openShifts'].forEach(k=>{
+    if(Array.isArray(S[k])) S[k].forEach(x => { if(x.site === oldName) x.site = name; });
+  });
+  // Holiday defs store an allowed-sites list; legacy holidays have a site field
+  (S.holidayDefs||[]).forEach(d => {
+    if(Array.isArray(d.sites)) d.sites = d.sites.map(x => x===oldName ? name : x);
+  });
+  (S.holidays||[]).forEach(h => { if(h.site === oldName) h.site = name; });
+  // Slot-map keys embed site name as the prefix: "NAME|dow|shift"
+  ['siteSlots','irSlots','irShiftSlots','wkndNeeds'].forEach(k => {
+    const obj = S[k]; if(!obj || typeof obj !== 'object') return;
+    const newObj = {};
+    Object.keys(obj).forEach(key => {
+      if(key.startsWith(oldName + '|')){
+        newObj[name + key.slice(oldName.length)] = obj[key];
+      } else {
+        newObj[key] = obj[key];
+      }
+    });
+    S[k] = newObj;
+  });
+  // Drive-time cache: site names appear in both origin and destination keys
+  if(S.driveTimes && typeof S.driveTimes === 'object'){
+    const newDT = {};
+    Object.keys(S.driveTimes).forEach(k => {
+      // Keys look like "physAddr||siteAddr" — but our internal lookup uses
+      // site NAME for some cache entries. Rekey any matching prefix/suffix.
+      const parts = k.split('||');
+      const newParts = parts.map(p => p === oldName ? name : p);
+      newDT[newParts.join('||')] = S.driveTimes[k];
+    });
+    S.driveTimes = newDT;
+  }
+  // Update the expanded-set entry so the panel stays open on re-render
+  if(_siteMixedExpanded.has(oldName)){
+    _siteMixedExpanded.delete(oldName);
+    _siteMixedExpanded.add(name);
+  }
+  triggerSave();
+  _afterMutation();
+}
+
+function saveSiteAddress(i, val){
+  if(!_adminOnly('edit site address')) return;
+  const s = S.sites[i]; if(!s) return;
+  s.address = String(val||'').trim();
+  triggerSave();
+  // No _afterMutation needed — address doesn't affect schedule rendering, just
+  // drive-time lookups. Leave the panel open.
+}
+
+function saveSiteGroup(i, val){
+  if(!_adminOnly('edit site group')) return;
+  const s = S.sites[i]; if(!s) return;
+  s.irGroup = val || null;
+  triggerSave();
+  _afterMutation();
+  renderSitesList();
+}
+
+function saveSiteSubs(i, kind){
+  if(!_adminOnly('edit site specialties')) return;
+  const s = S.sites[i]; if(!s) return;
+  const cls = kind==='dr' ? `site-drsub-${i}` : `site-irsub-${i}`;
+  const selected = Array.from(document.getElementsByClassName(cls))
+    .filter(c => c.checked).map(c => c.value);
+  if(kind==='dr') s.drSubs = selected;
+  else s.irSubs = selected;
+  triggerSave();
+  // Re-render sub dropdowns in any open builder
+  _afterMutation();
+}
+
+function toggleSiteSubsAll(i, kind, useAll){
+  if(!_adminOnly('edit site specialties')) return;
+  const s = S.sites[i]; if(!s) return;
+  if(useAll){
+    // Clear the per-site list → falls back to global
+    if(kind==='dr') delete s.drSubs;
+    else delete s.irSubs;
+  } else {
+    // Initialize with all currently-global subs checked (user can uncheck what
+    // doesn't apply at this site)
+    if(kind==='dr') s.drSubs = (S.drSubs||[]).slice();
+    else s.irSubs = (S.irSubs||[]).slice();
+  }
+  triggerSave();
+  renderSitesList();
+  _afterMutation();
 }
 
 function removeSiteWithCascade(idx){
@@ -8582,10 +8813,14 @@ function addSite(){
   const rawName=document.getElementById('new-site')?.value||'';
   const name=String(rawName).replace(/[<>&"|]/g,'').trim();
   const grp=document.getElementById('new-site-irg')?.value||null;
+  const addr=(document.getElementById('new-site-address')?.value||'').trim();
   if(!name){alert('Enter a site name.');return;}
   if((S.sites||[]).find(s=>s.name===name)){alert('A site with that name already exists.');return;}
-  S.sites.push({name,irGroup:grp||null,irAnchors:[],irFillins:[]});
+  const newSite = {name, irGroup:grp||null, irAnchors:[], irFillins:[]};
+  if(addr) newSite.address = addr;
+  S.sites.push(newSite);
   document.getElementById('new-site').value='';
+  const addrEl = document.getElementById('new-site-address'); if(addrEl) addrEl.value='';
   triggerSave();renderSitesList();
   S.sites.forEach(st=>{['1st','2nd','3rd','Home'].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
 }
@@ -11776,14 +12011,26 @@ function renderDRBuilder(){
     const tag = p.role === 'IR' ? ' [IR-only]' : p.role === 'MIXED' ? ' [MIXED]' : '';
     return `<option value="${p.id}">${p.last}, ${p.first}${tag}</option>`;
   }).join('');
-  populateSel('sb-sub',S.drSubs,'— any —');populateSel('sb-site',S.sites.map(s=>s.name),'');
+  // Sub dropdown filters by selected site — `siteDRSubsByName` returns the
+  // per-site list if configured, else the global list. Called again from
+  // updateSbInfo whenever the site selector changes.
+  const curSite = document.getElementById('sb-site')?.value || '';
+  const drSubsForSite = siteDRSubsByName(curSite);
+  populateSel('sb-sub', drSubsForSite, '— any —');
+  populateSel('sb-site', S.sites.map(s=>s.name), '');
   // Keep bulk panel dropdowns fresh
   ['2nd','3rd'].forEach(sh=>{
     const pe=document.getElementById(`drb-${sh}-phys`);
     if(pe) pe.innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
     const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
     const se=document.getElementById(`drb-${sh}-site`);if(se)se.innerHTML=siteNames.map(n=>`<option>${n}</option>`).join('');
-    const ue=document.getElementById(`drb-${sh}-sub`);if(ue)ue.innerHTML=S.drSubs.map(s=>`<option>${s}</option>`).join('');
+    const ue=document.getElementById(`drb-${sh}-sub`);
+    if(ue){
+      // Follow the currently-selected site in this bulk panel
+      const curBulkSite = document.getElementById(`drb-${sh}-site`)?.value || '';
+      const subsForSite = siteDRSubsByName(curBulkSite);
+      ue.innerHTML = subsForSite.map(s=>`<option>${s}</option>`).join('');
+    }
   });
   _renderDRTable();
 }
@@ -11806,6 +12053,20 @@ function updateSbInfo(){
   const pid=+document.getElementById('sb-phys')?.value;
   const date=document.getElementById('sb-date')?.value;
   const site=document.getElementById('sb-site')?.value;
+  // Re-filter the subspecialty dropdown whenever the site changes. Previously
+  // the sub list was populated once from the global S.drSubs and never refreshed,
+  // so per-site filtering had no effect in the DR builder.
+  const subSel = document.getElementById('sb-sub');
+  if(subSel){
+    const subsForSite = siteDRSubsByName(site);
+    const curSub = subSel.value;
+    const newHtml = '<option value="">— any —</option>' + subsForSite.map(s=>`<option>${s}</option>`).join('');
+    if(subSel.innerHTML !== newHtml){
+      subSel.innerHTML = newHtml;
+      // Preserve selection if still valid under the new site
+      if(curSub && subsForSite.includes(curSub)) subSel.value = curSub;
+    }
+  }
   if(!pid||!date){document.getElementById('sb-info').innerHTML='';return;}
   const p=S.physicians.find(x=>x.id===pid);if(!p)return;
   const ym=date.slice(0,7);
@@ -11866,8 +12127,18 @@ function fillDRHomeShifts(){
     const already=S.drShifts.find(s=>s.physId===p.id&&s.date===date)||
       S.weekendCalls.find(w=>w.physId===p.id&&(w.satDate===date||w.sunDate===date||w.date===date));
     if(!already){
-      S.drShifts.push({id:S.nextId++,physId:p.id,date,shift:'Home',site:'At Home / Remote',
-        sub:p.drSubs[0]||'General Procedures',notes:'Auto home-fill',autoHome:true});
+      // Pick a subspecialty that's both the physician's AND valid at the target site.
+      // Home shifts use 'At Home / Remote' which typically has no per-site filter,
+      // so this falls back to the physician's first sub → global default.
+      const siteName = 'At Home / Remote';
+      const siteSubs = siteDRSubsByName(siteName);
+      const physSubs = p.drSubs || [];
+      const subPick = physSubs.find(ps => siteSubs.includes(ps))
+                    || physSubs[0]
+                    || siteSubs[0]
+                    || 'General Procedures';
+      S.drShifts.push({id:S.nextId++,physId:p.id,date,shift:'Home',site:siteName,
+        sub:subPick,notes:'Auto home-fill',autoHome:true});
       added++;
     }
   });
@@ -11875,10 +12146,27 @@ function fillDRHomeShifts(){
 }
 
 /* ─── WEEKEND BUILDER ─── */
+// Refresh the weekend-builder's subspecialty dropdown to match the currently-
+// selected site. Called when the site dropdown changes so a per-site specialty
+// config takes effect without reloading the page.
+function _refreshWkSubs(){
+  const siteEl = document.getElementById('wk-site');
+  const subEl  = document.getElementById('wk-sub');
+  if(!siteEl || !subEl) return;
+  const curSub = subEl.value;
+  const subs = siteDRSubsByName(siteEl.value);
+  subEl.innerHTML = subs.map(s => `<option>${s}</option>`).join('');
+  if(curSub && subs.includes(curSub)) subEl.value = curSub;
+}
+
 function renderWkBuilder(){
   const drs=S.physicians.filter(p=>p.drFte>0&&p.shiftElig.wknd);
   document.getElementById('wk-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
-  populateSel('wk-sub',S.drSubs,'');populateSel('wk-site',S.sites.map(s=>s.name),'');
+  // Weekend subs: filtered by currently-selected site. _refreshWkSubs
+  // re-runs the filter on site-change without rebuilding the whole panel.
+  populateSel('wk-site', S.sites.map(s=>s.name), '');
+  const curWkSite = document.getElementById('wk-site')?.value || '';
+  populateSel('wk-sub', siteDRSubsByName(curWkSite), '');
   document.getElementById('wk-tbody').innerHTML=S.weekendCalls.sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
     return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="deleteWkCall(${w.id})">X</button></td></tr>`;
