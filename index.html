@@ -2123,8 +2123,11 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
         </div>
         <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
-          <div style="font-weight:700;font-size:12px;margin-bottom:6px">Shift Departure & Return Times
+          <div style="font-weight:700;font-size:12px;margin-bottom:6px">1st Shift Departure & Return Times
             <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format · used for daily traffic queries</span>
+          </div>
+          <div class="note ni" style="font-size:11px;margin-bottom:8px">
+            Drive times are only computed for <strong>DR 1st Shift</strong> and <strong>IR 1st Shift</strong>. Other shifts (2nd, 3rd, IR Call, Weekend, Holiday) are call or overnight assignments and don't use traffic-based drive times.
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;font-size:11px;align-items:center">
             <span style="font-weight:700;color:var(--txt3)">Shift</span>
@@ -2135,29 +2138,9 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
             <input id="st-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
 
-            <span>DR 2nd Shift</span>
-            <input id="st-2nd-dep" type="time" value="14:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-2nd-ret" type="time" value="23:00" style="font-size:11px;padding:2px 4px">
-
-            <span>DR 3rd Shift</span>
-            <input id="st-3rd-dep" type="time" value="22:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-3rd-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
-
             <span>IR 1st Shift</span>
             <input id="st-ir-1st-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
             <input id="st-ir-1st-ret" type="time" value="15:00" style="font-size:11px;padding:2px 4px">
-
-            <span>IR Call</span>
-            <input id="st-ircall-dep" type="time" value="16:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-ircall-ret" type="time" value="07:00" style="font-size:11px;padding:2px 4px">
-
-            <span>Weekend Call</span>
-            <input id="st-wknd-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-wknd-ret" type="time" value="18:00" style="font-size:11px;padding:2px 4px">
-
-            <span>Holiday Call</span>
-            <input id="st-hol-dep" type="time" value="06:30" style="font-size:11px;padding:2px 4px">
-            <input id="st-hol-ret" type="time" value="18:00" style="font-size:11px;padding:2px 4px">
           </div>
           <button class="bt bsm" style="margin-top:8px" onclick="saveShiftTimes()">💾 Save Times</button>
           <span id="shift-times-msg" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
@@ -5055,21 +5038,20 @@ function _trafficForShift(shiftEntry, qtrSel){
 function saveShiftTimes(){
   if(!S.cfg) S.cfg={};
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
-  // Map of shift-key → input element IDs. Keys match what refreshDailyDriveTimes and
-  // _shiftsForDailyDriveTimes use to look up times from cfg.
+  // Only DR 1st and IR 1st are eligible for drive-time calculations.
+  // Other shift types don't have inputs here and aren't saved.
   const map = [
-    {key:'1st',          dep:'st-1st-dep',      ret:'st-1st-ret',      defDep:'06:30', defRet:'15:00'},
-    {key:'2nd',          dep:'st-2nd-dep',      ret:'st-2nd-ret',      defDep:'14:30', defRet:'23:00'},
-    {key:'3rd',          dep:'st-3rd-dep',      ret:'st-3rd-ret',      defDep:'22:30', defRet:'07:00'},
-    {key:'IR 1st',       dep:'st-ir-1st-dep',   ret:'st-ir-1st-ret',   defDep:'06:30', defRet:'15:00'},
-    {key:'IR Call',      dep:'st-ircall-dep',   ret:'st-ircall-ret',   defDep:'16:30', defRet:'07:00'},
-    {key:'Weekend Call', dep:'st-wknd-dep',     ret:'st-wknd-ret',     defDep:'06:30', defRet:'18:00'},
-    {key:'Holiday Call', dep:'st-hol-dep',      ret:'st-hol-ret',      defDep:'06:30', defRet:'18:00'},
+    {key:'1st',    dep:'st-1st-dep',    ret:'st-1st-ret',    defDep:'06:30', defRet:'15:00'},
+    {key:'IR 1st', dep:'st-ir-1st-dep', ret:'st-ir-1st-ret', defDep:'06:30', defRet:'15:00'},
   ];
   map.forEach(m=>{
     const dep = document.getElementById(m.dep)?.value || m.defDep;
     const ret = document.getElementById(m.ret)?.value || m.defRet;
     S.cfg.shiftTimes[m.key] = {dep, ret};
+  });
+  // Clean up any legacy keys from earlier builds that expanded coverage
+  ['2nd','3rd','IR Call','Weekend Call','Holiday Call'].forEach(k=>{
+    if(S.cfg.shiftTimes[k]) delete S.cfg.shiftTimes[k];
   });
   // Proxy doesn't fire on nested mutations, so call triggerSave explicitly
   triggerSave();
@@ -5084,13 +5066,8 @@ function saveShiftTimes(){
 function _loadShiftTimesUI(){
   const st = S.cfg?.shiftTimes||{};
   const map = [
-    {key:'1st',          dep:'st-1st-dep',      ret:'st-1st-ret',      defDep:'06:30', defRet:'15:00'},
-    {key:'2nd',          dep:'st-2nd-dep',      ret:'st-2nd-ret',      defDep:'14:30', defRet:'23:00'},
-    {key:'3rd',          dep:'st-3rd-dep',      ret:'st-3rd-ret',      defDep:'22:30', defRet:'07:00'},
-    {key:'IR 1st',       dep:'st-ir-1st-dep',   ret:'st-ir-1st-ret',   defDep:'06:30', defRet:'15:00'},
-    {key:'IR Call',      dep:'st-ircall-dep',   ret:'st-ircall-ret',   defDep:'16:30', defRet:'07:00'},
-    {key:'Weekend Call', dep:'st-wknd-dep',     ret:'st-wknd-ret',     defDep:'06:30', defRet:'18:00'},
-    {key:'Holiday Call', dep:'st-hol-dep',      ret:'st-hol-ret',      defDep:'06:30', defRet:'18:00'},
+    {key:'1st',    dep:'st-1st-dep',    ret:'st-1st-ret',    defDep:'06:30', defRet:'15:00'},
+    {key:'IR 1st', dep:'st-ir-1st-dep', ret:'st-ir-1st-ret', defDep:'06:30', defRet:'15:00'},
   ];
   map.forEach(m=>{
     const saved = st[m.key] || {};
@@ -5208,24 +5185,55 @@ async function updateTrafficTimes(){
   const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
   const physWithAddr=S.physicians.filter(p=>p.address?.trim());
   const sitesWithAddr=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
-  if(!physWithAddr.length){setStatus('\u26a0 No physician addresses configured.');return;}
-  if(!sitesWithAddr.length){setStatus('\u26a0 No hospital addresses configured.');return;}
+  if(!physWithAddr.length){setStatus('⚠ No physician addresses configured.');return;}
+  if(!sitesWithAddr.length){setStatus('⚠ No hospital addresses configured.');return;}
   if(!S.driveTimes) S.driveTimes={};
   const now=new Date().toISOString();
   let done=0, errors=0;
   const BATCH=10;
 
-  // Read shift times from S.cfg — user-configurable in Settings → Drive Times
-  const _st=S.cfg.shiftTimes||{};
-  const SHIFTS=[
-    {type:'1st',    depTime:_st['1st']?.dep||'06:30',    retTime:_st['1st']?.ret||'15:00',
-     label:`DR 1st Shift (out ${_st['1st']?.dep||'06:30'} \u2192 back ${_st['1st']?.ret||'15:00'})`}
+  // Read shift times from S.cfg — user-configurable in Settings → Drive Times.
+  // We run TWO passes: one for DR 1st using DR 1st's dep/ret, one for IR 1st
+  // using IR 1st's dep/ret. This way IR physicians show traffic computed at
+  // their actual departure time (which may differ from DR 1st).
+  const _st = S.cfg?.shiftTimes || {};
+  const SHIFTS = [
+    {
+      type: '1st', // storage key used by DR shift lookups
+      depTime: _st['1st']?.dep || '06:30',
+      retTime: _st['1st']?.ret || '15:00',
+      label: `DR 1st Shift (out ${_st['1st']?.dep || '06:30'} → back ${_st['1st']?.ret || '15:00'})`,
+    },
+    {
+      type: 'IR 1st', // storage key used by IR shift lookups
+      depTime: _st['IR 1st']?.dep || '06:30',
+      retTime: _st['IR 1st']?.ret || '15:00',
+      label: `IR 1st Shift (out ${_st['IR 1st']?.dep || '06:30'} → back ${_st['IR 1st']?.ret || '15:00'})`,
+    },
   ];
 
   const hospAddrs=sitesWithAddr.map(s=>s.address.trim());
 
   for(const shift of SHIFTS){
-    setStatus(`Round-trip traffic: ${shift.label}\u2026`);
+    // Skip the second pass if DR and IR times are identical — no extra Maps calls needed
+    if(shift.type==='IR 1st' && shift.depTime===SHIFTS[0].depTime && shift.retTime===SHIFTS[0].retTime){
+      // Mirror DR 1st data into IR 1st bucket so lookups find it
+      setStatus(`IR 1st times match DR 1st — sharing results…`);
+      physWithAddr.forEach(p=>{
+        sitesWithAddr.forEach(s=>{
+          const key=`${p.id}|${s.name}`;
+          const drSnap = S.driveTimes[key]?.byShift?.['1st'];
+          if(drSnap){
+            if(!S.driveTimes[key]) S.driveTimes[key]={mins:null,text:'N/A',dist:'',updated:''};
+            if(!S.driveTimes[key].byShift) S.driveTimes[key].byShift={};
+            S.driveTimes[key].byShift['IR 1st'] = {...drSnap, label: shift.label};
+          }
+        });
+      });
+      continue;
+    }
+
+    setStatus(`Round-trip traffic: ${shift.label}…`);
     for(let i=0;i<physWithAddr.length;i+=BATCH){
       const batch=physWithAddr.slice(i,i+BATCH);
       const batchAddrs=batch.map(p=>p.address.trim());
@@ -5249,16 +5257,14 @@ async function updateTrafficTimes(){
               const retEl=retRes.rows[ci]?.elements[ri];
               const retTraffic=retEl?.status==='OK'
                 ?(retEl.duration_in_traffic||retEl.duration)
-                :outEl; // fallback to outbound time if return unavailable
+                :outEl;
               const outM=Math.round(outEl.value/60);
               const retM=Math.round(retTraffic.value/60);
               const qtr=_currentQuarter();
-              // Always update the top-level (latest) reading
               S.driveTimes[key].byShift[shift.type]={
                 outMins:outM,outText:outEl.text,
                 retMins:retM,retText:retTraffic.text,
                 label:shift.label,updated:now,
-                // Also store in per-quarter snapshot
                 quarters:{...((S.driveTimes[key].byShift[shift.type]||{}).quarters||{}),
                   [qtr]:{outMins:outM,retMins:retM,updated:now}}
               };
@@ -5275,7 +5281,7 @@ async function updateTrafficTimes(){
     await new Promise(r=>setTimeout(r,300));
   }
   triggerSave();
-  setStatus(`\u2713 Round-trip traffic updated \u2014 ${done} entries${errors?`, ${errors} errors`:''}.`);
+  setStatus(`✓ Round-trip traffic updated — ${done} entries${errors?`, ${errors} errors`:''}. Both DR 1st and IR 1st recalculated.`);
   if(_fteActiveTab==='commute') renderCommuteMatrix();
 }
 
@@ -5311,57 +5317,28 @@ async function _mapsProxyCallRT(origins, destinations, departureTime){
 
 // Build a list of (physId, site, date, shiftKind, depTime, retTime) tuples
 // from current schedule entries in a date range. Skips anything without a site.
+// POLICY: Drive times only apply to DR 1st Shift and IR 1st Shift. All other
+// shift types (2nd, 3rd, IR Call, Weekend Call, Holiday Call) are excluded —
+// those are overnight or evening shifts where the commute timing is either
+// outside traffic hours or handled differently (call coverage).
 function _shiftsForDailyDriveTimes(startDate, endDate){
   const tasks = [];
   const inRange = d => d && d >= startDate && d <= endDate;
   const st = S.cfg?.shiftTimes || {};
-  const defaultFor = (kind) => {
-    const defs = {
-      '1st': {dep:'06:30', ret:'15:00'},
-      '2nd': {dep:'14:30', ret:'23:00'},
-      '3rd': {dep:'22:30', ret:'07:00'},
-      'Home': null, // no commute needed
-      'IR Call': {dep:'16:30', ret:'07:00'},
-      'Weekend Call': {dep:'06:30', ret:'18:00'},
-      'Holiday Call': {dep:'06:30', ret:'18:00'},
-    };
-    return defs[kind] || null;
-  };
-  const resolveTimes = (kind) => {
-    const cfg = st[kind];
-    if(cfg && cfg.dep && cfg.ret) return {dep:cfg.dep, ret:cfg.ret};
-    return defaultFor(kind);
-  };
+  const dr1 = st['1st']    || {dep:'06:30', ret:'15:00'};
+  const ir1 = st['IR 1st'] || {dep:'06:30', ret:'15:00'};
   (S.drShifts||[]).forEach(s => {
     if(!inRange(s.date) || !s.site) return;
-    if(s.shift === 'Home') return; // remote, no commute
-    const t = resolveTimes(s.shift);
-    if(!t) return;
-    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:`DR ${s.shift}`, depTime:t.dep, retTime:t.ret, shiftId:`dr-${s.id}`});
+    if(s.shift !== '1st') return; // ONLY 1st shift qualifies
+    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:'DR 1st', depTime:dr1.dep, retTime:dr1.ret, shiftId:`dr-${s.id}`});
   });
   (S.irShifts||[]).forEach(s => {
     if(!inRange(s.date) || !s.site) return;
-    // Prefer IR-specific config keys (e.g. "IR 1st"); fall back to DR's if unset
-    const irKey = `IR ${s.shift||'1st'}`;
-    const t = resolveTimes(irKey) || resolveTimes(s.shift || '1st');
-    if(!t) return;
-    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:irKey, depTime:t.dep, retTime:t.ret, shiftId:`ir-${s.id}`});
+    if((s.shift||'1st') !== '1st') return; // ONLY 1st shift qualifies
+    tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:'IR 1st', depTime:ir1.dep, retTime:ir1.ret, shiftId:`ir-${s.id}`});
   });
-  (S.irCalls||[]).forEach(c => {
-    if(!inRange(c.date) || !c.site) return;
-    const t = resolveTimes('IR Call');
-    if(!t) return;
-    tasks.push({physId:c.physId, site:c.site, date:c.date, shiftKind:`IR Call`, depTime:t.dep, retTime:t.ret, shiftId:`irc-${c.id}`});
-  });
-  (S.weekendCalls||[]).forEach(w => {
-    if(!w.site) return;
-    const t = resolveTimes('Weekend Call');
-    if(!t) return;
-    [w.satDate, w.sunDate, w.date].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).forEach(d => {
-      if(!inRange(d)) return;
-      tasks.push({physId:w.physId, site:w.site, date:d, shiftKind:`Weekend Call`, depTime:t.dep, retTime:t.ret, shiftId:`wk-${w.id}-${d}`});
-    });
-  });
+  // Intentionally excluded: S.irCalls, S.weekendCalls, holidays — these are
+  // call/overnight shifts that aren't subject to morning commute traffic patterns.
   return tasks;
 }
 
@@ -5441,6 +5418,12 @@ async function refreshDailyDriveTimes(startDate, endDate, onProgress){
   }
   triggerSave();
   if(onProgress) onProgress({done:groupsDone, total:groupKeys.length, msg:`✓ ${fetched} daily drive times updated${errors?', '+errors+' errors':''}.`, finished:true});
+  // Re-render anything that depends on driveTimes so the user sees fresh values immediately
+  if(_fteActiveTab==='commute') renderCommuteMatrix();
+  // If a calendar is currently visible, refresh its tiles too so the new daily badges appear
+  const onPg = document.querySelector('.page.on')?.id;
+  if(onPg==='page-dr-cal' && typeof renderDRCal==='function') renderDRCal();
+  if(onPg==='page-ir-cal' && typeof renderIRCal==='function') renderIRCal();
   return {ok:true, fetched, errors};
 }
 
@@ -5664,18 +5647,32 @@ async function lookupDriveTime(){
   }
   setStatus('Fetching live Google Maps traffic…');
   try {
-    // Figure out a reasonable default departure/return. If this physician has a shift
-    // on this date, use that shift's times. Otherwise use DR 1st shift as fallback.
+    // POLICY: drive times only apply to DR 1st Shift and IR 1st Shift.
+    // If this physician has a scheduled shift on this date, confirm it's 1st.
+    // If they have no shift, allow the lookup — admin may be planning ahead.
     const st = S.cfg?.shiftTimes || {};
     let depTime = st['1st']?.dep || '06:30';
     let retTime = st['1st']?.ret || '15:00';
-    const hit = (S.drShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date)
-             || (S.irShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date);
+    let shiftKind = 'Custom lookup';
+    const drHit = (S.drShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date);
+    const irHit = (S.irShifts||[]).find(s => s.physId===physId && s.site===site && s.date===date);
+    const hit = drHit || irHit;
     if(hit){
-      const key2 = hit.shift?.startsWith?.('IR') ? `IR ${hit.shift}` : hit.shift;
-      const t = st[key2] || st[hit.shift] || st['1st'] || {};
-      depTime = t.dep || depTime;
-      retTime = t.ret || retTime;
+      const shiftLabel = hit.shift || '1st';
+      if(shiftLabel !== '1st'){
+        setStatus(`✕ Drive times are only available for 1st shifts. This physician's shift on ${date} is "${shiftLabel}".`, 'var(--red-t)');
+        return;
+      }
+      if(irHit){
+        const ir = st['IR 1st'] || st['1st'] || {};
+        depTime = ir.dep || depTime;
+        retTime = ir.ret || retTime;
+        shiftKind = 'IR 1st';
+      } else {
+        depTime = st['1st']?.dep || depTime;
+        retTime = st['1st']?.ret || retTime;
+        shiftKind = 'DR 1st';
+      }
     }
     const depTs = _dateTimeToUnix(date, depTime);
     const retTs = _dateTimeToUnix(date, retTime);
@@ -5704,7 +5701,7 @@ async function lookupDriveTime(){
       baseOutMins: Math.round(baseOut.value/60),
       baseRetMins: Math.round(baseRet.value/60),
       depTime, retTime,
-      shiftKind: hit?.shift ? (hit.shift.startsWith?.('IR')?'IR '+hit.shift:hit.shift) : 'Custom lookup',
+      shiftKind,
       dist: outEl.distance?.text || '',
       fetchedAt: new Date().toISOString(),
     };
@@ -5752,8 +5749,13 @@ function _checkTrafficStaleness(){
 
 
 
-function _driveTimeBadge(physId,siteName,shiftType,date){
+// Drive-time badge for a cell on a calendar. `role` is 'DR' or 'IR' — determines
+// which traffic snapshot to show (DR 1st vs IR 1st, computed from different dep/ret
+// times in Settings → Drive Times).
+function _driveTimeBadge(physId,siteName,shiftType,date,role){
   if(!S.driveTimes) return '';
+  // POLICY: only 1st shifts show drive-time badges.
+  if(shiftType !== '1st') return '';
   const dt=S.driveTimes[`${physId}|${siteName}`];
   if(!dt||dt.mins===null) return '';
   // Prefer daily traffic data if available for this specific date
@@ -5766,16 +5768,17 @@ function _driveTimeBadge(physId,siteName,shiftType,date){
       onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date).replace(/'/g,"\\'")}')"
       title="Daily traffic · Click for details">🚦${daily.outText}${deltaTxt}</span>`;
   }
-  // Fallback: legacy byShift snapshot for rough estimate
-  const shiftMap={'1st':'1st','2nd':'1st','3rd':'1st','Home':null,'daily':'1st','weekend':'1st','ir-daily':'1st','ir-weekend':'1st'};
-  const sk=shiftMap[shiftType]||null;
-  const traffic=sk&&dt.byShift?.[sk];
-  const outMins=traffic?traffic.outMins:dt.mins;
-  const outText=traffic?traffic.outText:dt.text;
-  const rtMins=traffic?(traffic.outMins+traffic.retMins):dt.mins*2;
-  const label=traffic?traffic.label:'base';
-  const col=outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
-  const icon=traffic?'🚦':'🚗';
+  // Fallback: byShift snapshot. Use role-specific key: IR → "IR 1st", DR → "1st".
+  // Fall back to the other if the role-specific one isn't populated yet.
+  const preferredKey = role==='IR' ? 'IR 1st' : '1st';
+  const fallbackKey  = role==='IR' ? '1st' : 'IR 1st';
+  const traffic = dt.byShift?.[preferredKey] || dt.byShift?.[fallbackKey];
+  const outMins = traffic ? traffic.outMins : dt.mins;
+  const outText = traffic ? traffic.outText : dt.text;
+  const rtMins  = traffic ? (traffic.outMins + traffic.retMins) : dt.mins*2;
+  const label   = traffic ? traffic.label : 'base';
+  const col = outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
+  const icon = traffic?'🚦':'🚗';
   const dateAttr = date ? `'${escHtml(date).replace(/'/g,"\\'")}'` : 'null';
   return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
     onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}',${dateAttr})"
@@ -5828,8 +5831,10 @@ function renderCommuteMatrix(){
 
   // ── ONE-WAY BASE MATRIX ───────────────────────────────────────────────────
   if(physWithAddr.length&&hospitals.length){
-    const SHIFT_KEYS=['1st'];
-    const SHIFT_SHORT={'1st':'DR 1st'};
+    // Show both DR 1st and IR 1st traffic snapshots so IR physicians see the
+    // times computed from IR 1st's dep/ret config (not DR 1st's).
+    const SHIFT_KEYS=['1st','IR 1st'];
+    const SHIFT_SHORT={'1st':'DR 1st','IR 1st':'IR 1st'};
 
     html+=`<div class="card" style="margin-bottom:14px">
       <div class="card-title">Commute Matrix — Base &amp; Per-Shift Traffic
@@ -5884,10 +5889,13 @@ function renderCommuteMatrix(){
     const byHosp={};
     let totalBase=0,totalTraffic=0,totalShifts=0;
 
-    function countShift(site, date){
+    function countShift(site, date, role){
       const entry=dt[`${p.id}|${site}`];
       if(!entry||entry.mins===null) return;
-      const sv=entry.byShift?.['1st']||null;
+      // Use role-specific snapshot: IR shifts read IR 1st, DR shifts read DR 1st.
+      const preferredKey = role==='IR' ? 'IR 1st' : '1st';
+      const fallbackKey  = role==='IR' ? '1st' : 'IR 1st';
+      const sv=entry.byShift?.[preferredKey] || entry.byShift?.[fallbackKey] || null;
       const tr=sv?_trafficForShift(sv,date):null;
       const outM=tr?.outMins??entry.mins;
       const retM=tr?.retMins??entry.mins;
@@ -5905,12 +5913,12 @@ function renderCommuteMatrix(){
     // DR 1st shifts
     S.drShifts
       .filter(s=>s.physId===p.id&&s.shift==='1st'&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>countShift(s.site, s.date));
+      .forEach(s=>countShift(s.site, s.date, 'DR'));
 
     // IR 1st shifts (procedure shifts, non-home)
     (S.irShifts||[])
       .filter(s=>s.physId===p.id&&s.shift==='1st'&&s.site!=='At Home / Remote'&&matchYear(s.date))
-      .forEach(s=>countShift(s.site, s.date));
+      .forEach(s=>countShift(s.site, s.date, 'IR'));
 
     return{p,byHosp,totalBase,totalTraffic,totalShifts};
   }).filter(d=>d.totalShifts>0);
@@ -11571,7 +11579,7 @@ function renderDRCal(){
         evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} — ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">
           <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
           <div style="font-size:9px;opacity:.85">${s.shift} Shift</div>
-          <div style="font-size:9px;opacity:.7">${siteSh}${subLbl?' · '+subLbl:''}${_driveTimeBadge(s.physId,s.site,s.shift,s.date)}</div>
+          <div style="font-size:9px;opacity:.7">${siteSh}${subLbl?' · '+subLbl:''}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'DR')}</div>
         </div>`;
       }
     });
@@ -12007,7 +12015,7 @@ function renderIRCal(){
           shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — ${shiftLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
             <div style="font-size:9px;opacity:.85">${shiftLbl}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}</div>
+            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
           </div>`;
         }
       });
