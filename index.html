@@ -7244,6 +7244,14 @@ function addIRShift(){
   const p = S.physicians.find(x => x.id === physId);
   if(!p) return;
 
+  // Block regular IR shift on defined holidays (Home shifts are OK — physician off).
+  if(shift!=='Home' && isHolidayBlackout(date)){
+    const reason = _holidayReasonFor(date);
+    const holName = reason?.name || 'defined holiday';
+    alert(`${date} is part of "${holName}" (Holiday Call → Define Holidays). Regular IR shifts cannot be scheduled on defined holidays — use the Holiday Call tab to assign coverage.`);
+    return;
+  }
+
   // Duplicate check
   if((S.irShifts||[]).find(s => s.physId === physId && s.date === date && s.shift === shift && s.site === site)){
     if(!confirm(`${p.last} already has a ${shift} shift at ${site} on ${date}. Add anyway?`)) return;
@@ -8001,9 +8009,20 @@ function renderSettings(){
     'cfg-wd':'wdMax','cfg-wk':'wkMax','cfg-ir-daily':'irDailyMax',
     'cfg-ir-wknd':'irWkndMax','cfg-rest':'rest','cfg-anc':'anchorPct'
   };
+  // Per-field defaults — used when the saved value is undefined/null/0. Matches
+  // the HTML input defaults and the state-init seed so there are no surprises.
+  const cfgDefaults = {
+    wdMax:20, wkMax:4, irDailyMax:20, irWkndMax:4, rest:1, anchorPct:70
+  };
   Object.entries(cfgFields).forEach(([id,k])=>{
     const el=document.getElementById(id);
-    if(el) el.value=S.cfg[k]??S.cfg.irMax??0;
+    if(el){
+      const v = S.cfg?.[k];
+      // Treat undefined/null/0 as "no value set" and use the explicit default.
+      // Zero is also not a meaningful value for caps/rest/anchor and likely indicates
+      // the field was never populated or the state was seeded incompletely.
+      el.value = (v==null || v===0) ? cfgDefaults[k] : v;
+    }
   });
   // Admin alert inbox
   const inboxEl=document.getElementById('cfg-admin-inbox');
@@ -8105,7 +8124,7 @@ function saveCfg(){
   S.cfg.irWkndMax=+document.getElementById('cfg-ir-wknd')?.value||4;
   S.cfg.irMax=S.cfg.irDailyMax;
   S.cfg.rest=+document.getElementById('cfg-rest')?.value||1;
-  S.cfg.anchorPct=+document.getElementById('cfg-anc')?.value||60;
+  S.cfg.anchorPct=+document.getElementById('cfg-anc')?.value||70;
   triggerSave();
 }
 function renderDRSList(){const el=document.getElementById('drs-list');if(!el)return;el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove DR sub')){S.drSubs.splice(${i},1);triggerSave();renderDRSList();}">X</button></div>`).join('');}
@@ -11354,6 +11373,15 @@ function addDRShift(){
   const shift=document.getElementById('sb-shift').value;
   const site=document.getElementById('sb-site').value;
   if(!date){alert('Select date');return;}
+  // Block regular shift assignment on defined holidays — those days are reserved
+  // for Holiday Call coverage, not day shifts. Home shifts on holidays are
+  // allowed (physician is off that day; home is not a work assignment per se).
+  if(shift!=='Home' && isHolidayBlackout(date)){
+    const reason = _holidayReasonFor(date);
+    const holName = reason?.name || 'defined holiday';
+    alert(`${date} is part of "${holName}" (Holiday Call → Define Holidays). Regular day shifts cannot be scheduled on defined holidays — use the Holiday Call tab to assign coverage.`);
+    return;
+  }
   const p=S.physicians.find(x=>x.id===pid);
   if(p.role==='IR'){alert('IR-only physicians cannot be assigned DR shifts.');return;}
   // Hard block: physician is on vacation this date
@@ -11443,12 +11471,34 @@ function previewAA(){
   drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym)||1; });
   const cnt={};drs.forEach(p=>{cnt[p.id]={wd:drCnt(p.id,ym),wk:wkCnt(p.id,ym)};});
 
-  // Sort comparator: lowest fill-ratio first; break ties by highest deficit; then anchor
+  // Anchor % target — from Settings. When a physician is below this rate at
+  // their anchor site, they get a ranked boost toward assignments there.
+  const ANC_PCT = (S.cfg?.anchorPct ?? 70) / 100;
+  // Count existing hospital shifts at anchor site for each physician
+  const ancCnt = {}, ancTot = {};
+  drs.forEach(p => {
+    ancCnt[p.id] = 0; ancTot[p.id] = 0;
+    S.drShifts.filter(s => s.physId===p.id && s.date.startsWith(ym) && s.shift!=='Home').forEach(s => {
+      ancTot[p.id]++;
+      if(p.anchorSite && s.site === p.anchorSite) ancCnt[p.id]++;
+    });
+  });
+
+  // Sort comparator: lowest fill-ratio first; break ties by anchor fit driven
+  // by the anchorPct setting; then by highest deficit.
   function sortByDeficit(pool, site){
     return pool.slice().sort((a,b)=>{
       const rA=cnt[a.id].wd/effTarget[a.id], rB=cnt[b.id].wd/effTarget[b.id];
       if(Math.abs(rA-rB)>0.005) return rA-rB; // lowest fill% first
-      // Prefer anchor site match
+      // Anchor target pressure — physicians below the anchorPct% target at their
+      // anchor site get preference when the assignment IS their anchor site.
+      // This actively drives the setting's value into the scheduling decision.
+      const aRate = ancTot[a.id]>0 ? ancCnt[a.id]/ancTot[a.id] : 0;
+      const bRate = ancTot[b.id]>0 ? ancCnt[b.id]/ancTot[b.id] : 0;
+      const aBelow = a.anchorSite===site && aRate < ANC_PCT;
+      const bBelow = b.anchorSite===site && bRate < ANC_PCT;
+      if(aBelow !== bBelow) return aBelow ? -1 : 1;
+      // Prefer anchor site match (regardless of rate)
       const ancA=(a.anchorSite===site?-1:0)+(a.siteRules?.find(r=>r.site===site)?.preferred?-0.5:0);
       const ancB=(b.anchorSite===site?-1:0)+(b.siteRules?.find(r=>r.site===site)?.preferred?-0.5:0);
       if(ancA!==ancB) return ancA-ancB;
@@ -13326,9 +13376,17 @@ function previewIRRebalance(){
     // Use ALL eligible Mon-Thu dates in the period, not just currently-assigned ones.
     // This lets the rebalancer fill gaps as well as redistribute existing calls.
     if(typ==='daily'||typ==='both'){
+      // Dates where a holiday-synced call already covers this group's daily slot
+      // — the rebalancer should leave those alone and not attempt to reassign.
+      const holDailyDates = new Set(
+        S.irCalls.filter(c =>
+          c.callType==='daily' && c.irGroup===g &&
+          inPeriod(c.date) && (c.notes||'').includes('(Holiday)')
+        ).map(c => c.date)
+      );
       const dailyDates=months.flatMap(ym=>
         buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date))
-      ).map(c=>c.date).sort();
+      ).map(c=>c.date).filter(d => !holDailyDates.has(d)).sort();
 
       const cntD={}; gPhys.forEach(p=>{cntD[p.id]=0;});
       // Largest-remainder quotas: each physician gets exactly floor or ceil of their
@@ -13407,9 +13465,23 @@ function previewIRRebalance(){
     // ── Weekend calls across all 6 months ──
     // Use ALL Fridays in the period — fills uncovered weekends as well as redistributing.
     if(typ==='weekend'||typ==='both'){
+      // Fridays where a holiday-synced weekend call already exists for this group
+      // — skip so the rebalancer doesn't overwrite them.
+      const holWkndFris = new Set(
+        S.irCalls.filter(c =>
+          c.callType==='weekend' && c.irGroup===g &&
+          inPeriod(c.date) && (c.notes||'').includes('(Holiday)')
+        ).map(c => c.date)
+      );
+      // Also skip any Fri→Mon span that has all 4 days as defined holidays —
+      // these are fully covered by Holiday Auto-Assign.
       const wkndDates=months.flatMap(ym=>
         buildCal(ym).filter(c=>c.day&&c.dow===5)
-      ).map(c=>c.date).sort();
+      ).map(c=>c.date).filter(fri => {
+        if(holWkndFris.has(fri)) return false;
+        const span = [fri, addDays(fri,1), addDays(fri,2), addDays(fri,3)];
+        return !span.every(d => isHolidayBlackout(d));
+      }).sort();
 
       const cntW={}; gPhys.forEach(p=>{cntW[p.id]=0;});
       const wkndQuotas=_irrQuotas(gPhys,wkndDates.length,p=>irWkndTargetPeriod(p,months));
@@ -13740,11 +13812,16 @@ function applyIRRebalance(){
   if(typ==='daily'||typ==='both') types.push('daily');
   if(typ==='weekend'||typ==='both') types.push('weekend');
 
-  // Remove existing calls in the 6-month window for affected groups/types
+  // Remove existing calls in the 6-month window for affected groups/types — BUT
+  // preserve any call that was synced from the Holiday Call tab. Those entries
+  // are tagged with "(Holiday)" in their notes; they must stay put so the
+  // holiday coverage doesn't get silently overwritten.
+  const isHolidaySynced = c => (c.notes||'').includes('(Holiday)');
   S.irCalls=S.irCalls.filter(c=>{
     if(!inPeriod(c.date)) return true;
     if(!groups.includes(c.irGroup)) return true;
     if(!types.includes(c.callType)) return true;
+    if(isHolidaySynced(c)) return true; // never delete holiday-synced calls
     return false;
   });
 
