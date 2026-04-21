@@ -4464,11 +4464,67 @@ function removePhys(id){
 }
 
 /* ─── VACATIONS ─── */
+let _editingVacId = null;
+function startEditVac(id){
+  if(!_adminOnly('edit vacation')) return;
+  _editingVacId = id;
+  renderVacations();
+}
+function cancelEditVac(){ _editingVacId = null; renderVacations(); }
+function saveEditVac(id){
+  if(!_adminOnly('edit vacation')) return;
+  const v = S.vacations.find(x => x.id === id); if(!v) return;
+  const physEl  = document.getElementById(`vace-phys-${id}`);
+  const typeEl  = document.getElementById(`vace-type-${id}`);
+  const startEl = document.getElementById(`vace-start-${id}`);
+  const endEl   = document.getElementById(`vace-end-${id}`);
+  const notesEl = document.getElementById(`vace-notes-${id}`);
+  const s = startEl?.value, e = endEl?.value;
+  if(!s || !e){ alert('Both start and end dates required.'); return; }
+  if(e < s){ alert('End date must be on or after start date.'); return; }
+  v.physId = +physEl?.value || v.physId;
+  v.type   = typeEl?.value || v.type;
+  v.start  = s;
+  v.end    = e;
+  v.notes  = notesEl?.value || '';
+  _editingVacId = null;
+  triggerSave();
+  _afterMutation();
+}
+
 function renderVacations(){
   document.getElementById('v-phys').innerHTML=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  const physOpts = S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  // Keep type options in sync with the "Add Time Off" form's current select
+  const typeEl = document.getElementById('v-type');
+  const vacTypes = typeEl
+    ? Array.from(typeEl.options).map(o => o.value).filter(v => v)
+    : ['Vacation','CME','Sick','Bereavement','Admin','Vacation Sold Back','Other'];
   document.getElementById('vac-tbody').innerHTML=S.vacations.sort((a,b)=>a.start>b.start?1:-1).map(v=>{
     const d=Math.round((parseDateLocal(v.end)-parseDateLocal(v.start))/86400000)+1;
-    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}"><td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td><td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td><td><button class="br bxs" onclick="deleteVacation(${v.id})">X</button></td></tr>`;
+    if(_editingVacId === v.id){
+      const typeOpts = vacTypes.map(t=>`<option value="${t}"${t===v.type?' selected':''}>${t}</option>`).join('');
+      return `<tr style="background:var(--blue-bg)">
+        <td><select id="vace-phys-${v.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${v.physId}"`, `value="${v.physId}" selected`)}</select></td>
+        <td><select id="vace-type-${v.id}" style="font-size:11px">${typeOpts}</select></td>
+        <td><input id="vace-start-${v.id}" type="date" value="${v.start}" style="font-size:11px"></td>
+        <td><input id="vace-end-${v.id}" type="date" value="${v.end}" style="font-size:11px"></td>
+        <td style="color:var(--txt3);font-size:10px"><em>auto</em></td>
+        <td><input id="vace-notes-${v.id}" value="${(v.notes||'').replace(/"/g,'&quot;')}" style="font-size:11px;width:100%"></td>
+        <td style="white-space:nowrap">
+          <button class="bg bxs" onclick="saveEditVac(${v.id})">✓</button>
+          <button class="bt bxs" onclick="cancelEditVac()">✕</button>
+        </td>
+      </tr>`;
+    }
+    return`<tr style="${v.type==='Vacation Sold Back'?'background:var(--green-bg);':''}">
+      <td>${pname(v.physId)}</td><td><span class="tag ta">${v.type}</span></td>
+      <td>${v.start}</td><td>${v.end}</td><td>${d}</td><td>${v.notes||'—'}</td>
+      <td style="white-space:nowrap">
+        <button class="bt bxs" onclick="startEditVac(${v.id})" title="Edit">✏</button>
+        <button class="br bxs" onclick="deleteVacation(${v.id})">X</button>
+      </td>
+    </tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 function addVac(){
@@ -7467,6 +7523,48 @@ function fillIRHomeShifts(){
   alert(`Added ${added} Home shift(s) for unscheduled days in ${ym}.`);
 }
 
+let _editingIRShiftId = null;
+function startEditIRShift(id){
+  if(!_adminOnly('edit IR shift')) return;
+  _editingIRShiftId = id;
+  renderIRShiftTable();
+}
+function cancelEditIRShift(){ _editingIRShiftId = null; renderIRShiftTable(); }
+function saveEditIRShift(id){
+  if(!_adminOnly('edit IR shift')) return;
+  const s = (S.irShifts||[]).find(x => x.id === id); if(!s) return;
+  const physEl = document.getElementById(`ire-phys-${id}`);
+  const dateEl = document.getElementById(`ire-date-${id}`);
+  const shiftEl= document.getElementById(`ire-shift-${id}`);
+  const siteEl = document.getElementById(`ire-site-${id}`);
+  const subEl  = document.getElementById(`ire-sub-${id}`);
+  const notesEl= document.getElementById(`ire-notes-${id}`);
+  if(!dateEl?.value){ alert('Date required.'); return; }
+  const newPid   = +physEl?.value || s.physId;
+  const newDate  = dateEl.value;
+  const newShift = shiftEl?.value || s.shift;
+  const newSite  = siteEl?.value || s.site;
+  const p = S.physicians.find(x=>x.id===newPid);
+  if(!p){ alert('Physician not found.'); return; }
+  if(newShift!=='Home' && isHolidayBlackout(newDate)){
+    const reason = _holidayReasonFor(newDate);
+    if(!confirm(`${newDate} is part of "${reason?.name||'defined holiday'}". Save anyway?`)) return;
+  }
+  if(vacDays(newPid).has(newDate)){
+    if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
+  }
+  s.physId  = newPid;
+  s.date    = newDate;
+  s.shift   = newShift;
+  s.site    = newSite;
+  s.sub     = subEl?.value || '';
+  s.notes   = notesEl?.value || '';
+  s.irGroup = p.irGroup || s.irGroup;
+  _editingIRShiftId = null;
+  triggerSave();
+  _afterMutation();
+}
+
 function renderIRShiftTable(){
   const tbody = document.getElementById('irs-tbody');
   if(!tbody) return;
@@ -7484,20 +7582,34 @@ function renderIRShiftTable(){
     return;
   }
 
-  // Build physician options for inline reassign
   const physOpts = S.physicians.filter(p => p.irFte > 0)
     .map(p => `<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  const shiftOpts = ['1st','2nd','3rd','Home'].map(sh=>`<option value="${sh}">${sh}</option>`).join('');
 
   tbody.innerHTML = rows.map(s => {
+    if(_editingIRShiftId === s.id){
+      // Edit-mode row with full field controls
+      const siteOpts = S.sites.filter(st => st.irGroup==='North'||st.irGroup==='South'||st.irGroup==='Both'||st.name===s.site)
+        .map(st => `<option value="${st.name}"${st.name===s.site?' selected':''}>${st.name}</option>`).join('');
+      const subs = siteIRSubsByName(s.site);
+      const subOpts = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}"${sub===s.sub?' selected':''}>${sub}</option>`).join('');
+      return `<tr id="irs-row-${s.id}" style="background:var(--blue-bg)">
+        <td><select id="ire-phys-${s.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${s.physId}"`, `value="${s.physId}" selected`)}</select></td>
+        <td><input id="ire-date-${s.id}" type="date" value="${s.date}" style="font-size:11px"></td>
+        <td><select id="ire-shift-${s.id}" style="font-size:11px">${shiftOpts.replace(`value="${s.shift}"`, `value="${s.shift}" selected`)}</select></td>
+        <td><select id="ire-site-${s.id}" style="font-size:11px" onchange="_ireRefreshSub(${s.id})">${siteOpts}</select></td>
+        <td><em style="color:var(--txt3);font-size:10px">auto</em></td>
+        <td><select id="ire-sub-${s.id}" style="font-size:11px">${subOpts}</select></td>
+        <td><input id="ire-notes-${s.id}" value="${(s.notes||'').replace(/"/g,'&quot;')}" style="font-size:11px;width:100%"></td>
+        <td style="white-space:nowrap">
+          <button class="bg bxs" onclick="saveEditIRShift(${s.id})">✓</button>
+          <button class="bt bxs" onclick="cancelEditIRShift()">✕</button>
+        </td>
+      </tr>`;
+    }
     const shiftLbl = s.shift === '1st' ? 'Day Shift' : s.shift;
     return `<tr id="irs-row-${s.id}">
-      <td style="font-weight:600">${pname(s.physId)}
-        <div style="display:none" id="irs-reassign-${s.id}">
-          <select style="font-size:11px;width:140px" onchange="reassignIRShift(${s.id},+this.value)">
-            <option value="">— reassign to —</option>${physOpts}
-          </select>
-        </div>
-      </td>
+      <td style="font-weight:600">${pname(s.physId)}</td>
       <td>${s.date}</td>
       <td><span class="tag ${s.shift==='Home'?'':'eir'}" style="font-size:10px">${shiftLbl}</span></td>
       <td>${s.site||'—'}</td>
@@ -7505,11 +7617,22 @@ function renderIRShiftTable(){
       <td style="font-size:11px">${s.sub||'—'}</td>
       <td style="font-size:11px">${s.notes||'—'}</td>
       <td style="white-space:nowrap">
-        <button class="bsm bt" onclick="toggleIRShiftReassign(${s.id})" title="Reassign">✏</button>
+        <button class="bt bxs" onclick="startEditIRShift(${s.id})" title="Edit">✏</button>
         <button class="br bxs" onclick="deleteIRShift(${s.id})">✕</button>
       </td>
     </tr>`;
   }).join('');
+}
+
+function _ireRefreshSub(id){
+  const s = (S.irShifts||[]).find(x=>x.id===id); if(!s) return;
+  const siteEl = document.getElementById(`ire-site-${id}`);
+  const subEl  = document.getElementById(`ire-sub-${id}`);
+  if(!siteEl || !subEl) return;
+  const subs = siteIRSubsByName(siteEl.value);
+  const curSub = subEl.value;
+  subEl.innerHTML = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}">${sub}</option>`).join('');
+  if(curSub && subs.includes(curSub)) subEl.value = curSub;
 }
 
 function toggleIRShiftReassign(id){
@@ -8414,8 +8537,55 @@ function saveCfg(){
   S.cfg.anchorPct=+document.getElementById('cfg-anc')?.value||70;
   triggerSave();
 }
-function renderDRSList(){const el=document.getElementById('drs-list');if(!el)return;el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row"><span class="tag tb">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove DR sub')){S.drSubs.splice(${i},1);triggerSave();renderDRSList();}">X</button></div>`).join('');}
-function renderIRSList(){const el=document.getElementById('irs-list');if(!el)return;el.innerHTML=(S.irSubs||[]).map((s,i)=>`<div class="row"><span class="tag tt">${s}</span><button class="br bxs" onclick="if(_adminOnly('remove IR sub')){S.irSubs.splice(${i},1);triggerSave();renderIRSList();}">X</button></div>`).join('');}
+// Subspecialty rename with cascade through every reference
+function renameSub(kind, idx){
+  if(!_adminOnly('rename subspecialty')) return;
+  const list = kind==='dr' ? S.drSubs : S.irSubs;
+  if(!list || !list[idx]) return;
+  const oldName = list[idx];
+  const newRaw = prompt(`Rename "${oldName}"?\n\n(Cascades to every physician, shift, and call record that references it.)`, oldName);
+  if(newRaw==null) return;
+  const newName = String(newRaw).replace(/[<>&"|]/g,'').trim();
+  if(!newName || newName === oldName) return;
+  if(list.some((x,i) => i!==idx && x===newName)){
+    alert(`"${newName}" already exists in the list.`); return;
+  }
+  list[idx] = newName;
+  // Physician drSubs / irSubs lists
+  (S.physicians||[]).forEach(p => {
+    if(Array.isArray(p.drSubs)) p.drSubs = p.drSubs.map(s => s===oldName ? newName : s);
+    if(Array.isArray(p.irSubs)) p.irSubs = p.irSubs.map(s => s===oldName ? newName : s);
+  });
+  // Shift / call records
+  ['drShifts','weekendCalls','irShifts','irCalls','openShifts'].forEach(k => {
+    if(Array.isArray(S[k])) S[k].forEach(x => { if(x.sub === oldName) x.sub = newName; });
+  });
+  // Per-site sub lists
+  (S.sites||[]).forEach(st => {
+    if(Array.isArray(st.drSubs)) st.drSubs = st.drSubs.map(s => s===oldName ? newName : s);
+    if(Array.isArray(st.irSubs)) st.irSubs = st.irSubs.map(s => s===oldName ? newName : s);
+  });
+  triggerSave();
+  if(kind==='dr') renderDRSList(); else renderIRSList();
+  _afterMutation();
+}
+
+function renderDRSList(){
+  const el=document.getElementById('drs-list');if(!el)return;
+  el.innerHTML=(S.drSubs||[]).map((s,i)=>`<div class="row">
+    <span class="tag tb" style="cursor:pointer" title="Click to rename" onclick="renameSub('dr',${i})">${s}</span>
+    <button class="bt bxs" onclick="renameSub('dr',${i})" title="Rename">✏</button>
+    <button class="br bxs" onclick="if(_adminOnly('remove DR sub')){S.drSubs.splice(${i},1);triggerSave();renderDRSList();}">X</button>
+  </div>`).join('');
+}
+function renderIRSList(){
+  const el=document.getElementById('irs-list');if(!el)return;
+  el.innerHTML=(S.irSubs||[]).map((s,i)=>`<div class="row">
+    <span class="tag tt" style="cursor:pointer" title="Click to rename" onclick="renameSub('ir',${i})">${s}</span>
+    <button class="bt bxs" onclick="renameSub('ir',${i})" title="Rename">✏</button>
+    <button class="br bxs" onclick="if(_adminOnly('remove IR sub')){S.irSubs.splice(${i},1);triggerSave();renderIRSList();}">X</button>
+  </div>`).join('');
+}
 
 // Per-site specialty helpers. When a site has its own `drSubs`/`irSubs` array
 // populated, those are the specialties offered AT that site. Otherwise falls
@@ -12034,20 +12204,102 @@ function renderDRBuilder(){
   });
   _renderDRTable();
 }
+// Tracks which DR shift row is currently in edit mode. Only one at a time.
+let _editingDRShiftId = null;
+function startEditDRShift(id){
+  if(!_adminOnly('edit DR shift')) return;
+  _editingDRShiftId = id;
+  _renderDRTable();
+}
+function cancelEditDRShift(){ _editingDRShiftId = null; _renderDRTable(); }
+function saveEditDRShift(id){
+  if(!_adminOnly('edit DR shift')) return;
+  const s = S.drShifts.find(x => x.id === id); if(!s) return;
+  const physEl  = document.getElementById(`dre-phys-${id}`);
+  const dateEl  = document.getElementById(`dre-date-${id}`);
+  const shiftEl = document.getElementById(`dre-shift-${id}`);
+  const siteEl  = document.getElementById(`dre-site-${id}`);
+  const subEl   = document.getElementById(`dre-sub-${id}`);
+  const notesEl = document.getElementById(`dre-notes-${id}`);
+  if(!dateEl?.value){ alert('Date required.'); return; }
+  // Validate: don't let the edit create a conflict (shift on holiday, vacation day, etc.)
+  const newShift = shiftEl?.value || s.shift;
+  const newDate  = dateEl.value;
+  const newPid   = +physEl?.value || s.physId;
+  const newSite  = siteEl?.value || s.site;
+  if(newShift!=='Home' && isHolidayBlackout(newDate)){
+    const reason = _holidayReasonFor(newDate);
+    if(!confirm(`${newDate} is part of "${reason?.name||'defined holiday'}". Regular shifts on defined holidays are normally blocked. Save anyway?`)) return;
+  }
+  if(vacDays(newPid).has(newDate)){
+    if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
+  }
+  s.physId = newPid;
+  s.date   = newDate;
+  s.shift  = newShift;
+  s.site   = newSite;
+  s.sub    = subEl?.value || '';
+  s.notes  = notesEl?.value || '';
+  // If we updated the physician and auto-home field was set, it stays — manual edits
+  // don't re-evaluate autoHome status
+  _editingDRShiftId = null;
+  triggerSave();
+  _afterMutation();
+}
+
 function _renderDRTable(){
   const fsh=document.getElementById('drb-filter-shift')?.value||'';
   const fmo=document.getElementById('drb-filter-mo')?.value||'';
   const rows=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)))
     .sort((a,b)=>a.date>b.date?1:-1);
   const el=document.getElementById('drb-tbody');if(!el)return;
+  // Build a physician option list once; reused for every editable row
+  const physOpts = S.physicians.filter(p=>p.drFte>0||p.role==='IR').sort((a,b)=>(a.last||'').localeCompare(b.last||''))
+    .map(p=>`<option value="${p.id}">${p.last}, ${p.first}${p.role==='IR'?' [IR]':p.role==='MIXED'?' [MIX]':''}</option>`).join('');
+  const shiftOpts = ['1st','2nd','3rd','Home'].map(sh=>`<option value="${sh}">${sh}</option>`).join('');
   el.innerHTML=rows.map(s=>{
+    if(_editingDRShiftId === s.id){
+      // Edit mode: swap the whole row's inner cells for editable inputs
+      const siteOpts = S.sites.map(st=>`<option value="${st.name}"${st.name===s.site?' selected':''}>${st.name}</option>`).join('');
+      const subsForSite = siteDRSubsByName(s.site);
+      const subOpts = '<option value="">—</option>' + subsForSite.map(sub=>`<option value="${sub}"${sub===s.sub?' selected':''}>${sub}</option>`).join('');
+      return `<tr style="background:var(--blue-bg)">
+        <td><select id="dre-phys-${s.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${s.physId}"`, `value="${s.physId}" selected`)}</select></td>
+        <td><input id="dre-date-${s.id}" type="date" value="${s.date}" style="font-size:11px"></td>
+        <td><select id="dre-shift-${s.id}" style="font-size:11px">${shiftOpts.replace(`value="${s.shift}"`, `value="${s.shift}" selected`)}</select></td>
+        <td><select id="dre-site-${s.id}" style="font-size:11px" onchange="_dreRefreshSub(${s.id})">${siteOpts}</select></td>
+        <td><em style="color:var(--txt3);font-size:10px">auto</em></td>
+        <td><select id="dre-sub-${s.id}" style="font-size:11px">${subOpts}</select></td>
+        <td><input id="dre-notes-${s.id}" value="${(s.notes||'').replace(/"/g,'&quot;')}" style="font-size:11px;width:100%"></td>
+        <td style="white-space:nowrap">
+          <button class="bg bxs" onclick="saveEditDRShift(${s.id})">✓</button>
+          <button class="bt bxs" onclick="cancelEditDRShift()">✕</button>
+        </td>
+      </tr>`;
+    }
     const p=S.physicians.find(x=>x.id===s.physId);const isAnc=p?.anchorSite===s.site;
     const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
     return`<tr><td>${pname(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
     <td>${s.sub||'—'}</td><td>${s.notes||'—'}</td>
-    <td><button class="br bxs" onclick="deleteDRShift(${s.id})">X</button></td></tr>`;
+    <td style="white-space:nowrap">
+      <button class="bt bxs" onclick="startEditDRShift(${s.id})" title="Edit">✏</button>
+      <button class="br bxs" onclick="deleteDRShift(${s.id})">X</button>
+    </td></tr>`;
   }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No shifts match filters</td></tr>';
+}
+
+// Called from the site <select> onchange inside an editing DR row — re-populates
+// the sub dropdown to match the newly-selected site's per-site specialty list.
+function _dreRefreshSub(id){
+  const s = S.drShifts.find(x=>x.id===id); if(!s) return;
+  const siteEl = document.getElementById(`dre-site-${id}`);
+  const subEl  = document.getElementById(`dre-sub-${id}`);
+  if(!siteEl || !subEl) return;
+  const subs = siteDRSubsByName(siteEl.value);
+  const curSub = subEl.value;
+  subEl.innerHTML = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}">${sub}</option>`).join('');
+  if(curSub && subs.includes(curSub)) subEl.value = curSub;
 }
 function updateSbInfo(){
   const pid=+document.getElementById('sb-phys')?.value;
@@ -12159,6 +12411,42 @@ function _refreshWkSubs(){
   if(curSub && subs.includes(curSub)) subEl.value = curSub;
 }
 
+let _editingWkId = null;
+function startEditWkCall(id){
+  if(!_adminOnly('edit weekend call')) return;
+  _editingWkId = id;
+  renderWkBuilder();
+}
+function cancelEditWkCall(){ _editingWkId = null; renderWkBuilder(); }
+function saveEditWkCall(id){
+  if(!_adminOnly('edit weekend call')) return;
+  const w = S.weekendCalls.find(x => x.id === id); if(!w) return;
+  const physEl = document.getElementById(`wke-phys-${id}`);
+  const satEl  = document.getElementById(`wke-sat-${id}`);
+  const subEl  = document.getElementById(`wke-sub-${id}`);
+  const siteEl = document.getElementById(`wke-site-${id}`);
+  const typeEl = document.getElementById(`wke-type-${id}`);
+  if(!satEl?.value){ alert('Saturday date required.'); return; }
+  const newPid = +physEl?.value || w.physId;
+  const newSat = satEl.value;
+  if(parseDateLocal(newSat).getDay()!==6 && !confirm('Not a Saturday. Continue?')) return;
+  const vd = vacDays(newPid);
+  const newSun = addDays(newSat, 1);
+  if(vd.has(newSat) || vd.has(newSun)){
+    if(!confirm(`${pname(newPid)} is on vacation during this weekend. Save anyway?`)) return;
+  }
+  w.physId  = newPid;
+  w.satDate = newSat;
+  w.sunDate = newSun;
+  w.date    = newSat; // legacy compat
+  w.sub     = subEl?.value || '';
+  w.site    = siteEl?.value || w.site;
+  w.ctype   = typeEl?.value || w.ctype || 'Primary';
+  _editingWkId = null;
+  triggerSave();
+  _afterMutation();
+}
+
 function renderWkBuilder(){
   const drs=S.physicians.filter(p=>p.drFte>0&&p.shiftElig.wknd);
   document.getElementById('wk-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
@@ -12167,10 +12455,46 @@ function renderWkBuilder(){
   populateSel('wk-site', S.sites.map(s=>s.name), '');
   const curWkSite = document.getElementById('wk-site')?.value || '';
   populateSel('wk-sub', siteDRSubsByName(curWkSite), '');
+
+  const physOpts = drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+
   document.getElementById('wk-tbody').innerHTML=S.weekendCalls.sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
-    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub}</td><td>${w.site}</td><td><span class="tag tb">${w.ctype}</span></td><td><button class="br bxs" onclick="deleteWkCall(${w.id})">X</button></td></tr>`;
+    if(_editingWkId === w.id){
+      const subs = siteDRSubsByName(w.site);
+      const siteOpts = S.sites.map(st=>`<option value="${st.name}"${st.name===w.site?' selected':''}>${st.name}</option>`).join('');
+      const subOpts = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}"${sub===w.sub?' selected':''}>${sub}</option>`).join('');
+      const typeOpts = ['Primary','Backup'].map(t=>`<option value="${t}"${t===w.ctype?' selected':''}>${t}</option>`).join('');
+      return `<tr style="background:var(--blue-bg)">
+        <td><select id="wke-phys-${w.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${w.physId}"`, `value="${w.physId}" selected`)}</select></td>
+        <td><input id="wke-sat-${w.id}" type="date" value="${sat}" style="font-size:11px"></td>
+        <td style="color:var(--txt3);font-size:10px"><em>auto +1</em></td>
+        <td><select id="wke-sub-${w.id}" style="font-size:11px">${subOpts}</select></td>
+        <td><select id="wke-site-${w.id}" style="font-size:11px" onchange="_wkeRefreshSub(${w.id})">${siteOpts}</select></td>
+        <td><select id="wke-type-${w.id}" style="font-size:11px">${typeOpts}</select></td>
+        <td style="white-space:nowrap">
+          <button class="bg bxs" onclick="saveEditWkCall(${w.id})">✓</button>
+          <button class="bt bxs" onclick="cancelEditWkCall()">✕</button>
+        </td>
+      </tr>`;
+    }
+    return`<tr><td>${pname(w.physId)}</td><td>${sat}</td><td>${sun}</td><td>${w.sub||'—'}</td><td>${w.site||'—'}</td><td><span class="tag tb">${w.ctype||'Primary'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="bt bxs" onclick="startEditWkCall(${w.id})" title="Edit">✏</button>
+        <button class="br bxs" onclick="deleteWkCall(${w.id})">X</button>
+      </td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
+}
+
+function _wkeRefreshSub(id){
+  const w = S.weekendCalls.find(x=>x.id===id); if(!w) return;
+  const siteEl = document.getElementById(`wke-site-${id}`);
+  const subEl  = document.getElementById(`wke-sub-${id}`);
+  if(!siteEl || !subEl) return;
+  const subs = siteDRSubsByName(siteEl.value);
+  const curSub = subEl.value;
+  subEl.innerHTML = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}">${sub}</option>`).join('');
+  if(curSub && subs.includes(curSub)) subEl.value = curSub;
 }
 function addWkCall(){
   if(!_adminOnly('assign weekend call'))return;
@@ -12954,18 +13278,71 @@ function removeIRCall(id){
   _afterMutation();
 }
 
+let _editingIRCallId = null;
+function startEditIRCall(id){
+  if(!_adminOnly('edit IR call')) return;
+  _editingIRCallId = id;
+  renderIRList();
+}
+function cancelEditIRCall(){ _editingIRCallId = null; renderIRList(); }
+function saveEditIRCall(id){
+  if(!_adminOnly('edit IR call')) return;
+  const ic = S.irCalls.find(x => x.id === id); if(!ic) return;
+  const physEl = document.getElementById(`irle-phys-${id}`);
+  const dateEl = document.getElementById(`irle-date-${id}`);
+  const typeEl = document.getElementById(`irle-type-${id}`);
+  const siteEl = document.getElementById(`irle-site-${id}`);
+  const notesEl= document.getElementById(`irle-notes-${id}`);
+  if(!dateEl?.value){ alert('Date required.'); return; }
+  const newPid = +physEl?.value || ic.physId;
+  const p = S.physicians.find(x => x.id === newPid);
+  if(!p){ alert('Physician not found.'); return; }
+  ic.physId   = newPid;
+  ic.date     = dateEl.value;
+  ic.callType = typeEl?.value || ic.callType;
+  ic.irGroup  = p.irGroup || ic.irGroup;
+  ic.site     = siteEl?.value || '';
+  ic.notes    = notesEl?.value || '';
+  _editingIRCallId = null;
+  triggerSave();
+  _afterMutation();
+}
+
 function renderIRList(){
   const ym=document.getElementById('irl-mo')?.value||new Date().toISOString().slice(0,7);const grp=document.getElementById('irl-grp')?.value||'';
   const ctColors={'daily':'tt','weekend':'tpk'};
-  document.getElementById('irl-tbody').innerHTML=S.irCalls.filter(ic=>ic.date.startsWith(ym)&&(!grp||ic.irGroup===grp)).sort((a,b)=>a.date>b.date?1:-1).map(ic=>{
+  const tbody = document.getElementById('irl-tbody'); if(!tbody) return;
+  const physOpts = S.physicians.filter(p=>p.irFte>0)
+    .map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
+  tbody.innerHTML=S.irCalls.filter(ic=>ic.date.startsWith(ym)&&(!grp||ic.irGroup===grp)).sort((a,b)=>a.date>b.date?1:-1).map(ic=>{
+    if(_editingIRCallId === ic.id){
+      const typeOpts = ['daily','weekend'].map(t=>`<option value="${t}"${t===ic.callType?' selected':''}>${t==='daily'?'Daily Call':'Weekend Call'}</option>`).join('');
+      const siteOpts = '<option value="">—</option>' + S.sites.map(st=>`<option value="${st.name}"${st.name===ic.site?' selected':''}>${st.name}</option>`).join('');
+      return `<tr style="background:var(--blue-bg)">
+        <td><select id="irle-phys-${ic.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${ic.physId}"`, `value="${ic.physId}" selected`)}</select></td>
+        <td style="color:var(--txt3);font-size:10px"><em>auto</em></td>
+        <td><select id="irle-type-${ic.id}" style="font-size:11px">${typeOpts}</select></td>
+        <td><input id="irle-date-${ic.id}" type="date" value="${ic.date}" style="font-size:11px"></td>
+        <td><select id="irle-site-${ic.id}" style="font-size:11px">${siteOpts}</select></td>
+        <td style="text-align:center;color:var(--txt3)">—</td>
+        <td><input id="irle-notes-${ic.id}" value="${(ic.notes||'').replace(/"/g,'&quot;')}" style="font-size:11px;width:100%"></td>
+        <td style="white-space:nowrap">
+          <button class="bg bxs" onclick="saveEditIRCall(${ic.id})">✓</button>
+          <button class="bt bxs" onclick="cancelEditIRCall()">✕</button>
+        </td>
+      </tr>`;
+    }
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
     const dt=ic.site&&ic.site!=='At Home / Remote'?_driveTimeCell(ic.physId,ic.site):'';
     return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${ic.irGroup==='North'?'tb':'tg'}">${ic.irGroup}</span></td>
     <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}</td>
     <td style="text-align:center">${dt||'—'}</td>
     <td>${ic.notes||'—'}</td>
-    <td><button class="br bxs" onclick="removeIRCall(${ic.id})">X</button></td></tr>`;
-  }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
+    <td style="white-space:nowrap">
+      <button class="bt bxs" onclick="startEditIRCall(${ic.id})" title="Edit">✏</button>
+      <button class="br bxs" onclick="removeIRCall(${ic.id})">X</button>
+    </td></tr>`;
+  }).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">None</td></tr>';
 }
 
 // autoFillIRHomeShifts removed: IR physicians not assigned call are left unscheduled
