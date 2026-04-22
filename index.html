@@ -2643,6 +2643,7 @@ async function hardSave(){
 }
 
 function clearAllData(){
+  if(!_adminOnly('reset all data')) return;
   if(!confirm('Reset ALL data to original seed data? This will download a fresh copy of the file. Any unsaved changes will be lost.'))return;
   // Build a version with only the original seed data by temporarily clearing arrays
   const backup={
@@ -4201,27 +4202,74 @@ function renderUserMgmt(){
   const lm=document.getElementById('lm-phys');
   if(lm) lm.innerHTML=physOpts;
 
+  // Inline physician-link options, reused per row. Each row's select gets its
+  // current value pre-selected via markup so the dropdown opens on the right
+  // entry without extra DOM work.
+  const physOptsFor = (curId) => '<option value="">— no link —</option>' +
+    S.physicians.map(p => `<option value="${p.id}"${curId==p.id?' selected':''}>${escHtml(p.last+', '+p.first)} (${p.role})</option>`).join('');
+
   document.getElementById('user-mgmt-list').innerHTML='<div class="card"><div class="card-title">Registered Users ('+USERS.length+')</div>'+
-    '<div class="note ni" style="font-size:11px;margin-bottom:10px">📬 <strong>Delivery Email</strong> is where notifications actually go. Leave blank to use the login email. Click a row\'s delivery email to edit it.</div>'+
-    '<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Login Email</th><th>📬 Delivery Email</th><th>Role</th><th>Linked Physician</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+
+    '<div class="note ni" style="font-size:11px;margin-bottom:10px">📬 <strong>Delivery Email</strong> is where notifications actually go. Leave blank to use the login email. First/last name and physician link can be edited inline — changes save on blur. Login email is managed by the auth provider and can only change at the auth layer.</div>'+
+    '<div style="overflow-x:auto"><table><thead><tr><th>First</th><th>Last</th><th>Login Email</th><th>📬 Delivery Email</th><th>Role</th><th>Linked Physician</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+
   USERS.map(u=>{
-    const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
     const deliveryAddr = u.notifyEmail || '';
     const addrDisplay = deliveryAddr
       ? `<span style="font-family:monospace;font-size:11px;color:var(--green-t)">${escHtml(deliveryAddr)}</span>`
       : `<span style="font-size:11px;color:var(--txt3);font-style:italic">→ login email</span>`;
     const placeholderWarn = _looksPlaceholder(u.notifyEmail||u.email||'')
       ? ` <span title="This address looks like a placeholder and will be skipped" style="color:var(--amber-t)">⚠</span>` : '';
-    return`<tr><td>${escHtml(u.first||'')} ${escHtml(u.last||'')}</td><td style="font-size:11px">${escHtml(u.email||'')}</td>
-    <td>${addrDisplay}${placeholderWarn} <button class="bxs" title="Edit delivery email" onclick="openDeliveryEmailEditor('${u.id}')">✎</button></td>
+    const uidLit = escHtml(JSON.stringify(u.id));
+    return`<tr>
+    <td><input class="um-edit" id="um-first-${escHtml(u.id)}" value="${escHtml(u.first||'')}" style="font-size:11px;width:90px" onblur="saveUserField(${uidLit},'first',this.value)"></td>
+    <td><input class="um-edit" id="um-last-${escHtml(u.id)}" value="${escHtml(u.last||'')}" style="font-size:11px;width:110px" onblur="saveUserField(${uidLit},'last',this.value)"></td>
+    <td style="font-size:11px;color:var(--txt3)" title="Managed by auth provider — not editable here">${escHtml(u.email||'')}</td>
+    <td>${addrDisplay}${placeholderWarn} <button class="bxs" title="Edit delivery email" onclick="openDeliveryEmailEditor(${uidLit})">✎</button></td>
     <td><span class="tag ${u.role==='admin'?'tnv':''}">${u.role}</span></td>
-    <td>${p?p.last+', '+p.first:'<span style="color:var(--txt3)">—</span>'}</td>
+    <td><select class="um-edit" id="um-phys-${escHtml(u.id)}" style="font-size:11px;max-width:180px" onchange="saveUserField(${uidLit},'physId',this.value)">${physOptsFor(u.physId)}</select></td>
     <td style="font-size:11px;color:var(--txt3)">${u.joined||''}</td>
     <td style="display:flex;gap:4px">
-      <button class="bxs" onclick="openLinkModal('${u.id}')">Link</button>
-      <button class="bxs" onclick="toggleRole('${u.id}')">${u.role==='admin'?'↓User':'↑Admin'}</button>
-      ${u.id!==CU?.id?`<button class="br bxs" onclick="delUser('${u.id}')">Del</button>`:''}
+      <button class="bxs" onclick="openLinkModal(${uidLit})" title="Richer link UI (also sets physician)">Link</button>
+      <button class="bxs" onclick="toggleRole(${uidLit})">${u.role==='admin'?'↓User':'↑Admin'}</button>
+      ${u.id!==CU?.id?`<button class="br bxs" onclick="delUser(${uidLit})">Del</button>`:''}
     </td></tr>`;}).join('')+'</tbody></table></div></div>';
+}
+
+// Inline user-field save. Supports first name, last name, and physician link.
+// Login email is NOT editable here because changing it requires an auth-provider
+// round trip (email verification, session invalidation, etc.) — that's what the
+// "Link" button's richer modal is for if it needs to change downstream.
+function saveUserField(uid, field, val){
+  if(!_adminOnly('edit user')) return;
+  const u = USERS.find(x=>x.id===uid); if(!u) return;
+  val = (val==null ? '' : String(val)).trim();
+  if(field === 'first' || field === 'last'){
+    // Sanitize: strip HTML metacharacters, trim, preserve case & apostrophes
+    val = val.replace(/[<>&"|]/g,'');
+    if(!val){
+      // Empty name would make the user unrecognizable in dropdowns — revert.
+      const el = document.getElementById(`um-${field}-${uid}`);
+      if(el) el.value = u[field] || '';
+      alert('Name cannot be empty.');
+      return;
+    }
+    u[field] = val;
+  } else if(field === 'physId'){
+    const newId = val ? +val : null;
+    if(newId && !S.physicians.some(p => p.id === newId)){
+      alert('Physician not found.'); return;
+    }
+    u.physId = newId;
+  } else {
+    return;
+  }
+  // Self-edit: keep CU in sync so the running session sees the change.
+  if(CU?.id === uid) Object.assign(CU, u);
+  triggerSave();
+  // Best-effort propagate to auth metadata so other clients see it too.
+  try{ _updateUserAuthMeta?.(uid, {first: u.first, last: u.last, physId: u.physId}); }catch(_){}
+  // Re-render quietly — don't blow away focus if the user is tab-keying through fields.
+  // We only re-render when the physician link changes because it affects other rows' dropdowns.
+  if(field === 'physId') renderUserMgmt();
 }
 
 // Admin helper: edit another user's delivery email (the address where their notifications go)
@@ -4617,6 +4665,8 @@ function addVac(){
     }
   }
   renderVacations();
+  triggerSave();
+  _afterMutation();
 }
 
 
@@ -5268,6 +5318,7 @@ function _trafficForShift(shiftEntry, qtrSel){
 
 /* ─── SHIFT TIME SETTINGS ─── */
 function saveShiftTimes(){
+  if(!_adminOnly('change shift times')) return;
   if(!S.cfg) S.cfg={};
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
   // Only DR 1st and IR 1st are eligible for drive-time calculations.
@@ -5317,6 +5368,7 @@ function _getGMapsKey(){ return localStorage.getItem(_GMAPS_KEY_LS)||''; }
 function _setGMapsKey(k){ if(k) localStorage.setItem(_GMAPS_KEY_LS,k); else localStorage.removeItem(_GMAPS_KEY_LS); }
 
 function saveGMapsKey(){
+  if(!_adminOnly('change Google Maps key')) return;
   const k=document.getElementById('gmaps-key')?.value.trim()||'';
   _setGMapsKey(k);
   S.cfg.mapsKey=k; // also persist in shared DB so scheduled refresh can use it
@@ -5371,6 +5423,7 @@ async function _mapsProxyCall(origins, destinations, departureTime, trafficModel
 }
 
 async function calcAllDriveTimes(){
+  if(!_adminOnly('run drive-time calculations')) return;
   const statusEl=document.getElementById('gmaps-calc-status');
   const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
   const physWithAddr=S.physicians.filter(p=>p.address?.trim());
@@ -5413,6 +5466,7 @@ async function calcAllDriveTimes(){
 }
 
 async function updateTrafficTimes(){
+  if(!_adminOnly('refresh traffic times')) return;
   const statusEl=document.getElementById('gmaps-calc-status');
   const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
   const physWithAddr=S.physicians.filter(p=>p.address?.trim());
@@ -6503,6 +6557,7 @@ function saveVacSetup(){
   if(msg){msg.textContent='\u2713 Saved';setTimeout(()=>{msg.textContent='';},2500);}
 }
 function addVacSection(){
+  if(!_adminOnly('change vacation sections')) return;
   const sec=document.getElementById('vacp-new-sec')?.value.trim();
   const lim=+document.getElementById('vacp-new-sec-lim')?.value||1;
   if(!sec) return;
@@ -6511,15 +6566,18 @@ function addVacSection(){
   triggerSave(); renderVacSetup();
 }
 function removeVacSection(sec){
+  if(!_adminOnly('change vacation sections')) return;
   delete S.vacPicking.sectionLimits?.[sec];
   triggerSave(); renderVacSetup();
 }
 function setPhysVacSection(physId,sec){
+  if(!_adminOnly('change physician vacation section')) return;
   if(!S.vacPicking.physSection) S.vacPicking.physSection={};
   S.vacPicking.physSection[physId]=sec||'';
   triggerSave();
 }
 function setPhysVacRounds(physId,val){
+  if(!_adminOnly('change physician vacation rounds')) return;
   if(!S.vacPicking.physRounds) S.vacPicking.physRounds={};
   S.vacPicking.physRounds[physId]=val!==''?+val:null;
   triggerSave();
@@ -6561,15 +6619,18 @@ function renderVacSeniority(){
   document.getElementById('vacp-content').innerHTML=html;
 }
 function addVacSen(physId){
+  if(!_adminOnly('change vacation seniority')) return;
   if(!S.vacPicking.seniority) S.vacPicking.seniority=[];
   if(!S.vacPicking.seniority.includes(physId)) S.vacPicking.seniority.push(physId);
   triggerSave(); renderVacSeniority();
 }
 function removeVacSen(physId){
+  if(!_adminOnly('change vacation seniority')) return;
   S.vacPicking.seniority=(S.vacPicking.seniority||[]).filter(id=>id!==physId);
   triggerSave(); renderVacSeniority();
 }
 function moveVacSen(idx,dir){
+  if(!_adminOnly('reorder vacation seniority')) return;
   const arr=S.vacPicking.seniority;
   const ni=idx+dir;
   if(ni<0||ni>=arr.length) return;
@@ -8763,6 +8824,7 @@ function deleteNatLangRule(id){
   renderNatLangRules();
 }
 function saveCfg(){
+  if(!_adminOnly('change scheduler config')) return;
   S.cfg.wdMax=+document.getElementById('cfg-wd')?.value||20;
   S.cfg.wkMax=+document.getElementById('cfg-wk')?.value||4;
   S.cfg.irDailyMax=+document.getElementById('cfg-ir-daily')?.value||20;
@@ -8901,7 +8963,6 @@ function renderSitesList(){
     let editor='';
     if(expanded){
       // Full inline editor: name, address, IR group, specialties, anchors, fill-ins
-      const nameLit = JSON.stringify(s.name);
       const allDRSubs = S.drSubs || [];
       const allIRSubs = S.irSubs || [];
       const drSet = new Set(Array.isArray(s.drSubs) ? s.drSubs : []);
@@ -8909,12 +8970,23 @@ function renderSitesList(){
       const drSubUseAll = !Array.isArray(s.drSubs) || s.drSubs.length===0;
       const irSubUseAll = !Array.isArray(s.irSubs) || s.irSubs.length===0;
 
-      const groupOpts = [
-        ['', 'DR / General'],
-        ['North', 'IR North'],
-        ['South', 'IR South'],
-        ['Both', 'IR Both']
-      ].map(([v,lbl]) => `<option value="${v}"${(s.irGroup||'')===v?' selected':''}>${lbl}</option>`).join('');
+      // IR group options derive from S.irGroups (via getIRGroups) so custom
+      // groups added via the IR Slots & Groups page appear here too. Previously
+      // this was hardcoded to ['North','South','Both'], which broke editing
+      // any site assigned to a custom group — the dropdown would silently
+      // drop the selection on first change. The 'Both' option is a legacy
+      // shared-site flag (site serves multiple IR groups) and is preserved.
+      const groupOptsRaw = [['', 'DR / General']]
+        .concat(getIRGroups().map(g => [g, 'IR ' + g]))
+        .concat([['Both', 'IR Both']]);
+      // Ensure the current selection is always present, even if the group
+      // has since been removed from S.irGroups — prevents silent orphaning.
+      const cur = s.irGroup || '';
+      if(cur && !groupOptsRaw.some(([v]) => v === cur)){
+        groupOptsRaw.push([cur, 'IR ' + cur + ' (removed)']);
+      }
+      const groupOpts = groupOptsRaw.map(([v,lbl]) =>
+        `<option value="${escHtml(v)}"${cur===v?' selected':''}>${escHtml(lbl)}</option>`).join('');
 
       const drSubsChk = allDRSubs.length
         ? allDRSubs.map(sub => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:var(--bg2);border-radius:4px">
@@ -9246,9 +9318,47 @@ function editSiteFillins(i){
   }).filter(Boolean);
   triggerSave();renderSitesList();
 }
-function renderWkndNeeds(){const el=document.getElementById('wknd-needs');if(!el)return;el.innerHTML=(S.drSubs||[]).map(s=>`<div class="row"><span style="font-size:12px;min-width:140px">${s}</span><input type="number" min="0" max="10" value="${S.wkndNeeds?.[s]||0}" style="width:55px" onchange="if(!S.wkndNeeds)S.wkndNeeds={};S.wkndNeeds['${s}']=parseInt(this.value)||0;triggerSave()"></div>`).join('');}
-function addDRSub(){const v=document.getElementById('new-drs')?.value.trim();if(!v||(S.drSubs||[]).includes(v))return;S.drSubs.push(v);document.getElementById('new-drs').value='';renderDRSList();}
-function addIRSub(){const v=document.getElementById('new-irs')?.value.trim();if(!v||(S.irSubs||[]).includes(v))return;S.irSubs.push(v);document.getElementById('new-irs').value='';renderIRSList();}
+function renderWkndNeeds(){
+  const el=document.getElementById('wknd-needs');
+  if(!el)return;
+  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  el.innerHTML=(S.drSubs||[]).map(s=>{
+    // Safe JS string literal for the onchange so subspecialty names with quotes/
+    // apostrophes don't break the attribute. _setWkndNeed does the admin check.
+    const jsLit = escHtml(JSON.stringify(String(s)));
+    return `<div class="row">
+      <span style="font-size:12px;min-width:140px">${escHtml(s)}</span>
+      <input type="number" min="0" max="10" value="${S.wkndNeeds?.[s]||0}" style="width:55px"
+        onchange="_setWkndNeed(${jsLit}, this.value)">
+    </div>`;
+  }).join('');
+}
+function _setWkndNeed(sub, val){
+  if(!_adminOnly('change weekend needs')) return;
+  if(!S.wkndNeeds) S.wkndNeeds = {};
+  S.wkndNeeds[sub] = parseInt(val) || 0;
+  triggerSave();
+}
+function addDRSub(){
+  if(!_adminOnly('add DR subspecialty')) return;
+  const v=document.getElementById('new-drs')?.value.trim();
+  if(!v||(S.drSubs||[]).includes(v))return;
+  S.drSubs.push(v);
+  document.getElementById('new-drs').value='';
+  triggerSave();
+  renderDRSList();
+  _afterMutation();
+}
+function addIRSub(){
+  if(!_adminOnly('add IR subspecialty')) return;
+  const v=document.getElementById('new-irs')?.value.trim();
+  if(!v||(S.irSubs||[]).includes(v))return;
+  S.irSubs.push(v);
+  document.getElementById('new-irs').value='';
+  triggerSave();
+  renderIRSList();
+  _afterMutation();
+}
 function addSite(){
   if(!_adminOnly('add sites')) return;
   // Sanitize site name: strip HTML metacharacters but keep apostrophes & letters/numbers/hyphens/spaces
@@ -9504,6 +9614,7 @@ function renderSlotGrid(ym,week){
 
 // Writer for the total slot count. Called by the top-row number input onchange.
 function _ssSetTotalSlot(siteName, week, sh, val){
+  if(!_adminOnly('change site slot')) return;
   if(!S.siteSlots) S.siteSlots = {};
   S.siteSlots[`${siteName}|${week}|${sh}`] = parseInt(val) || 0;
   triggerSave();
@@ -9511,6 +9622,7 @@ function _ssSetTotalSlot(siteName, week, sh, val){
 }
 
 function _ssSetSubSlot(siteName, week, sh, sub, val){
+  if(!_adminOnly('change site sub-slot')) return;
   if(!S.siteSlotsSubs) S.siteSlotsSubs = {};
   const key = `${siteName}|${week}|${sh}`;
   if(!S.siteSlotsSubs[key]) S.siteSlotsSubs[key] = {};
@@ -9789,6 +9901,11 @@ function renderIRShiftSlots(){ renderIRSlots(); }
 function _renderIRGroupsList(){
   const el = document.getElementById('ir-groups-list'); if(!el) return;
   const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // HTML-escape the JSON string so its double-quotes don't collide with the
+  // outer onclick="..." attribute quotes (the old `JSON.stringify(g)` alone
+  // produced `onclick="removeIRGroup("North")"`, which silently broke the
+  // button).
+  const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
   const groups = getIRGroups();
   el.innerHTML = groups.map(g => {
     const inUse = (S.sites||[]).filter(s => s.irGroup === g).length;
@@ -9797,10 +9914,9 @@ function _renderIRGroupsList(){
       ? '<span style="color:var(--txt3);font-size:11px"> — no sites yet</span>'
       : `<span style="color:var(--txt3);font-size:11px"> — ${inUse} site${inUse===1?'':'s'}</span>`;
     const defaultBadge = isDefault ? ' <span class="tag tb" style="font-size:9px">default</span>' : '';
-    const jsG = JSON.stringify(g);
     return `<div class="row" style="padding:4px 0;gap:8px">
       <span style="flex:1;font-size:12px;font-weight:600">${escHtml(g)}${defaultBadge}${siteSummary}</span>
-      <button class="br bxs" onclick="removeIRGroup(${jsG})" title="Remove group">X</button>
+      <button class="br bxs" onclick="removeIRGroup(${jsLit(g)})" title="Remove group">X</button>
     </div>`;
   }).join('') || '<em style="color:var(--txt3);font-size:11px">No groups configured yet.</em>';
 }
@@ -9853,6 +9969,7 @@ function _renderIRCallSlots(){
 }
 
 function _setIRCallSlot(siteName, dow, val){
+  if(!_adminOnly('change IR slot')) return;
   if(!S.irSlots) S.irSlots = {};
   S.irSlots[`${siteName}|${dow}`] = parseInt(val) || 0;
   triggerSave();
@@ -9904,6 +10021,7 @@ function _renderIRShiftSlotsGrid(){
 }
 
 function _setIRShiftSlot(siteName, dow, val){
+  if(!_adminOnly('change IR shift slot')) return;
   if(!S.irShiftSlots) S.irShiftSlots = {};
   S.irShiftSlots[`${siteName}|${dow}|1st`] = parseInt(val) || 0;
   triggerSave();
@@ -13129,6 +13247,7 @@ function addDRShift(){
 }
 // Fill unscheduled DR physicians with auto-home shifts for selected date (bypasses home max)
 function fillDRHomeShifts(){
+  if(!_adminOnly('bulk add home shifts')) return;
   const date=document.getElementById('sb-date').value;
   if(!date){alert('Select a date in the DR builder first.');return;}
   const vm=vacMap();const vacOnDate=new Set(vm[date]||[]);
@@ -13155,6 +13274,7 @@ function fillDRHomeShifts(){
       added++;
     }
   });
+  if(added > 0){ triggerSave(); _afterMutation(); }
   alert(`Added ${added} auto-home shift(s).`);renderDRBuilder();
 }
 
@@ -13276,7 +13396,9 @@ function addWkCall(){
   if(wkCnt(pid,satDate.slice(0,7))>=maxDR(p,'wk')&&!confirm('At weekend cap. Add anyway?'))return;
   if(_hasAdjacentWeekend(pid,satDate)){alert('Back-to-back weekend call not allowed: '+p.last+' already covers an adjacent weekend.');return;}
   S.weekendCalls.push({id:S.nextId++,physId:pid,satDate,sunDate,sub,site,ctype:document.getElementById('wk-ctype').value,notes:document.getElementById('wk-notes').value});
+  triggerSave();
   renderWkBuilder();
+  _afterMutation();
 }
 
 /* ─── AUTO-ASSIGN DR (anchor-aware) ─── */
@@ -14038,7 +14160,10 @@ function addIRCallFromGrid(sel,date,callType,group){
     alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');sel.value='';return;}
   // Daily call covers the entire group — no single hospital site
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site:'',notes:''});
-  sel.value='';renderIRWeekBuilder();
+  sel.value='';
+  triggerSave();
+  renderIRWeekBuilder();
+  _afterMutation();
 }
 
 function addIRWeekend(group,fridayDate){
@@ -14054,7 +14179,9 @@ function addIRWeekend(group,fridayDate){
   if(_wkSpan.some(d=>_has2ndOr3rdShift(physId,d))){
     alert(pname(physId)+' has a 2nd/3rd shift during this weekend span and cannot take IR weekend call.');return;}
   S.irCalls.push({id:S.nextId++,physId,date:fridayDate,callType:'weekend',irGroup:group,site,notes:''});
+  triggerSave();
   renderIRWeekBuilder();
+  _afterMutation();
 }
 
 function addIRCallManual(){
@@ -14073,6 +14200,11 @@ function addIRCallManual(){
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
   const callSite=callType==='daily'?'':site;
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site:callSite,notes:document.getElementById('ird-notes').value});
+  triggerSave();
+  _afterMutation();
+  // Re-render any IR call surfaces so the addition appears immediately
+  if(typeof renderIRList === 'function') try{ renderIRList(); }catch(_){}
+  if(typeof renderIRWeekBuilder === 'function') try{ renderIRWeekBuilder(); }catch(_){}
   alert('Added. Refresh the list tab to see all entries.');
 }
 
@@ -16808,6 +16940,7 @@ function deleteOpenShift(id){
 }
 
 function clearClaimedShifts(){
+  if(!_adminOnly('clear claimed shifts')) return;
   if(!confirm('Remove all claimed shifts from the board?'))return;
   S.openShifts=S.openShifts.filter(o=>!o.claimedBy);
   triggerSave();renderManageShifts();renderOpenShifts();
