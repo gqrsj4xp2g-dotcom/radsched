@@ -3064,10 +3064,22 @@ function _applyRemoteData(d){
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
   if(d.siteSlots)Object.assign(S.siteSlots,d.siteSlots);
-  // Per-specialty slot breakdown. Lazily init S.siteSlotsSubs since older data
-  // snapshots won't have this field — keeps backwards compatibility.
+  // Prune legacy hospital-site Home keys. Older practice snapshots populated
+  // "CHN|1|Home" etc., which are no longer configurable from the UI and
+  // would be dead data. Only keep Home keys under "At Home / Remote".
+  Object.keys(S.siteSlots).forEach(k => {
+    if(k.includes('|Home') && !k.startsWith('At Home / Remote|')){
+      delete S.siteSlots[k];
+    }
+  });
+  // Same cleanup for per-sub breakdown keys
   if(!S.siteSlotsSubs) S.siteSlotsSubs = {};
   if(d.siteSlotsSubs) Object.assign(S.siteSlotsSubs, d.siteSlotsSubs);
+  Object.keys(S.siteSlotsSubs).forEach(k => {
+    if(k.includes('|Home') && !k.startsWith('At Home / Remote|')){
+      delete S.siteSlotsSubs[k];
+    }
+  });
   if(d.irSlots)Object.assign(S.irSlots,d.irSlots);
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
@@ -9026,7 +9038,19 @@ function addSite(){
   document.getElementById('new-site').value='';
   const addrEl = document.getElementById('new-site-address'); if(addrEl) addrEl.value='';
   triggerSave();renderSitesList();
-  S.sites.forEach(st=>{['1st','2nd','3rd','Home'].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
+  // Seed default slot keys. Hospital sites only get 1st/2nd/3rd entries;
+  // only the "At Home / Remote" pseudo-site gets a Home key. (2nd/3rd are
+  // kept for legacy/back-compat even though auto-assign currently only
+  // reads 1st; removing them would orphan existing configuration.)
+  S.sites.forEach(st=>{
+    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd'];
+    shifts.forEach(sh=>{
+      for(let w=1; w<=5; w++){
+        const k = `${st.name}|${w}|${sh}`;
+        if(S.siteSlots[k]===undefined) S.siteSlots[k] = 0;
+      }
+    });
+  });
 }
 
 /* ─── SITE SLOTS ─── */
@@ -9146,7 +9170,15 @@ function addSiteFromSlots(){
   const ne=document.getElementById('new-site-ssl'); if(ne) ne.value='';
   const ae=document.getElementById('new-site-address-ssl'); if(ae) ae.value='';
   triggerSave();
-  S.sites.forEach(st=>{['1st','2nd','3rd','Home'].forEach(sh=>{for(let w=1;w<=5;w++){const k=`${st.name}|${w}|${sh}`;if(S.siteSlots[k]===undefined)S.siteSlots[k]=0;}});});
+  S.sites.forEach(st=>{
+    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd'];
+    shifts.forEach(sh=>{
+      for(let w=1; w<=5; w++){
+        const k = `${st.name}|${w}|${sh}`;
+        if(S.siteSlots[k]===undefined) S.siteSlots[k] = 0;
+      }
+    });
+  });
   renderSitesList();
   renderSiteSlots();
 }
@@ -9172,7 +9204,13 @@ function renderSlotGrid(ym,week){
   const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
   let html='<div class="g2">';
   (S.sites||[]).forEach(st=>{
-    const shifts=st.name==='At Home / Remote'?['Home']:['1st','Home'];
+    // Hospital sites show only 1st Shift slots. "Home" is not a hospital
+    // assignment — it's a physician-is-not-on-site designation, so it only
+    // makes sense at the "At Home / Remote" pseudo-site. Previously all
+    // hospital cards also showed a Home row, which encouraged confusion:
+    // admins would configure "CHN Home=3" thinking it meant something, but
+    // auto-assign only reads Home slots from the At Home / Remote entry.
+    const shifts=st.name==='At Home / Remote'?['Home']:['1st'];
     html+=`<div class="card"><div class="card-title">${escHtml(st.name)}</div>`;
 
     shifts.forEach(sh=>{
@@ -10757,7 +10795,8 @@ function _aiExecuteTool(name, input) {
     if(address) site.address = address;
     S.sites.push(site);
     // Seed default slot map for the new site (mirrors addSite())
-    ['1st','2nd','3rd','Home'].forEach(sh=>{
+    const _slotShifts = siteName==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd'];
+    _slotShifts.forEach(sh=>{
       for(let w=1;w<=5;w++){
         const k=`${siteName}|${w}|${sh}`;
         if(S.siteSlots[k]===undefined) S.siteSlots[k]=0;
@@ -12391,7 +12430,14 @@ function saveEditDRShift(id){
   const newShift = shiftEl?.value || s.shift;
   const newDate  = dateEl.value;
   const newPid   = +physEl?.value || s.physId;
-  const newSite  = siteEl?.value || s.site;
+  let   newSite  = siteEl?.value || s.site;
+  // Same Home-coercion rule as addDRShift — Home shifts live exclusively at
+  // the At Home / Remote site; any other choice for a Home shift is invalid.
+  if(newShift==='Home' && newSite!=='At Home / Remote'){
+    if(S.sites.find(st=>st.name==='At Home / Remote')){
+      newSite = 'At Home / Remote';
+    }
+  }
   if(newShift!=='Home' && isHolidayBlackout(newDate)){
     const reason = _holidayReasonFor(newDate);
     if(!confirm(`${newDate} is part of "${reason?.name||'defined holiday'}". Regular shifts on defined holidays are normally blocked. Save anyway?`)) return;
@@ -12503,7 +12549,20 @@ function addDRShift(){
   const pid=+document.getElementById('sb-phys').value;
   const date=document.getElementById('sb-date').value;
   const shift=document.getElementById('sb-shift').value;
-  const site=document.getElementById('sb-site').value;
+  let site=document.getElementById('sb-site').value;
+  // "Home" is never a hospital assignment — it means the physician is NOT
+  // at a clinical site. Silently redirect to the At Home / Remote pseudo-
+  // site, which is the single source of truth for home shifts. Prevents
+  // confusing shift records like "Home @ CHN" that auto-assign can't reason
+  // about. If the pseudo-site was somehow deleted, alert rather than create
+  // a bad record.
+  if(shift==='Home' && site!=='At Home / Remote'){
+    if(!S.sites.find(s=>s.name==='At Home / Remote')){
+      alert('The "At Home / Remote" site is missing. Re-add it under Site Management before assigning Home shifts.');
+      return;
+    }
+    site = 'At Home / Remote';
+  }
   if(!date){alert('Select date');return;}
   // Block regular shift assignment on defined holidays — those days are reserved
   // for Holiday Call coverage, not day shifts. Home shifts on holidays are
