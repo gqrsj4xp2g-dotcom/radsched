@@ -2398,6 +2398,17 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
   </div>
 </div>
 
+<!-- IR GROUP REMOVAL MODAL — shown when the group has references that need
+     a decision (reassign vs strip). If nothing references the group we skip
+     the modal and delete after a plain confirm(). -->
+<div class="modal-wrap" id="ir-group-remove-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('ir-group-remove-modal')">✕</button>
+    <div class="modal-title" id="ir-group-remove-title">Remove IR Group</div>
+    <div id="ir-group-remove-body"></div>
+  </div>
+</div>
+
 <!-- AI SCHEDULER AGENT -->
 <div id="page-ai-agent" class="page admin-only">
   <div class="pg-title">🤖 AI Scheduling Assistant</div>
@@ -2642,6 +2653,7 @@ function clearAllData(){
     holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
     siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,nextId:S.nextId,
+    irGroups:S.irGroups,
   };
   const usersBackup=[...USERS];
   // Reset to minimal seed — fresh practice. No demo physicians, no demo
@@ -2654,6 +2666,7 @@ function clearAllData(){
   S.holidayBlackouts=[];S.holidayNeeds=[];
   S.siteSlots={};S.siteSlotsSubs={};S.irSlots={};S.irShiftSlots={};S.wkndNeeds={};
   S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
+  S.irGroups=['North','South'];
   S.nextId=100;
   USERS.length=0;
   USERS.push(
@@ -3090,7 +3103,23 @@ function _applyRemoteData(d){
       delete S.siteSlotsSubs[k];
     }
   });
-  if(Array.isArray(d.irGroups)) S.irGroups = d.irGroups.slice();
+  if(Array.isArray(d.irGroups)){
+    S.irGroups = d.irGroups.slice();
+  } else {
+    // Legacy snapshot predates S.irGroups. One-time migration:
+    // seed ['North','South'] plus any custom group referenced by sites so
+    // nothing that was previously addressable becomes orphaned. Never runs
+    // again because subsequent saves will include d.irGroups explicitly.
+    const discovered = Array.from(new Set(
+      (S.sites||[]).map(s => s.irGroup).filter(g => g && g !== 'Both')
+    ));
+    const seeded = [];
+    const seen = new Set();
+    ['North','South', ...discovered].forEach(g => {
+      if(g && !seen.has(g)){ seen.add(g); seeded.push(g); }
+    });
+    S.irGroups = seeded;
+  }
   if(d.irSlots)Object.assign(S.irSlots,d.irSlots);
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
@@ -7965,6 +7994,145 @@ function renderHolCounter(){
   document.getElementById('hol-counter').innerHTML = html;
 }
 
+/* ─── HOLIDAY SCHEDULE VIEW ───────────────────────────────────────────────
+   Referenced by the Holidays page "Schedule" tab and by the year selector
+   (#holsched-yr). Renders a chronological read-only view of all holiday
+   assignments for the selected year, grouped by holiday name/date with
+   per-pool (DR + one column per IR group) chips. Kept intentionally simple
+   — it's a viewing surface, not a management one (edits happen on the
+   Assignments tab).
+*/
+function renderHolSchedule(){
+  const yrEl = document.getElementById('holsched-yr');
+  const wrap = document.getElementById('hol-schedule-content');
+  if(!wrap) return;
+  // Populate year dropdown from the data present.
+  if(yrEl){
+    const curSel = yrEl.value;
+    const defYears = (S.holidayDefs||[]).map(d=>d.year).filter(Boolean);
+    const holYears = (S.holidays||[]).map(h=>h.year).filter(Boolean);
+    const curYr = new Date().getFullYear();
+    const allYrs = [...new Set([...defYears, ...holYears, curYr-1, curYr, curYr+1, curYr+2])]
+      .filter(Boolean).sort((a,b)=>b-a);
+    const expectedHTML = allYrs.map(y=>`<option value="${y}">${y}</option>`).join('');
+    if(yrEl.innerHTML.replace(/\s/g,'') !== expectedHTML.replace(/\s/g,'')){
+      yrEl.innerHTML = expectedHTML;
+      if(curSel && [...yrEl.options].some(o=>o.value===curSel)) yrEl.value = curSel;
+      else yrEl.value = String(curYr);
+    }
+  }
+  const yr = +(yrEl?.value) || new Date().getFullYear();
+  const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  // Join holiday assignments to definitions by (name, year) so we can list
+  // even holidays that have zero assignments (helps spot coverage gaps).
+  const defs = (S.holidayDefs||[]).filter(d => d.year === yr);
+  const assignsByKey = {}; // key: `${name}|${date}|${group}`
+  (S.holidays||[]).filter(h => h.year === yr).forEach(h => {
+    const k = `${h.name}|${h.date}|${h.group}`;
+    (assignsByKey[k] = assignsByKey[k] || []).push(h);
+  });
+
+  if(!defs.length && Object.keys(assignsByKey).length === 0){
+    wrap.innerHTML = '<div class="note ni">No holidays defined or assigned for '+yr+'.</div>';
+    return;
+  }
+
+  // Flatten to one row per (def, date) — holidays with multi-day dates (e.g.
+  // Christmas Eve + Day) become separate rows so the schedule reads as a
+  // chronological list.
+  const rows = [];
+  defs.forEach(def => {
+    (def.dates||[]).forEach(dt => rows.push({def, date: dt}));
+  });
+  rows.sort((a,b) => a.date.localeCompare(b.date) || a.def.name.localeCompare(b.def.name));
+
+  const physName = (id) => {
+    const p = (S.physicians||[]).find(x=>x.id===id);
+    return p ? `${p.last}, ${p.first}` : `#${id}`;
+  };
+  const pools = ['DR', ...getIRGroups().map(g => 'IR-'+g)];
+  const poolLabel = (g) => g==='DR' ? 'DR' : 'IR '+g.slice(3);
+
+  let html = '<div style="overflow-x:auto"><table><thead><tr>'+
+    '<th>Date</th><th>Holiday</th>' +
+    pools.map(p=>`<th>${escHtml(poolLabel(p))}</th>`).join('') +
+    '</tr></thead><tbody>';
+
+  rows.forEach(({def, date}) => {
+    html += `<tr><td style="white-space:nowrap">${escHtml(date)}</td>`+
+            `<td>${escHtml(def.name)}</td>`;
+    pools.forEach(pool => {
+      const list = (assignsByKey[`${def.name}|${date}|${pool}`] || [])
+        .map(h => escHtml(physName(h.physId)));
+      html += `<td>${list.length ? list.map(n=>`<span class="tag tb" style="font-size:10px;margin:1px">${n}</span>`).join('') : '<span style="color:var(--txt3)">—</span>'}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  // Also surface any assignments whose (name,date) isn't in a current def —
+  // typically orphans from a deleted def. Displayed below the main table.
+  const defKeys = new Set();
+  defs.forEach(d => (d.dates||[]).forEach(dt => defKeys.add(`${d.name}|${dt}`)));
+  const orphanKeys = Object.keys(assignsByKey).filter(k => {
+    const [n, dt] = k.split('|'); return !defKeys.has(`${n}|${dt}`);
+  });
+  html += '</tbody></table></div>';
+  if(orphanKeys.length){
+    html += '<div class="note nw" style="margin-top:10px;font-size:11px"><strong>Orphan assignments</strong> — these reference a holiday definition that no longer exists:';
+    html += '<ul style="margin:6px 0 0 18px">';
+    orphanKeys.sort().forEach(k => {
+      const [n, dt, g] = k.split('|');
+      const who = assignsByKey[k].map(h => escHtml(physName(h.physId))).join(', ');
+      html += `<li>${escHtml(dt)} — ${escHtml(n)} [${escHtml(poolLabel(g))}]: ${who}</li>`;
+    });
+    html += '</ul></div>';
+  }
+  wrap.innerHTML = html;
+}
+
+/* ─── EXCEL IMPORT — UNIMPLEMENTED STUBS ──────────────────────────────────
+   The Import page UI (page-import) has two fully-wired pathways. The
+   "Vacation Pick Sheet" pathway works: previewPickImport() + applyPickImport()
+   are implemented. The "Standard Format" shifts/vacations pathway was drafted
+   in UI but never implemented in code, so the handlers below were firing
+   ReferenceErrors when users hit them. These stubs surface a clear message
+   rather than crashing silently. If/when the real import logic lands,
+   replace these shims.
+*/
+function _importNotImplemented(label){
+  try{
+    if(typeof logImport === 'function') logImport(`${label}: not yet implemented.`, 'error');
+  }catch(_){}
+  alert(`${label} is not yet implemented in this build.\n\nFor vacation imports, use the "Vacation Pick Sheet" tab instead, which is fully functional.`);
+}
+function previewShiftsImport(inputEl){
+  _importNotImplemented('Standard-format Shifts import');
+  if(inputEl) inputEl.value = '';
+}
+function applyShiftsImport(){ _importNotImplemented('Standard-format Shifts import'); }
+function previewVacImport(inputEl){
+  _importNotImplemented('Standard-format Vacations import');
+  if(inputEl) inputEl.value = '';
+}
+function applyVacImport(){ _importNotImplemented('Standard-format Vacations import'); }
+function downloadTemplate(kind){
+  // Minimal CSV templates so the template buttons do something useful even
+  // while the matching import pipeline is unwired.
+  const headers = kind === 'shifts'
+    ? 'Date,Physician,Shift,Site,Subspecialty,Notes'
+    : 'Physician,Start,End,Type,Notes';
+  const fname = kind === 'shifts' ? 'shifts_template.csv' : 'vacations_template.csv';
+  try{
+    const blob = new Blob([headers + '\n'], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){ alert('Template download failed: '+e.message); }
+}
+
 /* ─── HOLIDAY MANUAL REASSIGNMENT ─── */
 
 function reassignHoliday(id){
@@ -9369,30 +9537,16 @@ function _ssClearSubSlots(siteName, week, sh){
 // ═══════════════════════════════════════════════════════════════════════════
 // IR GROUPS — user-configurable set of IR practice subdivisions.
 // ═══════════════════════════════════════════════════════════════════════════
-// Historically hardcoded as ['North', 'South']. Most of the codebase still
-// references those literals directly (81+ sites as of this change); rather
-// than refactor all of them at once, we lazily derive the list from three
-// sources and allow the admin to add new groups via S.irGroups:
-//   1. Explicit S.irGroups[] if defined by admin additions
-//   2. Groups actually in use on S.sites[].irGroup  (discovered)
-//   3. Fallback 'North' + 'South'
-//
-// The UI on the IR Slots & Groups page iterates this combined list. New
-// groups the admin adds will immediately show up in slot config. When the
-// admin later configures a site's irGroup to the new name (via Site Management)
-// the physicians whose primary site is there inherit the group via existing
-// downstream code.
+// S.irGroups is the SOLE source of truth. Seeded to ['North','South'] in the
+// initial state and in the reset path (clearAllData); any admin modification
+// (addIRGroup / removeIRGroup) mutates S.irGroups directly. We deliberately
+// do NOT re-derive defaults at read time and do NOT auto-discover groups
+// from S.sites[].irGroup here — doing either would resurrect deleted groups
+// as soon as a stale site reference is encountered. Legacy snapshots that
+// predate S.irGroups get a one-time migration at load time in
+// _applyRemoteData (defaults + any values actually referenced by sites).
 function getIRGroups(){
-  const fromState = Array.isArray(S.irGroups) ? S.irGroups.slice() : [];
-  const fromSites = Array.from(new Set(
-    (S.sites||[]).map(s => s.irGroup).filter(g => g && g !== 'Both')
-  ));
-  const seen = new Set();
-  const merged = [];
-  ['North','South', ...fromState, ...fromSites].forEach(g => {
-    if(g && !seen.has(g)){ seen.add(g); merged.push(g); }
-  });
-  return merged;
+  return Array.isArray(S.irGroups) ? S.irGroups.slice() : [];
 }
 
 // Returns a CSS tag class for any IR group name so the entire UI can color
@@ -9514,31 +9668,112 @@ function addIRGroup(){
 function removeIRGroup(name){
   if(!_adminOnly('remove IR group')) return;
   // Check for in-use references before removal so admin knows the blast radius
-  const siteUses = (S.sites||[]).filter(s => s.irGroup === name).length;
-  const physUses = (S.physicians||[]).filter(p => p.irGroup === name).length;
-  const callUses = (S.irCalls||[]).filter(c => c.irGroup === name).length;
+  const siteUses  = (S.sites||[]).filter(s => s.irGroup === name).length;
+  const physUses  = (S.physicians||[]).filter(p => p.irGroup === name).length;
+  const callUses  = (S.irCalls||[]).filter(c => c.irGroup === name).length;
   const shiftUses = (S.irShifts||[]).filter(s => s.irGroup === name).length;
   const total = siteUses + physUses + callUses + shiftUses;
-  // North and South are defaults — refuse to remove until nothing references them.
-  if(total > 0 && (name === 'North' || name === 'South')){
-    alert(`"${name}" is a default group and is referenced by ${total} record(s). Reassign references first.`);
+
+  // No references → plain confirm, delete.
+  if(total === 0){
+    if(!confirm(`Remove IR group "${name}"?`)) return;
+    _doRemoveIRGroup(name, 'delete', null);
     return;
   }
-  let msg = `Remove IR group "${name}"?`;
-  if(total > 0){
-    msg += `\n\nThis group is referenced by:\n• ${siteUses} site(s)\n• ${physUses} physician(s)\n• ${callUses} IR call(s)\n• ${shiftUses} IR shift(s)\n\nRemoving the group definition won't delete these records — they'll just point to a group name that no longer appears in dropdowns.`;
+
+  // References exist → open modal offering reassign / strip / cancel.
+  const otherGroups = getIRGroups().filter(g => g !== name);
+  const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const jsName = escHtml(JSON.stringify(name));
+
+  const lines = [];
+  if(siteUses)  lines.push(`<li>${siteUses} site${siteUses===1?'':'s'}</li>`);
+  if(physUses)  lines.push(`<li>${physUses} physician${physUses===1?'':'s'}</li>`);
+  if(callUses)  lines.push(`<li>${callUses} IR call${callUses===1?'':'s'}</li>`);
+  if(shiftUses) lines.push(`<li>${shiftUses} IR shift${shiftUses===1?'':'s'}</li>`);
+
+  const reassignDisabled = otherGroups.length === 0;
+  const reassignOpts = otherGroups.map(g =>
+    `<option value="${escHtml(g)}">${escHtml(g)}</option>`
+  ).join('');
+
+  document.getElementById('ir-group-remove-title').textContent = `Remove IR Group — ${name}`;
+  document.getElementById('ir-group-remove-body').innerHTML = `
+    <div style="font-size:12px;margin-bottom:10px">
+      <strong>"${escHtml(name)}"</strong> is referenced by:
+      <ul style="margin:6px 0 10px 18px;padding:0">${lines.join('')}</ul>
+      Pick what to do with those references before the group is removed:
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <input type="radio" name="irg-remove-action" value="reassign" id="irg-remove-reassign"
+               ${reassignDisabled?'disabled':'checked'}>
+        <span style="flex:1">
+          <strong>Reassign</strong> to another group
+          <select id="irg-remove-target" style="display:block;margin-top:4px;width:200px"
+                  ${reassignDisabled?'disabled':''}>
+            ${reassignOpts || '<option value="">(no other groups)</option>'}
+          </select>
+          ${reassignDisabled?'<div style="font-size:10px;color:var(--txt3);margin-top:2px">Add another group first to enable this option.</div>':''}
+        </span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <input type="radio" name="irg-remove-action" value="strip"
+               ${reassignDisabled?'checked':''}>
+        <span><strong>Clear the group field</strong> on those records (leaves them unassigned).</span>
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="bsm" onclick="closeModal('ir-group-remove-modal')">Cancel</button>
+      <button class="br bsm" onclick="_confirmRemoveIRGroup(${jsName})">Remove Group</button>
+    </div>
+  `;
+  document.getElementById('ir-group-remove-modal').classList.add('open');
+}
+
+// Invoked by the modal's Remove button. Reads the chosen action + target
+// and dispatches to _doRemoveIRGroup.
+function _confirmRemoveIRGroup(name){
+  const action = document.querySelector('input[name="irg-remove-action"]:checked')?.value;
+  if(!action){ alert('Pick reassign or clear first.'); return; }
+  let target = null;
+  if(action === 'reassign'){
+    target = document.getElementById('irg-remove-target')?.value || '';
+    if(!target){ alert('Pick a target group to reassign to.'); return; }
+    if(target === name){ alert('Target group must differ from the one being removed.'); return; }
   }
-  if(!confirm(msg)) return;
+  closeModal('ir-group-remove-modal');
+  _doRemoveIRGroup(name, action, target);
+}
+
+// Shared deletion path. `action` is 'delete' (no refs), 'reassign' (move
+// refs to `target`), or 'strip' (null out irGroup on refs).
+function _doRemoveIRGroup(name, action, target){
+  if(action === 'reassign' && target){
+    (S.sites||[]).forEach(s => { if(s.irGroup === name) s.irGroup = target; });
+    (S.physicians||[]).forEach(p => { if(p.irGroup === name) p.irGroup = target; });
+    (S.irCalls||[]).forEach(c => { if(c.irGroup === name) c.irGroup = target; });
+    (S.irShifts||[]).forEach(sh => { if(sh.irGroup === name) sh.irGroup = target; });
+  } else if(action === 'strip'){
+    (S.sites||[]).forEach(s => { if(s.irGroup === name) s.irGroup = null; });
+    (S.physicians||[]).forEach(p => { if(p.irGroup === name) p.irGroup = null; });
+    (S.irCalls||[]).forEach(c => { if(c.irGroup === name) c.irGroup = null; });
+    (S.irShifts||[]).forEach(sh => { if(sh.irGroup === name) sh.irGroup = null; });
+    // Also prune slot keys for sites that previously belonged to this group,
+    // since a stripped site no longer participates in per-group call/shift needs.
+    const strippedSites = (S.sites||[]).filter(s => s.irGroup == null).map(s => s.name);
+    strippedSites.forEach(siteName => {
+      Object.keys(S.irSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irSlots[k]; });
+      Object.keys(S.irShiftSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irShiftSlots[k]; });
+    });
+  }
+  // Finally remove the group itself.
   if(Array.isArray(S.irGroups)) S.irGroups = S.irGroups.filter(g => g !== name);
-  // Prune any call/shift slot keys belonging to sites in the removed group
-  const orphanSites = (S.sites||[]).filter(s => s.irGroup === name).map(s => s.name);
-  orphanSites.forEach(siteName => {
-    Object.keys(S.irSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irSlots[k]; });
-    Object.keys(S.irShiftSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irShiftSlots[k]; });
-  });
   triggerSave();
   renderIRSlots();
   _repopulateIRGroupSelects();
+  if(typeof renderSitesList === 'function') try{ renderSitesList(); }catch(_){}
+  if(typeof renderPhysicians === 'function') try{ renderPhysicians(); }catch(_){}
 }
 
 // Unified renderer for the IR Slots & Groups page. Still exposed under the
@@ -14815,7 +15050,7 @@ function previewIRRebalance(){
         <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <span>Proposed Reassignments — review and uncheck any to keep as-is</span>
           <label style="font-size:12px;font-weight:400;cursor:pointer;display:flex;align-items:center;gap:5px">
-            <input type="checkbox" id="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
+            <input type="checkbox" class="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
           </label>
         </div>
         <div style="overflow-x:auto"><table><thead><tr>
@@ -15342,7 +15577,7 @@ function previewIRRebalance(){
       <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
         <span>Proposed Reassignments — review and uncheck any you want to keep as-is</span>
         <label style="font-size:12px;font-weight:400;cursor:pointer;display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
+          <input type="checkbox" class="irr-select-all" checked onchange="_irrToggleAll(this.checked)"> Select all
         </label>
       </div>
       <div style="overflow-x:auto"><table><thead><tr>
@@ -15385,18 +15620,23 @@ function previewIRRebalance(){
 }
 
 // ── IR Rebalancer checkbox helpers ──
+// Both preview panels (shift rebalance vs call rebalance) render a "select
+// all" master checkbox. They're emitted from mutually exclusive branches of
+// previewIRRebalance(), so only one is ever in the DOM. We use a class
+// instead of an id so a static ID-dup audit stays clean and so any future
+// change that accidentally renders both at once still works correctly.
 function _irrToggleAll(checked){
-  document.querySelectorAll('[id^="irr-swap-"]:not(#irr-select-all)').forEach(cb=>cb.checked=checked);
+  document.querySelectorAll('[id^="irr-swap-"]').forEach(cb=>cb.checked=checked);
   _irrUpdateBtn();
 }
 
 function _irrUpdateBtn(){
-  const all=document.querySelectorAll('[id^="irr-swap-"]:not(#irr-select-all)');
+  const all=document.querySelectorAll('[id^="irr-swap-"]');
   const checked=[...all].filter(cb=>cb.checked).length;
   const total=all.length;
   const btn=document.getElementById('irr-apply');
   const note=document.getElementById('irr-apply-note');
-  const allCb=document.getElementById('irr-select-all');
+  const allCb=document.querySelector('.irr-select-all');
   if(!btn) return;
   btn.style.display=total>0?'inline-block':'none';
   btn.disabled=checked===0;
