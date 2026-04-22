@@ -368,12 +368,15 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-sect">Compliance & Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
       <div class="snav-item admin-only" onclick="nav('holidays',this)">Holiday Call</div>
+      <div class="snav-item admin-only" onclick="nav('tumor-boards',this)">🔬 Tumor Boards</div>
+      <div class="snav-item admin-only" onclick="nav('clinics',this)">🏥 Clinics</div>
       <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
       <div class="snav-sect">System</div>
       <div class="snav-item admin-only" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
       <div class="snav-item" onclick="nav('comm-prefs',this)">🔔 Notifications</div>
       <div class="snav-sect admin-only">Admin</div>
       <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
+      <div class="snav-item admin-only" onclick="nav('publish',this)">📤 Publish Schedule</div>
       <div class="snav-item admin-only" onclick="nav('broadcast',this)">📢 Broadcast Email</div>
       <div class="snav-item admin-only" onclick="nav('settings',this)">⚙ Settings</div>
       <div class="snav-item admin-only" onclick="nav('import',this)">📥 Import Excel</div>
@@ -626,6 +629,9 @@ tbody tr:hover{background:var(--bg3)}
   <div class="card">
     <div class="card-title">Admin Announcements</div>
     <label class="cp-row"><input type="checkbox" id="cp-broadcast" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Practice-wide announcements</div><div class="cp-desc">Email broadcasts sent by administrators. Recommended: keep enabled.</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-schedulePublish" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Published schedules</div><div class="cp-desc">When an admin publishes a date range, you receive a personalized digest of your assignments (call, weekend, day shifts) for that range.</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-tumorBoard" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Tumor board reminders</div><div class="cp-desc">Reminders for tumor boards / conferences you're part of. Off if you'd rather rely solely on the calendar feed.</div></div></label>
+    <label class="cp-row"><input type="checkbox" id="cp-clinic" onchange="saveCommPrefs()"> <div><div style="font-weight:600;font-size:12px">Clinic reminders</div><div class="cp-desc">Reminders for outpatient clinics you're part of.</div></div></label>
   </div>
 
   <div class="card" style="border:1px dashed var(--bdr2)">
@@ -704,6 +710,191 @@ tbody tr:hover{background:var(--bg3)}
   </details>
 </div>
 
+<!-- TUMOR BOARDS (admin-only) -->
+<div id="page-tumor-boards" class="page admin-only">
+  <div class="pg-title">🔬 Tumor Boards & Recurring Conferences</div>
+  <div class="ibox" style="margin-bottom:12px">
+    <div class="note ni" style="font-size:11px">
+      Define recurring multidisciplinary conferences. Each board sets a weekly time slot, the sites and subspecialties it serves, and the physicians who participate. Boards appear automatically on each participant's downloaded <code>.ics</code> calendar feed and (if enabled) trigger reminder emails.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Add Tumor Board</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:180px">
+        <label>Name</label>
+        <input id="tb-new-name" placeholder="e.g. Thoracic Tumor Board" style="width:100%">
+      </div>
+      <div class="fg" style="min-width:120px">
+        <label>Day</label>
+        <select id="tb-new-dow">
+          <option value="0">Sunday</option><option value="1">Monday</option>
+          <option value="2">Tuesday</option><option value="3" selected>Wednesday</option>
+          <option value="4">Thursday</option><option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+      <div class="fg" style="min-width:100px">
+        <label>Start</label>
+        <input type="time" id="tb-new-time" value="07:00">
+      </div>
+      <div class="fg" style="min-width:90px">
+        <label>Duration (min)</label>
+        <input type="number" id="tb-new-dur" value="60" min="15" max="240" step="15">
+      </div>
+      <div class="fg">
+        <label>&nbsp;</label>
+        <button class="bp" onclick="addTumorBoard()">＋ Add Board</button>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:6px">
+      After adding, click ✎ on any board to edit sites, subspecialties, and participants.
+    </div>
+  </div>
+
+  <div id="tb-list"></div>
+</div>
+
+<!-- CLINICS (admin-only) — mirrors tumor boards, separate collection -->
+<div id="page-clinics" class="page admin-only">
+  <div class="pg-title">🏥 Clinics</div>
+  <div class="ibox" style="margin-bottom:12px">
+    <div class="note ni" style="font-size:11px">
+      Define recurring outpatient clinics. Each clinic sets a recurrence pattern (weekly, biweekly, monthly, custom), the sites/specialties it serves, and either a fixed participant list or a rotating roster (equal-frequency assignment). Clinics appear automatically on each assigned physician's calendar feed.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Add Clinic</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:180px">
+        <label>Name</label>
+        <input id="cl-new-name" placeholder="e.g. Tuesday IR Clinic" style="width:100%">
+      </div>
+      <div class="fg" style="min-width:120px">
+        <label>Day</label>
+        <select id="cl-new-dow">
+          <option value="0">Sunday</option><option value="1" selected>Monday</option>
+          <option value="2">Tuesday</option><option value="3">Wednesday</option>
+          <option value="4">Thursday</option><option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+      <div class="fg" style="min-width:100px">
+        <label>Start</label>
+        <input type="time" id="cl-new-time" value="08:00">
+      </div>
+      <div class="fg" style="min-width:90px">
+        <label>Duration (min)</label>
+        <input type="number" id="cl-new-dur" value="240" min="15" max="600" step="15">
+      </div>
+      <div class="fg">
+        <label>&nbsp;</label>
+        <button class="bp" onclick="addClinic()">＋ Add Clinic</button>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:6px">
+      After adding, click ✎ on any clinic to set recurrence, sites, specialties, participants, and optional rotation.
+    </div>
+  </div>
+
+  <div id="cl-list"></div>
+</div>
+
+<!-- PUBLISH SCHEDULE (admin-only) -->
+<div id="page-publish" class="page admin-only">
+  <div class="pg-title">📤 Publish Schedule</div>
+  <div class="ibox" style="margin-bottom:12px">
+    <div class="note ni" style="font-size:11px">
+      Send each physician a personalized digest of their assignments for a date range. Each recipient sees only their own shifts; a brief summary of who covers what is shown only when explicitly enabled below. Recipients who have opted out of "Published schedules" notifications are skipped.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Date Range &amp; Categories</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg"><label>Start date</label><input type="date" id="pub-start"></div>
+      <div class="fg"><label>End date</label><input type="date" id="pub-end"></div>
+      <div class="fg" style="min-width:140px">
+        <label>Quick range</label>
+        <select id="pub-quick" onchange="_pubApplyQuickRange(this.value)">
+          <option value="">— pick one —</option>
+          <option value="this-week">This week (Mon–Sun)</option>
+          <option value="next-week">Next week</option>
+          <option value="this-month">This month</option>
+          <option value="next-month">Next month</option>
+          <option value="next-30">Next 30 days</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-day" checked>
+        <div><div style="font-weight:600;font-size:12px">Day shifts (DR + IR)</div>
+        <div class="cp-desc">Includes 1st/2nd/3rd/Home and IR procedure shifts at any site.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-weekday" checked>
+        <div><div style="font-weight:600;font-size:12px">Weekday call (IR daily call)</div>
+        <div class="cp-desc">IR call assignments on Mon–Fri.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-weekend" checked>
+        <div><div style="font-weight:600;font-size:12px">Weekend call</div>
+        <div class="cp-desc">Saturday/Sunday DR weekend call entries and IR weekend call.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-holiday">
+        <div><div style="font-weight:600;font-size:12px">Holiday call</div>
+        <div class="cp-desc">Holiday assignments that fall in the date range.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-tb">
+        <div><div style="font-weight:600;font-size:12px">Tumor boards &amp; clinics</div>
+        <div class="cp-desc">Recurring conferences and clinics the recipient participates in (rotation-aware: only their assigned occurrences).</div></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Recipients</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:200px">
+        <label>Audience</label>
+        <select id="pub-audience" onchange="_pubAudienceChanged()">
+          <option value="all">All physicians (with linked accounts)</option>
+          <option value="dr">DR only</option>
+          <option value="ir">IR only</option>
+          <option value="ir-group">IR — specific group</option>
+          <option value="site">Specific site</option>
+          <option value="custom">Pick individuals</option>
+        </select>
+      </div>
+      <div class="fg" id="pub-aud-extra" style="min-width:180px;display:none">
+        <label id="pub-aud-extra-lbl">—</label>
+        <select id="pub-aud-extra-sel"></select>
+      </div>
+    </div>
+    <div id="pub-custom-list" style="margin-top:10px;display:none"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Actions</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="bsm bn" onclick="previewPublish()">👁 Preview (yourself)</button>
+      <button class="bp" onclick="sendPublish()">📤 Publish &amp; Email Recipients</button>
+      <span id="pub-status" style="font-size:11px;align-self:center"></span>
+    </div>
+    <div id="pub-preview" style="margin-top:14px;font-size:11px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recent Publishes</div>
+    <div id="pub-log"></div>
+  </div>
+</div>
+
 <!-- PHYSICIANS -->
 <div id="page-physicians" class="page admin-only">
   <div class="pg-title">Physician Roster</div>
@@ -770,6 +961,8 @@ tbody tr:hover{background:var(--bg3)}
         <div class="tab" onclick="srTab('day',this)">Day Conditions</div>
         <div class="tab" onclick="srTab('shift',this)">Shift Type Rules</div>
         <div class="tab" onclick="srTab('seq',this)">Sequence Rules</div>
+        <div class="tab" onclick="srTab('tb',this)">🔬 Conferences</div>
+        <div class="tab" onclick="srTab('callsite',this)">📞 Call-Day Site</div>
         <div class="tab" onclick="srTab('irblk',this)">🚫 IR Blackouts</div>
       </div>
 
@@ -851,7 +1044,7 @@ tbody tr:hover{background:var(--bg3)}
       <!-- SEQUENCE RULES TAB -->
       <div id="srt-seq" class="ibox" style="display:none">
         <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
-          Control how many days in a row this physician can be assigned
+          Control how many days in a row this physician can be assigned (globally)
         </div>
         <div class="g3">
           <div class="fg"><label>Max Consecutive Days (any site)</label>
@@ -868,9 +1061,114 @@ tbody tr:hover{background:var(--bg3)}
           <input id="sr-seq-notes" placeholder="e.g. Due to childcare, cannot work more than 3 consecutive days">
         </div>
         <button class="bp bsm" onclick="addSeqRule()">Set Sequence Rules</button>
+
+        <hr style="margin:14px 0;border:none;border-top:1px solid var(--bdr)">
+
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          📍 Per-Site / Per-Slot Sequence Rules
+        </div>
+        <div class="note ni" style="font-size:11px;margin-bottom:8px">
+          Constrain how many consecutive days the physician can work AT a specific site (or at a specific labeled slot within a site, like <code>stfs1</code>). Useful for "max 2 weeks in a row at the satellite site" or "no more than 3 consecutive Mondays at slot stfs1." Slot labels come from the IR Shift Slots admin page.
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Site</label>
+            <select id="sr-ss-site" onchange="_srRefreshSlotLabelOpts()"></select>
+          </div>
+          <div class="fg"><label>Slot label <span style="color:var(--txt3);font-weight:400">(optional)</span></label>
+            <select id="sr-ss-slot"><option value="">— Any slot at this site —</option></select>
+          </div>
+          <div class="fg"><label>Max Consecutive Days</label>
+            <input id="sr-ss-maxconsec" type="number" min="1" max="30" placeholder="No limit" style="width:100%">
+          </div>
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Min Days Off Between Shifts (here)</label>
+            <input id="sr-ss-minrest" type="number" min="0" max="30" placeholder="No minimum" style="width:100%">
+          </div>
+          <div class="fg" style="grid-column:span 2"><label>Notes</label>
+            <input id="sr-ss-notes" placeholder="e.g. Long commute — limit consecutive Main coverage">
+          </div>
+        </div>
+        <button class="bp bsm" onmousedown="_srRefreshSiteSeqOpts()" onclick="addSiteSeqRule()">＋ Add Site Sequence Rule</button>
       </div>
 
       <div id="sr-list" style="margin-top:12px"></div>
+
+      <!-- CONFERENCES (TUMOR BOARD / CLINIC) RULES -->
+      <div id="srt-tb" class="ibox" style="display:none;margin-top:8px">
+        <div class="note ni" style="font-size:11px;margin-bottom:10px">
+          Apply scheduling rules tied to tumor boards or clinics this physician is part of. The conference list comes from the 🔬 Tumor Boards and 🏥 Clinics admin pages — pick "Any" to apply to all of them, or scope to a specific event.
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Event</label>
+            <select id="sr-tb-event"><option value="">— pick a tumor board / clinic —</option></select>
+          </div>
+          <div class="fg"><label>Rule type</label>
+            <select id="sr-tb-action" onchange="_srTBOnActionChange()">
+              <option value="no-call-on-day">No call on event day</option>
+              <option value="no-shift-on-day">No DR/IR day shift on event day</option>
+              <option value="must-be-at-site-on-day">Must be at specific site on event day</option>
+              <option value="schedule-shift-prior">Schedule day shift N day(s) BEFORE event</option>
+              <option value="schedule-shift-after">Schedule day shift N day(s) AFTER event</option>
+              <option value="block-day-prior">No shift the day BEFORE event</option>
+              <option value="block-day-after">No shift the day AFTER event</option>
+              <option value="prefer-light-day">Prefer light coverage on event day (avoid 2nd/3rd)</option>
+            </select>
+          </div>
+          <div class="fg" id="sr-tb-numeric-wrap"><label>N (days)</label>
+            <input type="number" id="sr-tb-num" min="0" max="60" value="1" style="width:100%">
+          </div>
+        </div>
+        <div class="g3" id="sr-tb-site-wrap" style="display:none">
+          <div class="fg"><label>Required site (for must-be-at-site rules)</label>
+            <select id="sr-tb-site"></select>
+          </div>
+          <div class="fg"><label>Shift type (optional)</label>
+            <select id="sr-tb-shift">
+              <option value="">Any day shift</option>
+              <option value="1st">1st (day)</option>
+              <option value="2nd">2nd (evening)</option>
+              <option value="Home">Home / Remote</option>
+            </select>
+          </div>
+          <div class="fg">&nbsp;</div>
+        </div>
+        <div class="fg"><label>Notes / Reason</label>
+          <input id="sr-tb-notes" placeholder="e.g. Needs to be at MAIN for breast TB attendance">
+        </div>
+        <button class="bp bsm" onmousedown="_srRefreshTBEventOptions()" onclick="addTBRule()">＋ Add Conference Rule</button>
+      </div>
+
+      <!-- CALL-DAY SITE RULES -->
+      <div id="srt-callsite" class="ibox" style="display:none;margin-top:8px">
+        <div class="note ni" style="font-size:11px;margin-bottom:10px">
+          When this physician is on call, force their day shift on the same date to a specific hospital. Auto-assign uses this to keep call coverage geographically consistent (e.g. if they take call, they read at the call site so they're physically present).
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Call type</label>
+            <select id="sr-cs-calltype">
+              <option value="ir-call">IR daily call</option>
+              <option value="ir-weekend">IR weekend call</option>
+              <option value="weekend-call">DR weekend call</option>
+              <option value="any-call">Any call type</option>
+            </select>
+          </div>
+          <div class="fg"><label>Required day-shift site</label>
+            <select id="sr-cs-site"></select>
+          </div>
+          <div class="fg"><label>Apply to shift type</label>
+            <select id="sr-cs-shift">
+              <option value="">Any day shift</option>
+              <option value="1st">1st only</option>
+              <option value="Home">Home / Remote only</option>
+            </select>
+          </div>
+        </div>
+        <div class="fg"><label>Notes</label>
+          <input id="sr-cs-notes" placeholder="e.g. On IR call → must read at the call hospital">
+        </div>
+        <button class="bp bsm" onmousedown="_srRefreshCallSiteSiteOptions()" onclick="addCallSiteRule()">＋ Add Call-Day Site Rule</button>
+      </div>
 
       <!-- IR CALL BLACKOUTS TAB -->
       <div id="srt-irblk" class="ibox" style="display:none;margin-top:8px">
@@ -2600,7 +2898,7 @@ function _buildSaveHTML(){
     vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
+    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     irGroups:S.irGroups||[],
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
@@ -2653,7 +2951,7 @@ function clearAllData(){
     swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
     holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
     siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,nextId:S.nextId,
+    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,nextId:S.nextId,
     irGroups:S.irGroups,
   };
   const usersBackup=[...USERS];
@@ -3123,16 +3421,32 @@ function _applyRemoteData(d){
   }
   if(d.irSlots)Object.assign(S.irSlots,d.irSlots);
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
+  if(d.irShiftSlotLabels){
+    if(!S.irShiftSlotLabels) S.irShiftSlotLabels = {};
+    Object.assign(S.irShiftSlotLabels, d.irShiftSlotLabels);
+  }
+  if(d.siteSlotLabels){
+    if(!S.siteSlotLabels) S.siteSlotLabels = {};
+    Object.assign(S.siteSlotLabels, d.siteSlotLabels);
+  }
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
   if(d.cfg)Object.assign(S.cfg,d.cfg);
   if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
   if(d.driveTimes) S.driveTimes=d.driveTimes;
+  // Tumor boards: array of recurring conferences. Older snapshots simply
+  // won't have this field — leave the seeded empty array in that case.
+  if(Array.isArray(d.tumorBoards)) S.tumorBoards = d.tumorBoards.slice();
+  if(Array.isArray(d.clinics))     S.clinics = d.clinics.slice();
+  if(Array.isArray(d.publishLog))  S.publishLog  = d.publishLog.slice();
   if(d.nextId!=null) S.nextId=d.nextId;  // overlay exactly — prevents old practice's high nextId polluting a new practice
   // Patch missing array fields on physicians so downstream code can safely .includes() / .forEach()
   (S.physicians||[]).forEach(p=>{
     if(!Array.isArray(p.siteRules)) p.siteRules=[];
     if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
     if(!Array.isArray(p.dayConditions)) p.dayConditions=[];
+    if(!Array.isArray(p.tbRules)) p.tbRules=[];
+    if(!Array.isArray(p.callDayRules)) p.callDayRules=[];
+    if(!Array.isArray(p.siteSeqRules)) p.siteSeqRules=[];
     if(!Array.isArray(p.drSubs)) p.drSubs=[];
     if(!Array.isArray(p.irSubs)) p.irSubs=[];
     if(!Array.isArray(p.allowedSites)) p.allowedSites=[];
@@ -3325,6 +3639,8 @@ function _refreshCurrentPage(){
     settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
     'ir-shift-slots':renderIRShiftSlots,'import':renderImportPage,
     'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
+    'tumor-boards':renderTumorBoards,'publish':renderPublish,
+    'clinics':renderClinics,
   };
   try{if(fns[pg]) fns[pg]();}catch(e){/* non-fatal */}
 }
@@ -3420,6 +3736,19 @@ let S=/*S_START*/{
   holidays:[],
   openShifts:[],
   siteSlots:{},siteSlotsSubs:{},irSlots:{},irShiftSlots:{},
+  // Per-slot custom labels for IR shift positions. Key shape:
+  //   `${siteName}|${dow}|1st#${index}` → 'stfs1' | 'stfs2' | 'reading-room' | etc.
+  // Indexed slots let physicians' siteSeqRules target specific positions
+  // ("max 3 consecutive Mondays at Main slot stfs1") without conflating
+  // distinct work locations within the same site/day.
+  irShiftSlotLabels:{},
+  // Per-slot custom labels for DR shift positions. Key shape:
+  //   `${siteName}|${shift}|#${index}` → 'reading-room-A' | 'pediatric-bay' | etc.
+  // Per-(site, shift), NOT per-week — labels are stable across weeks even
+  // when the slot COUNT varies week-to-week. If week 1 has 3 slots and
+  // week 2 has 2, label index 0/1 apply both weeks; index 2 only week 1.
+  // shift ∈ {'1st','2nd','3rd','Home'}.
+  siteSlotLabels:{},
   irGroups:['North','South'],
   wkndNeeds:{},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
@@ -3440,6 +3769,21 @@ let S=/*S_START*/{
   natLangRules:[],
   broadcasts:[],
   shiftListings:[],
+  // Tumor boards: recurring multidisciplinary conferences. Each board has a
+  // weekly slot (dayOfWeek 0=Sun..6=Sat + start/duration), a list of relevant
+  // sites and DR/IR subspecialties, and an explicit allow-list of physicians
+  // who participate. Calendar sync (_myEventsInRange) emits one event per
+  // occurrence within the requested range. Optional skipDates lets admins
+  // exclude specific holidays/cancellations without deleting the board.
+  tumorBoards:[],
+  // Clinics: recurring outpatient clinics. Same schema as tumorBoards (they
+  // share _evtOccurrencesInRange, _evtAssignedPhysIds, etc.) but kept in a
+  // separate collection so the two surfaces never confuse each other.
+  clinics:[],
+  // Publish log: audit trail for the Schedule Publish admin action. Each
+  // entry records who published what (kinds + date range) and how many
+  // recipients received the email blast.
+  publishLog:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
@@ -3468,6 +3812,8 @@ S.sites.filter(s=>s.irGroup).forEach(st=>{
 });
 // init IR shift slots: "site|DOW|shift" → number (daily procedure schedule, separate from call)
 if(!S.irShiftSlots) S.irShiftSlots={};
+if(!S.irShiftSlotLabels) S.irShiftSlotLabels={};
+if(!S.siteSlotLabels) S.siteSlotLabels={};
 S.sites.filter(s=>s.irGroup).forEach(st=>{
   ['1st'].forEach(sh=>{
     for(let dow=0;dow<=6;dow++){
@@ -3754,12 +4100,13 @@ async function createPractice(){
     vacations:[], drShifts:[], weekendCalls:[], irShifts:[], irCalls:[],
     holidays:[], openShifts:[], chatMessages:[], chatGroups:[], swapRequests:[],
     holidayBlackouts:[], holidayNeeds:[], holidayDefs:[], natLangRules:[],
+    tumorBoards:[], clinics:[], publishLog:[],
     sites:[
       {name:"Main Site", irGroup:null, irAnchors:[], irFillins:[]},
       {name:"At Home / Remote", irGroup:null, irAnchors:[], irFillins:[]}
     ],
     drSubs:[], irSubs:[],
-    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, wkndNeeds:{},
+    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, irShiftSlotLabels:{}, siteSlotLabels:{}, wkndNeeds:{},
     irGroups:['North','South'],
     cfg:{anchorPct:70}, vacPicking:{}, driveTimes:{},
     nextId:1, users:[],
@@ -3903,6 +4250,8 @@ function nav(pg,el){
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,'practices':renderPracticesPage,
     'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
+    'tumor-boards':renderTumorBoards,'publish':renderPublish,
+    'clinics':renderClinics,
   };
   if(fns[pg]) fns[pg]();
 }
@@ -4058,15 +4407,22 @@ function renderMySched(){
       const cls=s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':'ehome';
       const anc=p.anchorSite&&s.site!==p.anchorSite?' eanc':'';
       const siteSh=(s.site||'').split(' ')[0];
+      // Slot label badge — shows the named position when admin set one.
+      // Lets physicians know "you're at Reading-Room-A" not just "you're at Main".
+      const slotBadge = s.slotLabel
+        ? `<div style="font-size:9px;font-weight:700;color:var(--blue-t);background:rgba(96,165,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${(s.slotLabel||'').replace(/</g,'&lt;')}</div>`
+        : '';
       if(s.shift==='Home'){
-        evs+=`<div class="ev ${cls}${anc}" title="Home @ ${s.site}">
+        evs+=`<div class="ev ${cls}${anc}" title="Home @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
           <div style="font-weight:700;font-size:11px">🏠 Home</div>
           <div style="font-size:9px;opacity:.7">${siteSh}</div>
+          ${slotBadge}
         </div>`;
       } else {
-        evs+=`<div class="ev ${cls}${anc}" title="${s.shift} Shift @ ${s.site}">
+        evs+=`<div class="ev ${cls}${anc}" title="${s.shift} Shift @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
           <div style="font-weight:700;font-size:11px">${s.shift} Shift</div>
           <div style="font-size:9px;opacity:.7">${siteSh}${s.sub?' · '+s.sub.slice(0,6):''}</div>
+          ${slotBadge}
         </div>`;
       }
     });
@@ -4102,17 +4458,22 @@ function renderMySched(){
     irSh.filter(s=>s.date===c.date).forEach(s=>{
       const shCls=s.shift==='Home'?'ehome':s.shift==='1st'?'eir':s.shift==='2nd'?'e2':'e3';
       const siteSh=(s.site||'').split(' ')[0];
+      const _irSlotBadge = s.slotLabel
+        ? `<div style="font-size:9px;font-weight:700;color:var(--purple-t,#a78bfa);background:rgba(167,139,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${(s.slotLabel||'').replace(/</g,'&lt;')}</div>`
+        : '';
       if(s.shift==='Home'){
-        evs+=`<div class="ev ${shCls}" title="IR Home @ ${s.site}">
+        evs+=`<div class="ev ${shCls}" title="IR Home @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
           <div style="font-weight:700;font-size:11px">🏠 Home</div>
           <div style="font-size:9px;opacity:.7">IR · ${siteSh}</div>
+          ${_irSlotBadge}
         </div>`;
       } else {
         const irShLbl=s.shift==='1st'?'Day Shift':s.shift+' Shift';
-        evs+=`<div class="ev ${shCls}" title="IR ${irShLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+        evs+=`<div class="ev ${shCls}" title="IR ${irShLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}${s.slotLabel?' · '+s.slotLabel:''}">
           <div style="font-weight:700;font-size:11px">${irShLbl}</div>
           <div style="font-size:9px;opacity:.85">IR · ${siteSh}</div>
           <div style="font-size:9px;opacity:.7">${s.sub?s.sub.slice(0,6):''}</div>
+          ${_irSlotBadge}
         </div>`;
       }
     });
@@ -4124,10 +4485,10 @@ function renderMySched(){
   html+=`</div></div>`;
 
   const allEvts=[
-    ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:s.sub||'—',col:'tb'})),
+    ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:[s.sub||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tb'})),
     ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
     ...ir.map(i=>({date:i.date,type:'IR '+i.callType+(i.callType==='weekend'?' (Fri→Mon)':''),site:i.site,detail:i.irGroup||'—',col:'tt'})),
-    ...irSh.map(s=>({date:s.date,type:'IR '+(s.shift==='1st'?'Day':s.shift)+' Shift',site:s.site,detail:s.sub||s.irGroup||'—',col:'tt'})),
+    ...irSh.map(s=>({date:s.date,type:'IR '+(s.shift==='1st'?'Day':s.shift)+' Shift',site:s.site,detail:[s.sub||s.irGroup||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tt'})),
     ...hols.map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
@@ -4332,10 +4693,23 @@ function delUser(uid){
 /* ─── PHYSICIANS ─── */
 function roleUI(){
   const r=document.getElementById('p-role').value;
-  document.getElementById('p-drfte-w').style.display=(r==='DR'||r==='MIXED')?'block':'none';
-  document.getElementById('p-irfte-w').style.display=(r==='IR'||r==='MIXED')?'block':'none';
-  document.getElementById('p-ir-w').style.display=(r==='IR'||r==='MIXED')?'block':'none';
-  document.getElementById('p-irsub-w').style.display=(r==='IR'||r==='MIXED')?'block':'none';
+  const drVisible = (r==='DR'||r==='MIXED');
+  const irVisible = (r==='IR'||r==='MIXED');
+  document.getElementById('p-drfte-w').style.display = drVisible ? 'block' : 'none';
+  document.getElementById('p-irfte-w').style.display = irVisible ? 'block' : 'none';
+  document.getElementById('p-ir-w').style.display    = irVisible ? 'block' : 'none';
+  document.getElementById('p-irsub-w').style.display = irVisible ? 'block' : 'none';
+  // When switching to a role that doesn't include DR (or IR), zero out the
+  // hidden field so the visible form state matches what would actually be
+  // saved. The save handlers also enforce this defensively, but clearing
+  // here prevents the confusing "DR FTE 1.0 still shows in the box" UX if
+  // the user toggles back and forth.
+  if(!drVisible){
+    const drEl = document.getElementById('p-drfte'); if(drEl) drEl.value = '0';
+  }
+  if(!irVisible){
+    const irEl = document.getElementById('p-irfte'); if(irEl) irEl.value = '0';
+  }
 }
 function renderSubChk(elId,subs,nm){
   const el=document.getElementById(elId);if(!el)return;
@@ -4412,7 +4786,11 @@ function editPhys(id){
   document.getElementById('p-deg').value=p.degree||'MD';
   document.getElementById('p-role').value=p.role||'DR';
   roleUI();
-  document.getElementById('p-drfte').value=p.drFte??1;
+  // For DR/MIXED roles, default to 1.0 if drFte missing on a legacy record;
+  // for IR-only, default to 0 so we don't reintroduce phantom DR FTE on save.
+  const _roleNow = p.role || 'DR';
+  const _drDefault = (_roleNow==='DR'||_roleNow==='MIXED') ? 1 : 0;
+  document.getElementById('p-drfte').value = (p.drFte!=null) ? p.drFte : _drDefault;
   const irfteEl=document.getElementById('p-irfte');
   if(irfteEl) irfteEl.value=p.irFte??0;
   // IR fields
@@ -4462,7 +4840,9 @@ function _saveEditPhys(id){
   p.last=last;
   p.degree=sanitizeNameInput(document.getElementById('p-deg').value)||'MD';
   p.role=role;
-  p.drFte=parseFloat(document.getElementById('p-drfte').value)||0;
+  // DR FTE only when role uses it (see addPhys). Without this guard, the
+  // hidden field's stale value would survive an IR-only edit.
+  p.drFte=(role==='DR'||role==='MIXED')?(parseFloat(document.getElementById('p-drfte').value)||0):0;
   p.irFte=role!=='DR'?(parseFloat(document.getElementById('p-irfte')?.value)||0):0;
   p.irGroup=role!=='DR'?(document.getElementById('p-irgrp')?.value||null):null;
   p.irSitePrim=role!=='DR'?(document.getElementById('p-irsiteprim')?.value||null):null;
@@ -4513,7 +4893,10 @@ function addPhys(){
   if(!first||!last){alert('Enter name');return;}
   const degree=sanitizeNameInput(document.getElementById('p-deg').value)||'MD';
   const role=document.getElementById('p-role').value;
-  const drFte=parseFloat(document.getElementById('p-drfte').value)||0;
+  // Only read DR FTE when the role actually uses it; otherwise the input
+  // field has been hidden by roleUI() and its stale value (default 1.0)
+  // would be incorrectly persisted as DR FTE on a pure-IR physician.
+  const drFte=(role==='DR'||role==='MIXED')?(parseFloat(document.getElementById('p-drfte').value)||0):0;
   const irFte=role!=='DR'?parseFloat(document.getElementById('p-irfte').value)||0:0;
   const anchor=document.getElementById('p-anchor').value||null;
   const allowed=[...document.querySelectorAll('[name="asite"]:checked')].map(c=>c.value);
@@ -4536,6 +4919,10 @@ function addPhys(){
     address:document.getElementById('p-address')?.value.trim()||'',
     siteRules:[],
     irCallBlackouts:[],
+    dayConditions:[],
+    tbRules:[],
+    callDayRules:[],
+    siteSeqRules:[],
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
   renderPhysicians();
@@ -6868,22 +7255,24 @@ function _myEventsInRange(startISO, endISO){
   };
   (S.drShifts||[]).filter(s => s.physId===myId && inRange(s.date)).forEach(s => {
     const t = timesFor('dr', s.shift);
+    const _lbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
     events.push({
       uid: `dr-${s.id}@radscheduler`,
       date: s.date,
-      summary: `DR ${s.shift||''}${s.site?' @ '+s.site:''}`,
-      description: `RadScheduler · DR shift${s.sub?' · '+s.sub:''}${s.notes?'\\n'+s.notes:''}`,
+      summary: `DR ${s.shift||''}${s.site?' @ '+s.site:''}${_lbl}`,
+      description: `RadScheduler · DR shift${s.sub?' · '+s.sub:''}${s.slotLabel?'\\nSlot: '+s.slotLabel:''}${s.notes?'\\n'+s.notes:''}`,
       location: s.site||'',
       ...t,
     });
   });
   (S.irShifts||[]).filter(s => s.physId===myId && inRange(s.date)).forEach(s => {
     const t = timesFor('ir', s.shift||'1st');
+    const _lbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
     events.push({
       uid: `ir-${s.id}@radscheduler`,
       date: s.date,
-      summary: `IR ${s.shift||'1st'}${s.site?' @ '+s.site:''}`,
-      description: `RadScheduler · IR shift${s.sub?' · '+s.sub:''}${s.notes?'\\n'+s.notes:''}`,
+      summary: `IR ${s.shift||'1st'}${s.site?' @ '+s.site:''}${_lbl}`,
+      description: `RadScheduler · IR shift${s.sub?' · '+s.sub:''}${s.slotLabel?'\\nSlot: '+s.slotLabel:''}${s.notes?'\\n'+s.notes:''}`,
       location: s.site||'',
       ...t,
     });
@@ -6935,6 +7324,45 @@ function _myEventsInRange(startISO, endISO){
       allDay: true, start:'00:00', end:'23:59',
     });
   });
+  // Tumor boards / recurring conferences. One event per occurrence in the
+  // range. We treat each occurrence as a fresh event with a unique UID
+  // (board id + ISO date) so calendar clients can correctly track edits to
+  // a single occurrence (e.g. cancellations) without disturbing the series.
+  // Honors active flag and skipDates inside _eventOccurrencesInRange.
+  //
+  // When rotation is enabled, only the assigned phys for each occurrence
+  // sees the event. Without rotation, every participant in allowedPhysIds
+  // sees every occurrence.
+  const _emitRecurringEvents = (items, kindLabel, uidPrefix, summaryEmoji, eventDescPrefix) => {
+    (items||[]).forEach(item => {
+      const isParticipant = (item.allowedPhysIds||[]).includes(myId);
+      if(!isParticipant) return;
+      const occurrences = _eventOccurrencesInRange(item, startISO, endISO);
+      for(const occDate of occurrences){
+        // Rotation gating: skip occurrences this user isn't assigned to.
+        if(item.rotation && item.rotation.enabled){
+          const assigned = _rotationPhysFor(item, occDate);
+          if(assigned !== myId) continue;
+        }
+        const {endDate, endTime} = _tbEndTimeFor(item, occDate);
+        const sites = (item.sites||[]).join(', ');
+        events.push({
+          uid: `${uidPrefix}-${item.id}-${occDate}@radscheduler`,
+          date: occDate,
+          summary: `${summaryEmoji} ${item.name}`,
+          description: `RadScheduler · ${eventDescPrefix}${item.notes?'\\n'+item.notes:''}${sites?'\\nSites: '+sites:''}`,
+          location: sites,
+          start: item.time||'07:00',
+          end: endTime,
+          allDay: false,
+          _tbEndDate: endDate,
+        });
+      }
+    });
+  };
+  _emitRecurringEvents(S.tumorBoards, 'tumorBoard', 'tb', '🔬', 'Tumor board');
+  _emitRecurringEvents(S.clinics,     'clinic',     'cl', '🏥', 'Clinic');
+
   return events.sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start));
 }
 
@@ -6973,9 +7401,12 @@ function _eventsToICS(events, calName){
       lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(fmtDate(next))}`);
     } else {
       const startDT = fmtDateTime(ev.date, ev.start);
-      // If end < start (overnight shift like 23:00 → 07:00), end is on next day
-      let endDate = ev.date;
-      if(ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00')){
+      // If end < start (overnight shift like 23:00 → 07:00), end is on next day.
+      // Tumor boards explicitly carry _tbEndDate so cross-midnight occurrences
+      // (rare — a 23:30 board running 60 min) serialize correctly without
+      // needing the heuristic below.
+      let endDate = ev._tbEndDate || ev.date;
+      if(!ev._tbEndDate && (ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00'))){
         const nxt = new Date(ev.date); nxt.setDate(nxt.getDate()+1);
         endDate = fmtDate(nxt);
       }
@@ -7364,7 +7795,17 @@ function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
       c=calCells[ci];
       n=shiftSlots[st.name+'|'+c.dow+'|1st']||0;
       var isMixed=(st.irAnchors&&st.irAnchors.length)||(st.irFillins&&st.irFillins.length);
-      for(ni=0;ni<n;ni++)r.push({date:c.date,site:st.name,mixed:!!isMixed,anchors:st.irAnchors||[],fillins:st.irFillins||[]});
+      // Each slot now carries its index + optional admin-set label so
+      // physician sequence rules can target a specific position
+      // (e.g. "max 2 consecutive Mondays at Main slot stfs1"). The label
+      // pulls from S.irShiftSlotLabels keyed `<site>|<dow>|1st#<index>`.
+      for(ni=0;ni<n;ni++){
+        var slotKey = st.name+'|'+c.dow+'|1st#'+ni;
+        var slotLabel = (S.irShiftSlotLabels||{})[slotKey] || '';
+        r.push({date:c.date,site:st.name,mixed:!!isMixed,
+                anchors:st.irAnchors||[],fillins:st.irFillins||[],
+                slotIndex:ni, slotLabel:slotLabel});
+      }
     }
   }
   r.sort(function(a,b){return a.date>b.date?1:-1;});
@@ -7381,7 +7822,21 @@ function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,months,ANC_RATE,slot){
   /* At a mixed site, always prefer designated IR anchors over fill-ins. */
   var mixedAnchorBoost=0;
   if(slot&&slot.mixed&&slot.anchors&&slot.anchors.indexOf(p.id)>=0)mixedAnchorBoost=1.0;
-  return fte+anc+mixedAnchorBoost;
+  /* Conference preference: tbRules with action 'schedule-shift-prior' /
+     'schedule-shift-after' nudge auto-assign toward picking this physician
+     for slots N days before/after their tumor board / clinic. The helper
+     returns negative for "preferred" (legacy convention used by the DR
+     sorter); here we negate to add positive boost since _irsaScore is
+     descending. Magnitude tuned small (0.1 per matched preference) so it
+     only acts as a tiebreaker after FTE pressure and anchor pressure. */
+  var confPref=0;
+  if(slot){
+    try{
+      var pref=_conferenceShiftPreferenceFor(p,{physId:p.id,date:slot.date,site:slot.site,shift:'1st',kind:'ir-shift'});
+      confPref = -pref * 0.1;
+    }catch(_){}
+  }
+  return fte+anc+mixedAnchorBoost+confPref;
 }
 
 function _irsaCountsForQuota(p,slot){
@@ -7442,9 +7897,18 @@ function previewIRShiftAA(){
         }}
       var _r=rawQ,_cd=callDays,_s=slot,_cnt=cnt,_anc=anc,_mo=slotMo;
       /* Pass 1: eligible + all rules + within quota */
-      pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&irSiteRuleOk(p,_s.site,_s.date)&&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')&&sequenceOk(p,_s.date,_mo)&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
+      pool=phys.filter(function(p){
+        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
+        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&irSiteRuleOk(p,_s.site,_s.date)
+          &&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')
+          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
+          &&tbRulesOk(p,_ictx)
+          &&callDayRulesOk(p,_ictx)
+          &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
+      });
       /* Pass 2: relax site rules */
-      if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&sequenceOk(p,_s.date,_mo)&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
+      if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
       /* Pass 3: relax sequence */
       if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
       /* Pass 4: over-quota fill */
@@ -7454,11 +7918,14 @@ function previewIRShiftAA(){
       picked=pool[0];
       var countsQ=_irsaCountsForQuota(picked,_s);
       note=!countsQ?'Auto (fill-in)':(_cnt[picked.id]>=_irsaEffQ(picked,_r,_cd,months)?'Auto (over-quota)':'Auto');
-      assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note});
+      // Carry slotLabel onto the assignment so it survives into S.irShifts
+      // (via _irsaPreview below) and can be inspected by sequence rules
+      // that scope to a specific labeled slot.
+      assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note,slotLabel:slot.slotLabel||''});
       if(countsQ){cnt[picked.id]++;if(picked.anchorSite&&picked.anchorSite===slot.site)anc[picked.id]++;}
       totalA++;
     }
-    for(ai=0;ai<assigned.length;ai++)_irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:grp,shift:'1st',sub:'',notes:assigned[ai].notes});
+    for(ai=0;ai<assigned.length;ai++)_irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:grp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||''});
     for(pi=0;pi<phys.length;pi++){
       phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;
       phys[pi]._irsaQta=_irsaEffQ(phys[pi],rawQ,callDays,months);
@@ -7501,7 +7968,7 @@ function previewIRShiftAA(){
     var inP=false;for(var mi2=0;mi2<months.length;mi2++){if(s.date.startsWith(months[mi2])){inP=true;break;}}
     if(!inP)return true;if(!groups.includes(s.irGroup))return true;if(s.shift==='Home')return true;return false;
   });
-  _irsaPreview.forEach(function(a){S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup});});
+  _irsaPreview.forEach(function(a){S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup,slotLabel:a.slotLabel||''});});
   var n=_irsaPreview.length;_irsaPreview=[];_irsaDRPreview=[];triggerSave();
   var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
   if(box)box.innerHTML='<div class="note ns">\u2713 '+n+' IR shift(s) assigned for '+periodLbl+'.</div>';
@@ -9549,6 +10016,36 @@ function renderSlotGrid(ym,week){
     const shifts=st.name==='At Home / Remote'?['Home']:['1st'];
     html+=`<div class="card"><div class="card-title">${escHtml(st.name)}</div>`;
 
+    // Slot labels panel — per-site, per-shift, NOT per-week. Renders one
+    // input per slot index up to the MAX count this site has across the
+    // weeks of the selected month (so labels grow as needed). Labels persist
+    // in S.siteSlotLabels keyed `${site}|${shift}|#${index}` and surface
+    // on the per-physician calendar + the rule slot-label dropdown.
+    shifts.forEach(sh => {
+      const allWeeks = [1,2,3,4,5];
+      let maxCount = 0;
+      allWeeks.forEach(w => {
+        const v = S.siteSlots?.[`${st.name}|${w}|${sh}`] ?? 0;
+        if(v > maxCount) maxCount = v;
+      });
+      if(maxCount > 1){
+        html += `<div style="background:var(--bg2,rgba(0,0,0,0.03));border:1px solid var(--bdr);border-radius:5px;padding:6px 8px;margin-bottom:8px">
+          <div style="font-size:10.5px;color:var(--txt3);margin-bottom:4px">
+            🏷️ <strong>Slot labels</strong> for ${escHtml(sh==='Home'?'Home':sh+' Shift')} <span style="opacity:0.7">(stable across weeks; physicians see these on their schedule)</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">`;
+        for(let i=0; i<maxCount; i++){
+          const labelKey = `${st.name}|${sh}|#${i}`;
+          const labelVal = (S.siteSlotLabels||{})[labelKey] || '';
+          html += `<input type="text" placeholder="slot ${i+1} label"
+            value="${escHtml(labelVal)}"
+            style="width:120px;padding:3px 5px;border:1px solid var(--bdr);border-radius:3px;font-size:11px"
+            onchange="_setSiteSlotLabel(${jsLit(st.name)}, ${jsLit(sh)}, ${i}, this.value)">`;
+        }
+        html += `</div></div>`;
+      }
+    });
+
     shifts.forEach(sh=>{
       const k=`${st.name}|${week}|${sh}`;
       const total=S.siteSlots?.[k]??0;
@@ -9616,9 +10113,36 @@ function renderSlotGrid(ym,week){
 function _ssSetTotalSlot(siteName, week, sh, val){
   if(!_adminOnly('change site slot')) return;
   if(!S.siteSlots) S.siteSlots = {};
-  S.siteSlots[`${siteName}|${week}|${sh}`] = parseInt(val) || 0;
+  const newCount = parseInt(val) || 0;
+  S.siteSlots[`${siteName}|${week}|${sh}`] = newCount;
+  // Prune labels for indices that exceed the NEW max-count across all weeks.
+  // Only prune when reduction shrinks the max, not on every count change.
+  if(S.siteSlotLabels){
+    let maxNow = 0;
+    [1,2,3,4,5].forEach(w => {
+      const v = S.siteSlots[`${siteName}|${w}|${sh}`] ?? 0;
+      if(v > maxNow) maxNow = v;
+    });
+    Object.keys(S.siteSlotLabels).forEach(k => {
+      const m = /^(.+)\|([^|]+)\|#(\d+)$/.exec(k);
+      if(!m) return;
+      if(m[1] !== siteName || m[2] !== sh) return;
+      if(+m[3] >= maxNow) delete S.siteSlotLabels[k];
+    });
+  }
   triggerSave();
   renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+}
+
+// Writer for a per-slot DR label. Sanitized + persisted. Empty string deletes.
+function _setSiteSlotLabel(siteName, sh, slotIdx, val){
+  if(!_adminOnly('change site slot label')) return;
+  if(!S.siteSlotLabels) S.siteSlotLabels = {};
+  const k = `${siteName}|${sh}|#${slotIdx}`;
+  const trimmed = (val||'').trim().replace(/[<>&"|]/g, '');
+  if(trimmed) S.siteSlotLabels[k] = trimmed;
+  else        delete S.siteSlotLabels[k];
+  triggerSave();
 }
 
 function _ssSetSubSlot(siteName, week, sh, sub, val){
@@ -9987,7 +10511,7 @@ function _renderIRShiftSlotsGrid(){
     return;
   }
 
-  let html = '';
+  let html = '<div class="note ni" style="font-size:11px;margin-bottom:10px">Set the number of IR shift slots per site/day. When count > 1, each slot can be labeled (e.g. <code>stfs1</code>, <code>stfs2</code>) so physician sequence rules can target a specific position.</div>';
   groups.forEach((grp, gi) => {
     const gSites = (S.sites||[]).filter(s => s.irGroup === grp || s.irGroup === 'Both');
     const gColor = grp === 'North' ? 'var(--blue-t)'
@@ -10005,11 +10529,26 @@ function _renderIRShiftSlotsGrid(){
         [1,2,3,4,5].forEach(dow => {
           const k = `${st.name}|${dow}|1st`;
           const v = (S.irShiftSlots || {})[k] ?? 1;
+          // Per-slot label inputs only render when count > 1, since a single
+          // slot doesn't need disambiguation. The compact font-size keeps the
+          // grid scanable.
+          let labelInputs = '';
+          if(v > 1){
+            for(let i = 0; i < v; i++){
+              const labelKey = `${st.name}|${dow}|1st#${i}`;
+              const labelVal = (S.irShiftSlotLabels || {})[labelKey] || '';
+              labelInputs += `<input type="text" placeholder="slot ${i+1} label"
+                value="${escHtml(labelVal)}"
+                style="display:block;width:100%;padding:2px 4px;margin-top:2px;border:1px solid var(--bdr);border-radius:3px;font-size:10px;text-align:center"
+                onchange="_setIRShiftSlotLabel(${jsLit(st.name)}, ${dow}, ${i}, this.value)">`;
+            }
+          }
           html += `<div style="text-align:center">
             <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
             <input type="number" min="0" max="10" value="${v}"
               style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
               oninput="_setIRShiftSlot(${jsLit(st.name)}, ${dow}, this.value)">
+            ${labelInputs}
           </div>`;
         });
         html += `</div></div>`;
@@ -10023,7 +10562,30 @@ function _renderIRShiftSlotsGrid(){
 function _setIRShiftSlot(siteName, dow, val){
   if(!_adminOnly('change IR shift slot')) return;
   if(!S.irShiftSlots) S.irShiftSlots = {};
-  S.irShiftSlots[`${siteName}|${dow}|1st`] = parseInt(val) || 0;
+  const newCount = parseInt(val) || 0;
+  S.irShiftSlots[`${siteName}|${dow}|1st`] = newCount;
+  // Prune label entries for indices that no longer exist after a count
+  // reduction. Without this, stale labels accumulate and confuse the slot-
+  // expansion code in _irsaBuildSlots.
+  if(S.irShiftSlotLabels){
+    Object.keys(S.irShiftSlotLabels).forEach(k => {
+      const m = /^(.+)\|(\d+)\|1st#(\d+)$/.exec(k);
+      if(!m) return;
+      if(m[1] !== siteName || +m[2] !== dow) return;
+      if(+m[3] >= newCount) delete S.irShiftSlotLabels[k];
+    });
+  }
+  triggerSave();
+  _renderIRShiftSlotsGrid();   // re-render so label inputs appear/disappear
+}
+
+function _setIRShiftSlotLabel(siteName, dow, slotIdx, val){
+  if(!_adminOnly('change IR shift slot label')) return;
+  if(!S.irShiftSlotLabels) S.irShiftSlotLabels = {};
+  const k = `${siteName}|${dow}|1st#${slotIdx}`;
+  const trimmed = (val||'').trim().replace(/[<>&"|]/g, '');
+  if(trimmed) S.irShiftSlotLabels[k] = trimmed;
+  else        delete S.irShiftSlotLabels[k];
   triggerSave();
 }
 
@@ -10758,7 +11320,7 @@ function closePhysSiteRules(){
 }
 function srTab(t,el){
   // Map tab keys to actual HTML panel IDs
-  const panelMap={site:'srt-site',day:'srt-day',shift:'srt-shift',seq:'srt-seq',irblk:'srt-irblk'};
+  const panelMap={site:'srt-site',day:'srt-day',shift:'srt-shift',seq:'srt-seq',tb:'srt-tb',callsite:'srt-callsite',irblk:'srt-irblk'};
   Object.values(panelMap).forEach(id=>{
     const p=document.getElementById(id);if(p)p.style.display='none';
   });
@@ -10766,6 +11328,11 @@ function srTab(t,el){
   if(active){const p=document.getElementById(active);if(p)p.style.display='block';}
   document.querySelectorAll('#phys-site-rules-wrap .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
+  // When opening the conference rules tab, refresh the event picker so newly-
+  // created tumor boards / clinics show up. Cheap to recompute every open.
+  if(t === 'tb') _srRefreshTBEventOptions();
+  if(t === 'callsite') _srRefreshCallSiteSiteOptions();
+  if(t === 'seq') _srRefreshSiteSeqOpts();
 }
 function renderSiteRulesList(){
   const el=document.getElementById('sr-list');if(!el)return;
@@ -10818,6 +11385,45 @@ function renderSiteRulesList(){
     html+=`</div><button class="br bxs" onclick="clearSeqRules()">✕</button></div>`;
   }
 
+  // Conference (tumor board / clinic) rules
+  const tbRules = p?.tbRules || [];
+  if(tbRules.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Conference Rules</div>';
+    html+=tbRules.map((r,i)=>{
+      const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
+      return `<div class="row" style="margin-bottom:4px">
+        <div style="flex:1;font-size:12px">${_describeTBRule(r)}${note}</div>
+        <button class="br bxs" onclick="removeTBRule(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Per-site / per-slot sequence rules
+  const siteSeqRules = p?.siteSeqRules || [];
+  if(siteSeqRules.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Site / Slot Sequence Rules</div>';
+    html+=siteSeqRules.map((r,i)=>{
+      const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
+      return `<div class="row" style="margin-bottom:4px">
+        <div style="flex:1;font-size:12px">${_describeSiteSeqRule(r)}${note}</div>
+        <button class="br bxs" onclick="removeSiteSeqRule(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Call-day site rules
+  const callRules = p?.callDayRules || [];
+  if(callRules.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Call-Day Site Rules</div>';
+    html+=callRules.map((r,i)=>{
+      const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
+      return `<div class="row" style="margin-bottom:4px">
+        <div style="flex:1;font-size:12px">${_describeCallSiteRule(r)}${note}</div>
+        <button class="br bxs" onclick="removeCallSiteRule(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
   el.innerHTML=html||'<div style="color:var(--txt3);font-size:12px;font-style:italic">No rules configured yet.</div>';
 }
 
@@ -10865,6 +11471,102 @@ function addSeqRule(){
   p.seqRules={maxConsec,minRest,maxWkCalls,notes};
   triggerSave();renderSiteRulesList();
 }
+
+// ── Site / slot sequence rules ───────────────────────────────────────────
+// Refresh the site dropdown on the per-site sequence form. Called on tab
+// open and on the add-button mousedown so a fresh site list is always shown.
+function _srRefreshSiteSeqOpts(){
+  const sel = document.getElementById('sr-ss-site'); if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = (S.sites||[]).filter(s=>s.name!=='At Home / Remote')
+    .map(s => `<option value="${s.name.replace(/"/g,'&quot;')}">${s.name.replace(/</g,'&lt;')}</option>`).join('')
+    || '<option value="">(no sites)</option>';
+  if(prev) sel.value = prev;
+  _srRefreshSlotLabelOpts();
+}
+
+// Refresh the slot-label dropdown based on the currently-selected site.
+// Pulls labels from both BOTH IR (S.irShiftSlotLabels) AND DR
+// (S.siteSlotLabels) maps so a single rule can reference any labeled position
+// at the selected site, regardless of whether it's an IR procedure slot or a
+// DR shift slot. Empty string = "any slot at this site".
+function _srRefreshSlotLabelOpts(){
+  const siteSel = document.getElementById('sr-ss-site');
+  const slotSel = document.getElementById('sr-ss-slot');
+  if(!siteSel || !slotSel) return;
+  const site = siteSel.value;
+  const labels = new Set();
+  // IR labels: keys of shape `${site}|<dow>|1st#<index>`
+  Object.entries(S.irShiftSlotLabels||{}).forEach(([k, v]) => {
+    if(!v) return;
+    const m = /^(.+)\|\d+\|1st#\d+$/.exec(k);
+    if(m && m[1] === site) labels.add(v);
+  });
+  // DR labels: keys of shape `${site}|<shift>|#<index>`
+  Object.entries(S.siteSlotLabels||{}).forEach(([k, v]) => {
+    if(!v) return;
+    const m = /^(.+)\|[^|]+\|#\d+$/.exec(k);
+    if(m && m[1] === site) labels.add(v);
+  });
+  const prev = slotSel.value;
+  slotSel.innerHTML = '<option value="">— Any slot at this site —</option>'
+    + [...labels].sort().map(l => `<option value="${l.replace(/"/g,'&quot;')}">${l.replace(/</g,'&lt;')}</option>`).join('');
+  if(prev && [...slotSel.options].some(o => o.value === prev)) slotSel.value = prev;
+}
+
+function addSiteSeqRule(){
+  if(!_adminOnly('add site sequence rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p){ alert('No physician selected.'); return; }
+  const site = document.getElementById('sr-ss-site')?.value;
+  if(!site){ alert('Pick a site.'); return; }
+  if(!(S.sites||[]).some(s => s.name === site)){
+    _srRefreshSiteSeqOpts();
+    alert(`Site "${site}" no longer exists. The dropdown has been refreshed.`);
+    return;
+  }
+  const slotLabel = document.getElementById('sr-ss-slot')?.value || '';
+  const maxConsec = +document.getElementById('sr-ss-maxconsec')?.value || null;
+  const minRest   = +document.getElementById('sr-ss-minrest')?.value || null;
+  const notes     = (document.getElementById('sr-ss-notes')?.value || '').trim();
+  if(!maxConsec && !minRest){ alert('Enter at least one of: max consecutive days, min days off.'); return; }
+  if(!Array.isArray(p.siteSeqRules)) p.siteSeqRules = [];
+  // De-dup by (site, slotLabel) — overwrite if exists so admins can adjust.
+  const existing = p.siteSeqRules.findIndex(r =>
+    r.site === site && (r.slotLabel||'') === (slotLabel||''));
+  const rule = {site, slotLabel, maxConsec, minRest, notes};
+  if(existing >= 0) p.siteSeqRules[existing] = rule;
+  else              p.siteSeqRules.push(rule);
+  // Clear the form fields so the admin can add another quickly
+  ['sr-ss-maxconsec','sr-ss-minrest','sr-ss-notes'].forEach(id=>{
+    const e = document.getElementById(id); if(e) e.value = '';
+  });
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+function removeSiteSeqRule(idx){
+  if(!_adminOnly('remove site sequence rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p || !Array.isArray(p.siteSeqRules)) return;
+  p.siteSeqRules.splice(idx, 1);
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+// Human-readable description of a siteSeqRule for the rule list.
+function _describeSiteSeqRule(r){
+  const target = r.slotLabel
+    ? `${r.site} <span style="color:var(--blue-t);font-weight:700">${r.slotLabel}</span>`
+    : `<strong>${(r.site||'?').replace(/</g,'&lt;')}</strong>`;
+  const parts = [];
+  if(r.maxConsec) parts.push(`max ${r.maxConsec} consecutive day(s)`);
+  if(r.minRest)   parts.push(`min ${r.minRest} day(s) off`);
+  return `📍 At ${target}: ${parts.join(', ')}`;
+}
+
 function addDayCondition(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   const dow=+document.getElementById('sr-dow')?.value;
@@ -12160,7 +12862,15 @@ if(document.readyState === 'loading'){
 const _NOTIF_DEFAULTS = {
   master:true, chatDM:true, chatGroup:false, chatMention:true,
   swapReq:true, swapRes:true, shiftAssign:true, shiftRemove:true,
-  holiday:true, vacation:true, openShift:false, broadcast:true
+  holiday:true, vacation:true, openShift:false, broadcast:true,
+  // Recurring conferences (tumor board) reminders — sent ahead of each occurrence.
+  tumorBoard:true,
+  // Clinic reminders — same idea, separate toggle so users can opt out
+  // independently if their clinic schedule is heavy.
+  clinic:true,
+  // Schedule publish digests — when admin publishes a date range, the user's
+  // own assignments in that range are emailed to them as a personalized digest.
+  schedulePublish:true,
 };
 
 // Look up the user row for a given physId (returns null if no linked account)
@@ -12417,7 +13127,8 @@ function renderCommPrefs(){
     'cp-master':'master','cp-chatDM':'chatDM','cp-chatGroup':'chatGroup','cp-chatMention':'chatMention',
     'cp-swapReq':'swapReq','cp-swapRes':'swapRes','cp-shiftAssign':'shiftAssign',
     'cp-shiftRemove':'shiftRemove','cp-holiday':'holiday','cp-vacation':'vacation',
-    'cp-openShift':'openShift','cp-broadcast':'broadcast'
+    'cp-openShift':'openShift','cp-broadcast':'broadcast',
+    'cp-tumorBoard':'tumorBoard','cp-clinic':'clinic','cp-schedulePublish':'schedulePublish'
   };
   Object.entries(map).forEach(([elId,prefKey])=>{
     const el=document.getElementById(elId);
@@ -12530,7 +13241,8 @@ function saveCommPrefs(){
     'cp-master':'master','cp-chatDM':'chatDM','cp-chatGroup':'chatGroup','cp-chatMention':'chatMention',
     'cp-swapReq':'swapReq','cp-swapRes':'swapRes','cp-shiftAssign':'shiftAssign',
     'cp-shiftRemove':'shiftRemove','cp-holiday':'holiday','cp-vacation':'vacation',
-    'cp-openShift':'openShift','cp-broadcast':'broadcast'
+    'cp-openShift':'openShift','cp-broadcast':'broadcast',
+    'cp-tumorBoard':'tumorBoard','cp-clinic':'clinic','cp-schedulePublish':'schedulePublish'
   };
   Object.entries(map).forEach(([elId,prefKey])=>{
     const el=document.getElementById(elId);
@@ -12711,6 +13423,1604 @@ async function sendBroadcastTest(){
 }
 
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   TUMOR BOARDS — recurring multidisciplinary conferences
+   ═══════════════════════════════════════════════════════════════════════════
+   Schema (S.tumorBoards):
+     {id, name, sites:[siteName], subs:[subspecialty], dayOfWeek:0..6,
+      time:'HH:MM', durationMin, allowedPhysIds:[id], notes, active:true,
+      skipDates:['YYYY-MM-DD']}
+   sites/subs are informational tags used for filtering and display; the
+   binding that drives calendar sync is allowedPhysIds. Editing happens in
+   place via _editingTBId — same pattern as the other inline-edit flows.
+*/
+
+// Module-level edit flag — only one tumor board edits at a time.
+let _editingTBId = null;
+
+// Day-of-week names re-used from the recurrence engine (_DOW_NAMES /
+// _DOW_SHORT) defined further down. Kept as references-only here so prior
+// _TB_DOW_NAMES / _TB_DOW_SHORT call sites still resolve.
+
+// HTML-escape helper (already exists as escHtml elsewhere; redeclared here for
+// safety so this section is self-contained if extracted later).
+function _tbEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// Per-kind config that lets one set of render functions serve both tumor
+// boards and clinics. The 'kind' string identifies which collection to read,
+// which DOM container to write to, and which functions to wire on the
+// edit/save buttons. Single source of truth for both pages.
+const _RECUR_KINDS = {
+  tumorBoard: {
+    coll: 'tumorBoards',
+    listElId: 'tb-list',
+    emoji: '🔬',
+    label: 'Tumor Board',
+    addFn: 'addTumorBoard',
+    editFn: 'startEditTumorBoard',
+    deleteFn: 'deleteTumorBoard',
+    saveFn: 'saveTumorBoard',
+    cancelFn: 'cancelEditTumorBoard',
+  },
+  clinic: {
+    coll: 'clinics',
+    listElId: 'cl-list',
+    emoji: '🏥',
+    label: 'Clinic',
+    addFn: 'addClinic',
+    editFn: 'startEditClinic',
+    deleteFn: 'deleteClinic',
+    saveFn: 'saveClinic',
+    cancelFn: 'cancelEditClinic',
+  },
+};
+
+// Look up an item by id across the kind's collection.
+function _recurFind(kind, id){
+  const cfg = _RECUR_KINDS[kind]; if(!cfg) return null;
+  return (S[cfg.coll]||[]).find(x => x.id === id);
+}
+
+// Look up an item across BOTH collections (used by helpers wired into
+// onchange/onclick attributes that don't carry a kind context).
+function _recurFindAny(id){
+  return (S.tumorBoards||[]).find(t=>t.id===id)
+      || (S.clinics||[]).find(c=>c.id===id);
+}
+
+// Page entry, shared by tumor boards and clinics.
+function _renderRecurringPage(kind){
+  const cfg = _RECUR_KINDS[kind]; if(!cfg) return;
+  if(!_isAdminOrSU()) return;
+  if(!Array.isArray(S[cfg.coll])) S[cfg.coll] = [];
+  const wrap = document.getElementById(cfg.listElId);
+  if(!wrap) return;
+  // Sort by "primary day" of the recurrence so the list groups intuitively.
+  const primaryDay = (item) => {
+    const r = item.recurrence;
+    if(!r) return item.dayOfWeek||0;
+    if(r.kind === 'weekly' || r.kind === 'biweekly') return (r.days&&r.days[0])||0;
+    if(r.kind === 'monthly-dow' || r.kind === 'monthly-multi') return r.day||0;
+    return 7; // monthly-dom / specific / every-N go last
+  };
+  const items = S[cfg.coll].slice().sort((a,b)=>{
+    const pa = primaryDay(a), pb = primaryDay(b);
+    if(pa !== pb) return pa - pb;
+    return (a.time||'').localeCompare(b.time||'');
+  });
+  if(!items.length){
+    wrap.innerHTML = `<div class="card"><em style="color:var(--txt3);font-size:12px">No ${cfg.label.toLowerCase()}s yet. Add one above.</em></div>`;
+    return;
+  }
+
+  const siteNames = (S.sites||[]).map(s=>s.name).filter(n=>n!=='At Home / Remote');
+  const allSubs   = [...(S.drSubs||[]), ...(S.irSubs||[])];
+
+  let html = '';
+  for(const item of items){
+    if(_editingTBId === item.id){
+      html += _renderRecurringEditCard(item, kind, siteNames, allSubs);
+    } else {
+      html += _renderRecurringViewCard(item, kind);
+    }
+  }
+  wrap.innerHTML = html;
+  // Inject the kind-specific recurrence input fields after the card is in DOM
+  if(_editingTBId != null){
+    _tbRenderRecurrenceFields(_editingTBId);
+  }
+}
+
+// Public entry points the nav system calls.
+function renderTumorBoards(){ _renderRecurringPage('tumorBoard'); }
+function renderClinics(){     _renderRecurringPage('clinic'); }
+
+// Read-only card. Identical schema for both kinds; only the action buttons
+// and emoji differ.
+function _renderRecurringViewCard(item, kind){
+  const cfg = _RECUR_KINDS[kind];
+  const recDesc = _describeRecurrence(item.recurrence) ||
+    (item.dayOfWeek != null ? `Weekly · ${_TB_DOW_SHORT[item.dayOfWeek]}` : 'Weekly');
+  const time = item.time || '00:00';
+  const dur = item.durationMin || 60;
+  const sites = (item.sites||[]).length ? (item.sites||[]).map(_tbEsc).join(', ') : '<em style="color:var(--txt3)">all sites</em>';
+  const subs  = (item.subs||[]).length ? (item.subs||[]).map(_tbEsc).join(', ') : '<em style="color:var(--txt3)">no specialty filter</em>';
+  const physIds = item.allowedPhysIds||[];
+  const physChips = physIds.length
+    ? physIds.map(id=>{
+        const p=(S.physicians||[]).find(x=>x.id===id);
+        return p ? `<span class="tag tb" style="font-size:10px;margin:1px">${_tbEsc(p.last+', '+p.first)}</span>` : '';
+      }).join('')
+    : `<em style="color:var(--txt3);font-size:11px">No participants assigned — won't appear on anyone's calendar.</em>`;
+  const inactiveBadge = item.active === false ? '<span class="tag" style="background:var(--red);color:#fff;font-size:9px;margin-left:6px">PAUSED</span>' : '';
+  const skip = (item.skipDates||[]).length ? `<div style="font-size:10px;color:var(--txt3);margin-top:4px">Skipped: ${(item.skipDates||[]).map(_tbEsc).join(', ')}</div>` : '';
+
+  // Rotation summary block — only when rotation is enabled. Shows next 6
+  // upcoming occurrences with the assigned phys.
+  let rotationBlock = '';
+  if(item.rotation && item.rotation.enabled){
+    const order = item.rotation.physRotation||[];
+    const orderChips = order.length
+      ? order.map((id,i)=>{
+          const p=(S.physicians||[]).find(x=>x.id===id);
+          return p ? `<span style="font-size:10px;color:var(--txt3)">${i+1}. ${_tbEsc(p.last)}</span>` : '';
+        }).join(' → ')
+      : '<em style="color:var(--txt3);font-size:11px">Rotation list empty.</em>';
+    const today = fmtDate(new Date());
+    const future = new Date(); future.setDate(future.getDate()+90);
+    const upcoming = _eventOccurrencesInRange(item, today, fmtDate(future)).slice(0, 6);
+    const upRows = upcoming.map(d => {
+      const physId = _rotationPhysFor(item, d);
+      const p = physId ? (S.physicians||[]).find(x=>x.id===physId) : null;
+      const a = item.rotation.assignments?.[d];
+      const tag = a && typeof a==='object' && a.assignedBy==='manual' ? ' <span class="tag" style="font-size:8px;background:var(--amber);color:#fff">manual</span>' : '';
+      return `<div style="font-size:11px">${_TB_DOW_SHORT[parseDateLocal(d).getDay()]} ${d}: ${p ? _tbEsc(p.last+', '+p.first) : '<em style="color:var(--amber-t,#92400e)">unassigned</em>'}${tag}</div>`;
+    }).join('') || '<em style="color:var(--txt3);font-size:11px">No upcoming occurrences in the next 90 days.</em>';
+    rotationBlock = `<div style="margin-top:10px;padding:8px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:4px">
+      <div style="font-size:11px;font-weight:600">🔁 Rotation enabled</div>
+      <div style="margin-top:4px">${orderChips}</div>
+      <div style="margin-top:8px;font-size:11px;font-weight:600">Upcoming assignments:</div>
+      ${upRows}
+    </div>`;
+  }
+
+  return `<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:14px">${_tbEsc(item.name)}${inactiveBadge}</div>
+        <div style="font-size:12px;color:var(--txt2);margin-top:2px">
+          ${_tbEsc(recDesc)} · ${_tbEsc(time)} · ${dur} min
+        </div>
+        <div style="font-size:11px;margin-top:6px"><strong>Sites:</strong> ${sites}</div>
+        <div style="font-size:11px"><strong>Specialties:</strong> ${subs}</div>
+        <div style="font-size:11px;margin-top:6px"><strong>Participants (${physIds.length}):</strong></div>
+        <div style="margin-top:2px">${physChips}</div>
+        ${item.notes ? `<div style="font-size:11px;color:var(--txt3);margin-top:6px"><em>${_tbEsc(item.notes)}</em></div>` : ''}
+        ${skip}
+        ${rotationBlock}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <button class="bsm" onclick="${cfg.editFn}(${item.id})" title="Edit">✎</button>
+        <button class="bsm br" onclick="${cfg.deleteFn}(${item.id})" title="Delete">🗑</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// In-place editor card. Same form for tumor boards and clinics; the save and
+// cancel buttons dispatch to the right handler via the kind cfg.
+function _renderRecurringEditCard(item, kind, siteNames, allSubs){
+  const cfg = _RECUR_KINDS[kind];
+  const physOpts = (S.physicians||[])
+    .slice()
+    .sort((a,b)=>(a.last||'').localeCompare(b.last||'')||(a.first||'').localeCompare(b.first||''))
+    .map(p=>{
+      const checked = (item.allowedPhysIds||[]).includes(p.id) ? 'checked' : '';
+      const role = p.role || (p.irFte>0&&p.drFte>0?'MIXED':p.irFte>0?'IR':'DR');
+      return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;cursor:pointer">
+        <input type="checkbox" class="tbe-phys-${item.id}" value="${p.id}" ${checked} onchange="_tbSyncRotationFromPhys(${item.id})">
+        ${_tbEsc(p.last+', '+p.first)} <span style="color:var(--txt3)">(${role})</span>
+      </label>`;
+    }).join('');
+
+  const siteCkbx = siteNames.map(s=>{
+    const checked = (item.sites||[]).includes(s) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;cursor:pointer">
+      <input type="checkbox" class="tbe-site-${item.id}" value="${_tbEsc(s)}" ${checked}>${_tbEsc(s)}
+    </label>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">No sites configured.</em>';
+
+  const subCkbx = allSubs.map(s=>{
+    const checked = (item.subs||[]).includes(s) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;cursor:pointer">
+      <input type="checkbox" class="tbe-sub-${item.id}" value="${_tbEsc(s)}" ${checked}>${_tbEsc(s)}
+    </label>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">No subspecialties configured.</em>';
+
+  // Recurrence kind picker. Field details rendered by _tbRenderRecurrenceFields
+  // post-mount, so the markup template stays small.
+  const rec = item.recurrence || {kind:'weekly', days:[item.dayOfWeek||0], interval:1};
+  const recKind = rec.kind || 'weekly';
+  const kindOpts = [
+    ['weekly','Weekly (every N weeks)'],
+    ['biweekly','Biweekly'],
+    ['monthly-dom','Monthly (day-of-month)'],
+    ['monthly-dow','Monthly (Nth weekday)'],
+    ['monthly-multi','Monthly (multiple weekdays-of-month)'],
+    ['every-n-days','Every N days'],
+    ['specific-dates','Specific dates only'],
+  ].map(([v,l])=>`<option value="${v}"${recKind===v?' selected':''}>${l}</option>`).join('');
+
+  const rotation = item.rotation || {enabled:false, physRotation:(item.allowedPhysIds||[]).slice(), assignments:{}};
+  const rotEnabled = !!rotation.enabled;
+  const rotOrder = rotation.physRotation || [];
+  const rotChips = rotOrder.length
+    ? rotOrder.map((pid, i) => {
+        const p = (S.physicians||[]).find(x=>x.id===pid);
+        const name = p ? _tbEsc(p.last+', '+p.first) : `?phys ${pid}`;
+        const upBtn = i > 0 ? `<button class="bxs" onclick="_tbMoveRotation(${item.id}, ${i}, -1)" title="Move up">▲</button>` : '';
+        const dnBtn = i < rotOrder.length-1 ? `<button class="bxs" onclick="_tbMoveRotation(${item.id}, ${i}, 1)" title="Move down">▼</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:2px 6px;background:var(--bg2,rgba(0,0,0,0.04));border-radius:3px">
+          <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
+          <span style="flex:1">${name}</span>
+          ${upBtn}${dnBtn}
+        </div>`;
+      }).join('')
+    : `<em style="color:var(--txt3);font-size:11px">Add participants above; they'll seed the rotation order.</em>`;
+
+  return `<div class="card" style="margin-bottom:10px;border:2px solid var(--blue)">
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Editing ${cfg.label.toLowerCase()}: ${_tbEsc(item.name)}</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:200px"><label>Name</label><input id="tbe-name-${item.id}" value="${_tbEsc(item.name)}" style="width:100%"></div>
+      <div class="fg"><label>Start</label><input type="time" id="tbe-time-${item.id}" value="${_tbEsc(item.time||'07:00')}"></div>
+      <div class="fg" style="width:90px"><label>Duration (min)</label><input type="number" id="tbe-dur-${item.id}" min="15" max="240" step="15" value="${+item.durationMin||60}"></div>
+      <div class="fg"><label>Active?</label><select id="tbe-active-${item.id}"><option value="1"${item.active!==false?' selected':''}>Yes</option><option value="0"${item.active===false?' selected':''}>Paused</option></select></div>
+    </div>
+
+    <div style="margin-top:14px;padding:10px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:6px">
+      <strong style="font-size:12px">Recurrence pattern</strong>
+      <div class="row" style="gap:8px;margin-top:6px;align-items:flex-end">
+        <div class="fg" style="min-width:240px">
+          <label>Pattern type</label>
+          <select id="tbe-reckind-${item.id}" onchange="_tbRenderRecurrenceFields(${item.id})">${kindOpts}</select>
+        </div>
+      </div>
+      <div id="tbe-recfields-${item.id}" style="margin-top:8px"></div>
+    </div>
+
+    <div style="margin-top:10px"><strong style="font-size:12px">Sites served</strong> <span style="color:var(--txt3);font-size:11px">(none = all)</span><div style="margin-top:4px">${siteCkbx}</div></div>
+    <div style="margin-top:10px"><strong style="font-size:12px">Specialty tags</strong> <span style="color:var(--txt3);font-size:11px">(informational)</span><div style="margin-top:4px">${subCkbx}</div></div>
+    <div style="margin-top:10px">
+      <strong style="font-size:12px">Participants</strong>
+      <span style="color:var(--txt3);font-size:11px">(only these physicians get the event on their calendar)</span>
+      <div id="tbe-physlist-${item.id}" style="margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid var(--bdr);padding:6px;border-radius:4px">${physOpts || '<em style="color:var(--txt3);font-size:11px">No physicians on roster.</em>'}</div>
+    </div>
+
+    <div style="margin-top:14px;padding:10px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:6px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="tbe-rotation-${item.id}" ${rotEnabled?'checked':''} onchange="_tbToggleRotationUI(${item.id})">
+        <strong style="font-size:12px">🔁 Rotate participants</strong>
+        <span style="color:var(--txt3);font-size:11px">— assign ONE participant per occurrence with equal frequency over time</span>
+      </label>
+      <div id="tbe-rotation-body-${item.id}" style="margin-top:8px;${rotEnabled?'':'display:none'}">
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">
+          Order below = rotation cycle. Auto-assign picks the next eligible person, skipping anyone on vacation that day.
+        </div>
+        <div id="tbe-rotation-list-${item.id}">${rotChips}</div>
+      </div>
+    </div>
+
+    <div class="fg" style="margin-top:10px"><label>Notes</label><input id="tbe-notes-${item.id}" value="${_tbEsc(item.notes||'')}" style="width:100%" placeholder="Optional — appears in calendar event description"></div>
+    <div class="fg" style="margin-top:10px">
+      <label>Skip dates <span style="color:var(--txt3);font-weight:400">(comma-separated YYYY-MM-DD; useful for holiday weeks)</span></label>
+      <input id="tbe-skip-${item.id}" value="${_tbEsc((item.skipDates||[]).join(', '))}" style="width:100%" placeholder="2026-12-25, 2026-12-26">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="bp bsm" onclick="${cfg.saveFn}(${item.id})">✓ Save</button>
+      <button class="bsm" onclick="${cfg.cancelFn}()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+// Wrappers retained for back-compat with any code that still calls these
+// names directly. Both delegate to the kind-aware renderers.
+function _renderTBViewCard(tb){ return _renderRecurringViewCard(tb, 'tumorBoard'); }
+function _renderTBEditCard(tb, siteNames, allSubs){ return _renderRecurringEditCard(tb, 'tumorBoard', siteNames, allSubs); }
+
+function addTumorBoard(){
+  if(!_adminOnly('add tumor board')) return;
+  const name = (document.getElementById('tb-new-name')?.value || '').trim().replace(/[<>&"|]/g,'');
+  if(!name){ alert('Enter a board name.'); return; }
+  if(!Array.isArray(S.tumorBoards)) S.tumorBoards = [];
+  if(S.tumorBoards.some(t => t.name.toLowerCase() === name.toLowerCase())){
+    alert(`A board named "${name}" already exists.`); return;
+  }
+  const dow  = +document.getElementById('tb-new-dow')?.value || 0;
+  const time = document.getElementById('tb-new-time')?.value || '07:00';
+  const dur  = +document.getElementById('tb-new-dur')?.value || 60;
+  const id = S.nextId++;
+  S.tumorBoards.push({
+    id, name, time, durationMin:dur,
+    // New schema: full recurrence object. Default = simple weekly on the
+    // chosen day. Editor lets admin pick any other pattern.
+    recurrence: {kind:'weekly', days:[dow], interval:1},
+    sites:[], subs:[], allowedPhysIds:[], notes:'', active:true, skipDates:[],
+    rotation: {enabled:false, physRotation:[], assignments:{}}
+  });
+  // Clear the form
+  ['tb-new-name'].forEach(i=>{const el=document.getElementById(i); if(el) el.value='';});
+  triggerSave();
+  // Auto-jump into edit mode for the just-created board so the admin can
+  // immediately add participants — empty boards are useless.
+  _editingTBId = id;
+  renderTumorBoards();
+}
+
+function startEditTumorBoard(id){
+  if(!_adminOnly('edit tumor board')) return;
+  _editingTBId = id;
+  renderTumorBoards();
+}
+
+function cancelEditTumorBoard(){
+  _editingTBId = null;
+  renderTumorBoards();
+}
+
+function saveTumorBoard(id){
+  if(!_adminOnly('edit tumor board')) return;
+  const tb = (S.tumorBoards||[]).find(t=>t.id===id);
+  if(!tb){ _editingTBId = null; renderTumorBoards(); return; }
+  const newName = (document.getElementById(`tbe-name-${id}`)?.value||'').trim().replace(/[<>&"|]/g,'');
+  if(!newName){ alert('Name cannot be empty.'); return; }
+  // Block name collisions with other boards (same name allowed for the same record being edited)
+  if(S.tumorBoards.some(t => t.id !== id && t.name.toLowerCase() === newName.toLowerCase())){
+    alert(`Another board named "${newName}" already exists.`); return;
+  }
+  tb.name        = newName;
+  tb.time        = document.getElementById(`tbe-time-${id}`)?.value || '07:00';
+  tb.durationMin = +document.getElementById(`tbe-dur-${id}`)?.value || 60;
+  tb.active      = document.getElementById(`tbe-active-${id}`)?.value !== '0';
+  tb.notes       = (document.getElementById(`tbe-notes-${id}`)?.value||'').trim();
+
+  // Read recurrence — _readRecurrenceFromForm returns null on invalid input.
+  const newRec = _readRecurrenceFromForm(id);
+  if(!newRec){ return; } // helper alerted already
+  tb.recurrence = newRec;
+  // Drop legacy dayOfWeek now that recurrence is canonical
+  delete tb.dayOfWeek;
+
+  tb.sites = [...document.querySelectorAll(`.tbe-site-${id}:checked`)].map(c=>c.value);
+  tb.subs  = [...document.querySelectorAll(`.tbe-sub-${id}:checked`)].map(c=>c.value);
+  tb.allowedPhysIds = [...document.querySelectorAll(`.tbe-phys-${id}:checked`)].map(c=>+c.value);
+
+  // Rotation. Inline edit handlers (_tbSyncRotationFromPhys / _tbMoveRotation)
+  // mutated tb.rotation directly during the edit session; here we just commit
+  // the enabled flag and run the auto-assignment for the next 90 days so the
+  // admin sees results immediately on the read-only card.
+  const rotEnabled = !!document.getElementById(`tbe-rotation-${id}`)?.checked;
+  if(!tb.rotation) tb.rotation = {enabled:false, physRotation:[], assignments:{}};
+  tb.rotation.enabled = rotEnabled;
+  // Filter rotation list to only active participants
+  tb.rotation.physRotation = (tb.rotation.physRotation||[]).filter(pid => tb.allowedPhysIds.includes(pid));
+  // Append any newly-checked participants who weren't in the rotation yet
+  for(const pid of tb.allowedPhysIds){
+    if(!tb.rotation.physRotation.includes(pid)) tb.rotation.physRotation.push(pid);
+  }
+
+  // Skip-dates: parse comma-list, validate each as a date, dedupe.
+  const skipRaw = (document.getElementById(`tbe-skip-${id}`)?.value||'').trim();
+  const skipDates = [];
+  for(const piece of skipRaw.split(',').map(s=>s.trim()).filter(Boolean)){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(piece)){
+      alert(`Skip date "${piece}" must be YYYY-MM-DD.`); return;
+    }
+    if(!skipDates.includes(piece)) skipDates.push(piece);
+  }
+  tb.skipDates = skipDates.sort();
+
+  // If rotation is enabled, run auto-assignment over the next 90 days so the
+  // assignments persist and show up on calendars/publish digests right away.
+  if(rotEnabled && tb.rotation.physRotation.length){
+    const today = fmtDate(new Date());
+    const future = new Date(); future.setDate(future.getDate()+90);
+    const occs = _eventOccurrencesInRange(tb, today, fmtDate(future));
+    const result = _assignRotation(tb, occs, {force:false});
+    if(result.skipped > 0){
+      console.warn(`[TB ${tb.name}] ${result.skipped} occurrences skipped during auto-assign:`, result.conflicts);
+    }
+  }
+
+  _editingTBId = null;
+  triggerSave();
+  _afterMutation();
+  renderTumorBoards();
+}
+
+// Read the recurrence-fields panel and return a normalized recurrence object.
+// Returns null and alerts on invalid input. Shared by tumor boards and clinics.
+function _readRecurrenceFromForm(id){
+  const kind = document.getElementById(`tbe-reckind-${id}`)?.value || 'weekly';
+  if(kind === 'weekly'){
+    const days = [...document.querySelectorAll(`.tbe-recday-${id}:checked`)].map(c=>+c.value);
+    if(!days.length){ alert('Pick at least one day of the week.'); return null; }
+    const interval = Math.max(1, +document.getElementById(`tbe-recint-${id}`)?.value || 1);
+    const rec = {kind:'weekly', days, interval};
+    if(interval > 1){
+      const anchor = document.getElementById(`tbe-recanchor-${id}`)?.value;
+      if(anchor) rec.anchorDate = anchor;
+    }
+    return rec;
+  }
+  if(kind === 'biweekly'){
+    const days = [...document.querySelectorAll(`.tbe-recday-${id}:checked`)].map(c=>+c.value);
+    if(!days.length){ alert('Pick at least one day of the week.'); return null; }
+    const anchor = document.getElementById(`tbe-recanchor-${id}`)?.value || fmtDate(new Date());
+    return {kind:'biweekly', days, anchorDate:anchor};
+  }
+  if(kind === 'monthly-dom'){
+    const dom = Math.min(31, Math.max(1, +document.getElementById(`tbe-recdom-${id}`)?.value || 1));
+    return {kind:'monthly-dom', dayOfMonth:dom};
+  }
+  if(kind === 'monthly-dow'){
+    const wkRaw = document.getElementById(`tbe-recwk-${id}`)?.value || '1';
+    const weekOfMonth = wkRaw === '-1' ? -1 : Math.max(1, +wkRaw || 1);
+    const day = +document.getElementById(`tbe-recday-${id}`)?.value || 0;
+    return {kind:'monthly-dow', weekOfMonth, day};
+  }
+  if(kind === 'monthly-multi'){
+    const weeks = [...document.querySelectorAll(`.tbe-recwks-${id}:checked`)].map(c => c.value === '-1' ? -1 : +c.value);
+    if(!weeks.length){ alert('Pick at least one week of the month.'); return null; }
+    const day = +document.getElementById(`tbe-recday-${id}`)?.value || 0;
+    return {kind:'monthly-multi', weeks, day};
+  }
+  if(kind === 'every-n-days'){
+    const interval = Math.max(1, +document.getElementById(`tbe-recint-${id}`)?.value || 7);
+    const anchor = document.getElementById(`tbe-recanchor-${id}`)?.value || fmtDate(new Date());
+    return {kind:'every-n-days', interval, anchorDate:anchor};
+  }
+  if(kind === 'specific-dates'){
+    const raw = (document.getElementById(`tbe-recdates-${id}`)?.value||'').trim();
+    const dates = [];
+    for(const piece of raw.split(',').map(s=>s.trim()).filter(Boolean)){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(piece)){
+        alert(`Date "${piece}" must be YYYY-MM-DD.`); return null;
+      }
+      if(!dates.includes(piece)) dates.push(piece);
+    }
+    if(!dates.length){ alert('Enter at least one date.'); return null; }
+    return {kind:'specific-dates', dates:dates.sort()};
+  }
+  alert('Unknown recurrence pattern: '+kind);
+  return null;
+}
+
+// Render the recurrence-specific input fields based on the selected pattern.
+// Called on initial card render (after _renderRecurringPage builds the DOM)
+// and whenever the pattern <select> changes. The card markup leaves the
+// `tbe-recfields-<id>` div empty; this function fills it. Keeps the markup
+// template manageable and lets us swap field sets without re-rendering the
+// whole card (which would lose form state).
+function _tbRenderRecurrenceFields(itemId){
+  const item = _recurFindAny(itemId);
+  if(!item) return;
+  const kind = document.getElementById(`tbe-reckind-${itemId}`)?.value || 'weekly';
+  const wrap = document.getElementById(`tbe-recfields-${itemId}`);
+  if(!wrap) return;
+  const rec = item.recurrence || {kind:'weekly', days:[item.dayOfWeek||0], interval:1};
+  const todayISO = fmtDate(new Date());
+  // Day-checkbox grid helper used by weekly/biweekly.
+  const dayChk = (selected) => _TB_DOW_NAMES.map((n,i)=>{
+    const ck = selected.includes(i) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin-right:8px;cursor:pointer">
+      <input type="checkbox" class="tbe-recday-${itemId}" value="${i}" ${ck}>${_TB_DOW_SHORT[i]}
+    </label>`;
+  }).join('');
+
+  if(kind === 'weekly'){
+    const days = (rec.kind==='weekly'?rec.days:null) || [item.dayOfWeek||0];
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg" style="width:120px"><label>Every N weeks</label><input type="number" id="tbe-recint-${itemId}" min="1" max="12" value="${rec.kind==='weekly'?(rec.interval||1):1}"></div>
+        <div class="fg" style="flex:1;min-width:240px"><label>Days of week</label><div>${dayChk(days)}</div></div>
+        <div class="fg"><label>Anchor date <span style="color:var(--txt3);font-weight:400">(used when N&gt;1)</span></label><input type="date" id="tbe-recanchor-${itemId}" value="${_tbEsc(rec.anchorDate||todayISO)}"></div>
+      </div>`;
+  } else if(kind === 'biweekly'){
+    const days = (rec.kind==='biweekly'?rec.days:null) || [item.dayOfWeek||0];
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg" style="flex:1;min-width:240px"><label>Days of week (alternates each week)</label><div>${dayChk(days)}</div></div>
+        <div class="fg"><label>Anchor date <span style="color:var(--txt3);font-weight:400">(week containing this date is "on")</span></label><input type="date" id="tbe-recanchor-${itemId}" value="${_tbEsc(rec.anchorDate||todayISO)}"></div>
+      </div>`;
+  } else if(kind === 'monthly-dom'){
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end">
+        <div class="fg" style="width:140px"><label>Day of month</label><input type="number" id="tbe-recdom-${itemId}" min="1" max="31" value="${rec.kind==='monthly-dom'?(rec.dayOfMonth||1):1}"></div>
+        <div style="font-size:11px;color:var(--txt3);padding-bottom:6px">If &gt; days in a month (e.g. 31 in Feb), it's clamped to the last day.</div>
+      </div>`;
+  } else if(kind === 'monthly-dow'){
+    const wkOpts = [['1','1st'],['2','2nd'],['3','3rd'],['4','4th'],['5','5th'],['-1','Last']]
+      .map(([v,l])=>`<option value="${v}"${String(rec.weekOfMonth||1)===v?' selected':''}>${l}</option>`).join('');
+    const dayOpts = _TB_DOW_NAMES.map((n,i)=>`<option value="${i}"${(rec.day||0)===i?' selected':''}>${n}</option>`).join('');
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end">
+        <div class="fg" style="width:100px"><label>Which</label><select id="tbe-recwk-${itemId}">${wkOpts}</select></div>
+        <div class="fg" style="width:160px"><label>Weekday</label><select id="tbe-recday-${itemId}">${dayOpts}</select></div>
+      </div>`;
+  } else if(kind === 'monthly-multi'){
+    const wkLabels = [['1','1st'],['2','2nd'],['3','3rd'],['4','4th'],['5','5th'],['-1','Last']];
+    const sel = rec.kind==='monthly-multi' ? (rec.weeks||[1]).map(String) : ['1','3'];
+    const dayOpts = _TB_DOW_NAMES.map((n,i)=>`<option value="${i}"${(rec.day||0)===i?' selected':''}>${n}</option>`).join('');
+    const wkChk = wkLabels.map(([v,l])=>{
+      const ck = sel.includes(v) ? 'checked' : '';
+      return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin-right:8px;cursor:pointer">
+        <input type="checkbox" class="tbe-recwks-${itemId}" value="${v}" ${ck}>${l}
+      </label>`;
+    }).join('');
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg"><label>Weeks of month</label><div>${wkChk}</div></div>
+        <div class="fg" style="width:160px"><label>Weekday</label><select id="tbe-recday-${itemId}">${dayOpts}</select></div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">Common pattern: 1st &amp; 3rd Tuesday → check 1st and 3rd, pick Tuesday.</div>`;
+  } else if(kind === 'every-n-days'){
+    wrap.innerHTML = `
+      <div class="row" style="gap:8px;align-items:flex-end">
+        <div class="fg" style="width:120px"><label>Every N days</label><input type="number" id="tbe-recint-${itemId}" min="1" max="365" value="${rec.kind==='every-n-days'?(rec.interval||7):7}"></div>
+        <div class="fg"><label>Anchor date <span style="color:var(--txt3);font-weight:400">(grid starts here)</span></label><input type="date" id="tbe-recanchor-${itemId}" value="${_tbEsc(rec.anchorDate||todayISO)}"></div>
+      </div>`;
+  } else if(kind === 'specific-dates'){
+    const dates = rec.kind==='specific-dates' ? (rec.dates||[]) : [];
+    wrap.innerHTML = `
+      <div class="fg">
+        <label>Specific dates <span style="color:var(--txt3);font-weight:400">(comma-separated YYYY-MM-DD)</span></label>
+        <input id="tbe-recdates-${itemId}" value="${_tbEsc(dates.join(', '))}" style="width:100%" placeholder="2026-05-12, 2026-05-26, 2026-06-09">
+      </div>`;
+  }
+}
+
+// Toggle the rotation body's visibility based on the enable checkbox.
+// Called from the rotation-toggle onchange.
+function _tbToggleRotationUI(itemId){
+  const cb = document.getElementById(`tbe-rotation-${itemId}`);
+  const body = document.getElementById(`tbe-rotation-body-${itemId}`);
+  if(cb && body) body.style.display = cb.checked ? '' : 'none';
+}
+
+// Sync the rotation list when the participant checkbox set changes. Adds new
+// picks to the end of the rotation; removes deselected ones. Re-renders only
+// the rotation list, NOT the full card — full re-render would trash the
+// other form fields' values. Tolerates not knowing the kind by using
+// _recurFindAny.
+function _tbSyncRotationFromPhys(itemId){
+  const item = _recurFindAny(itemId);
+  if(!item) return;
+  const checked = [...document.querySelectorAll(`.tbe-phys-${itemId}:checked`)].map(c=>+c.value);
+  if(!item.rotation) item.rotation = {enabled:false, physRotation:[], assignments:{}};
+  // Drop entries no longer participating
+  item.rotation.physRotation = (item.rotation.physRotation||[]).filter(id => checked.includes(id));
+  // Append new participants in checkbox order
+  for(const id of checked){
+    if(!item.rotation.physRotation.includes(id)) item.rotation.physRotation.push(id);
+  }
+  _renderRotationList(itemId);
+}
+
+// Move a rotation member up/down within its cycle (▲/▼ buttons).
+function _tbMoveRotation(itemId, idx, dir){
+  const item = _recurFindAny(itemId);
+  if(!item || !item.rotation) return;
+  const arr = item.rotation.physRotation || [];
+  const ni = idx + dir;
+  if(ni < 0 || ni >= arr.length) return;
+  [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+  _renderRotationList(itemId);
+}
+
+// Render only the rotation-list block. Shared by the two helpers above so
+// the rendering logic stays in one place.
+function _renderRotationList(itemId){
+  const item = _recurFindAny(itemId);
+  if(!item) return;
+  const wrap = document.getElementById(`tbe-rotation-list-${itemId}`);
+  if(!wrap) return;
+  const rotOrder = item.rotation?.physRotation || [];
+  wrap.innerHTML = rotOrder.length
+    ? rotOrder.map((pid,i) => {
+        const p = (S.physicians||[]).find(x=>x.id===pid);
+        const name = p ? _tbEsc(p.last+', '+p.first) : `?phys ${pid}`;
+        const upBtn = i > 0 ? `<button class="bxs" onclick="_tbMoveRotation(${itemId}, ${i}, -1)" title="Move up">▲</button>` : '';
+        const dnBtn = i < rotOrder.length-1 ? `<button class="bxs" onclick="_tbMoveRotation(${itemId}, ${i}, 1)" title="Move down">▼</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:2px 6px;background:var(--bg2,rgba(0,0,0,0.04));border-radius:3px">
+          <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
+          <span style="flex:1">${name}</span>
+          ${upBtn}${dnBtn}
+        </div>`;
+      }).join('')
+    : `<em style="color:var(--txt3);font-size:11px">Add participants above; they'll seed the rotation order.</em>`;
+}
+
+function deleteTumorBoard(id){
+  if(!_adminOnly('delete tumor board')) return;
+  const tb = (S.tumorBoards||[]).find(t=>t.id===id); if(!tb) return;
+  if(!confirm(`Delete tumor board "${tb.name}"? This cannot be undone.`)) return;
+  S.tumorBoards = S.tumorBoards.filter(t=>t.id!==id);
+  if(_editingTBId === id) _editingTBId = null;
+  triggerSave();
+  _afterMutation();
+  renderTumorBoards();
+}
+
+/* ─── CLINICS — same engine, separate collection ──────────────────────────
+   Clinic CRUD mirrors tumor board CRUD. The render functions, recurrence
+   engine, rotation logic, calendar sync, and publish digest all already
+   support clinics via the kind-parameterized helpers above. The only
+   collection-specific concerns are: (1) which array to push/filter on save
+   and delete, (2) which form fields to read on add (different IDs), and
+   (3) which name to pass to confirmation prompts. The shared _editingTBId
+   flag is reused — only one item at a time edits across BOTH pages, which
+   is desirable since the same form panel rendering helpers are involved.
+*/
+function addClinic(){
+  if(!_adminOnly('add clinic')) return;
+  const name = (document.getElementById('cl-new-name')?.value || '').trim().replace(/[<>&"|]/g,'');
+  if(!name){ alert('Enter a clinic name.'); return; }
+  if(!Array.isArray(S.clinics)) S.clinics = [];
+  if(S.clinics.some(c => c.name.toLowerCase() === name.toLowerCase())){
+    alert(`A clinic named "${name}" already exists.`); return;
+  }
+  const dow  = +document.getElementById('cl-new-dow')?.value || 0;
+  const time = document.getElementById('cl-new-time')?.value || '08:00';
+  const dur  = +document.getElementById('cl-new-dur')?.value || 240;
+  const id = S.nextId++;
+  S.clinics.push({
+    id, name, time, durationMin:dur,
+    recurrence: {kind:'weekly', days:[dow], interval:1},
+    sites:[], subs:[], allowedPhysIds:[], notes:'', active:true, skipDates:[],
+    rotation: {enabled:false, physRotation:[], assignments:{}}
+  });
+  ['cl-new-name'].forEach(i=>{const el=document.getElementById(i); if(el) el.value='';});
+  triggerSave();
+  _editingTBId = id;
+  renderClinics();
+}
+
+function startEditClinic(id){
+  if(!_adminOnly('edit clinic')) return;
+  _editingTBId = id;
+  renderClinics();
+}
+
+function cancelEditClinic(){
+  _editingTBId = null;
+  renderClinics();
+}
+
+function saveClinic(id){
+  if(!_adminOnly('edit clinic')) return;
+  const c = (S.clinics||[]).find(x=>x.id===id);
+  if(!c){ _editingTBId = null; renderClinics(); return; }
+  const newName = (document.getElementById(`tbe-name-${id}`)?.value||'').trim().replace(/[<>&"|]/g,'');
+  if(!newName){ alert('Name cannot be empty.'); return; }
+  if(S.clinics.some(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase())){
+    alert(`Another clinic named "${newName}" already exists.`); return;
+  }
+  c.name        = newName;
+  c.time        = document.getElementById(`tbe-time-${id}`)?.value || '08:00';
+  c.durationMin = +document.getElementById(`tbe-dur-${id}`)?.value || 240;
+  c.active      = document.getElementById(`tbe-active-${id}`)?.value !== '0';
+  c.notes       = (document.getElementById(`tbe-notes-${id}`)?.value||'').trim();
+
+  const newRec = _readRecurrenceFromForm(id);
+  if(!newRec){ return; }
+  c.recurrence = newRec;
+  delete c.dayOfWeek;
+
+  c.sites = [...document.querySelectorAll(`.tbe-site-${id}:checked`)].map(c=>c.value);
+  c.subs  = [...document.querySelectorAll(`.tbe-sub-${id}:checked`)].map(c=>c.value);
+  c.allowedPhysIds = [...document.querySelectorAll(`.tbe-phys-${id}:checked`)].map(c=>+c.value);
+
+  const rotEnabled = !!document.getElementById(`tbe-rotation-${id}`)?.checked;
+  if(!c.rotation) c.rotation = {enabled:false, physRotation:[], assignments:{}};
+  c.rotation.enabled = rotEnabled;
+  c.rotation.physRotation = (c.rotation.physRotation||[]).filter(pid => c.allowedPhysIds.includes(pid));
+  for(const pid of c.allowedPhysIds){
+    if(!c.rotation.physRotation.includes(pid)) c.rotation.physRotation.push(pid);
+  }
+
+  const skipRaw = (document.getElementById(`tbe-skip-${id}`)?.value||'').trim();
+  const skipDates = [];
+  for(const piece of skipRaw.split(',').map(s=>s.trim()).filter(Boolean)){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(piece)){
+      alert(`Skip date "${piece}" must be YYYY-MM-DD.`); return;
+    }
+    if(!skipDates.includes(piece)) skipDates.push(piece);
+  }
+  c.skipDates = skipDates.sort();
+
+  if(rotEnabled && c.rotation.physRotation.length){
+    const today = fmtDate(new Date());
+    const future = new Date(); future.setDate(future.getDate()+90);
+    const occs = _eventOccurrencesInRange(c, today, fmtDate(future));
+    const result = _assignRotation(c, occs, {force:false});
+    if(result.skipped > 0){
+      console.warn(`[Clinic ${c.name}] ${result.skipped} occurrences skipped during auto-assign:`, result.conflicts);
+    }
+  }
+
+  _editingTBId = null;
+  triggerSave();
+  _afterMutation();
+  renderClinics();
+}
+
+function deleteClinic(id){
+  if(!_adminOnly('delete clinic')) return;
+  const c = (S.clinics||[]).find(x=>x.id===id); if(!c) return;
+  if(!confirm(`Delete clinic "${c.name}"? This cannot be undone.`)) return;
+  S.clinics = S.clinics.filter(x=>x.id!==id);
+  if(_editingTBId === id) _editingTBId = null;
+  triggerSave();
+  _afterMutation();
+  renderClinics();
+}
+
+// Enumerate every occurrence of a tumor board between two ISO dates (inclusive).
+// Used by both the calendar feed (_myEventsInRange) and the publish digest.
+// Skips dates listed in tb.skipDates and skips boards where active === false.
+/* ═══════════════════════════════════════════════════════════════════════════
+   RECURRENCE ENGINE — shared by tumor boards and clinics (and any future
+   recurring-event surface). The engine takes a record with a `recurrence`
+   object and enumerates ISO date occurrences in a range. Rotation logic is
+   layered on top: when an event has rotation enabled, each occurrence is
+   assigned to a rotating subset of the participants (stable across loads
+   because it's keyed off anchorDate + occurrence index).
+   ═══════════════════════════════════════════════════════════════════════════
+   recurrence schema:
+   {
+     type: 'weekly' | 'biweekly' | 'every-n-weeks'
+         | 'monthly-nth-dow' | 'monthly-date',
+     dayOfWeek: 0..6,        // weekly, biweekly, every-n-weeks, monthly-nth-dow
+     anchorDate: 'YYYY-MM-DD',  // biweekly, every-n-weeks  — defines which weeks are "on"
+     weekInterval: 2..N,        // every-n-weeks
+     nth: 1..5 | -1,            // monthly-nth-dow  (-1 = last weekday of month)
+     dayOfMonth: 1..31,         // monthly-date
+   }
+   For back-compat: if `recurrence` is missing but top-level `dayOfWeek` is
+   set, we treat the event as weekly on that day. Old tumor boards continue
+   working without a migration.
+*/
+
+const _DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const _DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+// Aliases so prior _TB_* references in existing code still resolve.
+const _TB_DOW_NAMES = _DOW_NAMES;
+const _TB_DOW_SHORT = _DOW_SHORT;
+
+// Resolve an effective recurrence object from an event, falling back to the
+// legacy weekly-by-dayOfWeek shape so old data needs no migration.
+function _evtRecurrence(evt){
+  if(evt && evt.recurrence && typeof evt.recurrence === 'object') return evt.recurrence;
+  return {type:'weekly', dayOfWeek: (evt && evt.dayOfWeek!=null) ? +evt.dayOfWeek : 0};
+}
+
+// Internal: does ISO date `iso` match the recurrence pattern of `evt`?
+function _evtMatchesRecurrence(evt, iso){
+  const r = _evtRecurrence(evt);
+  const d = parseDateLocal(iso); if(!d) return false;
+  if(r.type === 'weekly'){
+    return d.getDay() === (+r.dayOfWeek||0);
+  }
+  if(r.type === 'biweekly' || r.type === 'every-n-weeks'){
+    if(d.getDay() !== (+r.dayOfWeek||0)) return false;
+    const interval = r.type === 'biweekly' ? 2 : Math.max(2, +r.weekInterval||2);
+    // Anchor: midnight of the chosen anchor date snapped back to its dayOfWeek.
+    // If no anchor, use the epoch-Mon week so output is deterministic but
+    // probably arbitrary — admins should set an anchor for biweekly events.
+    const anchor = r.anchorDate ? parseDateLocal(r.anchorDate) : new Date(1970,0,5); // 1970-01-05 = Mon
+    if(!anchor) return false;
+    // Snap anchor to the same dayOfWeek as the recurrence so we count weeks
+    // from the first matching occurrence on/after the anchor.
+    const anchorDow = anchor.getDay();
+    const want = +r.dayOfWeek||0;
+    const offset = (want - anchorDow + 7) % 7;
+    const anchorMatch = new Date(anchor); anchorMatch.setDate(anchor.getDate() + offset);
+    // Diff in days, divided by 7, modulo interval, must equal 0
+    const diffDays = Math.round((d - anchorMatch) / 86400000);
+    if(diffDays < 0) return false;
+    return (Math.floor(diffDays/7) % interval) === 0;
+  }
+  if(r.type === 'monthly-nth-dow'){
+    const want = +r.dayOfWeek||0;
+    const nth  = +r.nth||1;
+    if(d.getDay() !== want) return false;
+    if(nth === -1){
+      // Last weekday-of-month: next week's same dow would be in next month
+      const probe = new Date(d); probe.setDate(d.getDate()+7);
+      return probe.getMonth() !== d.getMonth();
+    }
+    // nth in 1..5: count which occurrence of `want` this is in d's month
+    const dayInMonth = d.getDate();
+    const ordinal = Math.floor((dayInMonth - 1) / 7) + 1;
+    return ordinal === nth;
+  }
+  if(r.type === 'monthly-date'){
+    const dom = +r.dayOfMonth||1;
+    // Clamp: if dayOfMonth > daysInMonth (e.g. 31 in Feb), match the last day
+    const lastDay = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    const target = Math.min(dom, lastDay);
+    return d.getDate() === target;
+  }
+  return false;
+}
+
+// Enumerate every occurrence of `evt` within [startISO, endISO] inclusive.
+// Honors evt.skipDates and evt.active. Returns ISO strings sorted ascending.
+function _evtOccurrencesInRange(evt, startISO, endISO){
+  if(!evt || evt.active === false) return [];
+  const out = [];
+  const start = parseDateLocal(startISO);
+  const end   = parseDateLocal(endISO);
+  if(!start || !end || end < start) return [];
+  const skip = new Set(evt.skipDates||[]);
+  // Day-by-day walk. Cheap for ranges up to ~5 years; the recurrence-match
+  // function is O(1) per day. Could be optimized for very long ranges by
+  // computing the first match then stepping by interval, but the readability
+  // win of this approach beats the speedup we'd never measure.
+  for(let d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+    if(!_evtMatchesRecurrence(evt, fmtDate(d))) continue;
+    const iso = fmtDate(d);
+    if(skip.has(iso)) continue;
+    out.push(iso);
+  }
+  return out;
+}
+
+// Compute the end-time for an event on a given date, accounting for midnight
+// crossover (e.g. 23:30 + 60min → next day 00:30). Returns {endDate, endTime}.
+function _evtEndTimeFor(evt, isoDate){
+  const [h,m] = (evt.time||'07:00').split(':').map(n=>+n);
+  const startMin = h*60 + m;
+  const endMinTotal = startMin + (+evt.durationMin || 60);
+  const dayCarry = Math.floor(endMinTotal / 1440);
+  const endMin = endMinTotal % 1440;
+  const eh = String(Math.floor(endMin/60)).padStart(2,'0');
+  const em = String(endMin%60).padStart(2,'0');
+  let endDate = isoDate;
+  if(dayCarry > 0){
+    const d = parseDateLocal(isoDate);
+    d.setDate(d.getDate() + dayCarry);
+    endDate = fmtDate(d);
+  }
+  return {endDate, endTime: `${eh}:${em}`};
+}
+
+// Stable index of an occurrence within an event's series. Counts the number
+// of occurrences from a fixed origin to the given date so rotation is
+// deterministic across page loads. Origin: rotation.startDate if set, else
+// recurrence.anchorDate, else the epoch-Mon (only meaningful when there's no
+// anchor — admins should set one for predictable rotation order).
+function _evtOccurrenceIndex(evt, isoDate){
+  const r = _evtRecurrence(evt);
+  const rot = evt.rotation || {};
+  const originISO = rot.startDate || r.anchorDate || '1970-01-05';
+  const origin = parseDateLocal(originISO);
+  const target = parseDateLocal(isoDate);
+  if(!origin || !target) return 0;
+  // Walk the same enumeration but stop at target; cheap because recurrences
+  // are sparse. Cap at ~10 years to avoid runaway loops on bad data.
+  let idx = -1;
+  const cap = new Date(target); cap.setDate(target.getDate()+1);
+  for(let d = new Date(origin); d <= cap; d.setDate(d.getDate()+1)){
+    if(_evtMatchesRecurrence(evt, fmtDate(d))) idx++;
+    if(d.getTime() === target.getTime()) break;
+  }
+  return Math.max(0, idx);
+}
+
+// Return the physician IDs assigned to a given occurrence.
+// - If rotation is disabled or has no participants: returns the full
+//   allowedPhysIds list (everyone is on every occurrence — original behavior).
+// - If rotation is enabled: returns `slotsPerOccurrence` IDs, picked from
+//   the rotation order using the occurrence index. Equal-frequency: every
+//   participant gets the same number of slots over time (off by at most one
+//   when slots % participants != 0).
+function _evtAssignedPhysIds(evt, isoDate){
+  const all = (evt.allowedPhysIds||[]).slice();
+  const rot = evt.rotation || {};
+  if(!rot.enabled || !all.length) return all;
+  // Optional: a custom rotation order. If provided, we filter to participants
+  // still in allowedPhysIds (admins may remove a participant without first
+  // editing the rotation order); otherwise default to numeric ID order so
+  // it's deterministic and stable.
+  const order = (Array.isArray(rot.order) && rot.order.length)
+    ? rot.order.filter(id => all.includes(id))
+    : all.slice().sort((a,b)=>a-b);
+  // Fold in any participants not yet listed in the rotation order so newly
+  // added physicians don't break the cycle.
+  for(const id of all){ if(!order.includes(id)) order.push(id); }
+  if(!order.length) return [];
+  const slots = Math.max(1, Math.min(+rot.slotsPerOccurrence || 1, order.length));
+  const idx = _evtOccurrenceIndex(evt, isoDate);
+  const out = [];
+  // Round-robin: occurrence idx 0 gets order[0..slots-1], occurrence 1 gets
+  // order[slots..2*slots-1], wrapping. With slots=1 this is the classic
+  // "everyone takes turns" pattern. With slots>1 it's still balanced because
+  // start = (idx*slots) % len, then we take `slots` consecutive entries.
+  const start = (idx * slots) % order.length;
+  for(let i=0; i<slots; i++){
+    out.push(order[(start + i) % order.length]);
+  }
+  return out;
+}
+
+// Backwards-compatible wrappers — older code still calls _tb*.
+function _tbOccurrencesInRange(evt, startISO, endISO){ return _evtOccurrencesInRange(evt, startISO, endISO); }
+function _tbEndTimeFor(evt, isoDate){ return _evtEndTimeFor(evt, isoDate); }
+
+// Human-friendly description of a recurrence pattern, used in card headers
+// and emails. Pure function — no DOM access.
+function _evtDescribeRecurrence(evt){
+  const r = _evtRecurrence(evt);
+  const dow = _DOW_NAMES[+r.dayOfWeek||0];
+  if(r.type === 'weekly') return `Every ${dow}`;
+  if(r.type === 'biweekly') return `Every other ${dow}` + (r.anchorDate?` (anchor ${r.anchorDate})`:'');
+  if(r.type === 'every-n-weeks') return `Every ${Math.max(2,+r.weekInterval||2)} weeks on ${dow}` + (r.anchorDate?` (anchor ${r.anchorDate})`:'');
+  if(r.type === 'monthly-nth-dow'){
+    const nth = +r.nth||1;
+    const ord = nth === -1 ? 'Last' : ['1st','2nd','3rd','4th','5th'][nth-1] || nth+'th';
+    return `${ord} ${dow} of each month`;
+  }
+  if(r.type === 'monthly-date'){
+    return `Day ${+r.dayOfMonth||1} of each month`;
+  }
+  return 'Custom recurrence';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIFIED RECURRENCE / ROTATION SHIM LAYER
+   ═══════════════════════════════════════════════════════════════════════════
+   Two schemas exist in the codebase — accept both so neither breaks:
+
+     Legacy schema (used by _evt* engine above):
+        recurrence.type, recurrence.dayOfWeek, recurrence.weekInterval,
+        recurrence.nth, recurrence.dayOfMonth
+        rotation.order, rotation.slotsPerOccurrence, rotation.startDate
+
+     New schema (used by edit card + add/save in tumor boards / clinics):
+        recurrence.kind, recurrence.days[], recurrence.interval,
+        recurrence.weekOfMonth, recurrence.day, recurrence.weeks[],
+        recurrence.dayOfMonth, recurrence.dates[], recurrence.anchorDate
+        rotation.physRotation, rotation.assignments
+
+   These shim functions are the canonical names used by render/save/sync code
+   in the rest of the file. They detect which schema is in use and dispatch.
+*/
+
+// True if the recurrence object uses the new `kind` schema (vs the legacy
+// `type` schema handled by _evtMatchesRecurrence). We treat "no recurrence
+// at all" as legacy so old day-of-week-only items continue to work.
+function _isNewRecurrence(rec){
+  return rec && typeof rec === 'object' && typeof rec.kind === 'string';
+}
+
+// Day-by-day occurrence enumeration for the new schema. Cheap, deterministic,
+// and the schema's coverage (weekly N-day-set, biweekly N-day-set, monthly
+// day-of-month, monthly Nth-weekday, monthly multi-Nth-weekday, every-N-days,
+// specific-dates) maps cleanly onto a per-day predicate. _eventOccurrencesInRange
+// dispatches to this when it detects the new schema.
+function _newRecurMatches(rec, isoDate, dateObj){
+  const d = dateObj || parseDateLocal(isoDate);
+  if(!d) return false;
+  if(rec.kind === 'specific-dates'){
+    return (rec.dates||[]).includes(isoDate);
+  }
+  if(rec.kind === 'weekly'){
+    const days = rec.days && rec.days.length ? rec.days : [0];
+    if(!days.includes(d.getDay())) return false;
+    const interval = Math.max(1, +rec.interval || 1);
+    if(interval === 1) return true;
+    const anchor = rec.anchorDate ? parseDateLocal(rec.anchorDate) : new Date(1970,0,5);
+    if(!anchor) return true;
+    // Compare ISO weeks (Mon-anchored) for stability.
+    const monOf = (x) => { const c = new Date(x); c.setDate(c.getDate() - ((c.getDay()+6)%7)); return c; };
+    const weeksDiff = Math.round((monOf(d) - monOf(anchor)) / (7*86400000));
+    return ((weeksDiff % interval) + interval) % interval === 0;
+  }
+  if(rec.kind === 'biweekly'){
+    const days = rec.days && rec.days.length ? rec.days : [0];
+    if(!days.includes(d.getDay())) return false;
+    const anchor = rec.anchorDate ? parseDateLocal(rec.anchorDate) : new Date(1970,0,5);
+    const monOf = (x) => { const c = new Date(x); c.setDate(c.getDate() - ((c.getDay()+6)%7)); return c; };
+    const weeksDiff = Math.round((monOf(d) - monOf(anchor)) / (7*86400000));
+    return weeksDiff % 2 === 0;
+  }
+  if(rec.kind === 'monthly-dom'){
+    const dom = Math.min(31, Math.max(1, +rec.dayOfMonth || 1));
+    const lastDay = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    const target = Math.min(dom, lastDay);
+    return d.getDate() === target;
+  }
+  if(rec.kind === 'monthly-dow'){
+    const wkRaw = +rec.weekOfMonth || 1;
+    const day = +rec.day || 0;
+    if(d.getDay() !== day) return false;
+    const target = _nthWeekdayOfMonth(d.getFullYear(), d.getMonth(), day, wkRaw);
+    return target && fmtDate(target) === isoDate;
+  }
+  if(rec.kind === 'monthly-multi'){
+    const weeks = rec.weeks && rec.weeks.length ? rec.weeks : [1];
+    const day = +rec.day || 0;
+    if(d.getDay() !== day) return false;
+    return weeks.some(wk => {
+      const target = _nthWeekdayOfMonth(d.getFullYear(), d.getMonth(), day, +wk);
+      return target && fmtDate(target) === isoDate;
+    });
+  }
+  if(rec.kind === 'every-n-days'){
+    const interval = Math.max(1, +rec.interval || 1);
+    const anchor = rec.anchorDate ? parseDateLocal(rec.anchorDate) : new Date(1970,0,5);
+    if(!anchor) return false;
+    const days = Math.round((d - anchor) / 86400000);
+    return ((days % interval) + interval) % interval === 0;
+  }
+  return false;
+}
+
+// Returns the Date for the nth occurrence of `dow` (0=Sun..6=Sat) in the
+// given month, or null if it doesn't exist (e.g. 5th Tuesday in a month with
+// only four). nth=-1 means "last".
+function _nthWeekdayOfMonth(year, monthIdx, dow, nth){
+  if(nth === -1 || nth === 'last' || nth === '-1'){
+    const last = new Date(year, monthIdx+1, 0);
+    let d = new Date(last);
+    while(d.getDay() !== dow) d.setDate(d.getDate()-1);
+    return d;
+  }
+  const n = Math.max(1, +nth || 1);
+  let d = new Date(year, monthIdx, 1);
+  while(d.getDay() !== dow) d.setDate(d.getDate()+1);
+  d.setDate(d.getDate() + (n-1)*7);
+  if(d.getMonth() !== monthIdx) return null;
+  return d;
+}
+
+// Canonical occurrence-enumeration entry point. Routes to whichever engine
+// matches the recurrence schema. Used by render cards, calendar sync, publish
+// digest, and rotation auto-assign.
+function _eventOccurrencesInRange(item, startISO, endISO){
+  if(!item || item.active === false) return [];
+  const rec = item.recurrence;
+  if(!_isNewRecurrence(rec)){
+    // Legacy schema or no recurrence at all → defer to the _evt engine which
+    // already handles back-compat with top-level dayOfWeek.
+    return _evtOccurrencesInRange(item, startISO, endISO);
+  }
+  // New schema — walk day-by-day with _newRecurMatches.
+  const start = parseDateLocal(startISO);
+  const end   = parseDateLocal(endISO);
+  if(!start || !end || end < start) return [];
+  const skip = new Set(item.skipDates||[]);
+  const out = [];
+  // specific-dates is sparse; short-circuit so we don't walk a year of days
+  // when there are 5 specific dates.
+  if(rec.kind === 'specific-dates'){
+    for(const iso of (rec.dates||[]).slice().sort()){
+      if(iso >= startISO && iso <= endISO && !skip.has(iso)) out.push(iso);
+    }
+    return out;
+  }
+  for(let d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+    const iso = fmtDate(d);
+    if(skip.has(iso)) continue;
+    if(_newRecurMatches(rec, iso, d)) out.push(iso);
+  }
+  return out;
+}
+
+// Back-compat alias kept for any caller still using the older name.
+// (_tbOccurrencesInRange still exists too, redirecting to _evtOccurrencesInRange
+// — both routes converge here for new-schema items.)
+function _tbOccurrencesInRangeShim(item, s, e){ return _eventOccurrencesInRange(item, s, e); }
+
+// Human-readable summary. Routes by schema, falls back to legacy engine
+// for items still using `type`.
+function _describeRecurrence(rec){
+  if(!rec) return 'Weekly';
+  if(!_isNewRecurrence(rec)){
+    // _evtDescribeRecurrence operates on the whole event, but for legacy
+    // items the relevant fields are right on `rec` — wrap it.
+    return _evtDescribeRecurrence({recurrence: rec});
+  }
+  const dayShort = (i) => _DOW_SHORT[i];
+  if(rec.kind === 'specific-dates'){
+    const n = (rec.dates||[]).length;
+    return n ? `Specific dates (${n})` : 'No dates set';
+  }
+  if(rec.kind === 'every-n-days'){
+    const iv = +rec.interval || 1;
+    return `Every ${iv} day${iv===1?'':'s'}`;
+  }
+  if(rec.kind === 'biweekly'){
+    return `Every other week · ${(rec.days||[]).map(dayShort).join(', ') || '—'}`;
+  }
+  if(rec.kind === 'weekly'){
+    const days = (rec.days||[]).map(dayShort).join(', ') || '—';
+    const iv = +rec.interval || 1;
+    return iv === 1 ? `Weekly · ${days}` : `Every ${iv} weeks · ${days}`;
+  }
+  if(rec.kind === 'monthly-dom'){
+    return `Monthly · day ${rec.dayOfMonth||1}`;
+  }
+  const ord = (n) => ({1:'1st',2:'2nd',3:'3rd',4:'4th',5:'5th','-1':'last'}[String(n)] || `${n}th`);
+  if(rec.kind === 'monthly-dow'){
+    return `Monthly · ${ord(rec.weekOfMonth||1)} ${dayShort(rec.day||0)}`;
+  }
+  if(rec.kind === 'monthly-multi'){
+    return `Monthly · ${(rec.weeks||[]).map(ord).join(' & ')} ${dayShort(rec.day||0)}`;
+  }
+  return rec.kind || 'Unknown';
+}
+
+// True if a phys is on vacation on the given ISO date.
+function _isPhysOnVacation(physId, isoDate){
+  return (S.vacations||[]).some(v =>
+    v.physId === physId &&
+    v.start <= isoDate &&
+    (v.end || v.start) >= isoDate
+  );
+}
+
+// Resolve which phys is assigned to a specific occurrence under a rotation.
+// Supports both:
+//   • New schema:    rotation.assignments[iso]  (set by _assignRotation below)
+//   • Legacy schema: rotation.order / rotation.slotsPerOccurrence (computed
+//                    on the fly by _evtAssignedPhysIds)
+// Returns a single physId or null when the rotation is empty / disabled.
+function _rotationPhysFor(item, isoDate){
+  if(!item || !item.rotation || !item.rotation.enabled) return null;
+  // Prefer explicit stored assignment when present.
+  const a = item.rotation.assignments?.[isoDate];
+  if(a){
+    if(typeof a === 'object') return a.physId;
+    return a;
+  }
+  // Fall through to legacy computed assignment (returns array; take first).
+  try{
+    const ids = _evtAssignedPhysIds(item, isoDate);
+    return (ids && ids[0]) != null ? ids[0] : null;
+  }catch(_){ return null; }
+}
+
+// Equal-frequency rotation auto-assignment. Walks `occurrences` in date order,
+// assigning each unassigned date to the rotation member with the lowest
+// all-time count who isn't on vacation. Manual assignments
+// (assignedBy === 'manual') are never overwritten. With `force:true`, prior
+// auto assignments inside the window are recomputed.
+//
+// Fairness invariant: max - min count across rotation members ≤ 1 (excluding
+// dates where the entire rotation is on vacation).
+function _assignRotation(item, occurrences, opts){
+  opts = opts || {};
+  const force = !!opts.force;
+  if(!item.rotation) item.rotation = {enabled:true, physRotation:[], assignments:{}};
+  const rotation = item.rotation;
+  if(!rotation.assignments) rotation.assignments = {};
+  // Use physRotation if set; fall back to allowedPhysIds in original order.
+  const order = (rotation.physRotation && rotation.physRotation.length)
+    ? rotation.physRotation.slice()
+    : (item.allowedPhysIds||[]).slice();
+  if(!order.length) return {assigned:0, skipped:0, conflicts:[], note:'rotation list is empty'};
+
+  // Initialize all-time counts so the cycle continues fairly across runs.
+  const allCounts = Object.fromEntries(order.map(id => [id, 0]));
+  for(const [d, a] of Object.entries(rotation.assignments)){
+    const id = (typeof a === 'object') ? a.physId : a;
+    if(order.includes(id)) allCounts[id]++;
+  }
+  let assigned = 0, skipped = 0;
+  const conflicts = [];
+  const sorted = occurrences.slice().sort();
+  for(const iso of sorted){
+    const existing = rotation.assignments[iso];
+    if(existing){
+      if(typeof existing === 'object' && existing.assignedBy === 'manual') continue;
+      if(!force) continue;
+      // force=true: subtract the prior assignment from counts so we redo it fairly.
+      const prior = (typeof existing === 'object') ? existing.physId : existing;
+      if(order.includes(prior)) allCounts[prior] = Math.max(0, allCounts[prior]-1);
+    }
+    // Pick lowest-count member who isn't on vacation that day. Tiebreak by
+    // cycle position so equally-loaded members alternate naturally.
+    const candidates = order
+      .map((id, idx) => ({id, idx, count: allCounts[id]}))
+      .filter(c => !_isPhysOnVacation(c.id, iso))
+      .sort((a,b) => a.count - b.count || a.idx - b.idx);
+    if(!candidates.length){
+      skipped++;
+      conflicts.push({date: iso, reason: 'all rotation members on vacation'});
+      continue;
+    }
+    const pick = candidates[0];
+    rotation.assignments[iso] = {physId: pick.id, assignedBy: 'auto', ts: Date.now()};
+    allCounts[pick.id]++;
+    assigned++;
+  }
+  return {assigned, skipped, conflicts};
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PUBLISH SCHEDULE — admin sends each physician their personalized digest
+   ═══════════════════════════════════════════════════════════════════════════
+   Categories the admin can include: day shifts, weekday IR call, weekend
+   call, holiday call, tumor boards. Recipients picked by audience filter or
+   custom list. Each recipient receives only their own assignments. Uses the
+   same send-notification edge function as broadcast email.
+*/
+
+// Quick-range helper for the date pickers.
+function _pubApplyQuickRange(kind){
+  if(!kind) return;
+  const today = new Date();
+  let start, end;
+  // ISO date helpers
+  const iso = d => fmtDate(d);
+  const startOfWeekMon = (ref) => {
+    const d = new Date(ref); const day = d.getDay();
+    const diff = (day === 0 ? -6 : 1 - day); // Sun = -6 back to Mon
+    d.setDate(d.getDate() + diff); return d;
+  };
+  if(kind === 'this-week'){
+    start = startOfWeekMon(today);
+    end = new Date(start); end.setDate(start.getDate()+6);
+  } else if(kind === 'next-week'){
+    start = startOfWeekMon(today); start.setDate(start.getDate()+7);
+    end = new Date(start); end.setDate(start.getDate()+6);
+  } else if(kind === 'this-month'){
+    start = new Date(today.getFullYear(), today.getMonth(), 1);
+    end   = new Date(today.getFullYear(), today.getMonth()+1, 0);
+  } else if(kind === 'next-month'){
+    start = new Date(today.getFullYear(), today.getMonth()+1, 1);
+    end   = new Date(today.getFullYear(), today.getMonth()+2, 0);
+  } else if(kind === 'next-30'){
+    start = new Date(today);
+    end   = new Date(today); end.setDate(today.getDate()+30);
+  }
+  if(start && end){
+    document.getElementById('pub-start').value = iso(start);
+    document.getElementById('pub-end').value   = iso(end);
+  }
+}
+
+// Render the page. Sets up extras and recent log.
+function renderPublish(){
+  if(!_isAdminOrSU()) return;
+  if(!Array.isArray(S.publishLog)) S.publishLog = [];
+  // Default to next 7 days if blank
+  if(!document.getElementById('pub-start').value){
+    _pubApplyQuickRange('next-week');
+  }
+  _pubAudienceChanged();
+  _renderPubLog();
+  // Clear stale preview
+  const pv = document.getElementById('pub-preview'); if(pv) pv.innerHTML='';
+  const st = document.getElementById('pub-status'); if(st){ st.textContent=''; st.style.color='var(--txt3)'; }
+}
+
+// React to audience-select change: show secondary picker if needed.
+function _pubAudienceChanged(){
+  const v = document.getElementById('pub-audience')?.value || 'all';
+  const extra = document.getElementById('pub-aud-extra');
+  const lbl = document.getElementById('pub-aud-extra-lbl');
+  const sel = document.getElementById('pub-aud-extra-sel');
+  const customWrap = document.getElementById('pub-custom-list');
+  if(!extra || !lbl || !sel || !customWrap) return;
+  extra.style.display = 'none';
+  customWrap.style.display = 'none';
+  customWrap.innerHTML = '';
+  if(v === 'ir-group'){
+    extra.style.display = '';
+    lbl.textContent = 'IR Group';
+    sel.innerHTML = getIRGroups().map(g=>`<option value="${_tbEsc(g)}">${_tbEsc(g)}</option>`).join('')
+      || '<option value="">(no groups configured)</option>';
+  } else if(v === 'site'){
+    extra.style.display = '';
+    lbl.textContent = 'Site';
+    sel.innerHTML = (S.sites||[]).filter(s=>s.name!=='At Home / Remote')
+      .map(s=>`<option value="${_tbEsc(s.name)}">${_tbEsc(s.name)}</option>`).join('')
+      || '<option value="">(no sites)</option>';
+  } else if(v === 'custom'){
+    customWrap.style.display = '';
+    customWrap.innerHTML = '<div style="font-size:11px;color:var(--txt3);margin-bottom:4px">Pick recipients:</div>'
+      + '<div style="max-height:220px;overflow-y:auto;border:1px solid var(--bdr);padding:6px;border-radius:4px">'
+      + (S.physicians||[]).slice().sort((a,b)=>(a.last||'').localeCompare(b.last||''))
+        .map(p=>{
+          const u = _userForPhys(p.id);
+          const tag = u ? '' : ' <span style="color:var(--amber-t);font-size:10px">(no account)</span>';
+          return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;cursor:pointer">
+            <input type="checkbox" class="pub-pick" value="${p.id}" ${u?'':'disabled'}>
+            ${_tbEsc(p.last+', '+p.first)}${tag}
+          </label>`;
+        }).join('')
+      + '</div>';
+  }
+}
+
+// Resolve the recipient list (USERS rows) given current form state.
+function _pubResolveRecipients(){
+  const v = document.getElementById('pub-audience')?.value || 'all';
+  let physMatches; // array of physician records
+  if(v === 'all'){
+    physMatches = (S.physicians||[]).slice();
+  } else if(v === 'dr'){
+    physMatches = (S.physicians||[]).filter(p => (p.drFte||0) > 0 && p.role !== 'IR');
+  } else if(v === 'ir'){
+    physMatches = (S.physicians||[]).filter(p => (p.irFte||0) > 0);
+  } else if(v === 'ir-group'){
+    const g = document.getElementById('pub-aud-extra-sel')?.value;
+    physMatches = (S.physicians||[]).filter(p => p.irGroup === g);
+  } else if(v === 'site'){
+    const site = document.getElementById('pub-aud-extra-sel')?.value;
+    // A physician is "at" the site if they're in its anchors/fillins or
+    // recently assigned there.
+    const s = (S.sites||[]).find(x => x.name === site);
+    const ids = new Set([...(s?.irAnchors||[]), ...(s?.irFillins||[])]);
+    // Also include anyone with shifts at the site in the publish range
+    const start = document.getElementById('pub-start')?.value;
+    const end   = document.getElementById('pub-end')?.value;
+    if(start && end){
+      (S.drShifts||[]).filter(sh => sh.site === site && sh.date >= start && sh.date <= end)
+        .forEach(sh => ids.add(sh.physId));
+      (S.irShifts||[]).filter(sh => sh.site === site && sh.date >= start && sh.date <= end)
+        .forEach(sh => ids.add(sh.physId));
+    }
+    physMatches = (S.physicians||[]).filter(p => ids.has(p.id));
+  } else if(v === 'custom'){
+    const picked = new Set([...document.querySelectorAll('.pub-pick:checked')].map(c=>+c.value));
+    physMatches = (S.physicians||[]).filter(p => picked.has(p.id));
+  } else {
+    physMatches = [];
+  }
+  // Map to USERS rows (skip physicians without linked accounts) and de-dup
+  const userMap = new Map();
+  for(const p of physMatches){
+    const u = _userForPhys(p.id);
+    if(u && !userMap.has(u.id)) userMap.set(u.id, u);
+  }
+  return [...userMap.values()];
+}
+
+// Pick which kinds the admin checked.
+function _pubReadKinds(){
+  return {
+    day:     !!document.getElementById('pub-kind-day')?.checked,
+    weekday: !!document.getElementById('pub-kind-weekday')?.checked,
+    weekend: !!document.getElementById('pub-kind-weekend')?.checked,
+    holiday: !!document.getElementById('pub-kind-holiday')?.checked,
+    tb:      !!document.getElementById('pub-kind-tb')?.checked,
+  };
+}
+
+// Build a personalized digest for one physician across the requested range,
+// honoring the kinds checkbox set. Returns {plain, html, count}.
+function _pubBuildDigest(physId, startISO, endISO, kinds){
+  const lines = []; const htmlLines = [];
+  let count = 0;
+  const inRange = (d) => d && d >= startISO && d <= endISO;
+  const fmtDay = (iso) => {
+    const d = parseDateLocal(iso); if(!d) return iso;
+    return `${_TB_DOW_SHORT[d.getDay()]} ${iso}`;
+  };
+  // Bucket by date for cleaner output.
+  const byDate = {};
+  const add = (iso, txt, html) => {
+    if(!byDate[iso]) byDate[iso] = {plain:[], html:[]};
+    byDate[iso].plain.push(txt);
+    byDate[iso].html.push(html || _tbEsc(txt));
+    count++;
+  };
+
+  if(kinds.day){
+    (S.drShifts||[]).filter(s => s.physId===physId && inRange(s.date)).forEach(s => {
+      const txt = `DR ${s.shift||''}${s.site?' @ '+s.site:''}${s.sub?' · '+s.sub:''}`;
+      add(s.date, txt);
+    });
+    (S.irShifts||[]).filter(s => s.physId===physId && inRange(s.date)).forEach(s => {
+      const txt = `IR ${s.shift||'1st'}${s.site?' @ '+s.site:''}${s.sub?' · '+s.sub:''}`;
+      add(s.date, txt);
+    });
+  }
+  if(kinds.weekday){
+    (S.irCalls||[]).filter(c => c.physId===physId && inRange(c.date) && c.callType !== 'weekend')
+      .forEach(c => add(c.date, `IR Call (${c.callType||'daily'})${c.irGroup?' — '+c.irGroup:''}${c.site?' @ '+c.site:''}`));
+  }
+  if(kinds.weekend){
+    (S.weekendCalls||[]).filter(w => w.physId===physId && (inRange(w.satDate)||inRange(w.sunDate)||inRange(w.date)))
+      .forEach(w => {
+        [w.satDate,w.sunDate,w.date].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i)
+          .filter(inRange).forEach(d => add(d, `Weekend Call${w.sub?' · '+w.sub:''}${w.site?' @ '+w.site:''}`));
+      });
+    (S.irCalls||[]).filter(c => c.physId===physId && inRange(c.date) && c.callType === 'weekend')
+      .forEach(c => add(c.date, `IR Weekend Call${c.irGroup?' — '+c.irGroup:''}${c.site?' @ '+c.site:''}`));
+  }
+  if(kinds.holiday){
+    (S.holidays||[]).filter(h => h.physId===physId && inRange(h.date))
+      .forEach(h => add(h.date, `🏖 Holiday Call: ${h.name}${h.group?' ('+h.group+')':''}`));
+  }
+  if(kinds.tb){
+    const emit = (items, emoji, label) => {
+      (items||[]).filter(item => (item.allowedPhysIds||[]).includes(physId))
+        .forEach(item => {
+          _eventOccurrencesInRange(item, startISO, endISO).forEach(d => {
+            // Same rotation gating as calendar sync — only the assigned phys
+            // for this occurrence sees it in their digest.
+            if(item.rotation && item.rotation.enabled){
+              const assigned = _rotationPhysFor(item, d);
+              if(assigned !== physId) return;
+            }
+            add(d, `${emoji} ${item.name} @ ${item.time||'07:00'} (${item.durationMin||60} min)`);
+          });
+        });
+    };
+    emit(S.tumorBoards, '🔬', 'Tumor board');
+    emit(S.clinics,     '🏥', 'Clinic');
+  }
+
+  const sortedDates = Object.keys(byDate).sort();
+  for(const d of sortedDates){
+    lines.push(`${fmtDay(d)}:`);
+    byDate[d].plain.forEach(t => lines.push(`  • ${t}`));
+    htmlLines.push(`<div style="margin-top:8px"><strong>${_tbEsc(fmtDay(d))}</strong></div>`);
+    htmlLines.push('<ul style="margin:2px 0 0 18px;padding:0">'
+      + byDate[d].html.map(h=>`<li>${h}</li>`).join('') + '</ul>');
+  }
+  return {
+    plain: lines.join('\n'),
+    html: htmlLines.join(''),
+    count
+  };
+}
+
+// Render the recent-publishes log table (newest first).
+function _renderPubLog(){
+  const wrap = document.getElementById('pub-log');
+  if(!wrap) return;
+  const log = (S.publishLog||[]).slice().sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));
+  if(!log.length){ wrap.innerHTML = '<em style="color:var(--txt3);font-size:11px">No publishes yet.</em>'; return; }
+  let html = '<div style="overflow-x:auto"><table><thead><tr><th>When</th><th>Who</th><th>Range</th><th>Kinds</th><th>Recipients</th></tr></thead><tbody>';
+  log.slice(0, 20).forEach(e => {
+    const ts = e.ts ? new Date(e.ts).toLocaleString() : '';
+    const sender = (USERS.find(u=>u.id===e.sentBy)||{});
+    const senderName = `${sender.first||''} ${sender.last||''}`.trim() || e.sentBy || '?';
+    const kinds = (e.kinds||[]).join(', ') || '—';
+    html += `<tr><td style="font-size:11px">${_tbEsc(ts)}</td><td style="font-size:11px">${_tbEsc(senderName)}</td>`
+         + `<td style="font-size:11px">${_tbEsc(e.dateStart||'')} → ${_tbEsc(e.dateEnd||'')}</td>`
+         + `<td style="font-size:11px">${_tbEsc(kinds)}</td>`
+         + `<td style="font-size:11px">${e.recipientCount||0}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+  wrap.innerHTML = html;
+}
+
+// Show what the current admin would receive (or, if not linked to a phys, the
+// first eligible recipient) so the admin can sanity-check before sending.
+function previewPublish(){
+  if(!_adminOnly('preview publish')) return;
+  const start = document.getElementById('pub-start')?.value;
+  const end   = document.getElementById('pub-end')?.value;
+  const pv    = document.getElementById('pub-preview');
+  if(!pv) return;
+  if(!start || !end || end < start){
+    pv.innerHTML = '<div style="color:var(--red-t)">Pick a valid date range first.</div>';
+    return;
+  }
+  const kinds = _pubReadKinds();
+  if(!Object.values(kinds).some(Boolean)){
+    pv.innerHTML = '<div style="color:var(--red-t)">Pick at least one category.</div>';
+    return;
+  }
+  const recipients = _pubResolveRecipients();
+  // Pick a phys to preview as: prefer admin's own linked phys, else first recipient.
+  let previewPhysId = CU?.physId;
+  let previewName = `${CU?.first||''} ${CU?.last||''}`.trim() || 'You';
+  if(!previewPhysId && recipients.length){
+    previewPhysId = recipients[0].physId;
+    previewName = `${recipients[0].first||''} ${recipients[0].last||''}`.trim();
+  }
+  if(!previewPhysId){
+    pv.innerHTML = '<div style="color:var(--amber-t,#92400e)">No physician available to preview as. Link your account to a physician or pick at least one recipient with an account.</div>';
+    return;
+  }
+  const digest = _pubBuildDigest(previewPhysId, start, end, kinds);
+  const subject = _pubSubject(start, end);
+  pv.innerHTML = `<div class="card" style="border:1px dashed var(--bdr2);background:var(--bg2,transparent)">
+    <div style="font-size:11px;color:var(--txt3)">Preview as <strong>${_tbEsc(previewName)}</strong> · ${recipients.length} recipient(s) total</div>
+    <div style="font-size:13px;font-weight:700;margin-top:6px">Subject: ${_tbEsc(subject)}</div>
+    <hr style="border:none;border-top:1px solid var(--bdr);margin:8px 0">
+    ${digest.count
+      ? digest.html
+      : '<em style="color:var(--txt3);font-size:11px">No matching events in this range — recipient would be skipped.</em>'}
+  </div>`;
+}
+
+function _pubSubject(start, end){
+  return `Schedule for ${start} → ${end}`;
+}
+
+async function sendPublish(){
+  if(!_adminOnly('publish schedule')) return;
+  const start = document.getElementById('pub-start')?.value;
+  const end   = document.getElementById('pub-end')?.value;
+  const statusEl = document.getElementById('pub-status');
+  const setStatus = (m,c)=>{ if(statusEl){ statusEl.textContent=m; statusEl.style.color=c||'var(--txt3)'; } };
+  if(!start || !end || end < start){ setStatus('✕ Pick a valid date range.', 'var(--red-t)'); return; }
+  const kinds = _pubReadKinds();
+  const kindKeys = Object.entries(kinds).filter(([,v])=>v).map(([k])=>k);
+  if(!kindKeys.length){ setStatus('✕ Pick at least one category.', 'var(--red-t)'); return; }
+
+  const recipients = _pubResolveRecipients();
+  if(!recipients.length){ setStatus('✕ Audience is empty (no physicians, or none with linked accounts).', 'var(--red-t)'); return; }
+
+  // Build personalized digests, drop recipients with nothing to report or who
+  // opted out of schedulePublish notifications.
+  const eligible = []; let skippedNoEvents = 0; let skippedOptOut = 0; let skippedNoEmail = 0;
+  for(const u of recipients){
+    const pref = u.notifPrefs || _NOTIF_DEFAULTS;
+    if(pref.master === false || pref.schedulePublish === false){ skippedOptOut++; continue; }
+    const addr = _deliveryEmail(u);
+    if(!addr || _looksPlaceholder(addr)){ skippedNoEmail++; continue; }
+    const digest = _pubBuildDigest(u.physId, start, end, kinds);
+    if(!digest.count){ skippedNoEvents++; continue; }
+    eligible.push({u, addr, digest});
+  }
+  if(!eligible.length){
+    setStatus(`✕ Nobody to send to. (skipped: ${skippedOptOut} opted out, ${skippedNoEmail} no email, ${skippedNoEvents} no events)`, 'var(--red-t)');
+    return;
+  }
+  if(!confirm(`Publish ${kindKeys.join(', ')} for ${start} → ${end} to ${eligible.length} recipient(s)?\n\n(Skipped: ${skippedOptOut} opted out, ${skippedNoEmail} bad/no email, ${skippedNoEvents} no events in range.)`)) return;
+
+  setStatus('Sending…', 'var(--txt3)');
+  const url = _getUrl(); const key = _getKey();
+  if(!url || !key){ setStatus('✕ Supabase not configured.', 'var(--red-t)'); return; }
+  const subject = _pubSubject(start, end);
+  let sent = 0, failed = 0;
+  // Send sequentially to keep edge-function load reasonable; the audiences
+  // here are small (single practice). For very large blasts, batch into the
+  // recipient list of a single broadcast call instead.
+  for(const {u, addr, digest} of eligible){
+    const body = `Hi ${u.first||'there'},\n\nHere is your schedule for ${start} through ${end}:\n\n${digest.plain}\n\n—\nRadScheduler · published by ${(CU?.first||'')+' '+(CU?.last||'')}`;
+    try{
+      const res = await fetch(`${url}/functions/v1/send-notification`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+        body:JSON.stringify({
+          kind:'schedulePublish',
+          subject, body,
+          recipients:[{email:addr, name:`${u.first||''} ${u.last||''}`.trim()}],
+          from_practice:_PRACTICE_ID||'main'
+        })
+      });
+      if(res.ok) sent++;
+      else { failed++; const e = await res.json().catch(()=>({})); console.warn('[RS publish] send failed', e); }
+    }catch(e){ failed++; console.warn('[RS publish] send error', e); }
+  }
+  // Log the publish event
+  if(!Array.isArray(S.publishLog)) S.publishLog = [];
+  S.publishLog.push({
+    id: S.nextId++, ts: new Date().toISOString(),
+    sentBy: CU?.id, kinds: kindKeys, dateStart: start, dateEnd: end,
+    recipientCount: sent, failedCount: failed
+  });
+  triggerSave();
+  setStatus(
+    `✓ Sent ${sent} of ${eligible.length}` + (failed?` (${failed} failed)`:''),
+    failed ? 'var(--amber-t,#92400e)' : 'var(--green-t)'
+  );
+  _renderPubLog();
+}
+
+
 /* ─── SITE RULE CONSTRAINT HELPERS ───────────────────────────────────────
    Called by DR auto-assign, IR auto-assign, and IR rebalancer to evaluate
    physician site-rule eligibility before assigning any shift or call.
@@ -12787,6 +15097,396 @@ function dayConditionSiteOk(p, siteName, date, context){
     if(c.requiredSite && c.requiredSite !== siteName) return false;
   }
   return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONFERENCE RULES (tumor boards / clinics) + CALL-DAY SITE RULES
+   ═══════════════════════════════════════════════════════════════════════════
+   Two new physician-rule families share this section:
+
+   1. p.tbRules[] = [{eventId|null, action, n?, requiredSite?, shift?, notes}]
+      eventId — id of a tumor board OR clinic; null = applies to ALL
+                conferences this physician participates in.
+      action  — one of:
+        'no-call-on-day'         → block any IR/weekend call on the event date
+        'no-shift-on-day'        → block any DR/IR shift on the event date
+        'must-be-at-site-on-day' → DR shift on event date must be requiredSite
+        'schedule-shift-prior'   → REQUIRE a day shift on date - n  (preference; flagged
+                                   but does not block — auto-assign uses it as a hint)
+        'schedule-shift-after'   → REQUIRE a day shift on date + n  (same — preference)
+        'block-day-prior'        → block any shift on date - n
+        'block-day-after'        → block any shift on date + n
+        'prefer-light-day'       → block 2nd / 3rd shift on the event date
+
+   2. p.callDayRules[] = [{callType, requiredSite, shift?, notes}]
+      callType — 'ir-call' | 'ir-weekend' | 'weekend-call' | 'any-call'
+      requiredSite — site the day shift on the same date must be at
+      shift — optional restrict to a specific shift type (default any day shift)
+
+   Both rule families short-circuit to "true" (no rule) when the physician
+   has no rules of that family — zero overhead for physicians with no
+   conference involvement.
+*/
+
+// Resolve the conference event by id, across both collections. Returns null
+// if not found (e.g. a stale rule referencing a deleted board).
+function _eventById(eventId){
+  if(eventId == null) return null;
+  return (S.tumorBoards||[]).find(t => t.id === eventId)
+      || (S.clinics||[]).find(c => c.id === eventId)
+      || null;
+}
+
+// Returns the set of ISO dates in [startISO, endISO] on which physId has
+// at least one tumor-board or clinic occurrence (after rotation gating).
+// Used by tbRulesOk to find rule-relevant dates relative to the candidate.
+function _conferenceDatesForPhys(physId, startISO, endISO, eventId){
+  const out = new Set();
+  const visit = (item) => {
+    if(!(item.allowedPhysIds||[]).includes(physId)) return;
+    const occs = _eventOccurrencesInRange(item, startISO, endISO);
+    for(const d of occs){
+      if(item.rotation && item.rotation.enabled){
+        if(_rotationPhysFor(item, d) !== physId) continue;
+      }
+      out.add(d);
+    }
+  };
+  if(eventId == null){
+    (S.tumorBoards||[]).forEach(visit);
+    (S.clinics||[]).forEach(visit);
+  } else {
+    const ev = _eventById(eventId);
+    if(ev) visit(ev);
+  }
+  return out;
+}
+
+// Add/subtract days from an ISO date, returning ISO. Wraps the existing
+// addDays helper if available; otherwise computes locally.
+function _isoShift(iso, deltaDays){
+  if(typeof addDays === 'function') return addDays(iso, deltaDays);
+  const d = parseDateLocal(iso); if(!d) return iso;
+  d.setDate(d.getDate() + deltaDays);
+  return fmtDate(d);
+}
+
+/**
+ * tbRulesOk(p, ctx) — evaluate all conference rules for the candidate
+ * assignment. Returns true if every rule allows the assignment, false on
+ * the first violation. Preference-style rules ('schedule-shift-prior/after',
+ * 'prefer-light-day' for 1st-shift cases) never block; only the explicit
+ * block actions return false.
+ *
+ * ctx = {physId, date, site?, shift?, kind}
+ *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
+ */
+function tbRulesOk(p, ctx){
+  const rules = (p && p.tbRules) || [];
+  if(!rules.length) return true;
+  if(!ctx || !ctx.date) return true;
+  for(const r of rules){
+    if(!r || !r.action) continue;
+    // Window for occurrence lookup is rule-specific. "on day" rules need the
+    // exact date; "N days before/after" rules need to find conferences within
+    // N days on either side of the candidate. We compute the smallest window
+    // that still covers the rule, with no upper cap — admins can specify
+    // arbitrarily large N if their workflow demands it.
+    const n = Math.max(0, +r.n || 0);
+    const startISO = _isoShift(ctx.date, -n);
+    const endISO   = _isoShift(ctx.date,  n);
+    const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
+    if(!occDates.size) continue;
+
+    if(r.action === 'no-call-on-day'){
+      if(ctx.kind !== 'ir-call' && ctx.kind !== 'ir-weekend' &&
+         ctx.kind !== 'dr-weekend' && ctx.kind !== 'holiday') continue;
+      if(occDates.has(ctx.date)) return false;
+    }
+    else if(r.action === 'no-shift-on-day'){
+      if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') continue;
+      if(occDates.has(ctx.date)) return false;
+    }
+    else if(r.action === 'must-be-at-site-on-day'){
+      if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') continue;
+      if(!occDates.has(ctx.date)) continue;
+      if(!r.requiredSite) continue;
+      if(ctx.site !== r.requiredSite) return false;
+      if(r.shift && ctx.shift && ctx.shift !== r.shift) return false;
+    }
+    else if(r.action === 'block-day-prior'){
+      const nv = Math.max(1, +r.n || 1);
+      // For each occurrence, the date n days BEFORE is blocked.
+      for(const occ of occDates){
+        if(_isoShift(occ, -nv) === ctx.date) return false;
+      }
+    }
+    else if(r.action === 'block-day-after'){
+      const nv = Math.max(1, +r.n || 1);
+      for(const occ of occDates){
+        if(_isoShift(occ, nv) === ctx.date) return false;
+      }
+    }
+    else if(r.action === 'prefer-light-day'){
+      // Block 2nd/3rd shifts on event days. 1st/Home/Wknd are preferences,
+      // not blocks (they're "lighter" already).
+      if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') continue;
+      if(!occDates.has(ctx.date)) continue;
+      const sh = ctx.shift || '';
+      if(sh === '2nd' || sh === '3rd') return false;
+    }
+    // 'schedule-shift-prior' / 'schedule-shift-after' are PREFERENCES only —
+    // they nudge auto-assign but never block. _conferenceShiftPreferenceFor
+    // exposes them to the assignment scorer as a hint.
+  }
+  return true;
+}
+
+/**
+ * Returns a small score adjustment (+/-) for a candidate based on the
+ * physician's prefer-style conference rules. Negative = preferred (auto-assign
+ * sorts ascending in many places). Currently +/- 1 per matched preference.
+ * Safe to call even when no rules exist — returns 0.
+ */
+function _conferenceShiftPreferenceFor(p, ctx){
+  const rules = (p && p.tbRules) || [];
+  if(!rules.length) return 0;
+  if(!ctx || !ctx.date) return 0;
+  if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') return 0;
+  let score = 0;
+  for(const r of rules){
+    if(r.action !== 'schedule-shift-prior' && r.action !== 'schedule-shift-after') continue;
+    const n = Math.max(0, +r.n || 1);
+    // Window precisely matches the rule's reach.
+    const startISO = _isoShift(ctx.date, -n);
+    const endISO   = _isoShift(ctx.date,  n);
+    const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
+    for(const occ of occDates){
+      const target = r.action === 'schedule-shift-prior'
+        ? _isoShift(occ, -n)
+        : _isoShift(occ, n);
+      if(target === ctx.date) score--; // prefer this date
+    }
+  }
+  return score;
+}
+
+/**
+ * callDayRulesOk(p, ctx) — when the candidate is a DAY SHIFT and the physician
+ * is already on call that day, enforce any callDayRules requirement that the
+ * day shift be at a specific site. Returns true if no rule blocks.
+ *
+ * Order of evaluation: this function checks if p has ANY existing call
+ * assignment on ctx.date that matches a configured rule's callType, and if
+ * so, requires ctx.site === rule.requiredSite (and optionally ctx.shift
+ * matches rule.shift).
+ */
+function callDayRulesOk(p, ctx){
+  const rules = (p && p.callDayRules) || [];
+  if(!rules.length) return true;
+  if(!ctx || !ctx.date) return true;
+  if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') return true;
+  // Index existing calls on ctx.date for this physician.
+  const date = ctx.date;
+  const callsToday = {
+    'ir-call': false, 'ir-weekend': false, 'weekend-call': false
+  };
+  (S.irCalls||[]).forEach(c => {
+    if(c.physId !== p.id || c.date !== date) return;
+    if(c.callType === 'weekend') callsToday['ir-weekend'] = true;
+    else callsToday['ir-call'] = true;
+  });
+  (S.weekendCalls||[]).forEach(w => {
+    if(w.physId !== p.id) return;
+    if(w.satDate === date || w.sunDate === date || w.date === date) callsToday['weekend-call'] = true;
+  });
+  for(const r of rules){
+    if(!r || !r.requiredSite) continue;
+    const ct = r.callType || 'any-call';
+    const matchesCall = (ct === 'any-call') || callsToday[ct];
+    if(!matchesCall) continue;
+    // Optional shift filter — rule only applies if shift matches (or rule has no filter).
+    if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
+    // Day shift on a call day must be at requiredSite.
+    if(ctx.site !== r.requiredSite) return false;
+  }
+  return true;
+}
+
+// ── Conference-rules tab UI ─────────────────────────────────────────────
+
+// Repopulate the event picker. Called when tab opens or after add/delete.
+function _srRefreshTBEventOptions(){
+  const sel = document.getElementById('sr-tb-event'); if(!sel) return;
+  const tbs = (S.tumorBoards||[]).map(t => ({id:t.id, label:`🔬 ${t.name}`}));
+  const cls = (S.clinics||[]).map(c => ({id:c.id, label:`🏥 ${c.name}`}));
+  const opts = [{id:'', label:'— Any conference (all I attend) —'}].concat(tbs, cls);
+  const cur = sel.value;
+  sel.innerHTML = opts.map(o => `<option value="${o.id===''?'':o.id}">${_tbEsc(o.label)}</option>`).join('');
+  if(cur) sel.value = cur;
+  // Also populate the required-site dropdown
+  const siteSel = document.getElementById('sr-tb-site');
+  if(siteSel){
+    const prev = siteSel.value;
+    siteSel.innerHTML = (S.sites||[]).map(s => `<option value="${_tbEsc(s.name)}">${_tbEsc(s.name)}</option>`).join('');
+    if(prev) siteSel.value = prev;
+  }
+}
+
+// Show/hide the action-specific input groups when the action picker changes.
+function _srTBOnActionChange(){
+  const action = document.getElementById('sr-tb-action')?.value;
+  const numWrap = document.getElementById('sr-tb-numeric-wrap');
+  const siteWrap = document.getElementById('sr-tb-site-wrap');
+  // N (days) only matters for *-prior / *-after actions
+  const needsN = ['schedule-shift-prior','schedule-shift-after','block-day-prior','block-day-after'].includes(action);
+  if(numWrap) numWrap.style.display = needsN ? '' : 'none';
+  // Site picker only matters for must-be-at-site-on-day
+  const needsSite = action === 'must-be-at-site-on-day';
+  if(siteWrap) siteWrap.style.display = needsSite ? '' : 'none';
+}
+
+function addTBRule(){
+  if(!_adminOnly('add conference rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p){ alert('No physician selected.'); return; }
+  // Sanity-check: the event picker may be stale if the admin added or deleted
+  // a tumor board / clinic in another window. Refresh and validate before
+  // committing the rule. The mousedown handler on this button refreshes the
+  // <select> options too, so the only way to slip through with a stale value
+  // is keyboard activation — handled here by the find-or-fail check.
+  const eventIdRaw = document.getElementById('sr-tb-event')?.value;
+  let eventId = null;
+  if(eventIdRaw !== '' && eventIdRaw != null){
+    eventId = +eventIdRaw;
+    const ev = _eventById(eventId);
+    if(!ev){
+      _srRefreshTBEventOptions();
+      alert('That conference no longer exists. The dropdown has been refreshed — please pick again.');
+      return;
+    }
+  }
+  const action = document.getElementById('sr-tb-action')?.value;
+  if(!action){ alert('Pick a rule type.'); return; }
+  const rule = {
+    eventId,
+    action,
+    notes: (document.getElementById('sr-tb-notes')?.value || '').trim(),
+  };
+  if(['schedule-shift-prior','schedule-shift-after','block-day-prior','block-day-after'].includes(action)){
+    rule.n = Math.max(0, +(document.getElementById('sr-tb-num')?.value) || 1);
+  }
+  if(action === 'must-be-at-site-on-day'){
+    rule.requiredSite = document.getElementById('sr-tb-site')?.value || '';
+    if(!rule.requiredSite){ alert('Pick a required site.'); return; }
+    const sh = document.getElementById('sr-tb-shift')?.value || '';
+    if(sh) rule.shift = sh;
+  }
+  if(!Array.isArray(p.tbRules)) p.tbRules = [];
+  // Block exact duplicates so admins can't accidentally double a rule.
+  const existing = p.tbRules.find(r =>
+    r.action === rule.action &&
+    (r.eventId||null) === (rule.eventId||null) &&
+    (r.n||null) === (rule.n||null) &&
+    (r.requiredSite||'') === (rule.requiredSite||'') &&
+    (r.shift||'') === (rule.shift||'')
+  );
+  if(existing){ alert('That exact rule already exists for this physician.'); return; }
+  p.tbRules.push(rule);
+  // Clear notes field so admin can add another rule without retyping
+  const notesEl = document.getElementById('sr-tb-notes'); if(notesEl) notesEl.value = '';
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+function removeTBRule(idx){
+  if(!_adminOnly('remove conference rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p || !Array.isArray(p.tbRules)) return;
+  p.tbRules.splice(idx, 1);
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+// ── Call-day-site rule UI ───────────────────────────────────────────────
+
+function _srRefreshCallSiteSiteOptions(){
+  const sel = document.getElementById('sr-cs-site'); if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = (S.sites||[]).map(s => `<option value="${_tbEsc(s.name)}">${_tbEsc(s.name)}</option>`).join('');
+  if(prev) sel.value = prev;
+}
+
+function addCallSiteRule(){
+  if(!_adminOnly('add call-day site rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p){ alert('No physician selected.'); return; }
+  const callType = document.getElementById('sr-cs-calltype')?.value;
+  const requiredSite = document.getElementById('sr-cs-site')?.value;
+  if(!callType || !requiredSite){ alert('Pick call type and required site.'); return; }
+  // Validate the site is still in S.sites — admin may have deleted it from
+  // another window since the modal opened.
+  if(!(S.sites||[]).some(s => s.name === requiredSite)){
+    _srRefreshCallSiteSiteOptions();
+    alert(`Site "${requiredSite}" no longer exists. The dropdown has been refreshed — please pick again.`);
+    return;
+  }
+  const shift = document.getElementById('sr-cs-shift')?.value || '';
+  const notes = (document.getElementById('sr-cs-notes')?.value || '').trim();
+  if(!Array.isArray(p.callDayRules)) p.callDayRules = [];
+  const existing = p.callDayRules.find(r =>
+    r.callType === callType &&
+    r.requiredSite === requiredSite &&
+    (r.shift||'') === (shift||'')
+  );
+  if(existing){ alert('That call-day site rule already exists for this physician.'); return; }
+  const rule = {callType, requiredSite, notes};
+  if(shift) rule.shift = shift;
+  p.callDayRules.push(rule);
+  const notesEl = document.getElementById('sr-cs-notes'); if(notesEl) notesEl.value = '';
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+function removeCallSiteRule(idx){
+  if(!_adminOnly('remove call-day site rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p || !Array.isArray(p.callDayRules)) return;
+  p.callDayRules.splice(idx, 1);
+  triggerSave();
+  _afterMutation();
+  renderSiteRulesList();
+}
+
+// ── Display strings for the rule-list section ────────────────────────────
+
+// Human-readable label for a tbRule. Used in renderSiteRulesList.
+function _describeTBRule(r){
+  const ev = _eventById(r.eventId);
+  const evName = ev ? ev.name : (r.eventId == null ? 'any conference' : `(deleted #${r.eventId})`);
+  const evIcon = !ev ? '⚠' : (S.tumorBoards||[]).some(t=>t.id===r.eventId) ? '🔬' : '🏥';
+  switch(r.action){
+    case 'no-call-on-day':         return `${evIcon} <strong>No call</strong> on ${evName} day`;
+    case 'no-shift-on-day':        return `${evIcon} <strong>No DR/IR shift</strong> on ${evName} day`;
+    case 'must-be-at-site-on-day': return `${evIcon} On ${evName} day, must be at <strong>${_tbEsc(r.requiredSite||'?')}</strong>${r.shift?` (${r.shift})`:''}`;
+    case 'schedule-shift-prior':   return `${evIcon} <strong>Prefer day shift</strong> ${r.n||1} day(s) before ${evName}`;
+    case 'schedule-shift-after':   return `${evIcon} <strong>Prefer day shift</strong> ${r.n||1} day(s) after ${evName}`;
+    case 'block-day-prior':        return `${evIcon} <strong>No shift</strong> ${r.n||1} day(s) before ${evName}`;
+    case 'block-day-after':        return `${evIcon} <strong>No shift</strong> ${r.n||1} day(s) after ${evName}`;
+    case 'prefer-light-day':       return `${evIcon} <strong>Light coverage</strong> on ${evName} day (no 2nd/3rd)`;
+    default:                       return `${evIcon} ${_tbEsc(r.action)}`;
+  }
+}
+
+function _describeCallSiteRule(r){
+  const ctLabel = {
+    'ir-call':'IR call', 'ir-weekend':'IR weekend call',
+    'weekend-call':'DR weekend call', 'any-call':'Any call'
+  }[r.callType] || r.callType;
+  return `📞 If on <strong>${ctLabel}</strong>, day shift must be at <strong>${_tbEsc(r.requiredSite||'?')}</strong>${r.shift?` (${r.shift})`:''}`;
 }
 
 /**
@@ -12873,7 +15573,7 @@ function natLangRulesOk(ctx){
  * NOT violate any maxConsec (consecutive-day) rule across all their site rules.
  * Called before adding a shift to prevent streaks longer than the configured cap.
  */
-function sequenceOk(p, date, ym){
+function sequenceOk(p, date, ym, candSite, candSlotLabel){
   const seq = p.seqRules;
   // Per-site maxConsec from siteRules (old model, kept for compat)
   const perSiteRules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
@@ -12907,6 +15607,55 @@ function sequenceOk(p, date, ym){
       const prevHas=S.drShifts.some(s=>s.physId===p.id&&s.date===prev)
                   ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev);
       if(prevHas) return false;
+    }
+  }
+  // Per-site / per-slot sequence rules — newer system. Each rule scopes to a
+  // site (and optionally a labeled slot like 'stfs1'). We only enforce a rule
+  // when the candidate assignment falls inside its scope; rules for sites
+  // other than the candidate site are skipped entirely.
+  const siteSeqRules = p.siteSeqRules||[];
+  if(siteSeqRules.length && candSite){
+    for(const rule of siteSeqRules){
+      if(rule.site !== candSite) continue;
+      // If the rule scopes to a specific slotLabel, require the candidate
+      // assignment to be at that label too. If candSlotLabel is unknown
+      // (legacy callers that don't pass it), conservatively skip the rule
+      // to avoid false-blocking — sequenceOk's contract is "block if
+      // certain"; uncertainty defaults to allow.
+      if(rule.slotLabel){
+        if(!candSlotLabel) continue;
+        if(rule.slotLabel !== candSlotLabel) continue;
+      }
+      // Predicate: does an existing shift on date `d` count toward this
+      // rule's streak? Match by site, and if the rule is slot-scoped also
+      // by stored slotLabel on the prior shift. Both DR and IR shifts now
+      // carry slotLabel — site-only rules match either; slot-scoped rules
+      // require the label to match.
+      const counts = (d) => {
+        const irHits = (S.irShifts||[]).filter(s =>
+          s.physId === p.id && s.date === d && s.site === rule.site
+          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
+        if(irHits.length) return true;
+        const drHits = (S.drShifts||[]).filter(s =>
+          s.physId === p.id && s.date === d && s.site === rule.site
+          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
+        return drHits.length > 0;
+      };
+      if(rule.maxConsec){
+        const cap = rule.maxConsec;
+        let streak=0, d=date;
+        for(let i=0;i<cap;i++){
+          d = addDays(d,-1);
+          if(counts(d)) streak++; else break;
+        }
+        if(streak >= cap) return false;
+      }
+      if(rule.minRest){
+        for(let i=1;i<=rule.minRest;i++){
+          const prev = addDays(date,-i);
+          if(counts(prev)) return false;
+        }
+      }
     }
   }
   return true;
@@ -13445,7 +16194,14 @@ function previewAA(){
 
   // Sort comparator: lowest fill-ratio first; break ties by anchor fit driven
   // by the anchorPct setting; then by highest deficit.
-  function sortByDeficit(pool, site){
+  // sortByDeficit: orders the candidate pool for a given site, with optional
+  // date/shift/kind context so conference-preference rules can nudge order.
+  // The conference preference (negative score = preferred) only kicks in
+  // when there are no stronger differentiators (anchor pressure, fill%) —
+  // it's a final tiebreaker that respects "schedule day shift N days
+  // before/after my tumor board" preferences without overriding fairness.
+  function sortByDeficit(pool, site, ctxDate, ctxShift, ctxKind){
+    const wantPref = !!(ctxDate && ctxKind);
     return pool.slice().sort((a,b)=>{
       const rA=cnt[a.id].wd/effTarget[a.id], rB=cnt[b.id].wd/effTarget[b.id];
       if(Math.abs(rA-rB)>0.005) return rA-rB; // lowest fill% first
@@ -13461,6 +16217,17 @@ function previewAA(){
       const ancA=(a.anchorSite===site?-1:0)+(a.siteRules?.find(r=>r.site===site)?.preferred?-0.5:0);
       const ancB=(b.anchorSite===site?-1:0)+(b.siteRules?.find(r=>r.site===site)?.preferred?-0.5:0);
       if(ancA!==ancB) return ancA-ancB;
+      // Conference shift preference — physicians whose tbRules say "schedule
+      // day shift N days before/after my tumor board" get a negative score
+      // for matching dates so they sort earlier. Only consults preference
+      // when caller passed a date/kind; otherwise zero overhead.
+      if(wantPref){
+        const cctx={physId:a.id, date:ctxDate, shift:ctxShift, kind:ctxKind};
+        const dctx={physId:b.id, date:ctxDate, shift:ctxShift, kind:ctxKind};
+        const prefA=_conferenceShiftPreferenceFor(a, cctx);
+        const prefB=_conferenceShiftPreferenceFor(b, dctx);
+        if(prefA !== prefB) return prefA - prefB;  // more-preferred (more negative) sorts first
+      }
       return (effTarget[b.id]-cnt[b.id].wd)-(effTarget[a.id]-cnt[a.id].wd); // highest deficit
     });
   }
@@ -13480,20 +16247,30 @@ function previewAA(){
           // build an ordered fill list where each entry targets a specific
           // subspecialty. Remaining slots (total - sum of subs) are "any"
           // slots. If no breakdown configured, all slots are "any".
+          //
+          // Each fillList entry now also carries a slotIndex so we can attach
+          // an admin-set slotLabel from S.siteSlotLabels (per-site, per-shift,
+          // stable across weeks). Indexing is sequential within this (site,
+          // week, shift) triple — sub-targeted slots get the lower indices,
+          // any-slots get the rest. The order is deterministic so re-runs
+          // assign the same physician to the same labeled position.
           const subMap = (S.siteSlotsSubs||{})[`${st.name}|${wk}|${sh}`] || {};
-          const fillList = []; // each entry: {targetSub: string|null}
+          const fillList = []; // each entry: {targetSub, slotIndex}
+          let _nextSlotIdx = ex; // first unfilled index = count of already-placed
           Object.entries(subMap).forEach(([targetSub, n]) => {
             const count = +n || 0;
             // Already-placed shifts at this specialty count against the need
             const exSub = S.drShifts.filter(s=>s.date===c.date&&s.site===st.name&&s.shift===sh&&s.sub===targetSub).length
                         + preview.filter(a=>a.date===c.date&&a.site===st.name&&a.shift===sh&&a.sub===targetSub).length;
-            for(let i=0; i<count-exSub; i++) fillList.push({targetSub});
+            for(let i=0; i<count-exSub; i++) fillList.push({targetSub, slotIndex:_nextSlotIdx++});
           });
           // Any remaining slots beyond the sub breakdown
           const anyLeft = slots - fillList.length;
-          for(let i=0; i<anyLeft; i++) fillList.push({targetSub: null});
+          for(let i=0; i<anyLeft; i++) fillList.push({targetSub: null, slotIndex:_nextSlotIdx++});
 
-          fillList.forEach(({targetSub}) => {
+          fillList.forEach(({targetSub, slotIndex}) => {
+            // Resolve the admin-set slot label for this position, if any
+            const _slotLabel = (S.siteSlotLabels||{})[`${st.name}|${sh}|#${slotIndex}`] || '';
             const pool=drs.filter(p=>{
               if(!p.shiftElig[k])return false;
               if(p.allowedSites?.length&&!p.allowedSites.includes(st.name))return false;
@@ -13501,16 +16278,19 @@ function previewAA(){
               if(targetSub && !(p.drSubs||[]).includes(targetSub)) return false;
               if(!siteRuleOk(p,st.name,ym,c.date,k))return false;
               if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
-              if(!sequenceOk(p,c.date,ym))return false;
+              if(!sequenceOk(p,c.date,ym,st.name,_slotLabel))return false;
               if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false;
               const vd=vacDays(p.id);if(vd.has(c.date))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
               const assumedSub = targetSub || p.drSubs?.[0] || '';
-              if(!natLangRulesOk({physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'}))return false;
+              const _ctx={physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'};
+              if(!natLangRulesOk(_ctx))return false;
+              if(!tbRulesOk(p,_ctx))return false;
+              if(!callDayRulesOk(p,_ctx))return false;
               return cnt[p.id].wd<effTarget[p.id];
             });
-            const sorted=sortByDeficit(pool,st.name);
+            const sorted=sortByDeficit(pool,st.name,c.date,sh,'dr-shift');
             const p=sorted[0];
             if(!p){
               // Gap messaging includes the specialty when targeted
@@ -13522,7 +16302,7 @@ function previewAA(){
             }
             // Assigned sub: targeted one if specified, else physician's primary
             const assignSub = targetSub || p.drSubs[0] || '';
-            preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:assignSub,notes:'Auto',autoHome:false});
+            preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:assignSub,notes:'Auto',autoHome:false,slotLabel:_slotLabel});
             cnt[p.id].wd++;
           });
         });
@@ -13536,15 +16316,22 @@ function previewAA(){
           if(!p.shiftElig.home)return false;
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
           if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-          if(!natLangRulesOk({physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'}))return false;
+          const _hctx={physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'};
+          if(!natLangRulesOk(_hctx))return false;
+          if(!tbRulesOk(p,_hctx))return false;
+          if(!callDayRulesOk(p,_hctx))return false;
           return cnt[p.id].wd<effTarget[p.id];
-        }),'At Home / Remote');
+        }),'At Home / Remote',c.date,'Home','dr-shift');
         for(let i=0;i<hNeed-hEx;i++){const p=hpool[i];if(!p)break;
-          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true});
+          // Home slots are also labeled per-shift, so look up the label
+          // for slot index = (already-placed Home count + i for THIS pass).
+          const _hSlotIdx = hEx + i;
+          const _hSlotLabel = (S.siteSlotLabels||{})[`At Home / Remote|Home|#${_hSlotIdx}`] || '';
+          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true,slotLabel:_hSlotLabel});
           cnt[p.id].wd++;}
       }
       // Auto-home: fill ALL remaining physicians up to their effective FTE target
-      sortByDeficit(drs,'At Home / Remote').forEach(p=>{
+      sortByDeficit(drs,'At Home / Remote',c.date,'Home','dr-shift').forEach(p=>{
         const vd=vacDays(p.id);if(vd.has(c.date))return;
         if(!p.shiftElig.home)return;
         const alreadyDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date);
@@ -13583,7 +16370,9 @@ function previewAA(){
           const vd=vacDays(p.id);
           if(vd.has(c.date)||vd.has(sunDate))return false;
           const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
-          if(!natLangRulesOk({physId:p.id,date:c.date,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'}))return false;
+          const _wkctx={physId:p.id,date:c.date,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'};
+          if(!natLangRulesOk(_wkctx))return false;
+          if(!tbRulesOk(p,_wkctx))return false;
           return cnt[p.id].wk<_wkCap;
         }).sort((a,b)=>{
           const rA=cnt[a.id].wk/maxDR(a,'wk'), rB=cnt[b.id].wk/maxDR(b,'wk');
@@ -13678,7 +16467,7 @@ function previewAA(){
     if(a.type==='wk')
       S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',notes:'Auto'});
     else
-      S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome});
+      S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome,slotLabel:a.slotLabel||''});
   });
   triggerSave();document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
@@ -14390,7 +17179,7 @@ function previewIRAA(){
           !isIRCallBlackout(p.id,date)&&
           !_has2ndOr3rdShift(p.id,date)&&
           dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')&&
-          sequenceOk(p,date,date.slice(0,7))
+          sequenceOk(p,date,date.slice(0,7),p.irSitePrim||'','')
         ).length;
       });
 
@@ -14418,9 +17207,12 @@ function previewIRAA(){
             if(irOnDate(p.id,date)){ reasons[p.id]='already on IR this date'; return false; }
             if(_has2ndOr3rdShift(p.id,date)){ reasons[p.id]='2nd/3rd DR shift'; return false; }
             if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')){ reasons[p.id]='day condition'; return false; }
-            if(!sequenceOk(p,date,date.slice(0,7))){ reasons[p.id]='sequence rule'; return false; }
+            if(!sequenceOk(p,date,date.slice(0,7),p.irSitePrim||'','')){ reasons[p.id]='sequence rule'; return false; }
             if(!natLangRulesOk({physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
               reasons[p.id]='natural-language rule'; return false;
+            }
+            if(!tbRulesOk(p,{physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
+              reasons[p.id]='conference rule (tumor board / clinic)'; return false;
             }
             // FTE cap — waived only on pass 3 (last-resort to avoid unfilled gap)
             if(pass<3 && cntD[p.id] >= dailyCapFn(p)){ reasons[p.id]='FTE cap reached'; return false; }
@@ -14561,6 +17353,11 @@ function previewIRAA(){
             if(span.some(d=>_has2ndOr3rdShift(p.id,d))){ reasons[p.id]='2nd/3rd DR shift'; return false; }
             if(!natLangRulesOk({physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})){
               reasons[p.id]='natural-language rule'; return false;
+            }
+            // Conference rules — check every date in the Fri→Mon span so a
+            // tumor board on Saturday correctly excludes a phys with no-call-on-day.
+            if(span.some(d => !tbRulesOk(p,{physId:p.id,date:d,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'}))){
+              reasons[p.id]='conference rule (tumor board / clinic)'; return false;
             }
             // Hard FTE cap — waived only on final pass 3 (pass 3 lets us fill a weekend
             // even when the chosen physician exceeds their rounded cap by 1 or more)
@@ -15081,7 +17878,7 @@ function previewIRRebalance(){
           if(gSAsgn.some(a=>a.physId===p.id&&a.date===entry.date)) return false;
           if(!siteRuleOk(p,entry.site,entry.date.slice(0,7),entry.date,'s1')) return false;
           if(!dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')) return false;
-          if(!sequenceOk(p,entry.date,entry.date.slice(0,7))) return false;
+          if(!sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'')) return false;
           if(isSoldBackDate(p.id,entry.date)) return false;
           // Mixed-site gate: only anchors + permitted fill-ins can cover this slot
           if(!_irsaEligibleForSlot(p,entry)) return false;
