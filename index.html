@@ -2578,7 +2578,7 @@ function _buildSaveHTML(){
     physicians:S.physicians,drSubs:S.drSubs,irSubs:S.irSubs,sites:S.sites,
     vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
-    openShifts:S.openShifts,siteSlots:S.siteSlots,irSlots:S.irSlots,
+    openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
@@ -3064,6 +3064,10 @@ function _applyRemoteData(d){
     if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
   });
   if(d.siteSlots)Object.assign(S.siteSlots,d.siteSlots);
+  // Per-specialty slot breakdown. Lazily init S.siteSlotsSubs since older data
+  // snapshots won't have this field — keeps backwards compatibility.
+  if(!S.siteSlotsSubs) S.siteSlotsSubs = {};
+  if(d.siteSlotsSubs) Object.assign(S.siteSlotsSubs, d.siteSlotsSubs);
   if(d.irSlots)Object.assign(S.irSlots,d.irSlots);
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
@@ -3406,7 +3410,7 @@ let S=/*S_START*/{
     {id:50,date:"2025-06-11",shiftType:"1st Shift",sub:"Emergency",site:"CHS",group:"DR",claimedBy:null,notes:""},
     {id:51,date:"2025-06-18",shiftType:"Weekend Call",sub:"Cardiac",site:"CHE",group:"DR",claimedBy:null,notes:""},
   ],
-  siteSlots:{},irSlots:{},irShiftSlots:{},
+  siteSlots:{},siteSlotsSubs:{},irSlots:{},irShiftSlots:{},
   wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
   driveTimes:{},
@@ -3771,7 +3775,7 @@ async function createPractice(){
       {name:"At Home / Remote", irGroup:null, irAnchors:[], irFillins:[]}
     ],
     drSubs:[], irSubs:[],
-    siteSlots:{}, irSlots:{}, irShiftSlots:{}, wkndNeeds:{},
+    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, wkndNeeds:{},
     cfg:{anchorPct:70}, vacPicking:{}, driveTimes:{},
     nextId:1, users:[],
     savedAt:new Date().toISOString()
@@ -9146,20 +9150,123 @@ function addSiteFromSlots(){
   renderSitesList();
   renderSiteSlots();
 }
+// Tracks which site+week+shift cells have their sub breakdown panel expanded
+const _slotSubsExpanded = new Set();
+function toggleSlotSubs(siteName, week, sh){
+  const key = `${siteName}|${week}|${sh}`;
+  if(_slotSubsExpanded.has(key)) _slotSubsExpanded.delete(key);
+  else _slotSubsExpanded.add(key);
+  renderSlotGrid(
+    document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7),
+    week
+  );
+}
+
 function renderSlotGrid(ym,week){
   const el=document.getElementById('ss-content');if(!el)return;
+  if(!S.siteSlotsSubs) S.siteSlotsSubs = {};  // lazy-init
+  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // Encode a string as a safe JS literal usable inside an HTML attribute.
+  // JSON.stringify produces valid JS strings; we then HTML-escape the result
+  // so embedded quotes work inside onclick="...".
+  const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
   let html='<div class="g2">';
   (S.sites||[]).forEach(st=>{
     const shifts=st.name==='At Home / Remote'?['Home']:['1st','Home'];
-    html+=`<div class="card"><div class="card-title">${st.name}</div><div class="g${shifts.length}">`;
+    html+=`<div class="card"><div class="card-title">${escHtml(st.name)}</div>`;
+
     shifts.forEach(sh=>{
-      const k=`${st.name}|${week}|${sh}`;const v=S.siteSlots?.[k]??0;
-      html+=`<div class="fg"><label>${sh==='Home'?'Home':sh+' Shift'}</label><input type="number" min="0" max="15" value="${v}" style="width:55px" onchange="if(!S.siteSlots)S.siteSlots={};S.siteSlots['${st.name}|${week}|${sh}']=parseInt(this.value)||0;triggerSave()"></div>`;
+      const k=`${st.name}|${week}|${sh}`;
+      const total=S.siteSlots?.[k]??0;
+      const subsMap = S.siteSlotsSubs[k] || {};
+      const subBreakdown = Object.entries(subsMap).filter(([_,n])=>n>0);
+      const subSum = subBreakdown.reduce((a,[_,n])=>a+(+n||0),0);
+      const expanded = _slotSubsExpanded.has(k);
+      const availSubs = sh==='Home' ? (S.drSubs || []) : siteDRSubs(st);
+      const lbl = sh==='Home' ? 'Home' : sh+' Shift';
+      const mismatchBadge = (subBreakdown.length>0 && subSum!==total)
+        ? `<span class="tag tgr" style="font-size:9px;margin-left:4px" title="Sub breakdown sums to ${subSum} but total is ${total}">Σ=${subSum}</span>`
+        : '';
+      const activeSubsLabel = subBreakdown.length>0
+        ? `<small style="color:var(--txt3)"> · ${subBreakdown.map(([s,n])=>`${escHtml(s)}:${n}`).join(', ')}</small>`
+        : '';
+
+      const siteLit = jsLit(st.name);
+      const shLit = jsLit(sh);
+
+      html += `<div style="margin-bottom:${expanded?'10px':'6px'}">
+        <div class="flex" style="gap:6px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:11px;min-width:70px">${lbl}</label>
+          <input type="number" min="0" max="15" value="${total}" style="width:55px"
+            onchange="_ssSetTotalSlot(${siteLit}, ${week}, ${shLit}, this.value)">
+          ${mismatchBadge}
+          <button class="br bxs" onclick="toggleSlotSubs(${siteLit}, ${week}, ${shLit})"
+            title="${expanded?'Hide':'Show'} specialty breakdown">${expanded?'▲':'▼ by sub'}</button>
+        </div>
+        ${expanded ? '' : activeSubsLabel}`;
+
+      if(expanded){
+        html += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:5px">
+          <div style="font-size:10px;color:var(--txt3);margin-bottom:4px">
+            Break down the ${total} slot${total===1?'':'s'} by subspecialty. Auto-assign will target each specialty separately.
+            Any slots beyond the sum of specialties are filled as "any qualified physician".
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px">`;
+        availSubs.forEach(sub=>{
+          const n = +(subsMap[sub] || 0);
+          const subLit = jsLit(sub);
+          html += `<label style="display:flex;align-items:center;gap:4px;font-size:11px">
+            <input type="number" min="0" max="15" value="${n}" style="width:50px"
+              onchange="_ssSetSubSlot(${siteLit}, ${week}, ${shLit}, ${subLit}, this.value)">
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(sub)}">${escHtml(sub)}</span>
+          </label>`;
+        });
+        html += `</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:4px">
+            Current total: <strong>${subSum}</strong> of ${total}
+            ${subBreakdown.length>0 && subSum!==total ? `<span style="color:var(--red-t)"> — doesn't match. Either adjust the total above or these counts.</span>` : ''}
+            ${subBreakdown.length>0 ? `<button class="br bxs" style="float:right" onclick="_ssClearSubSlots(${siteLit}, ${week}, ${shLit})">Clear breakdown</button>` : ''}
+          </div>
+        </div>`;
+      }
+      html += '</div>';
     });
-    html+='</div></div>';
+
+    html += '</div>';
   });
   html+='</div>';
   el.innerHTML=html;
+}
+
+// Writer for the total slot count. Called by the top-row number input onchange.
+function _ssSetTotalSlot(siteName, week, sh, val){
+  if(!S.siteSlots) S.siteSlots = {};
+  S.siteSlots[`${siteName}|${week}|${sh}`] = parseInt(val) || 0;
+  triggerSave();
+  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+}
+
+function _ssSetSubSlot(siteName, week, sh, sub, val){
+  if(!S.siteSlotsSubs) S.siteSlotsSubs = {};
+  const key = `${siteName}|${week}|${sh}`;
+  if(!S.siteSlotsSubs[key]) S.siteSlotsSubs[key] = {};
+  const n = parseInt(val) || 0;
+  if(n <= 0){
+    delete S.siteSlotsSubs[key][sub];
+  } else {
+    S.siteSlotsSubs[key][sub] = n;
+  }
+  if(Object.keys(S.siteSlotsSubs[key]).length === 0) delete S.siteSlotsSubs[key];
+  triggerSave();
+  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+}
+
+function _ssClearSubSlots(siteName, week, sh){
+  if(!S.siteSlotsSubs) return;
+  const key = `${siteName}|${week}|${sh}`;
+  delete S.siteSlotsSubs[key];
+  triggerSave();
+  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
 }
 
 /* ─── IR SLOTS ─── */
@@ -12650,10 +12757,30 @@ function previewAA(){
                   +preview.filter(a=>a.date===c.date&&a.site===st.name&&a.shift===sh).length;
           let slots=need-ex;if(slots<=0)return;
           const kMap={s1:'1st',s2:'2nd',s3:'3rd'};const k=Object.entries(kMap).find(([,v])=>v===sh)?.[0];
-          for(let i=0;i<slots;i++){
+
+          // Per-specialty breakdown: if S.siteSlotsSubs[site|wk|sh] is set,
+          // build an ordered fill list where each entry targets a specific
+          // subspecialty. Remaining slots (total - sum of subs) are "any"
+          // slots. If no breakdown configured, all slots are "any".
+          const subMap = (S.siteSlotsSubs||{})[`${st.name}|${wk}|${sh}`] || {};
+          const fillList = []; // each entry: {targetSub: string|null}
+          Object.entries(subMap).forEach(([targetSub, n]) => {
+            const count = +n || 0;
+            // Already-placed shifts at this specialty count against the need
+            const exSub = S.drShifts.filter(s=>s.date===c.date&&s.site===st.name&&s.shift===sh&&s.sub===targetSub).length
+                        + preview.filter(a=>a.date===c.date&&a.site===st.name&&a.shift===sh&&a.sub===targetSub).length;
+            for(let i=0; i<count-exSub; i++) fillList.push({targetSub});
+          });
+          // Any remaining slots beyond the sub breakdown
+          const anyLeft = slots - fillList.length;
+          for(let i=0; i<anyLeft; i++) fillList.push({targetSub: null});
+
+          fillList.forEach(({targetSub}) => {
             const pool=drs.filter(p=>{
               if(!p.shiftElig[k])return false;
               if(p.allowedSites?.length&&!p.allowedSites.includes(st.name))return false;
+              // When a specialty is targeted, filter out physicians who don't have it
+              if(targetSub && !(p.drSubs||[]).includes(targetSub)) return false;
               if(!siteRuleOk(p,st.name,ym,c.date,k))return false;
               if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
               if(!sequenceOk(p,c.date,ym))return false;
@@ -12661,20 +12788,25 @@ function previewAA(){
               const vd=vacDays(p.id);if(vd.has(c.date))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-              if(!natLangRulesOk({physId:p.id,date:c.date,site:st.name,shift:sh,sub:p.drSubs[0]||'',kind:'dr-shift'}))return false;
+              const assumedSub = targetSub || p.drSubs?.[0] || '';
+              if(!natLangRulesOk({physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'}))return false;
               return cnt[p.id].wd<effTarget[p.id];
             });
             const sorted=sortByDeficit(pool,st.name);
             const p=sorted[0];
             if(!p){
-              gaps.push(`${c.date} ${st.name} ${sh}`);
-              if(!S.openShifts.find(o=>o.date===c.date&&o.site===st.name&&o.shiftType===sh+' Shift'))
-                S.openShifts.push({id:S.nextId++,date:c.date,shiftType:sh+' Shift',sub:'',site:st.name,group:'DR',claimedBy:null,notes:''});
-              continue;
+              // Gap messaging includes the specialty when targeted
+              const gapLabel = targetSub ? `${c.date} ${st.name} ${sh} (${targetSub})` : `${c.date} ${st.name} ${sh}`;
+              gaps.push(gapLabel);
+              if(!S.openShifts.find(o=>o.date===c.date&&o.site===st.name&&o.shiftType===sh+' Shift'&&(!targetSub||o.sub===targetSub)))
+                S.openShifts.push({id:S.nextId++,date:c.date,shiftType:sh+' Shift',sub:targetSub||'',site:st.name,group:'DR',claimedBy:null,notes:''});
+              return;
             }
-            preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:p.drSubs[0]||'',notes:'Auto',autoHome:false});
+            // Assigned sub: targeted one if specified, else physician's primary
+            const assignSub = targetSub || p.drSubs[0] || '';
+            preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:assignSub,notes:'Auto',autoHome:false});
             cnt[p.id].wd++;
-          }
+          });
         });
       });
       // Configured home slots
@@ -16098,7 +16230,7 @@ async function _pushToSupabase(){
         weekendCalls:S.weekendCalls,irShifts:S.irShifts,irCalls:S.irCalls,
         holidays:S.holidays,openShifts:S.openShifts,chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],
         swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
-        holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,irSlots:S.irSlots,
+        holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
