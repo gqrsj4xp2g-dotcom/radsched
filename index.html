@@ -378,8 +378,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('settings',this)">⚙ Settings</div>
       <div class="snav-item admin-only" onclick="nav('import',this)">📥 Import Excel</div>
       <div class="snav-item admin-only" onclick="nav('site-slots',this)">DR Site Slots</div>
-      <div class="snav-item admin-only" onclick="nav('ir-slots',this)">IR Call Slots</div>
-      <div class="snav-item admin-only" onclick="nav('ir-shift-slots',this)">IR Shift Slots</div>
+      <div class="snav-item admin-only" onclick="nav('ir-slots',this)">IR Slots &amp; Groups</div>
       <div class="snav-sect su-only" style="color:#a855f7">⚡ Superuser</div>
       <div class="snav-item su-only" onclick="nav('su-dashboard',this)" style="color:#a855f7">Cross-Practice Dashboard</div>
       <div class="snav-item su-only" onclick="nav('su-practices',this)" style="color:#a855f7">All Practices</div>
@@ -399,6 +398,10 @@ tbody tr:hover{background:var(--bg3)}
     </div>
   </div>
   <div class="pg-sub" id="dash-greet" style="margin-bottom:10px"></div>
+
+  <!-- First-run setup banner — populated by renderDash when the practice
+       has no physicians/sites. Disappears automatically once setup complete. -->
+  <div id="dash-setup-banner" style="display:none"></div>
 
   <!-- Quick nav cards (admin only) -->
   <div id="dash-quicknav" class="admin-only" style="display:none;margin-bottom:12px">
@@ -1601,17 +1604,14 @@ tbody tr:hover{background:var(--bg3)}
           <input id="holdef-year" type="number" min="2024" max="2035" value="2026" style="width:90px"></div>
       </div>
       <div class="note ni" style="font-size:11px;margin-bottom:6px">
-        Three independent call pools. Set slots = <strong>1</strong> for each pool that needs a physician covering the whole block.
-        Leave <strong>0</strong> to skip that pool.
+        One slot per pool. Set = <strong>1</strong> for each pool that needs a physician covering the whole block.
+        Leave <strong>0</strong> to skip that pool. IR groups below reflect the groups you've configured in IR Slots &amp; Groups.
       </div>
       <div class="g3">
         <div class="fg"><label>DR Call Slots</label>
           <input id="holdef-dr" type="number" min="0" max="10" value="1" style="width:70px"></div>
-        <div class="fg"><label>IR North Slots</label>
-          <input id="holdef-ir-north" type="number" min="0" max="10" value="1" style="width:70px"></div>
-        <div class="fg"><label>IR South Slots</label>
-          <input id="holdef-ir-south" type="number" min="0" max="10" value="1" style="width:70px"></div>
       </div>
+      <div id="holdef-ir-slots" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:6px"></div>
       <div class="fg"><label>Notes</label>
         <input id="holdef-notes" placeholder="Optional"></div>
       <div class="fg" style="margin-bottom:8px">
@@ -2273,35 +2273,45 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 </div>
 
 
-<!-- IR SHIFT SLOT CONFIG -->
-<div id="page-ir-shift-slots" class="page admin-only">
-  <div class="pg-title">IR Shift Slot Configuration</div>
-  <div class="note ni">Configure how many IR physicians are needed per site, per shift type, per day of week for the <strong>daily procedure schedule</strong> (separate from call). Default: 1 physician per site on 1st shift weekdays, 0 otherwise.</div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">North Group Sites</div>
-      <div id="ir-shift-slots-north"></div>
+<!-- MERGED IR SLOTS + GROUPS PAGE -->
+<div id="page-ir-shift-slots" class="page admin-only" style="display:none"></div>
+
+<div id="page-ir-slots" class="page admin-only">
+  <div class="pg-title">IR Slots &amp; Groups</div>
+  <div class="note ni" style="margin-bottom:10px">
+    Configure IR groups (practice subdivisions like North, South, regional pods) and the physician slot needs for each group's call and procedure coverage.
+    Call slots = number of IR call physicians on a given day of week. Shift slots = number of IR physicians doing daily procedures at each site.
+  </div>
+
+  <!-- IR Groups editor -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">IR Groups</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:8px">
+      Every IR-eligible site belongs to a group. Physicians inherit their group from their primary site. Default groups are North and South; add more for complex practices.
     </div>
-    <div class="card">
-      <div class="card-title">South Group Sites</div>
-      <div id="ir-shift-slots-south"></div>
+    <div id="ir-groups-list" style="margin-bottom:8px"></div>
+    <div class="flex" style="gap:4px">
+      <input id="new-ir-group" placeholder="New group name (e.g. 'West', 'Pediatric')" style="flex:1;font-size:12px">
+      <button class="bp bsm" onclick="addIRGroup()">Add Group</button>
     </div>
   </div>
-</div>
 
-<!-- IR DAILY SLOTS PAGE -->
-<div id="page-ir-slots" class="page admin-only">
-  <div class="pg-title">IR Daily Slot Configuration</div>
-  <div class="note ni">Configure the number of IR call physicians needed per group per <strong>day of week</strong>. Standard: 1 physician per group Mon-Fri covers all hospitals in that group. Weekend coverage is managed via IR Weekend Call.</div>
-  <div class="g2">
-    <div class="card">
-      <div class="card-title">North Group Sites</div>
-      <div id="ir-slots-north"></div>
+  <!-- Call slots per group per DOW -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Call Slots</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:8px">
+      Number of IR call physicians needed per site per day of week. Mon–Fri: covered by daily IR Call. Weekends (amber): covered by IR Weekend Call, not these slots.
     </div>
-    <div class="card">
-      <div class="card-title">South Group Sites</div>
-      <div id="ir-slots-south"></div>
+    <div id="ir-call-slots-content"></div>
+  </div>
+
+  <!-- Procedure shift slots per group per DOW -->
+  <div class="card">
+    <div class="card-title">Procedure Shift Slots</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:8px">
+      Number of IR physicians needed at each site for the daily procedure schedule (separate from call). Mon–Fri only; weekends handled via call.
     </div>
+    <div id="ir-shift-slots-content"></div>
   </div>
 </div>
 
@@ -2580,6 +2590,7 @@ function _buildSaveHTML(){
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
+    irGroups:S.irGroups||[],
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
     holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
@@ -2628,21 +2639,25 @@ function clearAllData(){
     irShifts:S.irShifts,vacations:S.vacations,holidays:S.holidays,
     openShifts:S.openShifts,physicians:S.physicians,chatMessages:S.chatMessages,
     swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
-    holidayNeeds:S.holidayNeeds,nextId:S.nextId,
+    holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
+    siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
+    irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,nextId:S.nextId,
   };
   const usersBackup=[...USERS];
-  // Reset to minimal seed
+  // Reset to minimal seed — fresh practice. No demo physicians, no demo
+  // user accounts, only the superuser. Customers who click Reset get the
+  // same clean slate a brand-new install gets. Preserves the "At Home /
+  // Remote" pseudo-site since code assumes it always exists.
   S.drShifts=[];S.weekendCalls=[];S.irCalls=[];S.irShifts=[];
   S.vacations=[];S.holidays=[];S.openShifts=[];S.chatMessages=[];
-  S.swapRequests=[];S.nextId=200;
+  S.swapRequests=[];S.physicians=[];S.holidayDefs=[];
+  S.holidayBlackouts=[];S.holidayNeeds=[];
+  S.siteSlots={};S.siteSlotsSubs={};S.irSlots={};S.irShiftSlots={};S.wkndNeeds={};
+  S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
+  S.nextId=100;
   USERS.length=0;
   USERS.push(
-    {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
-    {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
-    {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
-    {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
-    {id:'u4',email:'dr.torres@rad.com',pw:'',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
-    {id:'u5',email:'dr.lee@rad.com',pw:'',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'}
+    {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'}
   );
   try{
     const freshHTML=_buildSaveHTML();
@@ -2669,11 +2684,6 @@ let _regRole = 'user';
 
 let USERS = /*USERS_START*/[
   {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
-  {id:'u1',email:'admin@rad.com',pw:'',role:'admin',first:'Admin',last:'User',physId:null,joined:'2024-01-01'},
-  {id:'u2',email:'dr.chen@rad.com',pw:'',role:'user',first:'Sarah',last:'Chen',physId:1,joined:'2024-01-02'},
-  {id:'u3',email:'dr.patel@rad.com',pw:'',role:'user',first:'James',last:'Patel',physId:2,joined:'2024-01-02'},
-  {id:'u4',email:'dr.torres@rad.com',pw:'',role:'user',first:'Michael',last:'Torres',physId:6,joined:'2024-01-02'},
-  {id:'u5',email:'dr.lee@rad.com',pw:'',role:'user',first:'Anna',last:'Lee',physId:9,joined:'2024-01-03'},
 ]/*USERS_END*/;
 let CU = null;           // current user
 let _PRACTICE_ID='main'; // active practice row id
@@ -3080,6 +3090,7 @@ function _applyRemoteData(d){
       delete S.siteSlotsSubs[k];
     }
   });
+  if(Array.isArray(d.irGroups)) S.irGroups = d.irGroups.slice();
   if(d.irSlots)Object.assign(S.irSlots,d.irSlots);
   if(d.irShiftSlots)Object.assign(S.irShiftSlots,d.irShiftSlots);
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
@@ -3103,12 +3114,11 @@ function _applyRemoteData(d){
     if(!Array.isArray(st.irFillins)) st.irFillins=[];
   });
   // ── Migrate legacy holiday data to 3-pool model ──────────────────────────
-  // 1) Holiday assignments: group: 'IR' → 'IR-North' / 'IR-South' by physician's irGroup
+  // 1) Holiday assignments: legacy group='IR' → 'IR-<groupName>' by physician's irGroup
   (S.holidays||[]).forEach(h=>{
     if(h.group==='IR'){
       const p=(S.physicians||[]).find(x=>x.id===h.physId);
-      if(p&&p.irGroup==='North') h.group='IR-North';
-      else if(p&&p.irGroup==='South') h.group='IR-South';
+      if(p && p.irGroup) h.group = 'IR-' + p.irGroup;
       // else: leave as 'IR' — downstream code tolerates it
     }
   });
@@ -3358,115 +3368,47 @@ function _makeReactive(obj){
 }
 
 let S=/*S_START*/{
-  physicians:[
-    {id:1,first:"Sarah",last:"Chen",degree:"MD",role:"DR",drFte:1.0,irFte:0,irGroup:null,irSitePrim:null,anchorSite:"CHN",allowedSites:["CHN","CHE"],drSubs:["Neuroradiology","Body MRI","General Procedures"],irSubs:[],shiftElig:{s1:true,s2:false,s3:false,home:true,wknd:true},drSite:"CHN",siteRules:[]},
-    {id:2,first:"James",last:"Patel",degree:"MD",role:"DR",drFte:1.0,irFte:0,irGroup:null,irSitePrim:null,anchorSite:"CHE",allowedSites:["CHE","CHN"],drSubs:["Chest","Cardiac","General Procedures"],irSubs:[],shiftElig:{s1:true,s2:true,s3:false,home:true,wknd:true},drSite:"CHE",siteRules:[]},
-    {id:3,first:"Maria",last:"Rodriguez",degree:"MD",role:"DR",drFte:0.8,irFte:0,irGroup:null,irSitePrim:null,anchorSite:"CHN",allowedSites:["CHN"],drSubs:["Breast Imaging","Body MRI"],irSubs:[],shiftElig:{s1:true,s2:false,s3:false,home:true,wknd:true},drSite:"CHN",siteRules:[]},
-    {id:4,first:"David",last:"Kim",degree:"MD PhD",role:"DR",drFte:1.0,irFte:0,irGroup:null,irSitePrim:null,anchorSite:"CHS",allowedSites:["CHS","CHN"],drSubs:["MSK","Emergency","General Procedures"],irSubs:[],shiftElig:{s1:true,s2:true,s3:true,home:false,wknd:true},drSite:"CHS",siteRules:[]},
-    {id:5,first:"Lisa",last:"Wang",degree:"MD",role:"DR",drFte:0.5,irFte:0,irGroup:null,irSitePrim:null,anchorSite:"CHN",allowedSites:["CHN","At Home / Remote"],drSubs:["Neuroradiology"],irSubs:[],shiftElig:{s1:true,s2:false,s3:false,home:true,wknd:false},drSite:"CHN",siteRules:[]},
-    {id:6,first:"Michael",last:"Torres",degree:"MD",role:"IR",drFte:0,irFte:1.0,irGroup:"North",irSitePrim:"CHN",anchorSite:null,allowedSites:["CHN","CHE"],drSubs:[],irSubs:["IR General","Vascular"],shiftElig:{},drSite:"CHN",siteRules:[]},
-    {id:7,first:"Emily",last:"Johnson",degree:"MD",role:"IR",drFte:0,irFte:1.0,irGroup:"North",irSitePrim:"CHE",anchorSite:null,allowedSites:["CHE","CHN"],drSubs:[],irSubs:["IR General","Oncologic IR"],shiftElig:{},drSite:"CHE",siteRules:[]},
-    {id:8,first:"Robert",last:"Singh",degree:"MD",role:"IR",drFte:0,irFte:1.0,irGroup:"South",irSitePrim:"CHS",anchorSite:null,allowedSites:["CHS","STFS"],drSubs:[],irSubs:["IR General","Vascular"],shiftElig:{},drSite:"CHS",siteRules:[]},
-    {id:9,first:"Anna",last:"Lee",degree:"MD",role:"MIXED",drFte:0.25,irFte:0.75,irGroup:"South",irSitePrim:"CHS",anchorSite:"CHN",allowedSites:["CHN","CHS","STFS"],drSubs:["Body MRI","General Procedures"],irSubs:["IR General"],shiftElig:{s1:true,s2:false,s3:false,home:true,wknd:false},drSite:"CHN",siteRules:[]},
-  ],
+  physicians:[],
   // siteRules stored on each physician as p.siteRules = [{site, maxPerMonth, maxConsec, blocked}]
+  // Default subspecialty lists — opinionated starting points. Admins can
+  // add/remove/rename these via Settings. Kept non-empty because a fresh
+  // practice with zero subs can't meaningfully assign shifts.
   drSubs:["Neuroradiology","Body MRI","Chest","Cardiac","Breast Imaging","MSK","Emergency","Pediatric","Nuclear Medicine","General Procedures"],
   irSubs:["IR General","Vascular","Oncologic IR","Neuro IR","Body IR"],
   sites:[
-    {name:"CHN",irGroup:"North",irAnchors:[],irFillins:[]},
-    {name:"CHE",irGroup:"North",irAnchors:[],irFillins:[]},
-    {name:"CHS",irGroup:"South",irAnchors:[],irFillins:[]},
-    {name:"STFS",irGroup:"South",irAnchors:[],irFillins:[]},
-    {name:"Riverview",irGroup:null,irAnchors:[],irFillins:[]},
+    // "At Home / Remote" is a pseudo-site used for Home shifts. Code
+    // assumes it always exists, so it's the one seed entry kept. Admins
+    // add their real hospital sites via Site Management.
     {name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]},
   ],
-  vacations:[
-    {id:1,physId:1,start:"2025-06-02",end:"2025-06-06",type:"Vacation",notes:"",siteRules:[]},
-    {id:2,physId:3,start:"2025-06-16",end:"2025-06-20",type:"CME",notes:"",siteRules:[]},
-  ],
-  drShifts:[
-    {id:1,physId:1,date:"2025-06-02",shift:"1st",site:"CHN",sub:"Neuroradiology",notes:"",autoHome:false,siteRules:[]},
-    {id:2,physId:2,date:"2025-06-02",shift:"1st",site:"CHE",sub:"Chest",notes:"",autoHome:false,siteRules:[]},
-    {id:3,physId:4,date:"2025-06-03",shift:"3rd",site:"CHS",sub:"MSK",notes:"",autoHome:false,siteRules:[]},
-    {id:4,physId:5,date:"2025-06-03",shift:"Home",site:"At Home / Remote",sub:"Neuroradiology",notes:"",autoHome:false,siteRules:[]},
-    {id:5,physId:3,date:"2025-06-04",shift:"1st",site:"CHN",sub:"Breast Imaging",notes:"",autoHome:false,siteRules:[]},
-    {id:6,physId:1,date:"2025-06-05",shift:"1st",site:"CHN",sub:"Body MRI",notes:"",autoHome:false,siteRules:[]},
-    {id:7,physId:2,date:"2025-06-05",shift:"2nd",site:"CHE",sub:"Cardiac",notes:"",autoHome:false,siteRules:[]},
-    {id:8,physId:4,date:"2025-06-09",shift:"1st",site:"CHS",sub:"MSK",notes:"",autoHome:false,siteRules:[]},
-    {id:9,physId:1,date:"2025-06-10",shift:"1st",site:"CHN",sub:"Neuroradiology",notes:"",autoHome:false,siteRules:[]},
-    {id:10,physId:3,date:"2025-06-10",shift:"1st",site:"CHN",sub:"Body MRI",notes:"",autoHome:false,siteRules:[]},
-    {id:11,physId:1,date:"2025-06-11",shift:"1st",site:"CHE",sub:"Neuroradiology",notes:"non-anchor",autoHome:false,siteRules:[]},
-  ],
-  weekendCalls:[
-    {id:20,physId:1,satDate:"2025-06-07",sunDate:"2025-06-08",sub:"Neuroradiology",site:"CHN",ctype:"Primary",notes:"",siteRules:[]},
-    {id:21,physId:2,satDate:"2025-06-07",sunDate:"2025-06-08",sub:"Chest",site:"CHE",ctype:"Primary",notes:"",siteRules:[]},
-    {id:22,physId:4,satDate:"2025-06-14",sunDate:"2025-06-15",sub:"MSK",site:"CHS",ctype:"Primary",notes:"",siteRules:[]},
-  ],
+  vacations:[],
+  drShifts:[],
+  weekendCalls:[],
   // irShifts: non-call daily procedure shifts (separate from on-call schedule)
   irShifts:[],
-  irCalls:[
-    {id:30,physId:6,date:"2025-06-02",callType:"daily",irGroup:"North",site:"CHN",ctype:"Primary",notes:""},
-    {id:31,physId:7,date:"2025-06-03",callType:"daily",irGroup:"North",site:"CHE",ctype:"Primary",notes:""},
-    {id:32,physId:8,date:"2025-06-02",callType:"daily",irGroup:"South",site:"CHS",ctype:"Primary",notes:""},
-    {id:33,physId:7,date:"2025-06-06",callType:"weekend",irGroup:"North",site:"CHN",notes:""},
-    {id:34,physId:8,date:"2025-06-06",callType:"weekend",irGroup:"South",site:"CHS",notes:""},
-  ],
-  holidays:[
-    {id:40,name:"Memorial Day",date:"2025-05-26",year:2025,physId:1,group:"DR",notes:""},
-    {id:41,name:"Memorial Day",date:"2024-05-27",year:2024,physId:2,group:"DR",notes:""},
-    {id:42,name:"Christmas Day",date:"2025-12-25",year:2025,physId:6,group:"IR",notes:""},
-    {id:43,name:"Independence Day",date:"2025-07-04",year:2025,physId:3,group:"DR",notes:""},
-    {id:44,name:"New Year's Day",date:"2024-01-01",year:2024,physId:4,group:"DR",notes:""},
-  ],
-  openShifts:[
-    {id:50,date:"2025-06-11",shiftType:"1st Shift",sub:"Emergency",site:"CHS",group:"DR",claimedBy:null,notes:""},
-    {id:51,date:"2025-06-18",shiftType:"Weekend Call",sub:"Cardiac",site:"CHE",group:"DR",claimedBy:null,notes:""},
-  ],
+  irCalls:[],
+  holidays:[],
+  openShifts:[],
   siteSlots:{},siteSlotsSubs:{},irSlots:{},irShiftSlots:{},
-  wkndNeeds:{"Neuroradiology":4,"Body MRI":3,"Chest":3,"MSK":3,"Breast Imaging":2,"Cardiac":2,"Emergency":2,"Pediatric":1,"Nuclear Medicine":1,"General Procedures":2},
+  irGroups:['North','South'],
+  wkndNeeds:{},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
   driveTimes:{},
-  nextId:200,
+  nextId:100,
   aaPreview:[],iraPreview:[],irsaPreview:[],
   vacPicking:{year:new Date().getFullYear(),defaultRounds:12,roundOpen:1,viewRound:1,
     seniority:[],physRounds:{},physSection:{},sectionLimits:{},totalWeekLimit:{},
     picks:{},assignments:{}},
-  // Chat messages
-  chatMessages:[
-    {id:1,userId:'u1',text:'Welcome to RadScheduler! Use the Chat tab to coordinate with colleagues.',ts:'2025-06-01T09:00:00',channel:'general',toGroupId:null,toUserId:null},
-  ],
+  chatMessages:[],
   chatGroups:[
-    {id:2,name:'General',memberIds:[],createdBy:'u1',isPrivate:false,description:'Everyone'},
+    {id:1,name:'General',memberIds:[],createdBy:null,isPrivate:false,description:'Everyone'},
   ],
-  // Shift swap requests
   swapRequests:[],
-  // Holiday blackout dates (dates where normal daily shifts are blocked)
-  holidayBlackouts:[
-    {id:1,name:'Memorial Day',date:'2025-05-26'},
-    {id:2,name:'Independence Day',date:'2025-07-04'},
-    {id:3,name:'Christmas Day',date:'2025-12-25'},
-  ],
-  // Holiday call auto-assign needs: {holidayName, group (DR|IR|Both), slots}
-  holidayNeeds:[
-    {id:1,name:"New Year's Day",group:'DR',slots:2},
-    {id:2,name:"New Year's Day",group:'IR',slots:1},
-    {id:3,name:'Memorial Day',group:'DR',slots:2},
-    {id:4,name:'Memorial Day',group:'IR',slots:1},
-    {id:5,name:'Independence Day',group:'DR',slots:2},
-    {id:6,name:'Independence Day',group:'IR',slots:1},
-    {id:7,name:'Labor Day',group:'DR',slots:2},
-    {id:8,name:'Labor Day',group:'IR',slots:1},
-    {id:9,name:'Thanksgiving',group:'DR',slots:2},
-    {id:10,name:'Thanksgiving',group:'IR',slots:1},
-    {id:11,name:'Christmas Day',group:'DR',slots:2},
-    {id:12,name:'Christmas Day',group:'IR',slots:1},
-  ],
+  holidayBlackouts:[],
+  holidayNeeds:[],
   holidayDefs:[],
-  // Natural-language if/then rules — enforced during auto-assign
   natLangRules:[],
-  // Broadcast email history
   broadcasts:[],
-  // Shift marketplace listings ("for sale")
   shiftListings:[],
 }/*S_END*/;
 // _isRestoring and _dataRestored declared at top of script
@@ -3788,6 +3730,7 @@ async function createPractice(){
     ],
     drSubs:[], irSubs:[],
     siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, wkndNeeds:{},
+    irGroups:['North','South'],
     cfg:{anchorPct:70}, vacPicking:{}, driveTimes:{},
     nextId:1, users:[],
     savedAt:new Date().toISOString()
@@ -3917,6 +3860,11 @@ function nav(pg,el){
   document.getElementById('page-'+pg)?.querySelectorAll('input[type="month"]').forEach(inp=>{
     if(!inp.value) inp.value=ym;
   });
+  // Refresh all IR-group <select> elements with the current dynamic list
+  // before rendering the target page, so newly-added groups appear wherever
+  // IR group dropdowns exist — without each render function having to know
+  // about this concern individually.
+  try{ _repopulateIRGroupSelects(); }catch(e){}
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
@@ -3940,6 +3888,42 @@ function renderDash(){
   document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
   ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
+
+  // First-run setup banner — shown to admins of a brand-new practice. Walks
+  // through the minimum setup needed to make auto-assign work. Disappears
+  // automatically once there's at least one non-"At Home / Remote" site
+  // AND at least one physician.
+  const setupBanner = document.getElementById('dash-setup-banner');
+  if(setupBanner){
+    const realSites = S.sites.filter(s => s.name !== 'At Home / Remote');
+    const hasPhys = S.physicians.length > 0;
+    if(isAdm && (!realSites.length || !hasPhys)){
+      const steps = [
+        {done: realSites.length>0, label: 'Add your hospital sites', target:'site-slots'},
+        {done: (S.irGroups||[]).length>0, label: 'Configure IR groups (North/South by default)', target:'ir-slots'},
+        {done: hasPhys, label: 'Add your physicians', target:'physicians'},
+      ];
+      setupBanner.style.display = '';
+      setupBanner.innerHTML = `
+        <div style="padding:16px;background:linear-gradient(135deg,var(--blue-bg),var(--teal-bg));border:1px solid var(--blue-t);border-radius:8px;margin-bottom:14px">
+          <div style="font-weight:800;font-size:15px;color:var(--blue-t);margin-bottom:6px">🚀 Welcome to RadScheduler</div>
+          <div style="font-size:12px;color:var(--txt2);margin-bottom:10px">
+            Get your practice running in a few minutes. Complete these steps in order — each one unlocks the next.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${steps.map((s,i)=>`
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg2);border-radius:6px;${s.done?'opacity:.6':''}">
+                <span style="font-weight:800;color:${s.done?'var(--green)':'var(--txt3)'};min-width:18px">${s.done?'✓':(i+1)+'.'}</span>
+                <span style="flex:1;font-size:12px;font-weight:${s.done?'500':'700'};${s.done?'text-decoration:line-through':''}">${s.label}</span>
+                ${s.done ? '' : `<button class="bp bsm" onclick="nav('${s.target}',document.querySelector('[onclick*=\\'${s.target}\\']'))">Go →</button>`}
+              </div>`).join('')}
+          </div>
+        </div>`;
+    } else {
+      setupBanner.style.display = 'none';
+      setupBanner.innerHTML = '';
+    }
+  }
   const drPs=S.physicians.filter(p=>p.role!=='IR');
   const irPs=S.physicians.filter(p=>p.irFte>0);
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
@@ -3991,7 +3975,7 @@ function renderDash(){
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No shifts.</p>';
     const irR=document.getElementById('dash-ir-recent');
     if(irR)irR.innerHTML=S.irCalls.filter(c=>c.date.startsWith(ym)).slice(0,5).map(c=>{
-      const cls=c.irGroup==='North'?'tb':'tg';
+      const cls=irGroupColorClass(c.irGroup);
       return`<div class="row"><span style="font-size:12px;flex:1">${pname(c.physId)}</span><span class="tag ${cls}">${c.irGroup}</span><span style="color:var(--txt3);font-size:11px">${c.date.slice(5)} ${c.callType}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No IR calls.</p>';
   }
@@ -4314,6 +4298,21 @@ function renderPhysicians(){
       </div>`;
     });
   });
+  // Empty-state: welcome a fresh practice with concrete next steps rather than
+  // a silent blank page. Shown only when there are no physicians yet; once any
+  // are added this block disappears naturally.
+  if(!html){
+    html = `<div style="padding:24px;text-align:center;color:var(--txt3)">
+      <div style="font-size:28px;margin-bottom:6px">👋</div>
+      <div style="font-size:14px;font-weight:700;color:var(--txt2);margin-bottom:4px">Welcome — let's add your first physician</div>
+      <div style="font-size:12px;max-width:480px;margin:0 auto 10px">
+        Use the form above to add each physician's name, role (DR, IR, or Mixed), and their FTE.
+        You can configure subspecialties and anchor sites once you've added your hospital sites in
+        <strong>Site Management</strong>.
+      </div>
+      <div style="font-size:11px;opacity:.7">Quick order: Site Management → IR Slots &amp; Groups → Physicians → Auto-Assign</div>
+    </div>`;
+  }
   document.getElementById('phys-list').innerHTML=html;
 }
 function submitPhys(){
@@ -4820,7 +4819,7 @@ function renderFTE(){
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
-        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup||'—'}</span></td>
         <td style="text-align:center;font-weight:700">${dailyCalls}</td>
         <td style="text-align:center;color:var(--txt3)">${dailyTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
@@ -4961,7 +4960,7 @@ function renderFTEPeriod(){
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
         <td style="text-align:center">${p.irFte}</td>
-        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup||'—'}</span></td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup||'—'}</span></td>
         <td style="text-align:center;font-weight:700">${dailyTotal}</td>
         <td style="text-align:center;color:var(--txt3)">${dailyTgt.toFixed(1)}</td>
         <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
@@ -5055,7 +5054,7 @@ function renderFTECareer(){
   });
 
   // ── Summary balance leaderboard ─────────────────────────────────────────
-  const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
+  const groups = getIRGroups().filter(g=>grpFilter==='both'||g===grpFilter);
   let html='';
 
   // Balance bar helper: -ve = owes calls (green bar on left), +ve = ahead (red bar on right)
@@ -7320,7 +7319,7 @@ function previewIRShiftAA(){
   var grpSel=(document.getElementById('irsa-grp')||{}).value||'both';
   var ancTgt=S.cfg?(S.cfg.anchorPct||70):70;
   var ANC_RATE=ancTgt/100;
-  var groups=['North','South'].filter(function(g){return grpSel==='both'||g===grpSel;});
+  var groups = getIRGroups().filter(function(g){return grpSel==='both'||g===grpSel;});
   var ancEl=document.getElementById('irsa-anc-target');
   if(ancEl)ancEl.textContent=ancTgt;
   var allP=S.physicians||[],allS=S.sites||[],allC=S.irCalls||[],slots_cfg=S.irShiftSlots||{};
@@ -7406,7 +7405,7 @@ function previewIRShiftAA(){
   var months=[],mi;for(mi=startMo;mi<startMo+6;mi++)months.push(yr+'-'+(mi<10?'0':'')+mi);
   var periodLbl=period+' '+yr;
   var grp=(document.getElementById('irsa-grp')||{}).value||'both';
-  var groups=['North','South'].filter(function(g){return grp==='both'||g===grp;});
+  var groups = getIRGroups().filter(function(g){return grp==='both'||g===grp;});
   if(!confirm('Apply '+_irsaPreview.length+' IR shift(s) for '+periodLbl+'? Existing non-Home IR shifts for this period will be replaced.'))return;
   S.irShifts=(S.irShifts||[]).filter(function(s){
     var inP=false;for(var mi2=0;mi2<months.length;mi2++){if(s.date.startsWith(months[mi2])){inP=true;break;}}
@@ -7430,7 +7429,7 @@ function clearIRShiftsPeriod(){
   var months=[],mi;for(mi=startMo;mi<startMo+6;mi++)months.push(yr+'-'+(mi<10?'0':'')+mi);
   var periodLbl=period+' '+yr;
   var grp=(document.getElementById('irsa-grp')||{}).value||'both';
-  var groups=['North','South'].filter(function(g){return grp==='both'||g===grp;});
+  var groups = getIRGroups().filter(function(g){return grp==='both'||g===grp;});
   if(!confirm('Clear all non-Home IR shifts for '+periodLbl+'?'))return;
   S.irShifts=(S.irShifts||[]).filter(function(s){
     var inP=false;for(var mi2=0;mi2<months.length;mi2++){if(s.date.startsWith(months[mi2])){inP=true;break;}}
@@ -7626,7 +7625,10 @@ function renderIRShiftTable(){
   tbody.innerHTML = rows.map(s => {
     if(_editingIRShiftId === s.id){
       // Edit-mode row with full field controls
-      const siteOpts = S.sites.filter(st => st.irGroup==='North'||st.irGroup==='South'||st.irGroup==='Both'||st.name===s.site)
+      // Show sites in ANY IR group (or 'Both') plus the shift's current site
+      // as a fallback. Using getIRGroups() lets custom groups participate too.
+      const _irGroupSet = new Set(getIRGroups());
+      const siteOpts = S.sites.filter(st => _irGroupSet.has(st.irGroup) || st.irGroup==='Both' || st.name===s.site)
         .map(st => `<option value="${st.name}"${st.name===s.site?' selected':''}>${st.name}</option>`).join('');
       const subs = siteIRSubsByName(s.site);
       const subOpts = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}"${sub===s.sub?' selected':''}>${sub}</option>`).join('');
@@ -7650,7 +7652,7 @@ function renderIRShiftTable(){
       <td>${s.date}</td>
       <td><span class="tag ${s.shift==='Home'?'':'eir'}" style="font-size:10px">${shiftLbl}</span></td>
       <td>${s.site||'—'}</td>
-      <td><span class="tag ${(s.irGroup||'')==='North'?'tb':'tg'}" style="font-size:10px">${s.irGroup||'—'}</span></td>
+      <td><span class="tag ${irGroupColorClass((s.irGroup||''))}" style="font-size:10px">${s.irGroup||'—'}</span></td>
       <td style="font-size:11px">${s.sub||'—'}</td>
       <td style="font-size:11px">${s.notes||'—'}</td>
       <td style="white-space:nowrap">
@@ -7768,15 +7770,25 @@ function renderHolCounter(){
   const physicians = S.physicians.filter(p => {
     if(grp === 'ALL')       return p.drFte > 0 || p.irFte > 0;
     if(grp === 'DR')        return p.drFte > 0 && p.role !== 'IR';
-    if(grp === 'IR-North')  return p.irFte > 0 && p.irGroup === 'North';
-    if(grp === 'IR-South')  return p.irFte > 0 && p.irGroup === 'South';
+    // Generic IR-<groupName> match — e.g. "IR-North", "IR-Pediatric", etc.
+    // Replaces the old hardcoded 'IR-North' / 'IR-South' conditions so any
+    // admin-added IR group works here without code changes.
+    const m = /^IR-(.+)$/.exec(grp);
+    if(m) return p.irFte > 0 && p.irGroup === m[1];
     return false;
   });
 
-  // Build data: physId → {total, byYear:{yr:N}, byHol:{name:N}, byGroup:{DR:N,'IR-North':N,'IR-South':N}}
+  // Build data: physId → {total, byYear:{yr:N}, byHol:{name:N}, byGroup:{DR:N,'IR-X':N,...}}
+  // Dynamically seed byGroup buckets for every known IR group so any admin-
+  // added group (e.g. 'IR-East') gets counted without code changes.
+  const _emptyByGroup = () => {
+    const b = {DR:0, IR:0};
+    getIRGroups().forEach(g => { b['IR-'+g] = 0; });
+    return b;
+  };
   const data = {};
   physicians.forEach(p => {
-    data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:{'DR':0,'IR-North':0,'IR-South':0,'IR':0}};
+    data[p.id] = {total:0, byYear:{}, byHol:{}, byGroup:_emptyByGroup()};
   });
   // Deduplicate to blocks: name+year+group+physId = 1 assignment regardless of dates
   const seen=new Set();
@@ -7784,11 +7796,13 @@ function renderHolCounter(){
     const key=`${h.physId}|${h.name}|${h.year}|${h.group}`;
     if(seen.has(key)) return;
     seen.add(key);
-    if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:{'DR':0,'IR-North':0,'IR-South':0,'IR':0}};
+    if(!data[h.physId]) data[h.physId] = {total:0, byYear:{}, byHol:{}, byGroup:_emptyByGroup()};
     const d = data[h.physId];
     d.total++;
     d.byYear[h.year] = (d.byYear[h.year]||0) + 1;
     d.byHol[h.name]  = (d.byHol[h.name]||0) + 1;
+    // Unknown group? Init lazily so legacy data with unexpected group values doesn't crash
+    if(d.byGroup[h.group] === undefined) d.byGroup[h.group] = 0;
     d.byGroup[h.group] = (d.byGroup[h.group]||0) + 1;
   });
 
@@ -7809,12 +7823,15 @@ function renderHolCounter(){
   if(isCareer){
     // For each group and each year, compute total slots and per-physician fair share
     physicians.forEach(p=>{ fairByPhys[p.id]={actTot:0, fairTot:0, bal:0}; });
-    const groupsToConsider = grp==='ALL' ? ['DR','IR-North','IR-South'] : [grp];
+    const groupsToConsider = grp==='ALL'
+      ? ['DR', ...getIRGroups().map(g => 'IR-'+g)]
+      : [grp];
     groupsToConsider.forEach(g=>{
       const poolPhys = physicians.filter(p=>{
         if(g==='DR') return p.drFte>0 && p.role!=='IR';
-        if(g==='IR-North') return p.irFte>0 && p.irGroup==='North';
-        if(g==='IR-South') return p.irFte>0 && p.irGroup==='South';
+        // Generic IR-<groupName> filter
+        const mm = /^IR-(.+)$/.exec(g);
+        if(mm) return p.irFte>0 && p.irGroup===mm[1];
         return false;
       });
       const gFteTot = poolPhys.reduce((s,p)=>s+(g==='DR'?p.drFte:p.irFte), 0) || 1;
@@ -7868,12 +7885,15 @@ function renderHolCounter(){
       .map(([n,c]) => `<span class="tag ta" style="font-size:9px">${n.split(' ')[0]}×${c}</span>`)
       .join(' ');
 
-    // Combine legacy 'IR' into North/South display cells — show under whichever matches the physician
+    // Combine legacy 'IR' into the matching IR group's cell — legacy entries
+    // where physician's irGroup is set become part of that group's count.
     const legacyIR = v.byGroup['IR']||0;
-    const isNorth = p && p.irGroup==='North';
-    const isSouth = p && p.irGroup==='South';
-    const cellN = (v.byGroup['IR-North']||0) + (isNorth?legacyIR:0);
-    const cellS = (v.byGroup['IR-South']||0) + (isSouth?legacyIR:0);
+    const irGroups = getIRGroups();
+    // Per-group cell values: base count + legacy-IR if physician's group matches
+    const perGroupCells = {};
+    irGroups.forEach(g => {
+      perGroupCells[g] = (v.byGroup['IR-'+g]||0) + ((p && p.irGroup===g) ? legacyIR : 0);
+    });
     const cellDR = v.byGroup['DR']||0;
 
     // Career balance cell
@@ -7886,9 +7906,14 @@ function renderHolCounter(){
       balCell = `<td style="text-align:center;font-weight:700;color:${balCol}" title="Fair share: ${fair}">${balTxt}</td>`;
     }
 
+    // When grp==='ALL' show DR + one column per IR group (dynamic)
+    const allCells = grp === 'ALL'
+      ? `<td style="text-align:center">${cellDR}</td>` + irGroups.map(g => `<td style="text-align:center">${perGroupCells[g]}</td>`).join('')
+      : '';
+
     html += `<tr>
       <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
-      ${grp === 'ALL' ? `<td style="text-align:center">${cellDR}</td><td style="text-align:center">${cellN}</td><td style="text-align:center">${cellS}</td>` : ''}
+      ${allCells}
       ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
       ${balCell}
@@ -7905,6 +7930,7 @@ function renderHolCounter(){
 
   const zeroes = physicians.filter(p => !(data[p.id]?.total > 0));
   if(zeroes.length){
+    const irGroups = getIRGroups();
     zeroes.forEach(p => {
       let zBal='';
       if(isCareer){
@@ -7914,9 +7940,12 @@ function renderHolCounter(){
         const balCol = b < -1.5 ? 'var(--blue-t)' : 'var(--txt3)';
         zBal = `<td style="text-align:center;font-weight:700;color:${balCol}" title="Fair share: ${fair}">${fair==='0.0'?'—':balTxt}</td>`;
       }
+      const allDashes = grp === 'ALL'
+        ? ('<td style="text-align:center">—</td>' + irGroups.map(() => '<td style="text-align:center">—</td>').join(''))
+        : '';
       html += `<tr style="opacity:.5">
         <td style="font-weight:600">${pname(p.id)}</td>
-        ${grp === 'ALL' ? '<td style="text-align:center">—</td><td style="text-align:center">—</td><td style="text-align:center">—</td>' : ''}
+        ${allDashes}
         ${showYears ? allYears.map(() => '<td>—</td>').join('') : ''}
         <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);color:var(--txt3)">0</td>
         ${zBal}
@@ -7945,8 +7974,9 @@ function reassignHoliday(id){
   const physOpts = S.physicians
     .filter(p => {
       if(h.group === 'DR')       return p.drFte > 0 && p.role !== 'IR';
-      if(h.group === 'IR-North') return p.irFte > 0 && p.irGroup === 'North';
-      if(h.group === 'IR-South') return p.irFte > 0 && p.irGroup === 'South';
+      // Generic IR-<group> → physicians in that group
+      const mm = /^IR-(.+)$/.exec(h.group||'');
+      if(mm) return p.irFte > 0 && p.irGroup === mm[1];
       // Legacy 'IR' — show all IR physicians
       if(h.group === 'IR')       return p.irFte > 0;
       return false;
@@ -7970,7 +8000,7 @@ function doReassignHoliday(id){
   if(!newPhysId){ alert('Select a physician.'); return; }
   const h = S.holidays.find(x => x.id === id);
   if(!h) return;
-  const isIR = h.group === 'IR' || h.group === 'IR-North' || h.group === 'IR-South';
+  const isIR = h.group === 'IR' || /^IR-/.test(h.group||'');
   if(isIR) _removeHolidayIRCall(h.physId, h.date);
   h.physId = newPhysId;
   if(isIR) _syncHolidayToIRCall(h.physId, h.date, h.name);
@@ -8647,6 +8677,34 @@ function siteIRSubsByName(name){ return siteIRSubs((S.sites||[]).find(s=>s.name=
 const _siteMixedExpanded = new Set();
 
 function renderSitesList(){
+  // Keep the IR group dropdowns on both add-forms in sync with the dynamic
+  // S.irGroups list. Admins who add new groups will see them appear here,
+  // letting sites be assigned to custom groups like "Pediatric" or "West".
+  // Existing selected value is preserved; falls back to blank if gone.
+  ['new-site-irg','new-site-irg-ssl','p-irgrp','ird-grp'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    if(!sel) return;
+    const prev = sel.value;
+    const groups = getIRGroups();
+    // Different selects have different "blank" semantics — preserve each one's
+    // original first option text if it was a non-group option ("DR/General", etc.)
+    const first = sel.options[0];
+    const firstIsBlank = first && (first.value === '' || first.textContent.match(/general|both|any/i));
+    const opts = [];
+    if(firstIsBlank) opts.push(`<option value="${first.value}">${first.textContent}</option>`);
+    groups.forEach(g => {
+      const lbl = (selId === 'new-site-irg' || selId === 'new-site-irg-ssl') ? `IR ${g}` : g;
+      opts.push(`<option value="${g}">${lbl}</option>`);
+    });
+    // "Both" option on site-group selectors (for sites that serve multiple groups)
+    if(selId === 'new-site-irg' || selId === 'new-site-irg-ssl'){
+      opts.push(`<option value="Both">IR Both</option>`);
+    }
+    sel.innerHTML = opts.join('');
+    // Restore prior selection if it's still a valid option
+    if(prev && Array.from(sel.options).some(o => o.value === prev)) sel.value = prev;
+  });
+
   // Render into whichever anchors currently exist in the DOM. This lets the
   // site editor live in BOTH the Settings tab's "Hospital Sites" card AND the
   // Site Management (DR Site Slots) tab, staying in sync. Users naturally
@@ -8658,7 +8716,7 @@ function renderSitesList(){
   if(!anchors.length) return;
   const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const html=(S.sites||[]).map((s,i)=>{
-    const g=s.irGroup?`<span class="tag ${s.irGroup==='North'?'tb':s.irGroup==='South'?'tg':'tt'}">IR ${s.irGroup}</span>`:'';
+    const g=s.irGroup?`<span class="tag ${irGroupColorClass(s.irGroup)}">IR ${s.irGroup}</span>`:'';
     const anchors=s.irAnchors||[], fillins=s.irFillins||[];
     const anchorNames=anchors.map(id=>pname(id)).join(', ')||'—';
     const fillinNames=fillins.map(id=>pname(id)).join(', ')||'—';
@@ -9308,67 +9366,312 @@ function _ssClearSubSlots(siteName, week, sh){
 }
 
 /* ─── IR SLOTS ─── */
-function renderIRSlots(){
-  const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  ['north','south'].forEach(g=>{
-    const G=g[0].toUpperCase()+g.slice(1);
-    const gSites=(S.sites||[]).filter(s=>s.irGroup===G||s.irGroup==='Both');
-    let html='';
-    gSites.forEach(st=>{
-      html+=`<div style="margin-bottom:14px">
-        <div style="font-weight:800;font-size:12px;margin-bottom:6px;color:${G==='North'?'var(--blue-t)':'var(--green-t)'}">${st.name}</div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">`;
-      DOW.forEach((dn,dow)=>{
-        if(!S.irSlots) S.irSlots={};
-        const k=`${st.name}|${dow}`;
-        const v=S.irSlots[k]!==undefined?S.irSlots[k]:(dow>=1&&dow<=5?1:0);
-        const isWknd=dow===0||dow===6;
-        html+=`<div style="text-align:center">
-          <label style="display:block;font-size:9.5px;font-weight:800;color:${isWknd?'var(--amber-t)':'var(--txt2)'};margin-bottom:3px;text-transform:uppercase">${dn}</label>
-          <input type="number" min="0" max="5" value="${v}"
-            style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:${isWknd?'var(--amber-bg)':'var(--bg2)'}"
-            oninput="if(!S.irSlots)S.irSlots={};S.irSlots['${k}']=parseInt(this.value)||0;triggerSave()">
-        </div>`;
-      });
-      html+=`</div>
-      <div style="font-size:10px;color:var(--amber-t);margin-top:3px">Amber = weekends — covered by IR Weekend Call, not daily slots.</div>
-      </div>`;
+// ═══════════════════════════════════════════════════════════════════════════
+// IR GROUPS — user-configurable set of IR practice subdivisions.
+// ═══════════════════════════════════════════════════════════════════════════
+// Historically hardcoded as ['North', 'South']. Most of the codebase still
+// references those literals directly (81+ sites as of this change); rather
+// than refactor all of them at once, we lazily derive the list from three
+// sources and allow the admin to add new groups via S.irGroups:
+//   1. Explicit S.irGroups[] if defined by admin additions
+//   2. Groups actually in use on S.sites[].irGroup  (discovered)
+//   3. Fallback 'North' + 'South'
+//
+// The UI on the IR Slots & Groups page iterates this combined list. New
+// groups the admin adds will immediately show up in slot config. When the
+// admin later configures a site's irGroup to the new name (via Site Management)
+// the physicians whose primary site is there inherit the group via existing
+// downstream code.
+function getIRGroups(){
+  const fromState = Array.isArray(S.irGroups) ? S.irGroups.slice() : [];
+  const fromSites = Array.from(new Set(
+    (S.sites||[]).map(s => s.irGroup).filter(g => g && g !== 'Both')
+  ));
+  const seen = new Set();
+  const merged = [];
+  ['North','South', ...fromState, ...fromSites].forEach(g => {
+    if(g && !seen.has(g)){ seen.add(g); merged.push(g); }
+  });
+  return merged;
+}
+
+// Returns a CSS tag class for any IR group name so the entire UI can color
+// groups consistently. North → blue (tb), South → green (tg), everything
+// else rotates through a stable palette based on hash so the same group name
+// always gets the same color regardless of the order it appears.
+function irGroupColorClass(g){
+  if(!g) return 'tgr';
+  if(g === 'North') return 'tb';
+  if(g === 'South') return 'tg';
+  if(g === 'Both')  return 'tt';
+  // Deterministic hash → palette slot for custom groups
+  const palette = ['ta', 'tpk', 'tt', 'tgr'];
+  let hash = 0;
+  for(let i=0; i<g.length; i++){ hash = ((hash<<5) - hash + g.charCodeAt(i)) | 0; }
+  return palette[Math.abs(hash) % palette.length];
+}
+
+// Returns a CSS color variable for any IR group name — used where inline
+// style colors are needed instead of tag classes.
+function irGroupColor(g){
+  if(g === 'North') return 'var(--blue-t)';
+  if(g === 'South') return 'var(--green-t)';
+  const palette = ['var(--purple-t)','var(--amber-t)','var(--red-t)','var(--teal)'];
+  let hash = 0;
+  for(let i=0; i<(g||'').length; i++){ hash = ((hash<<5) - hash + g.charCodeAt(i)) | 0; }
+  return palette[Math.abs(hash) % palette.length];
+}
+
+// Repopulate every IR group <select> in the DOM from the dynamic list.
+// Each select is classified by ID prefix to determine whether it needs a
+// "Both" pseudo-option (for filter selectors) or not (for single-group
+// assignment selectors). Current selection is preserved when possible.
+// Called from page-load bootstrap, whenever S.irGroups changes, and before
+// any IR-related page render so the latest groups always appear.
+function _repopulateIRGroupSelects(){
+  const groups = getIRGroups();
+  // Selects that take a single group value (no "Both" option)
+  const singleSelects = [
+    {id:'p-irgrp',           makeLabel:(g)=>g},            // physician profile IR group
+    {id:'ird-grp',           makeLabel:(g)=>g},            // IR daily call group
+    {id:'new-site-irg',      makeLabel:(g)=>'IR '+g, includeBoth:true, blankValue:'', blankLabel:'DR/General'},
+    {id:'new-site-irg-ssl',  makeLabel:(g)=>'IR '+g, includeBoth:true, blankValue:'', blankLabel:'DR/General'},
+  ];
+  // Selects that include a "both" option for filtering
+  const filterSelects = [
+    {id:'irb-grp',         makeLabel:(g)=>g+' Group', bothValue:'both', bothLabel:'Both Groups'},
+    {id:'irsa-grp',        makeLabel:(g)=>g+' Only',  bothValue:'both', bothLabel:'Both Groups'},
+    {id:'ira-grp',         makeLabel:(g)=>g+' Only',  bothValue:'both', bothLabel:'Both Groups'},
+    {id:'irr-grp',         makeLabel:(g)=>g+' Only',  bothValue:'both', bothLabel:'Both Groups'},
+    {id:'fte-career-grp',  makeLabel:(g)=>g,          bothValue:'both', bothLabel:'Both'},
+    {id:'irl-grp',         makeLabel:(g)=>g,          bothValue:'',     bothLabel:'Both'},
+  ];
+
+  singleSelects.forEach(({id, makeLabel, includeBoth, blankValue, blankLabel}) => {
+    const sel = document.getElementById(id); if(!sel) return;
+    const prev = sel.value;
+    const opts = [];
+    if(blankValue !== undefined) opts.push(`<option value="${blankValue}">${blankLabel}</option>`);
+    groups.forEach(g => opts.push(`<option value="${g}">${makeLabel(g)}</option>`));
+    if(includeBoth) opts.push(`<option value="Both">IR Both</option>`);
+    sel.innerHTML = opts.join('');
+    if(prev && Array.from(sel.options).some(o => o.value === prev)) sel.value = prev;
+  });
+
+  filterSelects.forEach(({id, makeLabel, bothValue, bothLabel}) => {
+    const sel = document.getElementById(id); if(!sel) return;
+    const prev = sel.value;
+    const opts = [`<option value="${bothValue}">${bothLabel}</option>`];
+    groups.forEach(g => opts.push(`<option value="${g}">${makeLabel(g)}</option>`));
+    sel.innerHTML = opts.join('');
+    if(prev && Array.from(sel.options).some(o => o.value === prev)) sel.value = prev;
+  });
+
+  // Holiday group dropdowns use "DR" + "IR-<groupName>" as values. These need
+  // a separate loop because the format differs from plain group filters.
+  const holSelects = [
+    {id:'hol-grp',   prefix:'',       makeLabel:(g)=>g+' Call'},  // assignment: DR Call / IR North Call
+    {id:'holf-grp',  prefix:'',       makeLabel:(g)=>g, topBlank:{value:'',label:'All'}},  // filter, allows blank
+    {id:'haa-grp',   prefix:'',       makeLabel:(g)=>g+' only', topBlank:{value:'all',label:'All pools'}},  // tally
+    {id:'hcg',       prefix:'',       makeLabel:(g)=>g, topBlank:{value:'ALL',label:'All'}},  // counter
+  ];
+  holSelects.forEach(({id, makeLabel, topBlank}) => {
+    const sel = document.getElementById(id); if(!sel) return;
+    const prev = sel.value;
+    const opts = [];
+    if(topBlank) opts.push(`<option value="${topBlank.value}">${topBlank.label}</option>`);
+    opts.push(`<option value="DR">${id==='hol-grp' ? 'DR Call' : id==='haa-grp' ? 'DR only' : 'DR'}</option>`);
+    groups.forEach(g => {
+      const labelMap = {
+        'hol-grp':  `IR ${g} Call`,
+        'holf-grp': `IR ${g}`,
+        'haa-grp':  `IR ${g} only`,
+        'hcg':      `IR ${g}`,
+      };
+      opts.push(`<option value="IR-${g}">${labelMap[id] || ('IR-'+g)}</option>`);
     });
-    if(!gSites.length)html='<p style="color:var(--txt3);font-size:12px">No IR sites in this group. Add sites with an IR group in Settings.</p>';
-    const el=document.getElementById(`ir-slots-${g}`);if(el)el.innerHTML=html;
+    sel.innerHTML = opts.join('');
+    if(prev && Array.from(sel.options).some(o => o.value === prev)) sel.value = prev;
   });
 }
 
-/* ─── IR SHIFT SLOTS ─── */
-function renderIRShiftSlots(){
-  const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  ['North','South'].forEach(grp=>{
-    const el=document.getElementById('ir-shift-slots-'+grp.toLowerCase());if(!el)return;
-    const gSites=(S.sites||[]).filter(s=>s.irGroup===grp);
-    if(!gSites.length){
-      el.innerHTML='<div style="color:var(--txt3);font-size:12px">No '+grp+' group IR sites configured.</div>';
-      return;
-    }
-    const gColor=grp==='North'?'var(--blue-t)':'var(--green-t)';
-    let html='';
-    gSites.forEach(st=>{
-      html+=`<div style="margin-bottom:14px">
-        <div style="font-weight:700;font-size:12px;color:${gColor};margin-bottom:6px">${st.name}</div>
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">`;
-      [1,2,3,4,5].forEach(dow=>{
-        const k=`${st.name}|${dow}|1st`;
-        const v=(S.irShiftSlots||{})[k]??1;
-        html+=`<div style="text-align:center">
-          <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
-          <input type="number" min="0" max="10" value="${v}"
-            style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
-            oninput="if(!S.irShiftSlots)S.irShiftSlots={};S.irShiftSlots['${k}']=parseInt(this.value)||0;triggerSave()">
-        </div>`;
-      });
-      html+='</div></div>';
-    });
-    el.innerHTML=html;
+function addIRGroup(){
+  if(!_adminOnly('add IR group')) return;
+  const raw = document.getElementById('new-ir-group')?.value || '';
+  const name = String(raw).replace(/[<>&"|]/g, '').trim();
+  if(!name){ alert('Enter a group name.'); return; }
+  if(getIRGroups().includes(name)){
+    alert(`"${name}" already exists as an IR group.`); return;
+  }
+  if(!Array.isArray(S.irGroups)) S.irGroups = [];
+  S.irGroups.push(name);
+  const el = document.getElementById('new-ir-group'); if(el) el.value = '';
+  triggerSave();
+  renderIRSlots();
+  _repopulateIRGroupSelects();
+}
+
+function removeIRGroup(name){
+  if(!_adminOnly('remove IR group')) return;
+  // Check for in-use references before removal so admin knows the blast radius
+  const siteUses = (S.sites||[]).filter(s => s.irGroup === name).length;
+  const physUses = (S.physicians||[]).filter(p => p.irGroup === name).length;
+  const callUses = (S.irCalls||[]).filter(c => c.irGroup === name).length;
+  const shiftUses = (S.irShifts||[]).filter(s => s.irGroup === name).length;
+  const total = siteUses + physUses + callUses + shiftUses;
+  // North and South are defaults — refuse to remove until nothing references them.
+  if(total > 0 && (name === 'North' || name === 'South')){
+    alert(`"${name}" is a default group and is referenced by ${total} record(s). Reassign references first.`);
+    return;
+  }
+  let msg = `Remove IR group "${name}"?`;
+  if(total > 0){
+    msg += `\n\nThis group is referenced by:\n• ${siteUses} site(s)\n• ${physUses} physician(s)\n• ${callUses} IR call(s)\n• ${shiftUses} IR shift(s)\n\nRemoving the group definition won't delete these records — they'll just point to a group name that no longer appears in dropdowns.`;
+  }
+  if(!confirm(msg)) return;
+  if(Array.isArray(S.irGroups)) S.irGroups = S.irGroups.filter(g => g !== name);
+  // Prune any call/shift slot keys belonging to sites in the removed group
+  const orphanSites = (S.sites||[]).filter(s => s.irGroup === name).map(s => s.name);
+  orphanSites.forEach(siteName => {
+    Object.keys(S.irSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irSlots[k]; });
+    Object.keys(S.irShiftSlots || {}).forEach(k => { if(k.startsWith(siteName + '|')) delete S.irShiftSlots[k]; });
   });
+  triggerSave();
+  renderIRSlots();
+  _repopulateIRGroupSelects();
+}
+
+// Unified renderer for the IR Slots & Groups page. Still exposed under the
+// old name `renderIRSlots` so existing navigation code keeps working. The
+// old `renderIRShiftSlots` becomes a no-op wrapper.
+function renderIRSlots(){
+  _renderIRGroupsList();
+  _renderIRCallSlots();
+  _renderIRShiftSlotsGrid();
+}
+function renderIRShiftSlots(){ renderIRSlots(); }
+
+function _renderIRGroupsList(){
+  const el = document.getElementById('ir-groups-list'); if(!el) return;
+  const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const groups = getIRGroups();
+  el.innerHTML = groups.map(g => {
+    const inUse = (S.sites||[]).filter(s => s.irGroup === g).length;
+    const isDefault = g === 'North' || g === 'South';
+    const siteSummary = inUse === 0
+      ? '<span style="color:var(--txt3);font-size:11px"> — no sites yet</span>'
+      : `<span style="color:var(--txt3);font-size:11px"> — ${inUse} site${inUse===1?'':'s'}</span>`;
+    const defaultBadge = isDefault ? ' <span class="tag tb" style="font-size:9px">default</span>' : '';
+    const jsG = JSON.stringify(g);
+    return `<div class="row" style="padding:4px 0;gap:8px">
+      <span style="flex:1;font-size:12px;font-weight:600">${escHtml(g)}${defaultBadge}${siteSummary}</span>
+      <button class="br bxs" onclick="removeIRGroup(${jsG})" title="Remove group">X</button>
+    </div>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">No groups configured yet.</em>';
+}
+
+function _renderIRCallSlots(){
+  const wrap = document.getElementById('ir-call-slots-content'); if(!wrap) return;
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const groups = getIRGroups();
+  const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
+
+  if(!groups.length){
+    wrap.innerHTML = '<div style="color:var(--txt3);font-size:12px">No IR groups configured.</div>';
+    return;
+  }
+
+  let html = '';
+  groups.forEach((grp, gi) => {
+    const gSites = (S.sites||[]).filter(s => s.irGroup === grp || s.irGroup === 'Both');
+    const gColor = grp === 'North' ? 'var(--blue-t)'
+                 : grp === 'South' ? 'var(--green-t)'
+                 : ['var(--purple-t)','var(--amber-t)','var(--red-t)','var(--teal)'][gi % 4];
+    html += `<div style="margin-bottom:16px;padding:10px;border:1px solid var(--bdr2);border-radius:6px">
+      <div style="font-weight:800;color:${gColor};font-size:13px;margin-bottom:8px">${escHtml(grp)} Group</div>`;
+    if(!gSites.length){
+      html += `<div style="color:var(--txt3);font-size:11px;font-style:italic">No sites in this group yet. Assign sites to "${escHtml(grp)}" via Site Management.</div>`;
+    } else {
+      gSites.forEach(st => {
+        html += `<div style="margin-bottom:10px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px">${escHtml(st.name)}</div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">`;
+        DOW.forEach((dn, dow) => {
+          if(!S.irSlots) S.irSlots = {};
+          const k = `${st.name}|${dow}`;
+          const v = S.irSlots[k] !== undefined ? S.irSlots[k] : (dow>=1 && dow<=5 ? 1 : 0);
+          const isWknd = dow === 0 || dow === 6;
+          html += `<div style="text-align:center">
+            <label style="display:block;font-size:9.5px;font-weight:800;color:${isWknd?'var(--amber-t)':'var(--txt2)'};margin-bottom:3px;text-transform:uppercase">${dn}</label>
+            <input type="number" min="0" max="10" value="${v}"
+              style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:${isWknd?'var(--amber-bg)':'var(--bg2)'}"
+              oninput="_setIRCallSlot(${jsLit(st.name)}, ${dow}, this.value)">
+          </div>`;
+        });
+        html += `</div></div>`;
+      });
+    }
+    html += `</div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function _setIRCallSlot(siteName, dow, val){
+  if(!S.irSlots) S.irSlots = {};
+  S.irSlots[`${siteName}|${dow}`] = parseInt(val) || 0;
+  triggerSave();
+}
+
+function _renderIRShiftSlotsGrid(){
+  const wrap = document.getElementById('ir-shift-slots-content'); if(!wrap) return;
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const groups = getIRGroups();
+  const escHtml = (s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
+
+  if(!groups.length){
+    wrap.innerHTML = '<div style="color:var(--txt3);font-size:12px">No IR groups configured.</div>';
+    return;
+  }
+
+  let html = '';
+  groups.forEach((grp, gi) => {
+    const gSites = (S.sites||[]).filter(s => s.irGroup === grp || s.irGroup === 'Both');
+    const gColor = grp === 'North' ? 'var(--blue-t)'
+                 : grp === 'South' ? 'var(--green-t)'
+                 : ['var(--purple-t)','var(--amber-t)','var(--red-t)','var(--teal)'][gi % 4];
+    html += `<div style="margin-bottom:16px;padding:10px;border:1px solid var(--bdr2);border-radius:6px">
+      <div style="font-weight:800;color:${gColor};font-size:13px;margin-bottom:8px">${escHtml(grp)} Group</div>`;
+    if(!gSites.length){
+      html += `<div style="color:var(--txt3);font-size:11px;font-style:italic">No sites in this group yet.</div>`;
+    } else {
+      gSites.forEach(st => {
+        html += `<div style="margin-bottom:10px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px">${escHtml(st.name)}</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">`;
+        [1,2,3,4,5].forEach(dow => {
+          const k = `${st.name}|${dow}|1st`;
+          const v = (S.irShiftSlots || {})[k] ?? 1;
+          html += `<div style="text-align:center">
+            <label style="display:block;font-size:9.5px;font-weight:800;color:var(--txt2);margin-bottom:3px">${DOW[dow]}</label>
+            <input type="number" min="0" max="10" value="${v}"
+              style="width:100%;padding:5px 2px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:13px;text-align:center;background:var(--bg2)"
+              oninput="_setIRShiftSlot(${jsLit(st.name)}, ${dow}, this.value)">
+          </div>`;
+        });
+        html += `</div></div>`;
+      });
+    }
+    html += `</div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function _setIRShiftSlot(siteName, dow, val){
+  if(!S.irShiftSlots) S.irShiftSlots = {};
+  S.irShiftSlots[`${siteName}|${dow}|1st`] = parseInt(val) || 0;
+  triggerSave();
 }
 
 /* ─── IMPORT ─── */
@@ -10257,13 +10560,12 @@ function addHoliday(){
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
   if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
-  if(grp==='IR-North'){
+  // Generic IR-<groupName> check — works for any admin-added group.
+  const _irMatch = /^IR-(.+)$/.exec(grp);
+  if(_irMatch){
+    const targetGroup = _irMatch[1];
     if(!(p.irFte>0)) { alert(`${p.last} has no IR FTE and cannot take IR holiday call.`); return; }
-    if(p.irGroup!=='North' && !confirm(`${p.last} is not in the IR North group (currently: ${p.irGroup||'unassigned'}). Assign anyway?`)) return;
-  }
-  if(grp==='IR-South'){
-    if(!(p.irFte>0)) { alert(`${p.last} has no IR FTE and cannot take IR holiday call.`); return; }
-    if(p.irGroup!=='South' && !confirm(`${p.last} is not in the IR South group (currently: ${p.irGroup||'unassigned'}). Assign anyway?`)) return;
+    if(p.irGroup!==targetGroup && !confirm(`${p.last} is not in the IR ${targetGroup} group (currently: ${p.irGroup||'unassigned'}). Assign anyway?`)) return;
   }
   if(S.holidays.find(h=>h.physId===pid&&h.date===date&&h.group===grp)){
     if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
@@ -10271,7 +10573,7 @@ function addHoliday(){
   S.holidays.push({id:S.nextId++, name, date, year:yr, physId:pid, group:grp, notes});
   // Auto-sync to the correct calendar — removes conflicting auto-assignments on
   // that date so the holiday call physician "owns" the day across the app.
-  if(grp==='IR-North' || grp==='IR-South') _syncHolidayToIRCall(pid, date, name);
+  if(_irMatch) _syncHolidayToIRCall(pid, date, name);
   if(grp==='DR') _syncHolDRDates(pid, [date], name);
   ['hol-date','hol-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   triggerSave();
@@ -10282,7 +10584,7 @@ function addHoliday(){
   if(document.getElementById('drc-mo') && typeof renderDRCal==='function') renderDRCal();
   if(document.getElementById('irc-mo') && typeof renderIRCal==='function') renderIRCal();
   // Notify the assigned physician
-  const grpLabel = grp==='DR'?'DR':grp==='IR-North'?'IR North':grp==='IR-South'?'IR South':grp;
+  const grpLabel = grp==='DR' ? 'DR' : (_irMatch ? 'IR '+_irMatch[1] : grp);
   _notify('holiday',{
     physId:pid,
     subject:`Holiday call assignment: ${name}`,
@@ -13061,9 +13363,26 @@ function renderIRCal(){
         if(ic.callType==='weekend'){const mon=addDays(ic.date,3);if(c.date>=ic.date&&c.date<=mon)show=true;}
         if(!show)return;
         let ev;
-        const grpColor=ic.irGroup==='North'
-          ?'background:#eff6ff;color:#1e40af;border:1px solid #93c5fd'
-          :'background:#f0fdf4;color:#166534;border:1px solid #86efac';
+        // Pick a CSS background/color combo for any IR group. North/South
+        // keep their iconic blue/green; custom groups rotate through a stable
+        // palette keyed by group name hash so the same group always gets the
+        // same color throughout the app.
+        const _irCalStyles = {
+          'North': 'background:#eff6ff;color:#1e40af;border:1px solid #93c5fd',
+          'South': 'background:#f0fdf4;color:#166534;border:1px solid #86efac',
+        };
+        const _irCalCustomPalette = [
+          'background:#faf5ff;color:#6b21a8;border:1px solid #d8b4fe',  // purple
+          'background:#fef3c7;color:#78350f;border:1px solid #fcd34d',  // amber
+          'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5',  // red
+          'background:#ecfeff;color:#155e75;border:1px solid #67e8f9',  // cyan
+        ];
+        let grpColor = _irCalStyles[ic.irGroup];
+        if(!grpColor){
+          let _h = 0;
+          for(let _i=0; _i<(ic.irGroup||'').length; _i++){ _h = ((_h<<5) - _h + ic.irGroup.charCodeAt(_i)) | 0; }
+          grpColor = _irCalCustomPalette[Math.abs(_h) % _irCalCustomPalette.length];
+        }
         const holNote=ic.notes?.includes('Holiday')?'🏖 ':'';
         if(ic.callType==='weekend'){
           const isStart=ic.date===c.date;
@@ -13149,12 +13468,14 @@ function renderIRCal(){
     let metaEvs='';
     S.holidays.filter(h=>{
       if(h.date!==c.date) return false;
-      if(h.group!=='IR' && h.group!=='IR-North' && h.group!=='IR-South') return false;
+      // Accept legacy 'IR' plus any 'IR-<group>' — works for custom groups.
+      if(h.group!=='IR' && !/^IR-/.test(h.group||'')) return false;
       if(fpid && h.physId!==fpid) return false;
       if(fg){
-        // Filter by IR group: IR-North/IR-South match directly; legacy 'IR' falls back to physician's group
-        if(h.group==='IR-North') return fg==='North';
-        if(h.group==='IR-South') return fg==='South';
+        // Filter by IR group: IR-<groupName> matches directly; legacy 'IR'
+        // falls back to the physician's current irGroup.
+        const _m = /^IR-(.+)$/.exec(h.group||'');
+        if(_m) return _m[1] === fg;
         const ph=S.physicians.find(x=>x.id===h.physId);
         return ph?.irGroup===fg;
       }
@@ -13230,7 +13551,7 @@ function renderIRWeekBuilder(){
   const grp=document.getElementById('irb-grp')?.value||'North';
   const weekDates=getWeekDates(mondayVal); // 0=Mon...6=Sun
   const fridayDate=weekDates[4]; // index 4 = Friday
-  const groups=grp==='both'?['North','South']:[grp];
+  const groups = grp==='both' ? getIRGroups() : [grp];
   const allCallTypes=['daily'];
   const ctLabels={'daily':'Daily Call'};
   const ctBg={'daily':'var(--teal-bg)'};
@@ -13583,7 +13904,7 @@ function renderIRList(){
     }
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
     const dt=ic.site&&ic.site!=='At Home / Remote'?_driveTimeCell(ic.physId,ic.site):'';
-    return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${ic.irGroup==='North'?'tb':'tg'}">${ic.irGroup}</span></td>
+    return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${irGroupColorClass(ic.irGroup)}">${ic.irGroup}</span></td>
     <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}</td>
     <td style="text-align:center">${dt||'—'}</td>
     <td>${ic.notes||'—'}</td>
@@ -13634,7 +13955,7 @@ function previewIRAA(){
   // is avoided and everyone reaches close to their realistic 100% FTE target
   const dailyCapFn = p=>Math.max(Math.ceil(irDailyTargetAdjusted(p,months)),1);
   const wkndCapFn  = p=>Math.max(Math.ceil(irWkndTargetAdjusted(p,months)),1);
-  const groups=['North','South'].filter(g=>grpFilter==='both'||g===grpFilter);
+  const groups = getIRGroups().filter(g=>grpFilter==='both'||g===grpFilter);
 
   function _sortByFte(pool,gPhys,cntMap,capFn){
     const n=Math.max(gPhys.length,1);
@@ -13985,7 +14306,7 @@ function previewIRAA(){
       const passBadge=a._pass>0?`<span class="tag ta" style="font-size:9px;margin-left:4px">pass ${a._pass+1}</span>`:'';
       html+=`<tr style="${rowStyle}">
         <td>${pname(a.physId)}${passBadge}</td>
-        <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td style="font-size:11px;color:var(--txt2)">${coverLbl}</td></tr>`;
@@ -14210,7 +14531,7 @@ function renderIRRebalancePrep(){
       const sCls=ps>110?'color:var(--red-t)':ps>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
-        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup}</span></td>
         <td style="text-align:center">${p.irFte}</td>
         <td style="text-align:center;font-weight:700">${s}</td>
         <td style="text-align:center;color:var(--txt3)">${ts>0?ts.toFixed(1):'—'}</td>
@@ -14226,7 +14547,7 @@ function renderIRRebalancePrep(){
       const wCls=pw>110?'color:var(--red-t)':pw>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
-        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup}</span></td>
         <td style="text-align:center">${p.irFte}</td>
         ${typ!=='weekend'?`<td style="text-align:center;font-weight:700">${d}</td>
           <td style="text-align:center;color:var(--txt3)">${td.toFixed(1)}</td>
@@ -14285,7 +14606,7 @@ function previewIRRebalance(){
   const label   = _irrPeriodLabel(months);
   const grp     = document.getElementById('irr-grp')?.value||'both';
   const typ     = document.getElementById('irr-type')?.value||'both';
-  const groups  = ['North','South'].filter(g=>grp==='both'||g===grp);
+  const groups = getIRGroups().filter(g=>grp==='both'||g===grp);
   const inPeriod= (date)=>months.some(ym=>date.startsWith(ym));
 
   // ── Procedure Shifts rebalancer (separate path) ──────────────────────────
@@ -14475,7 +14796,7 @@ function previewIRRebalance(){
       const sCls=pct>110?'color:var(--red-t)':pct>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
         <td style="font-weight:600">${pname(p.id)}</td>
-        <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup}</span></td>
         <td style="text-align:center">${p.irFte}</td>
         <td style="text-align:center;color:var(--txt3)">${oldS}</td>
         <td id="irrd-sn-${p.id}" style="text-align:center;font-weight:700">${newS}${arrow}</td>
@@ -14507,7 +14828,7 @@ function previewIRRebalance(){
             onchange="_irrUpdateBtn()" style="cursor:pointer;width:15px;height:15px"></td>
           <td>${a.date}</td>
           <td>${a.site}</td>
-          <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
+          <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
           <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
           <td style="font-weight:600;color:var(--green-t)">${pname(a.physId)}</td>
           <td style="font-size:11px;color:var(--blue-t)">${a.callPriority?'📞 on-call':''}</td>
@@ -14684,7 +15005,7 @@ function previewIRRebalance(){
         const pctCol=pctAfter>=95?'var(--green-t)':pctAfter>=80?'var(--amber,#d97706)':'var(--red-t)';
         html+=`<tr>
           <td style="font-weight:600">${pname(p.id)}</td>
-          <td><span class="tag ${g==='North'?'tb':'tg'}">${g}</span></td>
+          <td><span class="tag ${irGroupColorClass(g)}">${g}</span></td>
           <td style="text-align:center">${p.irFte}</td>
           <td style="text-align:center">${target.toFixed(1)}</td>
           <td style="text-align:center;color:var(--txt3)">${before}</td>
@@ -14997,7 +15318,7 @@ function previewIRRebalance(){
     const wArrow=wChg>0?`<span style="color:var(--green-t)"> ▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(wChg)}</span>`:'';
     html+=`<tr>
       <td style="font-weight:600">${pname(p.id)}</td>
-      <td><span class="tag ${p.irGroup==='North'?'tb':'tg'}">${p.irGroup}</span></td>
+      <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup}</span></td>
       <td style="text-align:center">${p.irFte}</td>
       ${typ!=='weekend'?`<td style="text-align:center;color:var(--txt3)">${oldD}</td>
         <td id="irrd-dn-${p.id}" style="text-align:center;font-weight:700">${newD}${dArrow}</td>
@@ -15035,7 +15356,7 @@ function previewIRRebalance(){
           onchange="_irrUpdateBtn()" style="cursor:pointer;width:15px;height:15px"></td>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
-        <td><span class="tag ${a.irGroup==='North'?'tb':'tg'}">${a.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
         <td style="color:var(--txt3)">${pname(a.origPhysId)}</td>
         <td style="font-weight:600;color:var(--green-t)">${pname(a.physId)}${a.needsShift?'<span class="tag ta" style="font-size:9px;margin-left:4px" title="No IR proc shift on this date — assign one after applying">⚠ no shift</span>':''}</td>
       </tr>`;
@@ -15168,7 +15489,7 @@ function applyIRRebalance(){
   const months  =_irrMonths();
   const grp     =document.getElementById('irr-grp')?.value||'both';
   const typ     =document.getElementById('irr-type')?.value||'both';
-  const groups  =['North','South'].filter(g=>grp==='both'||g===grp);
+  const groups = getIRGroups().filter(g=>grp==='both'||g===grp);
   const inPeriod=(date)=>months.some(ym=>date.startsWith(ym));
 
   // ── Procedure Shifts & Day-Fill apply path ──
@@ -15351,7 +15672,7 @@ function renderAnchorReport(){
     html += `<tr>
       <td style="font-weight:600">${pname(p.id)}</td>
       <td style="text-align:center">${p.irFte||'—'}</td>
-      <td><span class="tag ${p.irGroup==='South'?'tg':'tb'}">${p.anchorSite}</span></td>
+      <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.anchorSite}</span></td>
       <td style="text-align:center">${irCount}</td>
       <td style="text-align:center;font-weight:700">${tot}</td>
       <td style="text-align:center">${atAnc}</td>
@@ -15461,11 +15782,12 @@ function _irCallPhysOnDate(date,irGroup){
 
 // Returns per-physician career tally for holiday calls for a given group.
 // Helper: pool of physicians that participate in a given pool
-// pool = 'DR' | 'IR-North' | 'IR-South'
+// pool = 'DR' | 'IR-<groupName>'  (e.g. 'IR-North', 'IR-South', 'IR-East')
 function _holPoolPhysicians(pool){
-  if(pool==='DR')       return S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
-  if(pool==='IR-North') return S.physicians.filter(p=>p.irFte>0&&p.irGroup==='North');
-  if(pool==='IR-South') return S.physicians.filter(p=>p.irFte>0&&p.irGroup==='South');
+  if(pool==='DR') return S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
+  // Generic IR-<groupName> match — works for every admin-added group.
+  const m = /^IR-(.+)$/.exec(pool||'');
+  if(m) return S.physicians.filter(p=>p.irFte>0 && p.irGroup===m[1]);
   return [];
 }
 
@@ -15535,9 +15857,9 @@ function renderHolCareerTally(){
   const group=document.getElementById('haa-grp')?.value||'all';
   const el=document.getElementById('haa-tally');
   if(!el) return;
-  const allGroups=['DR','IR-North','IR-South'];
+  const allGroups = ['DR', ...getIRGroups().map(g => 'IR-'+g)];
   const groups=group==='all'?allGroups:[group];
-  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+  const labelOf = g => { if(g==='DR') return 'DR'; const _m=/^IR-(.+)$/.exec(g||''); return _m?'IR '+_m[1]:g; };
   let html='';
   groups.forEach(grp=>{
     const data=_holCareerData(grp);
@@ -15641,6 +15963,12 @@ function holTab(t,el){
 // Entry from nav
 function renderHolidays(){
   _populateHolPhysSel();
+  // Populate the per-IR-group slot inputs on the Define Holidays form. Must
+  // run on every render so new IR groups appear as inputs when the admin adds
+  // them from the IR Slots & Groups tab.
+  if(typeof _renderHoldefIRSlotInputs === 'function' && !_holdefEditId){
+    _renderHoldefIRSlotInputs();
+  }
   // Restore whichever tab was last active (default: assignments if holidays exist)
   const tab = _holActiveTab || (S.holidays.length ? 'assignments' : 'define');
   holTab(tab);
@@ -15660,35 +15988,41 @@ function renderHolDefList(){
     return;
   }
   el.innerHTML = defs.map(d=>{
-    // Resolve slot needs — back-fill legacy irSlots onto both IR pools for display
-    const needDR = d.drSlots||0;
-    const needN  = d.irNorthSlots!=null ? d.irNorthSlots : (d.irSlots||0);
-    const needS  = d.irSouthSlots!=null ? d.irSouthSlots : (d.irSlots||0);
-    // Count distinct assignments (1 physician per block regardless of how many dates)
-    const assignedDR = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='DR').map(h=>h.physId)).size;
-    const assignedN  = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR-North').map(h=>h.physId)).size;
-    const assignedS  = new Set(S.holidays.filter(h=>h.name===d.name&&h.year===d.year&&h.group==='IR-South').map(h=>h.physId)).size;
-    const drFull = needDR===0 ? true : assignedDR>=needDR;
-    const nFull  = needN===0  ? true : assignedN>=needN;
-    const sFull  = needS===0  ? true : assignedS>=needS;
-    const pill = (label,assigned,need,full,colorClass)=>{
-      if(need===0) return `<span style="color:var(--txt3);opacity:.5">${label}: —</span>`;
-      return `<span>${label}: <strong style="color:${full?'var(--green-t)':'var(--amber,#d97706)'}">${assigned}/${need}</strong></span>`;
+    const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    // Resolve slot needs per pool. Uses the same slotsFor semantics as the
+    // auto-assign engine: irSlotsByGroup map first, legacy fields fallback.
+    const slotsFor = (grp) => {
+      if(grp==='DR') return d.drSlots||0;
+      const m = /^IR-(.+)$/.exec(grp||'');
+      if(!m) return 0;
+      const gName = m[1];
+      if(d.irSlotsByGroup && d.irSlotsByGroup[gName] != null) return d.irSlotsByGroup[gName];
+      if(gName==='North') return d.irNorthSlots != null ? d.irNorthSlots : (d.irSlots||0);
+      if(gName==='South') return d.irSouthSlots != null ? d.irSouthSlots : (d.irSlots||0);
+      return 0;
     };
+    // Build one pill per pool: DR + one per IR group
+    const pools = ['DR', ...getIRGroups().map(g => 'IR-'+g)];
+    const pillHtml = pools.map(grp => {
+      const need = slotsFor(grp);
+      const assigned = new Set(S.holidays.filter(h=>h.name===d.name && h.year===d.year && h.group===grp).map(h=>h.physId)).size;
+      const full = need===0 ? true : assigned >= need;
+      const label = grp==='DR' ? 'DR' : 'IR ' + grp.slice(3);
+      if(need===0) return `<span style="color:var(--txt3);opacity:.5">${escHtml(label)}: —</span>`;
+      return `<span>${escHtml(label)}: <strong style="color:${full?'var(--green-t)':'var(--amber,#d97706)'}">${assigned}/${need}</strong></span>`;
+    }).join('');
     return `<div class="card" style="margin-bottom:8px">
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="flex:1">
-          <div style="font-weight:700;font-size:14px">${d.name}
+          <div style="font-weight:700;font-size:14px">${escHtml(d.name)}
             <span class="tag tgr" style="font-size:10px">${d.year}</span>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin:5px 0">
             ${(d.dates||[]).sort().map(dt=>`<span class="tag ta" style="font-size:10px">${dt}</span>`).join('')}
           </div>
           <div style="font-size:11px;color:var(--txt3);display:flex;gap:14px;flex-wrap:wrap">
-            ${pill('DR',assignedDR,needDR,drFull)}
-            ${pill('IR North',assignedN,needN,nFull)}
-            ${pill('IR South',assignedS,needS,sFull)}
-            ${d.notes?`<span>${d.notes}</span>`:''}
+            ${pillHtml}
+            ${d.notes?`<span>${escHtml(d.notes)}</span>`:''}
           </div>
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0">
@@ -15732,12 +16066,24 @@ function submitHolDef(){
   const name  = document.getElementById('holdef-name')?.value.trim();
   const year  = +document.getElementById('holdef-year')?.value||2026;
   const drSlots = +document.getElementById('holdef-dr')?.value||0;
-  const irNorthSlots = +document.getElementById('holdef-ir-north')?.value||0;
-  const irSouthSlots = +document.getElementById('holdef-ir-south')?.value||0;
+  // Read per-group IR slot values from the dynamic inputs. Each input has id
+  // holdef-ir-slot-<GroupName> so the parse is generic across any groups the
+  // admin has configured.
+  const irSlotsByGroup = {};
+  getIRGroups().forEach(g => {
+    const el = document.getElementById(`holdef-ir-slot-${g}`);
+    const v = el ? (+el.value || 0) : 0;
+    if(v > 0) irSlotsByGroup[g] = v;
+  });
+  // Back-compat fields — older code paths still read irNorthSlots/irSouthSlots
+  // directly. Keep them populated from the map so nothing downstream regresses.
+  const irNorthSlots = irSlotsByGroup['North'] || 0;
+  const irSouthSlots = irSlotsByGroup['South'] || 0;
   const notes = document.getElementById('holdef-notes')?.value.trim()||'';
   if(!name){ alert('Enter a holiday name.'); return; }
   if(!_holdefDates.length){ alert('Add at least one date.'); return; }
-  if(!drSlots && !irNorthSlots && !irSouthSlots){
+  const hasAnyIRSlots = Object.values(irSlotsByGroup).some(v => v > 0);
+  if(!drSlots && !hasAnyIRSlots){
     if(!confirm('No slots configured for any pool. Create this holiday as blackout-only?')) return;
   }
   if(!S.holidayDefs) S.holidayDefs=[];
@@ -15745,20 +16091,41 @@ function submitHolDef(){
     const d=S.holidayDefs.find(x=>x.id===_holdefEditId);
     if(d){
       d.name=name; d.year=year; d.dates=[..._holdefDates];
-      d.drSlots=drSlots; d.irNorthSlots=irNorthSlots; d.irSouthSlots=irSouthSlots;
+      d.drSlots=drSlots;
+      d.irSlotsByGroup=irSlotsByGroup;
+      d.irNorthSlots=irNorthSlots; d.irSouthSlots=irSouthSlots;  // back-compat
       d.notes=notes;
       delete d.irSlots; // clear legacy field
     }
     cancelHolDef();
   } else {
     S.holidayDefs.push({id:S.nextId++,name,year,dates:[..._holdefDates],
-      drSlots,irNorthSlots,irSouthSlots,notes});
+      drSlots,irSlotsByGroup,irNorthSlots,irSouthSlots,notes});
     ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
     _holdefDates=[];
     renderHoldefDatesChips();
+    _renderHoldefIRSlotInputs(); // reset to defaults
   }
   triggerSave();
   renderHolDefList();
+}
+
+// Render one number input per configured IR group into #holdef-ir-slots.
+// Each input gets id `holdef-ir-slot-<GroupName>` so submitHolDef and
+// editHolDef can read/write them by group name. Values: populated from
+// `preset` (when editing) or defaults to 1 per group (when creating new).
+function _renderHoldefIRSlotInputs(preset){
+  const wrap = document.getElementById('holdef-ir-slots');
+  if(!wrap) return;
+  const groups = getIRGroups();
+  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  wrap.innerHTML = groups.map(g => {
+    const v = preset && preset[g] != null ? preset[g] : 1;
+    return `<div class="fg" style="margin:0">
+      <label style="font-size:11px">IR ${escHtml(g)} Slots</label>
+      <input id="holdef-ir-slot-${escHtml(g)}" type="number" min="0" max="10" value="${v}" style="width:70px">
+    </div>`;
+  }).join('');
 }
 
 function editHolDef(id){
@@ -15769,10 +16136,12 @@ function editHolDef(id){
   document.getElementById('holdef-name').value  = d.name;
   document.getElementById('holdef-year').value  = d.year;
   document.getElementById('holdef-dr').value    = d.drSlots||0;
-  // Back-fill legacy irSlots onto both IR pools if new fields aren't present
+  // Build preset: prefer irSlotsByGroup, fall back to legacy fields.
   const legacyIR = d.irSlots||0;
-  document.getElementById('holdef-ir-north').value = d.irNorthSlots!=null?d.irNorthSlots:legacyIR;
-  document.getElementById('holdef-ir-south').value = d.irSouthSlots!=null?d.irSouthSlots:legacyIR;
+  const preset = Object.assign({}, d.irSlotsByGroup || {});
+  if(preset['North'] == null) preset['North'] = d.irNorthSlots != null ? d.irNorthSlots : legacyIR;
+  if(preset['South'] == null) preset['South'] = d.irSouthSlots != null ? d.irSouthSlots : legacyIR;
+  _renderHoldefIRSlotInputs(preset);
   document.getElementById('holdef-notes').value = d.notes||'';
   document.getElementById('holdef-edit-id').value = id;
   document.getElementById('holdef-form-title').textContent = 'Edit Holiday — '+d.name;
@@ -15787,8 +16156,7 @@ function cancelHolDef(){
   ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('holdef-year').value='2026';
   document.getElementById('holdef-dr').value='1';
-  const nEl=document.getElementById('holdef-ir-north'); if(nEl) nEl.value='1';
-  const sEl=document.getElementById('holdef-ir-south'); if(sEl) sEl.value='1';
+  _renderHoldefIRSlotInputs(); // resets to default 1 per group
   document.getElementById('holdef-form-title').textContent='Create New Holiday';
   document.getElementById('holdef-submit-btn').textContent='Create Holiday';
   document.getElementById('holdef-cancel-btn').style.display='none';
@@ -15819,7 +16187,7 @@ function deleteHolDef(id){
   if(cascade && affected.length){
     // Clean up synced IR calls first (before we lose the physId/date info)
     affected.forEach(h => {
-      if(h.group==='IR'||h.group==='IR-North'||h.group==='IR-South'){
+      if((h.group==='IR' || /^IR-/.test(h.group||''))){
         _removeHolidayIRCall(h.physId, h.date);
       }
     });
@@ -15852,8 +16220,8 @@ function renderHolTable(){
     .filter(h=>(!fyr||String(h.year)===fyr)&&(!fgrp||h.group===fgrp)&&(!fname||h.name===fname))
     .sort((a,b)=>a.date>b.date?1:-1);
   const physOpts=S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
-  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
-  const tagOf = g => g==='DR'?'tb':g==='IR-North'?'tt':g==='IR-South'?'tg':'tgr';
+  const labelOf = g => { if(g==='DR') return 'DR'; const _m=/^IR-(.+)$/.exec(g||''); return _m?'IR '+_m[1]:g; };
+  const tagOf = g => { if(g==='DR') return 'tb'; const _m=/^IR-(.+)$/.exec(g||''); return _m ? irGroupColorClass(_m[1]) : 'tgr'; };
   document.getElementById('hol-tbody').innerHTML=filtered.map(h=>{
     if(h.id===_editingHolId){
       const groupOpts = ['DR','IR-North','IR-South','IR'].map(g=>
@@ -15897,7 +16265,7 @@ function saveEditHoliday(id){
   const grpEl =document.getElementById(`hol-edit-grp-${id}`);
   const notEl =document.getElementById(`hol-edit-notes-${id}`);
   if(!dateEl?.value){alert('Date required.');return;}
-  const wasIR = h.group==='IR'||h.group==='IR-North'||h.group==='IR-South';
+  const wasIR = (h.group==='IR' || /^IR-/.test(h.group||''));
   if(wasIR) _removeHolidayIRCall(h.physId, h.date);
   h.name  =nameEl?.value||h.name;
   h.date  =dateEl.value;
@@ -15905,7 +16273,7 @@ function saveEditHoliday(id){
   h.physId=+physEl?.value||h.physId;
   h.group =grpEl?.value||h.group;
   h.notes =notEl?.value||'';
-  const isIR = h.group==='IR'||h.group==='IR-North'||h.group==='IR-South';
+  const isIR = (h.group==='IR' || /^IR-/.test(h.group||''));
   if(isIR) _syncHolidayToIRCall(h.physId, h.date, h.name);
   _editingHolId=null;
   triggerSave(); renderHolTable(); renderHolCounter();
@@ -15915,7 +16283,7 @@ function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
   if(!confirm('Delete this assignment?'))return;
   const h=S.holidays.find(x=>x.id===id);
-  if(h&&(h.group==='IR'||h.group==='IR-North'||h.group==='IR-South')) _removeHolidayIRCall(h.physId, h.date);
+  if(h&&((h.group==='IR' || /^IR-/.test(h.group||'')))) _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
   triggerSave();
   _afterMutation();
@@ -16009,15 +16377,24 @@ function previewHolRandom(){
   }
 
   const preview=[], gaps=[];
-  const allGroups=['DR','IR-North','IR-South'];
+  const allGroups = ['DR', ...getIRGroups().map(g => 'IR-'+g)];
   const groups = grpFilter==='all'?allGroups:[grpFilter];
-  const labelOf = g => g==='DR'?'DR':g==='IR-North'?'IR North':g==='IR-South'?'IR South':g;
+  const labelOf = g => { if(g==='DR') return 'DR'; const _m=/^IR-(.+)$/.exec(g||''); return _m?'IR '+_m[1]:g; };
 
-  // Slot count getter — handles legacy irSlots back-fill
+  // Slot count getter — generic across any IR group. Reads from the new
+  // irSlotsByGroup map first; falls back to the legacy irNorthSlots /
+  // irSouthSlots fields and ultimately the even-older irSlots field.
   function slotsFor(def, grp){
     if(grp==='DR') return def.drSlots||0;
-    if(grp==='IR-North') return def.irNorthSlots!=null ? def.irNorthSlots : (def.irSlots||0);
-    if(grp==='IR-South') return def.irSouthSlots!=null ? def.irSouthSlots : (def.irSlots||0);
+    const m = /^IR-(.+)$/.exec(grp||'');
+    if(!m) return 0;
+    const gName = m[1];
+    if(def.irSlotsByGroup && def.irSlotsByGroup[gName] != null){
+      return def.irSlotsByGroup[gName];
+    }
+    // Back-compat paths for snapshots saved before irSlotsByGroup existed
+    if(gName==='North') return def.irNorthSlots != null ? def.irNorthSlots : (def.irSlots||0);
+    if(gName==='South') return def.irSouthSlots != null ? def.irSouthSlots : (def.irSlots||0);
     return 0;
   }
 
@@ -16087,7 +16464,7 @@ function previewHolRandom(){
     </tr></thead><tbody>`;
     preview.forEach(a=>{
       const balCls=+a.balance<-0.5?'color:var(--green-t)':+a.balance>0.5?'color:var(--amber,#d97706)':'color:var(--txt3)';
-      const tagCls = a.group==='DR'?'tb':a.group==='IR-North'?'tt':'tg';
+      const tagCls = (a.group==='DR'?'tb':irGroupColorClass((/^IR-(.+)$/.exec(a.group||'')||[,''])[1]));
       html+=`<tr>
         <td style="font-weight:600">${a.defName}</td>
         <td><span class="tag ${tagCls}">${labelOf(a.group)}</span></td>
@@ -16291,6 +16668,7 @@ async function _pushToSupabase(){
         swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
         holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
         irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
+        irGroups:S.irGroups||[],
         sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
         holidayDefs:S.holidayDefs||[],
         natLangRules:S.natLangRules||[],
