@@ -7340,9 +7340,12 @@ function _myEventsInRange(startISO, endISO){
       const occurrences = _eventOccurrencesInRange(item, startISO, endISO);
       for(const occDate of occurrences){
         // Rotation gating: skip occurrences this user isn't assigned to.
+        // Multi-slot rotations may assign the user to any of several slots
+        // for a given occurrence; checking the full list (not just the
+        // first phys) catches all of them.
         if(item.rotation && item.rotation.enabled){
-          const assigned = _rotationPhysFor(item, occDate);
-          if(assigned !== myId) continue;
+          const ids = _rotationPhysIdsFor(item, occDate);
+          if(!ids.includes(myId)) continue;
         }
         const {endDate, endTime} = _tbEndTimeFor(item, occDate);
         const sites = (item.sites||[]).join(', ');
@@ -13555,30 +13558,60 @@ function _renderRecurringViewCard(item, kind){
   const inactiveBadge = item.active === false ? '<span class="tag" style="background:var(--red);color:#fff;font-size:9px;margin-left:6px">PAUSED</span>' : '';
   const skip = (item.skipDates||[]).length ? `<div style="font-size:10px;color:var(--txt3);margin-top:4px">Skipped: ${(item.skipDates||[]).map(_tbEsc).join(', ')}</div>` : '';
 
-  // Rotation summary block — only when rotation is enabled. Shows next 6
-  // upcoming occurrences with the assigned phys.
+  // Rotation summary block — only when rotation is enabled. Shows the slot
+  // structure plus upcoming assignments per slot. Migrates legacy single-pool
+  // rotations on read so old data displays correctly.
   let rotationBlock = '';
   if(item.rotation && item.rotation.enabled){
-    const order = item.rotation.physRotation||[];
-    const orderChips = order.length
-      ? order.map((id,i)=>{
-          const p=(S.physicians||[]).find(x=>x.id===id);
-          return p ? `<span style="font-size:10px;color:var(--txt3)">${i+1}. ${_tbEsc(p.last)}</span>` : '';
-        }).join(' → ')
-      : '<em style="color:var(--txt3);font-size:11px">Rotation list empty.</em>';
+    _migrateRotationToSlots(item);
+    const slots = item.rotation.slots || [];
+    const slotRows = slots.length
+      ? slots.map(slot => {
+          const order = slot.physRotation || [];
+          const orderChips = order.length
+            ? order.map((id,i)=>{
+                const p=(S.physicians||[]).find(x=>x.id===id);
+                return p ? `<span style="font-size:10px;color:var(--txt3)">${i+1}. ${_tbEsc(p.last)}</span>` : '';
+              }).join(' → ')
+            : '<em style="color:var(--txt3);font-size:11px">empty pool</em>';
+          // Filter summary: render concise tags for whatever filters are set
+          const f = slot.filter || {};
+          const tags = [];
+          if(f.role && f.role !== 'any') tags.push(`<span class="tag" style="font-size:9px">role: ${f.role}</span>`);
+          if(f.irGroup) tags.push(`<span class="tag" style="font-size:9px;background:var(--purple-t,#a78bfa);color:#fff">IR ${f.irGroup}</span>`);
+          if(Array.isArray(f.drSubs) && f.drSubs.length) tags.push(`<span class="tag tb" style="font-size:9px">DR sub: ${f.drSubs.map(_tbEsc).join('/')}</span>`);
+          if(Array.isArray(f.irSubs) && f.irSubs.length) tags.push(`<span class="tag tt" style="font-size:9px">IR sub: ${f.irSubs.map(_tbEsc).join('/')}</span>`);
+          if(Array.isArray(f.allowedPhysIds) && f.allowedPhysIds.length) tags.push(`<span class="tag" style="font-size:9px">whitelist: ${f.allowedPhysIds.length}</span>`);
+          return `<div style="margin-top:6px;padding:4px 6px;background:rgba(0,0,0,0.03);border-radius:3px">
+            <div style="font-size:11px;font-weight:600">${_tbEsc(slot.label||slot.id)}</div>
+            ${tags.length ? `<div style="margin-top:2px">${tags.join(' ')}</div>` : ''}
+            <div style="margin-top:2px">${orderChips}</div>
+          </div>`;
+        }).join('')
+      : '<em style="color:var(--txt3);font-size:11px">No slots configured.</em>';
+
     const today = fmtDate(new Date());
     const future = new Date(); future.setDate(future.getDate()+90);
     const upcoming = _eventOccurrencesInRange(item, today, fmtDate(future)).slice(0, 6);
     const upRows = upcoming.map(d => {
-      const physId = _rotationPhysFor(item, d);
-      const p = physId ? (S.physicians||[]).find(x=>x.id===physId) : null;
-      const a = item.rotation.assignments?.[d];
-      const tag = a && typeof a==='object' && a.assignedBy==='manual' ? ' <span class="tag" style="font-size:8px;background:var(--amber);color:#fff">manual</span>' : '';
-      return `<div style="font-size:11px">${_TB_DOW_SHORT[parseDateLocal(d).getDay()]} ${d}: ${p ? _tbEsc(p.last+', '+p.first) : '<em style="color:var(--amber-t,#92400e)">unassigned</em>'}${tag}</div>`;
+      const dayMap = item.rotation.assignments?.[d];
+      // Render one row per slot for each upcoming date
+      const slotLines = slots.map(slot => {
+        const v = dayMap?.[slot.id];
+        const physId = v && (typeof v === 'object' ? v.physId : v);
+        const p = physId ? (S.physicians||[]).find(x=>x.id===physId) : null;
+        const tag = v && typeof v==='object' && v.assignedBy==='manual'
+          ? ' <span class="tag" style="font-size:8px;background:var(--amber);color:#fff">manual</span>'
+          : '';
+        const name = p ? _tbEsc(p.last+', '+p.first) : '<em style="color:var(--amber-t,#92400e)">unassigned</em>';
+        return `<div style="font-size:10px;color:var(--txt2);margin-left:14px">${_tbEsc(slot.label||slot.id)}: ${name}${tag}</div>`;
+      }).join('');
+      return `<div style="font-size:11px;margin-top:4px"><strong>${_TB_DOW_SHORT[parseDateLocal(d).getDay()]} ${d}</strong>${slotLines}</div>`;
     }).join('') || '<em style="color:var(--txt3);font-size:11px">No upcoming occurrences in the next 90 days.</em>';
+
     rotationBlock = `<div style="margin-top:10px;padding:8px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:4px">
-      <div style="font-size:11px;font-weight:600">🔁 Rotation enabled</div>
-      <div style="margin-top:4px">${orderChips}</div>
+      <div style="font-size:11px;font-weight:600">🔁 Rotation enabled · ${slots.length} slot${slots.length===1?'':'s'}</div>
+      ${slotRows}
       <div style="margin-top:8px;font-size:11px;font-weight:600">Upcoming assignments:</div>
       ${upRows}
     </div>`;
@@ -13651,22 +13684,84 @@ function _renderRecurringEditCard(item, kind, siteNames, allSubs){
     ['specific-dates','Specific dates only'],
   ].map(([v,l])=>`<option value="${v}"${recKind===v?' selected':''}>${l}</option>`).join('');
 
-  const rotation = item.rotation || {enabled:false, physRotation:(item.allowedPhysIds||[]).slice(), assignments:{}};
+  // Multi-slot rotation editor. Each slot defines:
+  //   - filter criteria (role / IR group / DR/IR sub list / explicit phys)
+  //   - its own rotation order (drawn from participants matching the filter)
+  // Auto-assign fills one phys per slot per occurrence with equal frequency.
+  if(item.rotation) _migrateRotationToSlots(item);
+  const rotation = item.rotation || {enabled:false, slots:[], assignments:{}};
   const rotEnabled = !!rotation.enabled;
-  const rotOrder = rotation.physRotation || [];
-  const rotChips = rotOrder.length
-    ? rotOrder.map((pid, i) => {
-        const p = (S.physicians||[]).find(x=>x.id===pid);
-        const name = p ? _tbEsc(p.last+', '+p.first) : `?phys ${pid}`;
-        const upBtn = i > 0 ? `<button class="bxs" onclick="_tbMoveRotation(${item.id}, ${i}, -1)" title="Move up">▲</button>` : '';
-        const dnBtn = i < rotOrder.length-1 ? `<button class="bxs" onclick="_tbMoveRotation(${item.id}, ${i}, 1)" title="Move down">▼</button>` : '';
-        return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:2px 6px;background:var(--bg2,rgba(0,0,0,0.04));border-radius:3px">
-          <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
-          <span style="flex:1">${name}</span>
-          ${upBtn}${dnBtn}
-        </div>`;
-      }).join('')
-    : `<em style="color:var(--txt3);font-size:11px">Add participants above; they'll seed the rotation order.</em>`;
+  const rotSlots = rotation.slots || [];
+
+  // Snapshot the available DR & IR sub lists for the filter pickers
+  const _drSubsList = (S.drSubs||[]);
+  const _irSubsList = (S.irSubs||[]);
+  const _irGroups = (typeof getIRGroups === 'function') ? getIRGroups() : ['North','South'];
+
+  const slotEditors = rotSlots.map((slot, sIdx) => {
+    const f = slot.filter || {};
+    const order = slot.physRotation || [];
+    const orderChips = order.length
+      ? order.map((pid, i) => {
+          const p = (S.physicians||[]).find(x=>x.id===pid);
+          const name = p ? _tbEsc(p.last+', '+p.first) : `?phys ${pid}`;
+          const upBtn = i > 0 ? `<button class="bxs" onclick="_tbSlotMoveRotation(${item.id}, ${sIdx}, ${i}, -1)" title="Move up">▲</button>` : '';
+          const dnBtn = i < order.length-1 ? `<button class="bxs" onclick="_tbSlotMoveRotation(${item.id}, ${sIdx}, ${i}, 1)" title="Move down">▼</button>` : '';
+          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:2px 6px;background:var(--bg2,rgba(0,0,0,0.04));border-radius:3px">
+            <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
+            <span style="flex:1">${name}</span>
+            ${upBtn}${dnBtn}
+          </div>`;
+        }).join('')
+      : `<em style="color:var(--txt3);font-size:11px">No matching participants. Adjust filters or add participants above.</em>`;
+
+    const groupOpts = ['<option value="">— any IR group —</option>']
+      .concat(_irGroups.map(g => `<option value="${_tbEsc(g)}"${f.irGroup===g?' selected':''}>${_tbEsc(g)}</option>`)).join('');
+    const drSubChks = _drSubsList.length
+      ? _drSubsList.map(s => `<label style="display:inline-flex;align-items:center;gap:3px;font-size:10px;margin-right:6px;cursor:pointer">
+          <input type="checkbox" class="tbe-slot-drsub-${item.id}-${sIdx}" value="${_tbEsc(s)}"${(f.drSubs||[]).includes(s)?' checked':''}>${_tbEsc(s)}
+        </label>`).join('')
+      : '<em style="font-size:10px;color:var(--txt3)">no DR subs configured</em>';
+    const irSubChks = _irSubsList.length
+      ? _irSubsList.map(s => `<label style="display:inline-flex;align-items:center;gap:3px;font-size:10px;margin-right:6px;cursor:pointer">
+          <input type="checkbox" class="tbe-slot-irsub-${item.id}-${sIdx}" value="${_tbEsc(s)}"${(f.irSubs||[]).includes(s)?' checked':''}>${_tbEsc(s)}
+        </label>`).join('')
+      : '<em style="font-size:10px;color:var(--txt3)">no IR subs configured</em>';
+
+    return `<div style="margin-top:8px;padding:8px;border:1px solid var(--bdr);border-radius:5px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <strong style="font-size:11px;color:var(--txt2)">Slot ${sIdx+1}:</strong>
+        <input type="text" class="tbe-slot-label-${item.id}" value="${_tbEsc(slot.label||`Slot ${sIdx+1}`)}"
+          placeholder="Slot label" style="flex:1;font-size:11px;padding:2px 4px">
+        <button class="bxs br" onclick="_tbRemoveSlot(${item.id}, ${sIdx})" title="Remove this slot">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:6px">
+        <div>
+          <label style="font-size:10px;color:var(--txt3)">Role required</label>
+          <select class="tbe-slot-role-${item.id}" style="width:100%;font-size:11px" onchange="_tbSlotFilterChange(${item.id}, ${sIdx})">
+            <option value="any"${!f.role||f.role==='any'?' selected':''}>Any</option>
+            <option value="DR"${f.role==='DR'?' selected':''}>DR</option>
+            <option value="IR"${f.role==='IR'?' selected':''}>IR</option>
+            <option value="MIXED"${f.role==='MIXED'?' selected':''}>MIXED</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--txt3)">IR group</label>
+          <select class="tbe-slot-irgrp-${item.id}" style="width:100%;font-size:11px" onchange="_tbSlotFilterChange(${item.id}, ${sIdx})">${groupOpts}</select>
+        </div>
+      </div>
+      <div style="margin-bottom:4px">
+        <label style="font-size:10px;color:var(--txt3)">DR subspecialty (any-of)</label>
+        <div style="margin-top:2px" onchange="_tbSlotFilterChange(${item.id}, ${sIdx})">${drSubChks}</div>
+      </div>
+      <div style="margin-bottom:6px">
+        <label style="font-size:10px;color:var(--txt3)">IR subspecialty (any-of)</label>
+        <div style="margin-top:2px" onchange="_tbSlotFilterChange(${item.id}, ${sIdx})">${irSubChks}</div>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:2px">Eligible cycle (auto-derived from filters; reorder for fairness preference):</div>
+      <div id="tbe-slot-pool-${item.id}-${sIdx}">${orderChips}</div>
+    </div>`;
+  }).join('') || `<em style="color:var(--txt3);font-size:11px">No slots yet. Click "+ Add slot" to define the first assignment.</em>`;
 
   return `<div class="card" style="margin-bottom:10px;border:2px solid var(--blue)">
     <div style="font-weight:700;font-size:13px;margin-bottom:8px">Editing ${cfg.label.toLowerCase()}: ${_tbEsc(item.name)}</div>
@@ -13704,9 +13799,12 @@ function _renderRecurringEditCard(item, kind, siteNames, allSubs){
       </label>
       <div id="tbe-rotation-body-${item.id}" style="margin-top:8px;${rotEnabled?'':'display:none'}">
         <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">
-          Order below = rotation cycle. Auto-assign picks the next eligible person, skipping anyone on vacation that day.
+          Define one or more <strong>slots</strong>. Each slot fills with one physician per occurrence using equal-frequency rotation. Filters narrow each slot's eligible pool — for example, "1 from IR South" or "1 DR with breast subspecialty". The same physician will not fill two slots on the same date.
         </div>
-        <div id="tbe-rotation-list-${item.id}">${rotChips}</div>
+        <div id="tbe-slots-${item.id}">${slotEditors}</div>
+        <div style="margin-top:8px">
+          <button class="bp bxs" onclick="_tbAddSlot(${item.id})">+ Add slot</button>
+        </div>
       </div>
     </div>
 
@@ -13745,7 +13843,7 @@ function addTumorBoard(){
     // chosen day. Editor lets admin pick any other pattern.
     recurrence: {kind:'weekly', days:[dow], interval:1},
     sites:[], subs:[], allowedPhysIds:[], notes:'', active:true, skipDates:[],
-    rotation: {enabled:false, physRotation:[], assignments:{}}
+    rotation: {enabled:false, slots:[], assignments:{}}
   });
   // Clear the form
   ['tb-new-name'].forEach(i=>{const el=document.getElementById(i); if(el) el.value='';});
@@ -13794,18 +13892,27 @@ function saveTumorBoard(id){
   tb.subs  = [...document.querySelectorAll(`.tbe-sub-${id}:checked`)].map(c=>c.value);
   tb.allowedPhysIds = [...document.querySelectorAll(`.tbe-phys-${id}:checked`)].map(c=>+c.value);
 
-  // Rotation. Inline edit handlers (_tbSyncRotationFromPhys / _tbMoveRotation)
-  // mutated tb.rotation directly during the edit session; here we just commit
-  // the enabled flag and run the auto-assignment for the next 90 days so the
-  // admin sees results immediately on the read-only card.
+  // Rotation: multi-slot. Slot order, label, filter, and rotation pool were
+  // mutated live during the edit session by _tbAddSlot/_tbRemoveSlot/
+  // _tbSlotFilterChange/_tbSlotMoveRotation/_tbResyncSlotPool. Here we
+  // commit the enabled flag and the per-slot labels (the only DOM-only state
+  // not yet pushed to tb.rotation).
   const rotEnabled = !!document.getElementById(`tbe-rotation-${id}`)?.checked;
-  if(!tb.rotation) tb.rotation = {enabled:false, physRotation:[], assignments:{}};
+  if(!tb.rotation) tb.rotation = {enabled:false, slots:[], assignments:{}};
+  _migrateRotationToSlots(tb);
   tb.rotation.enabled = rotEnabled;
-  // Filter rotation list to only active participants
-  tb.rotation.physRotation = (tb.rotation.physRotation||[]).filter(pid => tb.allowedPhysIds.includes(pid));
-  // Append any newly-checked participants who weren't in the rotation yet
-  for(const pid of tb.allowedPhysIds){
-    if(!tb.rotation.physRotation.includes(pid)) tb.rotation.physRotation.push(pid);
+  // Pull updated labels from each label input (one per slot, in order)
+  const labelInputs = document.querySelectorAll(`.tbe-slot-label-${id}`);
+  (tb.rotation.slots||[]).forEach((slot, i) => {
+    const v = labelInputs[i]?.value?.trim();
+    if(v) slot.label = v;
+  });
+  // Re-resync every slot's pool against the just-committed participant list.
+  // (Filter changes during the edit session already triggered this, but if
+  // the admin only changed participants without touching filters, the slots'
+  // pools haven't been refreshed yet.)
+  for(const slot of (tb.rotation.slots||[])){
+    _tbResyncSlotPool(tb, slot, tb.allowedPhysIds);
   }
 
   // Skip-dates: parse comma-list, validate each as a date, dedupe.
@@ -13819,15 +13926,17 @@ function saveTumorBoard(id){
   }
   tb.skipDates = skipDates.sort();
 
-  // If rotation is enabled, run auto-assignment over the next 90 days so the
-  // assignments persist and show up on calendars/publish digests right away.
-  if(rotEnabled && tb.rotation.physRotation.length){
+  // If rotation is enabled and at least one slot has eligible candidates,
+  // run auto-assignment over the next 90 days so assignments show up on
+  // calendars/publish digests immediately.
+  const _hasFillableSlot = (tb.rotation.slots||[]).some(s => (s.physRotation||[]).length);
+  if(rotEnabled && _hasFillableSlot){
     const today = fmtDate(new Date());
     const future = new Date(); future.setDate(future.getDate()+90);
     const occs = _eventOccurrencesInRange(tb, today, fmtDate(future));
     const result = _assignRotation(tb, occs, {force:false});
     if(result.skipped > 0){
-      console.warn(`[TB ${tb.name}] ${result.skipped} occurrences skipped during auto-assign:`, result.conflicts);
+      console.warn(`[TB ${tb.name}] ${result.skipped} slot-occurrences skipped during auto-assign:`, result.conflicts);
     }
   }
 
@@ -13987,57 +14096,149 @@ function _tbToggleRotationUI(itemId){
   if(cb && body) body.style.display = cb.checked ? '' : 'none';
 }
 
-// Sync the rotation list when the participant checkbox set changes. Adds new
-// picks to the end of the rotation; removes deselected ones. Re-renders only
-// the rotation list, NOT the full card — full re-render would trash the
-// other form fields' values. Tolerates not knowing the kind by using
-// _recurFindAny.
+// When the participant checkbox set changes, sync EVERY slot's eligible cycle
+// so the pools reflect the current participant list. Slot filters still apply
+// — physicians who match a slot's filter criteria AND are participants get
+// added to the slot's pool; deselected participants are removed.
 function _tbSyncRotationFromPhys(itemId){
   const item = _recurFindAny(itemId);
   if(!item) return;
   const checked = [...document.querySelectorAll(`.tbe-phys-${itemId}:checked`)].map(c=>+c.value);
-  if(!item.rotation) item.rotation = {enabled:false, physRotation:[], assignments:{}};
-  // Drop entries no longer participating
-  item.rotation.physRotation = (item.rotation.physRotation||[]).filter(id => checked.includes(id));
-  // Append new participants in checkbox order
-  for(const id of checked){
-    if(!item.rotation.physRotation.includes(id)) item.rotation.physRotation.push(id);
+  if(!item.rotation) item.rotation = {enabled:false, slots:[], assignments:{}};
+  _migrateRotationToSlots(item);
+  // Re-derive pools for every slot now that the participant list changed
+  for(const slot of (item.rotation.slots||[])){
+    _tbResyncSlotPool(item, slot, checked);
   }
-  _renderRotationList(itemId);
+  _renderAllSlotPools(itemId);
 }
 
-// Move a rotation member up/down within its cycle (▲/▼ buttons).
-function _tbMoveRotation(itemId, idx, dir){
+// Resync one slot's physRotation order against the current participants and
+// the slot's filter. Drops anyone no longer eligible; appends newly-eligible
+// physicians at the end so existing fairness order is preserved.
+function _tbResyncSlotPool(item, slot, allowedPhysIds){
+  if(!Array.isArray(slot.physRotation)) slot.physRotation = [];
+  const eligibleIds = (S.physicians||[])
+    .filter(p => _rotationSlotEligible(p, slot, allowedPhysIds))
+    .map(p => p.id);
+  // Remove non-eligible
+  slot.physRotation = slot.physRotation.filter(id => eligibleIds.includes(id));
+  // Append newly-eligible in roster order
+  for(const id of eligibleIds){
+    if(!slot.physRotation.includes(id)) slot.physRotation.push(id);
+  }
+}
+
+// Move a member up/down within ONE slot's rotation cycle.
+function _tbSlotMoveRotation(itemId, slotIdx, idx, dir){
   const item = _recurFindAny(itemId);
   if(!item || !item.rotation) return;
-  const arr = item.rotation.physRotation || [];
+  const slot = (item.rotation.slots||[])[slotIdx];
+  if(!slot) return;
+  const arr = slot.physRotation || [];
   const ni = idx + dir;
   if(ni < 0 || ni >= arr.length) return;
   [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
-  _renderRotationList(itemId);
+  _renderSlotPool(itemId, slotIdx);
 }
 
-// Render only the rotation-list block. Shared by the two helpers above so
-// the rendering logic stays in one place.
-function _renderRotationList(itemId){
+// Add a new empty slot to the rotation. The new slot has no filter (any-of)
+// so it picks up all current participants until the admin narrows it.
+function _tbAddSlot(itemId){
   const item = _recurFindAny(itemId);
   if(!item) return;
-  const wrap = document.getElementById(`tbe-rotation-list-${itemId}`);
+  if(!item.rotation) item.rotation = {enabled:true, slots:[], assignments:{}};
+  _migrateRotationToSlots(item);
+  // Generate a unique slot id within this item — use a simple counter that
+  // skips over existing ids so re-adding after removal doesn't collide.
+  const used = new Set((item.rotation.slots||[]).map(s => s.id));
+  let n = 0;
+  while(used.has(`slot-${n}`)) n++;
+  const checked = [...document.querySelectorAll(`.tbe-phys-${itemId}:checked`)].map(c=>+c.value);
+  const newSlot = {
+    id: `slot-${n}`,
+    label: `Slot ${(item.rotation.slots||[]).length + 1}`,
+    filter: {},
+    physRotation: checked.slice(),
+  };
+  item.rotation.slots.push(newSlot);
+  // Re-render the editor card so the new slot appears
+  if(typeof renderTumorBoards === 'function') renderTumorBoards();
+  if(typeof renderClinics === 'function') renderClinics();
+}
+
+// Remove slot at index. Also drops any stored assignments for that slot id.
+function _tbRemoveSlot(itemId, slotIdx){
+  const item = _recurFindAny(itemId);
+  if(!item || !item.rotation) return;
+  const slot = (item.rotation.slots||[])[slotIdx];
+  if(!slot) return;
+  if(!confirm(`Remove "${slot.label||slot.id}" slot? Stored assignments for this slot will also be cleared.`)) return;
+  const removedId = slot.id;
+  item.rotation.slots.splice(slotIdx, 1);
+  if(item.rotation.assignments){
+    for(const d of Object.keys(item.rotation.assignments)){
+      const dayMap = item.rotation.assignments[d];
+      if(dayMap && typeof dayMap === 'object' && removedId in dayMap){
+        delete dayMap[removedId];
+      }
+    }
+  }
+  if(typeof renderTumorBoards === 'function') renderTumorBoards();
+  if(typeof renderClinics === 'function') renderClinics();
+}
+
+// Called when any slot filter input changes. Reads filter from the DOM,
+// updates the slot's filter object, then resyncs the slot's pool and re-
+// renders ONLY that slot's pool (preserving the rest of the form state).
+function _tbSlotFilterChange(itemId, slotIdx){
+  const item = _recurFindAny(itemId);
+  if(!item || !item.rotation) return;
+  const slot = (item.rotation.slots||[])[slotIdx];
+  if(!slot) return;
+  const role = document.querySelectorAll(`.tbe-slot-role-${itemId}`)[slotIdx]?.value || 'any';
+  const irGroup = document.querySelectorAll(`.tbe-slot-irgrp-${itemId}`)[slotIdx]?.value || '';
+  const drSubs = [...document.querySelectorAll(`.tbe-slot-drsub-${itemId}-${slotIdx}:checked`)].map(c=>c.value);
+  const irSubs = [...document.querySelectorAll(`.tbe-slot-irsub-${itemId}-${slotIdx}:checked`)].map(c=>c.value);
+  slot.filter = slot.filter || {};
+  slot.filter.role = role;
+  if(irGroup) slot.filter.irGroup = irGroup; else delete slot.filter.irGroup;
+  if(drSubs.length) slot.filter.drSubs = drSubs; else delete slot.filter.drSubs;
+  if(irSubs.length) slot.filter.irSubs = irSubs; else delete slot.filter.irSubs;
+  // Resync this slot's pool against the current participant set
+  const checked = [...document.querySelectorAll(`.tbe-phys-${itemId}:checked`)].map(c=>+c.value);
+  _tbResyncSlotPool(item, slot, checked);
+  _renderSlotPool(itemId, slotIdx);
+}
+
+// Render a single slot's pool list (the eligible-cycle chips). Used by the
+// filter-change and reorder handlers to refresh just that block.
+function _renderSlotPool(itemId, slotIdx){
+  const item = _recurFindAny(itemId); if(!item) return;
+  const slot = (item.rotation?.slots||[])[slotIdx]; if(!slot) return;
+  const wrap = document.getElementById(`tbe-slot-pool-${itemId}-${slotIdx}`);
   if(!wrap) return;
-  const rotOrder = item.rotation?.physRotation || [];
-  wrap.innerHTML = rotOrder.length
-    ? rotOrder.map((pid,i) => {
+  const order = slot.physRotation || [];
+  wrap.innerHTML = order.length
+    ? order.map((pid, i) => {
         const p = (S.physicians||[]).find(x=>x.id===pid);
         const name = p ? _tbEsc(p.last+', '+p.first) : `?phys ${pid}`;
-        const upBtn = i > 0 ? `<button class="bxs" onclick="_tbMoveRotation(${itemId}, ${i}, -1)" title="Move up">▲</button>` : '';
-        const dnBtn = i < rotOrder.length-1 ? `<button class="bxs" onclick="_tbMoveRotation(${itemId}, ${i}, 1)" title="Move down">▼</button>` : '';
+        const upBtn = i > 0 ? `<button class="bxs" onclick="_tbSlotMoveRotation(${itemId}, ${slotIdx}, ${i}, -1)" title="Move up">▲</button>` : '';
+        const dnBtn = i < order.length-1 ? `<button class="bxs" onclick="_tbSlotMoveRotation(${itemId}, ${slotIdx}, ${i}, 1)" title="Move down">▼</button>` : '';
         return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:2px 6px;background:var(--bg2,rgba(0,0,0,0.04));border-radius:3px">
           <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
           <span style="flex:1">${name}</span>
           ${upBtn}${dnBtn}
         </div>`;
       }).join('')
-    : `<em style="color:var(--txt3);font-size:11px">Add participants above; they'll seed the rotation order.</em>`;
+    : `<em style="color:var(--txt3);font-size:11px">No matching participants. Adjust filters or add participants above.</em>`;
+}
+
+// Re-render every slot's pool. Called by participant-checkbox sync.
+function _renderAllSlotPools(itemId){
+  const item = _recurFindAny(itemId); if(!item) return;
+  const slots = item.rotation?.slots || [];
+  for(let i=0; i<slots.length; i++) _renderSlotPool(itemId, i);
 }
 
 function deleteTumorBoard(id){
@@ -14077,7 +14278,7 @@ function addClinic(){
     id, name, time, durationMin:dur,
     recurrence: {kind:'weekly', days:[dow], interval:1},
     sites:[], subs:[], allowedPhysIds:[], notes:'', active:true, skipDates:[],
-    rotation: {enabled:false, physRotation:[], assignments:{}}
+    rotation: {enabled:false, slots:[], assignments:{}}
   });
   ['cl-new-name'].forEach(i=>{const el=document.getElementById(i); if(el) el.value='';});
   triggerSave();
@@ -14121,11 +14322,17 @@ function saveClinic(id){
   c.allowedPhysIds = [...document.querySelectorAll(`.tbe-phys-${id}:checked`)].map(c=>+c.value);
 
   const rotEnabled = !!document.getElementById(`tbe-rotation-${id}`)?.checked;
-  if(!c.rotation) c.rotation = {enabled:false, physRotation:[], assignments:{}};
+  if(!c.rotation) c.rotation = {enabled:false, slots:[], assignments:{}};
+  _migrateRotationToSlots(c);
   c.rotation.enabled = rotEnabled;
-  c.rotation.physRotation = (c.rotation.physRotation||[]).filter(pid => c.allowedPhysIds.includes(pid));
-  for(const pid of c.allowedPhysIds){
-    if(!c.rotation.physRotation.includes(pid)) c.rotation.physRotation.push(pid);
+  // Pull slot labels from the DOM (in slot order) and resync each slot's pool
+  const _labelInputs = document.querySelectorAll(`.tbe-slot-label-${id}`);
+  (c.rotation.slots||[]).forEach((slot, i) => {
+    const v = _labelInputs[i]?.value?.trim();
+    if(v) slot.label = v;
+  });
+  for(const slot of (c.rotation.slots||[])){
+    _tbResyncSlotPool(c, slot, c.allowedPhysIds);
   }
 
   const skipRaw = (document.getElementById(`tbe-skip-${id}`)?.value||'').trim();
@@ -14138,13 +14345,14 @@ function saveClinic(id){
   }
   c.skipDates = skipDates.sort();
 
-  if(rotEnabled && c.rotation.physRotation.length){
+  const _hasFillableSlot = (c.rotation.slots||[]).some(s => (s.physRotation||[]).length);
+  if(rotEnabled && _hasFillableSlot){
     const today = fmtDate(new Date());
     const future = new Date(); future.setDate(future.getDate()+90);
     const occs = _eventOccurrencesInRange(c, today, fmtDate(future));
     const result = _assignRotation(c, occs, {force:false});
     if(result.skipped > 0){
-      console.warn(`[Clinic ${c.name}] ${result.skipped} occurrences skipped during auto-assign:`, result.conflicts);
+      console.warn(`[Clinic ${c.name}] ${result.skipped} slot-occurrences skipped during auto-assign:`, result.conflicts);
     }
   }
 
@@ -14577,74 +14785,196 @@ function _isPhysOnVacation(physId, isoDate){
 //   • Legacy schema: rotation.order / rotation.slotsPerOccurrence (computed
 //                    on the fly by _evtAssignedPhysIds)
 // Returns a single physId or null when the rotation is empty / disabled.
-function _rotationPhysFor(item, isoDate){
-  if(!item || !item.rotation || !item.rotation.enabled) return null;
-  // Prefer explicit stored assignment when present.
+// Returns the list of all physician IDs assigned to `item` on `isoDate`.
+// Multi-slot rotation: one phys per slot. Returns [] when rotation isn't
+// enabled or the date has no assignments yet.
+function _rotationPhysIdsFor(item, isoDate){
+  if(!item || !item.rotation || !item.rotation.enabled) return [];
   const a = item.rotation.assignments?.[isoDate];
-  if(a){
-    if(typeof a === 'object') return a.physId;
-    return a;
+  if(!a) return [];
+  // New schema: per-occurrence assignments are an object keyed by slotId.
+  // Each value is either {physId, assignedBy, ts} or a raw physId (legacy).
+  if(typeof a === 'object' && !Array.isArray(a)){
+    // Distinguish legacy single-assignment shape {physId, assignedBy, ts}
+    // from the new multi-slot shape {slot-0:{...}, slot-1:{...}}.
+    if('physId' in a){
+      return a.physId != null ? [a.physId] : [];
+    }
+    const ids = [];
+    for(const sid of Object.keys(a)){
+      const v = a[sid];
+      if(v == null) continue;
+      const id = (typeof v === 'object') ? v.physId : v;
+      if(id != null) ids.push(id);
+    }
+    return ids;
   }
-  // Fall through to legacy computed assignment (returns array; take first).
+  // Very-legacy raw-id storage
+  return a != null ? [a] : [];
+}
+
+// Resolve THE phys for a date — single-slot back-compat used by call sites
+// that haven't been updated to multi-assignment. Returns the first assigned
+// phys or null. Single-slot rotations behave identically to before.
+function _rotationPhysFor(item, isoDate){
+  const ids = _rotationPhysIdsFor(item, isoDate);
+  if(ids.length) return ids[0];
+  // Fall through to legacy computed assignment
   try{
-    const ids = _evtAssignedPhysIds(item, isoDate);
-    return (ids && ids[0]) != null ? ids[0] : null;
+    const computed = _evtAssignedPhysIds(item, isoDate);
+    return (computed && computed[0]) != null ? computed[0] : null;
   }catch(_){ return null; }
 }
 
-// Equal-frequency rotation auto-assignment. Walks `occurrences` in date order,
-// assigning each unassigned date to the rotation member with the lowest
-// all-time count who isn't on vacation. Manual assignments
-// (assignedBy === 'manual') are never overwritten. With `force:true`, prior
-// auto assignments inside the window are recomputed.
+// Build the eligible-pool predicate for a rotation slot. Returns true if
+// physId p is eligible for that slot. Pure function, no side effects.
+function _rotationSlotEligible(p, slot, allowedPhysIds){
+  if(!p) return false;
+  if(!(allowedPhysIds||[]).includes(p.id)) return false;  // must be a participant
+  const f = slot.filter || {};
+  // Explicit narrow list always wins when set
+  if(Array.isArray(f.allowedPhysIds) && f.allowedPhysIds.length){
+    return f.allowedPhysIds.includes(p.id);
+  }
+  // Role filter
+  if(f.role && f.role !== 'any'){
+    const role = p.role || (p.irFte>0&&p.drFte>0?'MIXED':p.irFte>0?'IR':'DR');
+    if(f.role === 'DR'    && role === 'IR')    return false;
+    if(f.role === 'IR'    && role === 'DR')    return false;
+    if(f.role === 'MIXED' && role !== 'MIXED') return false;
+  }
+  // IR group filter
+  if(f.irGroup && p.irGroup !== f.irGroup) return false;
+  // DR subspecialty filter (any-of match)
+  if(Array.isArray(f.drSubs) && f.drSubs.length){
+    const hits = (p.drSubs||[]).some(s => f.drSubs.includes(s));
+    if(!hits) return false;
+  }
+  // IR subspecialty filter (any-of match)
+  if(Array.isArray(f.irSubs) && f.irSubs.length){
+    const hits = (p.irSubs||[]).some(s => f.irSubs.includes(s));
+    if(!hits) return false;
+  }
+  return true;
+}
+
+// Migrate a legacy single-pool rotation onto the new multi-slot schema.
+// Idempotent: if `slots` already present, leaves alone. Called lazily in
+// _assignRotation and the editor's save path so old data heals on contact.
+function _migrateRotationToSlots(item){
+  const r = item.rotation;
+  if(!r) return;
+  if(Array.isArray(r.slots) && r.slots.length) return;  // already migrated
+  // Build a single default slot from the legacy physRotation.
+  const physRot = (r.physRotation && r.physRotation.length)
+    ? r.physRotation.slice()
+    : (item.allowedPhysIds||[]).slice();
+  r.slots = [{
+    id: 'slot-0',
+    label: 'Assignment',
+    filter: {},     // no constraints — any participant
+    physRotation: physRot,
+  }];
+  // Migrate any per-occurrence stored assignments from {physId} → {'slot-0': {physId, ...}}
+  if(r.assignments){
+    for(const d of Object.keys(r.assignments)){
+      const a = r.assignments[d];
+      if(a && typeof a === 'object' && !Array.isArray(a) && 'physId' in a){
+        r.assignments[d] = {'slot-0': a};
+      } else if(typeof a !== 'object'){
+        r.assignments[d] = {'slot-0': {physId: a, assignedBy: 'auto', ts: Date.now()}};
+      }
+    }
+  }
+  // Drop legacy field after migration so subsequent saves don't double-track.
+  delete r.physRotation;
+}
+
+// Equal-frequency rotation auto-assignment. Multi-slot aware: each slot gets
+// its own equal-frequency cycle independent of the others. The same
+// physician can fill ONE slot per occurrence at most — once picked for slot
+// k on date d, they're excluded from later slots on d.
 //
-// Fairness invariant: max - min count across rotation members ≤ 1 (excluding
-// dates where the entire rotation is on vacation).
+// Manual overrides (assignedBy === 'manual') are preserved unconditionally.
+// `force:true` recomputes auto assignments inside the window; manual stays.
 function _assignRotation(item, occurrences, opts){
   opts = opts || {};
   const force = !!opts.force;
-  if(!item.rotation) item.rotation = {enabled:true, physRotation:[], assignments:{}};
+  if(!item.rotation) item.rotation = {enabled:true, slots:[], assignments:{}};
+  _migrateRotationToSlots(item);
   const rotation = item.rotation;
   if(!rotation.assignments) rotation.assignments = {};
-  // Use physRotation if set; fall back to allowedPhysIds in original order.
-  const order = (rotation.physRotation && rotation.physRotation.length)
-    ? rotation.physRotation.slice()
-    : (item.allowedPhysIds||[]).slice();
-  if(!order.length) return {assigned:0, skipped:0, conflicts:[], note:'rotation list is empty'};
+  const slots = rotation.slots || [];
+  if(!slots.length) return {assigned:0, skipped:0, conflicts:[], note:'no rotation slots configured'};
 
-  // Initialize all-time counts so the cycle continues fairly across runs.
-  const allCounts = Object.fromEntries(order.map(id => [id, 0]));
-  for(const [d, a] of Object.entries(rotation.assignments)){
-    const id = (typeof a === 'object') ? a.physId : a;
-    if(order.includes(id)) allCounts[id]++;
+  const allowedPhysIds = item.allowedPhysIds || [];
+
+  // Per-slot all-time counts so each slot's cycle continues fairly across runs.
+  const slotCounts = {};
+  for(const slot of slots){
+    slotCounts[slot.id] = Object.fromEntries((slot.physRotation||[]).map(id => [id, 0]));
+    for(const [d, dayMap] of Object.entries(rotation.assignments)){
+      if(!dayMap || typeof dayMap !== 'object') continue;
+      const v = dayMap[slot.id];
+      if(!v) continue;
+      const id = (typeof v === 'object') ? v.physId : v;
+      if(slotCounts[slot.id][id] != null) slotCounts[slot.id][id]++;
+    }
   }
+
   let assigned = 0, skipped = 0;
   const conflicts = [];
   const sorted = occurrences.slice().sort();
   for(const iso of sorted){
-    const existing = rotation.assignments[iso];
-    if(existing){
-      if(typeof existing === 'object' && existing.assignedBy === 'manual') continue;
-      if(!force) continue;
-      // force=true: subtract the prior assignment from counts so we redo it fairly.
-      const prior = (typeof existing === 'object') ? existing.physId : existing;
-      if(order.includes(prior)) allCounts[prior] = Math.max(0, allCounts[prior]-1);
+    if(!rotation.assignments[iso] || typeof rotation.assignments[iso] !== 'object') {
+      rotation.assignments[iso] = {};
     }
-    // Pick lowest-count member who isn't on vacation that day. Tiebreak by
-    // cycle position so equally-loaded members alternate naturally.
-    const candidates = order
-      .map((id, idx) => ({id, idx, count: allCounts[id]}))
-      .filter(c => !_isPhysOnVacation(c.id, iso))
-      .sort((a,b) => a.count - b.count || a.idx - b.idx);
-    if(!candidates.length){
-      skipped++;
-      conflicts.push({date: iso, reason: 'all rotation members on vacation'});
-      continue;
+    // Already-claimed phys for THIS occurrence (manual or just-auto-assigned)
+    // so the same person doesn't fill two slots on the same day.
+    const claimedToday = new Set();
+    for(const sid of Object.keys(rotation.assignments[iso])){
+      const v = rotation.assignments[iso][sid];
+      if(v && typeof v === 'object' && v.physId != null) claimedToday.add(v.physId);
     }
-    const pick = candidates[0];
-    rotation.assignments[iso] = {physId: pick.id, assignedBy: 'auto', ts: Date.now()};
-    allCounts[pick.id]++;
-    assigned++;
+
+    for(const slot of slots){
+      const existing = rotation.assignments[iso][slot.id];
+      if(existing){
+        if(typeof existing === 'object' && existing.assignedBy === 'manual') continue;
+        if(!force) continue;
+        const prior = (typeof existing === 'object') ? existing.physId : existing;
+        if(slotCounts[slot.id][prior] != null){
+          slotCounts[slot.id][prior] = Math.max(0, slotCounts[slot.id][prior]-1);
+        }
+        claimedToday.delete(prior);
+      }
+      // Build slot's eligible candidate list: rotation order, filtered by
+      // (a) eligibility, (b) not on vacation that day, (c) not already
+      // claimed for another slot on this same occurrence.
+      const order = slot.physRotation || [];
+      const cycleCounts = slotCounts[slot.id];
+      const candidates = order
+        .map((id, idx) => ({id, idx, count: cycleCounts[id]||0}))
+        .filter(c => {
+          if(claimedToday.has(c.id)) return false;
+          const ph = (S.physicians||[]).find(x => x.id === c.id);
+          if(!_rotationSlotEligible(ph, slot, allowedPhysIds)) return false;
+          if(_isPhysOnVacation(c.id, iso)) return false;
+          return true;
+        })
+        .sort((a,b) => a.count - b.count || a.idx - b.idx);
+      if(!candidates.length){
+        skipped++;
+        conflicts.push({date: iso, slotId: slot.id, slotLabel: slot.label,
+                        reason: 'no eligible non-vacationed candidate (or all double-booked)'});
+        continue;
+      }
+      const pick = candidates[0];
+      rotation.assignments[iso][slot.id] = {physId: pick.id, assignedBy: 'auto', ts: Date.now()};
+      cycleCounts[pick.id] = (cycleCounts[pick.id]||0) + 1;
+      claimedToday.add(pick.id);
+      assigned++;
+    }
   }
   return {assigned, skipped, conflicts};
 }
@@ -14854,10 +15184,11 @@ function _pubBuildDigest(physId, startISO, endISO, kinds){
         .forEach(item => {
           _eventOccurrencesInRange(item, startISO, endISO).forEach(d => {
             // Same rotation gating as calendar sync — only the assigned phys
-            // for this occurrence sees it in their digest.
+            // for this occurrence sees it in their digest. Multi-slot
+            // rotations may assign the user to any slot; check the full list.
             if(item.rotation && item.rotation.enabled){
-              const assigned = _rotationPhysFor(item, d);
-              if(assigned !== physId) return;
+              const ids = _rotationPhysIdsFor(item, d);
+              if(!ids.includes(physId)) return;
             }
             add(d, `${emoji} ${item.name} @ ${item.time||'07:00'} (${item.durationMin||60} min)`);
           });
@@ -15147,7 +15478,8 @@ function _conferenceDatesForPhys(physId, startISO, endISO, eventId){
     const occs = _eventOccurrencesInRange(item, startISO, endISO);
     for(const d of occs){
       if(item.rotation && item.rotation.enabled){
-        if(_rotationPhysFor(item, d) !== physId) continue;
+        const ids = _rotationPhysIdsFor(item, d);
+        if(!ids.includes(physId)) continue;
       }
       out.add(d);
     }
