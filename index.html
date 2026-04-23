@@ -1255,6 +1255,7 @@ tbody tr:hover{background:var(--bg3)}
     <div class="tab" onclick="drBuilderTab('2nd',this)">2nd Shift</div>
     <div class="tab" onclick="drBuilderTab('3rd',this)">3rd Shift</div>
     <div class="tab" onclick="drBuilderTab('home',this)">At Home</div>
+    <div class="tab" onclick="drBuilderTab('picks',this)">🎯 Pick Groups</div>
   </div>
 
   <!-- 1ST SHIFT / HOME TAB: single-entry form -->
@@ -1284,9 +1285,9 @@ tbody tr:hover{background:var(--bg3)}
         Evening coverage assignment — assign one physician across multiple weeks at once
       </div>
       <div class="g3">
-        <div class="fg"><label>Physician</label><select id="drb-2nd-phys"></select></div>
-        <div class="fg"><label>Site</label><select id="drb-2nd-site"></select></div>
-        <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub"></select></div>
+        <div class="fg"><label>Physician</label><select id="drb-2nd-phys" onmousedown="_populateBulkDropdowns('2nd')"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-2nd-site" onmousedown="_populateBulkDropdowns('2nd')"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-2nd-sub" onmousedown="_populateBulkDropdowns('2nd')"></select></div>
       </div>
       <div class="g3">
         <div class="fg"><label>Start Date</label>
@@ -1323,9 +1324,9 @@ tbody tr:hover{background:var(--bg3)}
         Night/overnight coverage — assign one physician across multiple weeks at once
       </div>
       <div class="g3">
-        <div class="fg"><label>Physician</label><select id="drb-3rd-phys"></select></div>
-        <div class="fg"><label>Site</label><select id="drb-3rd-site"></select></div>
-        <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub"></select></div>
+        <div class="fg"><label>Physician</label><select id="drb-3rd-phys" onmousedown="_populateBulkDropdowns('3rd')"></select></div>
+        <div class="fg"><label>Site</label><select id="drb-3rd-site" onmousedown="_populateBulkDropdowns('3rd')"></select></div>
+        <div class="fg"><label>Subspecialty</label><select id="drb-3rd-sub" onmousedown="_populateBulkDropdowns('3rd')"></select></div>
       </div>
       <div class="g3">
         <div class="fg"><label>Start Date</label>
@@ -1352,6 +1353,34 @@ tbody tr:hover{background:var(--bg3)}
       <div id="drb-3rd-preview" style="margin:8px 0;font-size:12px;color:#7c3aed;font-weight:600;min-height:18px"></div>
       <button class="bp" onclick="bulkAssignMultiWeek('3rd')" style="background:#7c3aed">Assign 3rd Shift</button>
     </div>
+  </div>
+
+  <!-- PICK GROUPS TAB -->
+  <!--
+    A "pick group" is a rotating-draft assignment mechanism for 2nd/3rd shift
+    coverage. The admin creates a group (e.g. "Weekday Evening A"), configures
+    its scope (shift/site/sub/date-range/DOWs), adds member physicians in an
+    order, and then members take turns "picking" weeks. The group's rotation
+    wraps so each member picks the same number of weeks ± 1. Multiple groups
+    can run in parallel to cover different sections of the schedule for the
+    same date range (e.g. weekend evening vs weekday evening).
+
+    When a group is "Applied", each picked week becomes a set of S.drShifts
+    entries for that physician across the configured days-of-week within that
+    week. Existing shifts on those dates are respected (no duplicates).
+  -->
+  <div id="drbt-picks" style="display:none">
+    <div class="ibox" style="border:2px solid var(--amber);background:rgba(251,191,36,0.08)">
+      <div style="font-size:12px;font-weight:800;color:var(--amber-t,#92400e);margin-bottom:8px">
+        <span style="background:var(--amber);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">Pick Groups</span>
+        Rotating-draft assignment for 2nd / 3rd shift coverage
+      </div>
+      <div class="note ni" style="font-size:11px;margin-bottom:10px">
+        Create a group, add members in draft order, then each member picks their weeks in turn. Multiple groups can run in parallel for different sections of the schedule. The rotation wraps so everyone picks roughly the same number of weeks. Members on vacation that week are auto-skipped to the next picker.
+      </div>
+      <button class="bp bsm" onclick="_pgCreateGroup()">+ New Pick Group</button>
+    </div>
+    <div id="pg-list" style="margin-top:10px"></div>
   </div>
 
   <!-- Shared shift table (all tabs) -->
@@ -2920,6 +2949,7 @@ function _buildSaveHTML(){
     irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
     openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
+    shiftPickGroups:S.shiftPickGroups||[],
     irGroups:S.irGroups||[],
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
@@ -2973,6 +3003,7 @@ function clearAllData(){
     holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
     siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,nextId:S.nextId,
+    shiftPickGroups:S.shiftPickGroups||[],
     irGroups:S.irGroups,
   };
   const usersBackup=[...USERS];
@@ -3450,6 +3481,7 @@ function _applyRemoteData(d){
     if(!S.siteSlotLabels) S.siteSlotLabels = {};
     Object.assign(S.siteSlotLabels, d.siteSlotLabels);
   }
+  if(Array.isArray(d.shiftPickGroups)) S.shiftPickGroups = d.shiftPickGroups.slice();
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
   if(d.cfg)Object.assign(S.cfg,d.cfg);
   if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
@@ -3770,6 +3802,15 @@ let S=/*S_START*/{
   // week 2 has 2, label index 0/1 apply both weeks; index 2 only week 1.
   // shift ∈ {'1st','2nd','3rd','Home'}.
   siteSlotLabels:{},
+  // Shift pick groups: bidding-style assignment for 2nd/3rd shift coverage.
+  // Each group has an ordered roster of physicians who take turns picking
+  // weeks within a configured date range. Multiple groups can run in
+  // parallel for distinct subsets (e.g. one group bids on weekday evenings,
+  // another bids on weekend evenings — both happen for the same dates).
+  // Schema: {id, name, shift, site, sub, startDate, endDate, dows[], physIds[],
+  //          pickOrder[], picks[{weekStart, physId, pickRound, ts}],
+  //          status:'open'|'closed', notes}
+  shiftPickGroups:[],
   irGroups:['North','South'],
   wkndNeeds:{},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}}},
@@ -4127,7 +4168,7 @@ async function createPractice(){
       {name:"At Home / Remote", irGroup:null, irAnchors:[], irFillins:[]}
     ],
     drSubs:[], irSubs:[],
-    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, irShiftSlotLabels:{}, siteSlotLabels:{}, wkndNeeds:{},
+    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, irShiftSlotLabels:{}, siteSlotLabels:{}, shiftPickGroups:[], wkndNeeds:{},
     irGroups:['North','South'],
     cfg:{anchorPct:70}, vacPicking:{}, driveTimes:{},
     nextId:1, users:[],
@@ -5138,24 +5179,47 @@ function drBuilderTab(shift, el){
   document.getElementById('drbt-1st').style.display=(shift==='1st'||shift==='home')?'block':'none';
   document.getElementById('drbt-2nd').style.display=shift==='2nd'?'block':'none';
   document.getElementById('drbt-3rd').style.display=shift==='3rd'?'block':'none';
+  const picksPanel = document.getElementById('drbt-picks');
+  if(picksPanel) picksPanel.style.display = shift==='picks' ? 'block' : 'none';
   const sd=document.getElementById('sb-shift');
   if(sd) sd.value=shift==='home'?'Home':shift==='2nd'?'2nd':shift==='3rd'?'3rd':'1st';
   if(shift==='2nd'||shift==='3rd') _populateBulkDropdowns(shift);
+  if(shift==='picks') _pgRenderList();
   const fsh=document.getElementById('drb-filter-shift');
-  if(fsh) fsh.value=(shift==='home'?'Home':shift==='1st'?'1st':shift);
+  if(fsh) fsh.value=(shift==='home'?'Home':shift==='1st'?'1st':shift==='picks'?'1st':shift);
   // Re-render table only (no recursive tab switch)
   _renderDRTable();
 }
 
 function _populateBulkDropdowns(shift){
-  const drs=S.physicians.filter(p=>p.drFte>0);
-  const siteNames=S.sites.filter(s=>s.name!=='At Home / Remote').map(s=>s.name);
-  document.getElementById(`drb-${shift}-phys`).innerHTML=
-    drs.map(p=>`<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
-  document.getElementById(`drb-${shift}-site`).innerHTML=
-    siteNames.map(n=>`<option>${n}</option>`).join('');
-  document.getElementById(`drb-${shift}-sub`).innerHTML=
-    S.drSubs.map(s=>`<option>${s}</option>`).join('');
+  // Pool: DR + MIXED physicians. Excluding only `role === 'IR'` matches the
+  // DR auto-assign filter at previewAA. Previously this used `drFte > 0`,
+  // which mistakenly included IR-only physicians that had a phantom drFte
+  // from an older bug — and excluded MIXED docs whose drFte legitimately
+  // varies. The role check is the correct invariant.
+  // Additional gating: respect the per-physician shift eligibility flag
+  // (p.shiftElig.s2 / s3) so admins don't accidentally book a doc onto a
+  // shift type they're not credentialed for.
+  const eligKey = shift === '2nd' ? 's2' : shift === '3rd' ? 's3' : null;
+  const drs = (S.physicians||[])
+    .filter(p => p.role !== 'IR')
+    .filter(p => !eligKey || (p.shiftElig && p.shiftElig[eligKey]))
+    .slice()
+    .sort((a,b) => (a.last||'').localeCompare(b.last||'') || (a.first||'').localeCompare(b.first||''));
+  const physSel = document.getElementById(`drb-${shift}-phys`);
+  if(physSel){
+    physSel.innerHTML = drs.length
+      ? drs.map(p => {
+          const role = p.role || (p.irFte>0&&p.drFte>0?'MIXED':p.irFte>0?'IR':'DR');
+          return `<option value="${p.id}">${(p.last||'').replace(/</g,'&lt;')}, ${(p.first||'').replace(/</g,'&lt;')} (${role})</option>`;
+        }).join('')
+      : `<option value="">— No eligible physicians for ${shift} shift —</option>`;
+  }
+  const siteNames = (S.sites||[]).filter(s => s.name !== 'At Home / Remote').map(s => s.name);
+  const siteSel = document.getElementById(`drb-${shift}-site`);
+  if(siteSel) siteSel.innerHTML = siteNames.map(n => `<option>${(n||'').replace(/</g,'&lt;')}</option>`).join('');
+  const subSel = document.getElementById(`drb-${shift}-sub`);
+  if(subSel) subSel.innerHTML = (S.drSubs||[]).map(s => `<option>${(s||'').replace(/</g,'&lt;')}</option>`).join('');
 }
 
 function updateMultiWeekPreview(shift){
@@ -5209,6 +5273,391 @@ function bulkAssignMultiWeek(shift){
   if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},5000);}
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHIFT PICK GROUPS — rotating-draft assignment for 2nd/3rd shifts
+   ═══════════════════════════════════════════════════════════════════════════
+   Each group defines a slate of member physicians who take turns picking
+   weeks within a scoped date range. Picks commit immediately but don't
+   materialize into S.drShifts until the admin clicks "Apply Group". The
+   rotation wraps so member N picks again only after members 1..N-1 have each
+   picked once (round robin). Vacationed members are auto-skipped.
+*/
+
+// Escape-for-HTML helper used throughout the pick-group UI.
+function _pgEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// Return all ISO-Monday week-start dates in [start,end]. A "week" here means
+// Mon-Sun; picking a week means locking that physician to that week's span.
+function _pgWeekStartsIn(startISO, endISO){
+  if(!startISO || !endISO || endISO < startISO) return [];
+  const out = [];
+  const s = parseDateLocal(startISO); const e = parseDateLocal(endISO);
+  if(!s || !e) return [];
+  // Walk back to Monday of start's week
+  const d = new Date(s); const dow = d.getDay();
+  d.setDate(d.getDate() - ((dow + 6) % 7));
+  while(d <= e){
+    // Only include week-starts whose Monday is on/after startISO — picking
+    // a week that starts BEFORE the configured range would pull in days
+    // outside the admin's intent.
+    const iso = fmtDate(d);
+    if(iso >= startISO) out.push(iso);
+    d.setDate(d.getDate() + 7);
+  }
+  return out;
+}
+
+// Is any day of the Mon-Sun week starting at `weekStartISO` within the
+// physician's vacation span? Used to auto-skip vacationed pickers.
+function _pgPhysOnVacationThatWeek(physId, weekStartISO){
+  const start = weekStartISO;
+  const end = addDays(weekStartISO, 6);
+  return (S.vacations||[]).some(v => v.physId === physId
+    && v.start <= end && (v.end || v.start) >= start);
+}
+
+// Who's up next in the rotation for this group? Returns the member whose
+// count of picks is LOWEST, breaking ties by pickOrder position. This is
+// the classic "equal-frequency draft" pattern: everyone picks every N
+// rounds where N = number of members.
+function _pgNextPicker(group){
+  const order = group.pickOrder || [];
+  if(!order.length) return null;
+  const counts = Object.fromEntries(order.map(id => [id, 0]));
+  for(const p of (group.picks||[])){
+    if(counts[p.physId] != null) counts[p.physId]++;
+  }
+  const sorted = order
+    .map((id, idx) => ({id, idx, count: counts[id]}))
+    .sort((a,b) => a.count - b.count || a.idx - b.idx);
+  return sorted[0]?.id ?? null;
+}
+
+// Available weeks for picking — within the group's range, not already picked
+// by someone in this group.
+function _pgAvailableWeeks(group){
+  const all = _pgWeekStartsIn(group.startDate, group.endDate);
+  const taken = new Set((group.picks||[]).map(p => p.weekStart));
+  return all.filter(w => !taken.has(w));
+}
+
+// Create a new group. The admin fills in scope immediately via the editor.
+function _pgCreateGroup(){
+  if(!_adminOnly('create pick group')) return;
+  if(!Array.isArray(S.shiftPickGroups)) S.shiftPickGroups = [];
+  const id = S.nextId++;
+  S.shiftPickGroups.push({
+    id,
+    name: `Pick Group ${S.shiftPickGroups.length + 1}`,
+    shift: '2nd',
+    site: (S.sites||[]).filter(s=>s.name!=='At Home / Remote')[0]?.name || '',
+    sub: '',
+    startDate: '',
+    endDate: '',
+    dows: [1,2,3,4,5],   // Mon-Fri default
+    physIds: [],
+    pickOrder: [],
+    picks: [],
+    status: 'open',
+    notes: '',
+  });
+  triggerSave();
+  _pgRenderList();
+}
+
+function _pgDeleteGroup(gid){
+  if(!_adminOnly('delete pick group')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid);
+  if(!g) return;
+  if(!confirm(`Delete "${g.name}"? This removes its configuration and all picks (but not any shifts already applied).`)) return;
+  S.shiftPickGroups = S.shiftPickGroups.filter(x => x.id !== gid);
+  triggerSave();
+  _afterMutation();
+  _pgRenderList();
+}
+
+// Toggle membership for a physician. Also keeps pickOrder in sync — added
+// physicians go to the end of the order; removed physicians drop out of
+// order AND of any as-yet-uncommitted picks.
+function _pgTogglePhys(gid, physId){
+  if(!_adminOnly('edit pick group')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  physId = +physId;
+  const was = g.physIds.includes(physId);
+  if(was){
+    g.physIds = g.physIds.filter(id => id !== physId);
+    g.pickOrder = (g.pickOrder||[]).filter(id => id !== physId);
+    // If this person had picked weeks, remove those picks so the rotation
+    // stays consistent.
+    g.picks = (g.picks||[]).filter(p => p.physId !== physId);
+  } else {
+    g.physIds.push(physId);
+    if(!g.pickOrder.includes(physId)) g.pickOrder.push(physId);
+  }
+  triggerSave();
+  _pgRenderGroupCard(gid);
+}
+
+// Move a member up/down in the pick order.
+function _pgMoveOrder(gid, idx, dir){
+  if(!_adminOnly('reorder pick group')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  const ni = idx + dir;
+  if(ni < 0 || ni >= g.pickOrder.length) return;
+  [g.pickOrder[idx], g.pickOrder[ni]] = [g.pickOrder[ni], g.pickOrder[idx]];
+  triggerSave();
+  _pgRenderGroupCard(gid);
+}
+
+// Persist a scope change (name / shift / site / sub / dates / DOWs / notes).
+function _pgUpdateField(gid, field, val){
+  if(!_adminOnly('edit pick group')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  if(field === 'dows'){
+    const checked = [...document.querySelectorAll(`.pg-${gid}-dow:checked`)].map(c => +c.value);
+    g.dows = checked;
+  } else {
+    g[field] = val;
+  }
+  triggerSave();
+  _pgRenderGroupCard(gid);
+}
+
+// Commit the selected pick for this group: assigns the current picker (or
+// the admin-overridden picker) to the chosen week. Validates the week is
+// still available and the physician isn't on vacation for that week.
+function _pgCommitPick(gid){
+  if(!_adminOnly('commit pick')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  const weekStart = document.getElementById(`pg-${gid}-wk`)?.value;
+  const overrideId = +document.getElementById(`pg-${gid}-who`)?.value || 0;
+  if(!weekStart){ alert('Pick a week.'); return; }
+  // Validate still available
+  if((g.picks||[]).some(p => p.weekStart === weekStart)){
+    alert('That week has already been picked by someone in this group.'); return;
+  }
+  if(weekStart < g.startDate || weekStart > g.endDate){
+    alert('That week is outside the group\'s configured date range.'); return;
+  }
+  const physId = overrideId || _pgNextPicker(g);
+  if(!physId){ alert('No member is eligible to pick (group may be empty).'); return; }
+  if(!g.physIds.includes(physId)){
+    alert('Override picker is not a member of this group.'); return;
+  }
+  if(_pgPhysOnVacationThatWeek(physId, weekStart)){
+    if(!confirm(`The selected picker is on vacation during that week. Commit anyway?`)) return;
+  }
+  // Compute round number for clarity in the audit log
+  const prior = (g.picks||[]).filter(p => p.physId === physId).length;
+  g.picks = g.picks || [];
+  g.picks.push({weekStart, physId, pickRound: prior + 1, ts: Date.now()});
+  triggerSave();
+  _afterMutation();
+  _pgRenderGroupCard(gid);
+}
+
+// Remove a pick — admin-only correction for a mispicked week.
+function _pgUndoPick(gid, pickIdx){
+  if(!_adminOnly('undo pick')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  const pick = (g.picks||[])[pickIdx]; if(!pick) return;
+  if(!confirm(`Remove pick for week of ${pick.weekStart}?`)) return;
+  g.picks.splice(pickIdx, 1);
+  triggerSave();
+  _afterMutation();
+  _pgRenderGroupCard(gid);
+}
+
+// Apply: turn every committed pick into S.drShifts entries for the configured
+// days-of-week within that week. Idempotent — existing shifts on those
+// (physId, date, shift, site) are not duplicated. Does not clear picks so
+// the admin can apply, edit, re-apply if needed.
+function _pgApplyGroup(gid){
+  if(!_adminOnly('apply pick group')) return;
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  if(!(g.picks||[]).length){ alert('This group has no picks to apply.'); return; }
+  if(!g.site){ alert('Set a site for this group first.'); return; }
+  if(!confirm(`Apply ${g.picks.length} pick(s) from "${g.name}" as ${g.shift} shift assignments?`)) return;
+  let added = 0, skipped = 0;
+  const dowSet = new Set(g.dows||[]);
+  for(const pick of g.picks){
+    // Each pick covers its Mon-Sun week. Walk each day in the week, filter
+    // by dows, and create a DR shift entry.
+    for(let d = 0; d < 7; d++){
+      const date = addDays(pick.weekStart, d);
+      const dow = parseDateLocal(date).getDay();
+      if(!dowSet.has(dow)) continue;
+      const already = S.drShifts.some(s =>
+        s.physId === pick.physId && s.date === date && s.shift === g.shift && s.site === g.site);
+      if(already){ skipped++; continue; }
+      S.drShifts.push({
+        id: S.nextId++,
+        physId: pick.physId,
+        date,
+        shift: g.shift,
+        site: g.site,
+        sub: g.sub || '',
+        notes: g.notes ? `Pick (${g.name}) — ${g.notes}` : `Pick (${g.name})`,
+        autoHome: false,
+        slotLabel: '',
+      });
+      added++;
+    }
+  }
+  triggerSave();
+  _afterMutation();
+  const si = document.getElementById('save-indicator');
+  if(si){
+    si.textContent = `✓ Applied ${added} × ${g.shift} shift${skipped?` (${skipped} already present)`:''}`;
+    si.style.color = 'var(--green-t)'; setTimeout(()=>{si.textContent='';}, 5000);
+  }
+  _pgRenderList();
+}
+
+// Render the list of all groups. Each group renders as a collapsible-ish
+// card with its full editor inline.
+function _pgRenderList(){
+  const wrap = document.getElementById('pg-list'); if(!wrap) return;
+  const groups = S.shiftPickGroups || [];
+  if(!groups.length){
+    wrap.innerHTML = '<div class="card"><em style="color:var(--txt3);font-size:12px">No pick groups yet. Click "+ New Pick Group" above.</em></div>';
+    return;
+  }
+  wrap.innerHTML = groups.map(g => `<div id="pg-card-${g.id}"></div>`).join('');
+  groups.forEach(g => _pgRenderGroupCard(g.id));
+}
+
+// Render ONE group card. Called on every mutation so state stays fresh.
+function _pgRenderGroupCard(gid){
+  const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
+  const slot = document.getElementById(`pg-card-${gid}`); if(!slot) return;
+
+  const allPhys = (S.physicians||[])
+    .filter(p => p.role !== 'IR')
+    .slice()
+    .sort((a,b) => (a.last||'').localeCompare(b.last||''));
+  const sites = (S.sites||[]).filter(s => s.name !== 'At Home / Remote').map(s => s.name);
+  const subs = S.drSubs || [];
+
+  const siteOpts = sites.map(n => `<option${g.site===n?' selected':''}>${_pgEsc(n)}</option>`).join('');
+  const subOpts = `<option value=""${!g.sub?' selected':''}>— any —</option>`
+    + subs.map(s => `<option${g.sub===s?' selected':''}>${_pgEsc(s)}</option>`).join('');
+
+  const memberChks = allPhys.map(p => {
+    const checked = g.physIds.includes(p.id);
+    const role = p.role || (p.irFte>0&&p.drFte>0?'MIXED':'DR');
+    return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;cursor:pointer">
+      <input type="checkbox" ${checked?'checked':''} onchange="_pgTogglePhys(${gid}, ${p.id})">
+      ${_pgEsc(p.last+', '+p.first)} <span style="color:var(--txt3)">(${role})</span>
+    </label>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">No eligible physicians.</em>';
+
+  // Pick order with counts
+  const pickCounts = Object.fromEntries((g.pickOrder||[]).map(id => [id, 0]));
+  for(const pick of (g.picks||[])) if(pickCounts[pick.physId]!=null) pickCounts[pick.physId]++;
+  const orderList = (g.pickOrder||[]).map((pid, i) => {
+    const p = (S.physicians||[]).find(x => x.id === pid);
+    const name = p ? _pgEsc(p.last+', '+p.first) : `?phys ${pid}`;
+    const nextId = _pgNextPicker(g);
+    const isNext = pid === nextId;
+    return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin:2px 0;padding:3px 6px;background:${isNext?'rgba(34,197,94,0.15)':'var(--bg2,rgba(0,0,0,0.04))'};border-radius:3px">
+      <span style="color:var(--txt3);min-width:20px">${i+1}.</span>
+      <span style="flex:1">${name} ${isNext?'<span class="tag" style="font-size:9px;background:var(--green);color:#fff;margin-left:6px">on deck</span>':''}</span>
+      <span style="color:var(--txt3);font-size:10px">${pickCounts[pid]||0} pick${pickCounts[pid]===1?'':'s'}</span>
+      ${i>0?`<button class="bxs" onclick="_pgMoveOrder(${gid}, ${i}, -1)">▲</button>`:''}
+      ${i<g.pickOrder.length-1?`<button class="bxs" onclick="_pgMoveOrder(${gid}, ${i}, 1)">▼</button>`:''}
+    </div>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">Add members above to seed the draft order.</em>';
+
+  // Available weeks dropdown
+  const avail = (g.startDate && g.endDate) ? _pgAvailableWeeks(g) : [];
+  const weekOpts = avail.length
+    ? avail.map(w => {
+        const endW = addDays(w, 6);
+        return `<option value="${w}">Week of ${w} (${w} → ${endW})</option>`;
+      }).join('')
+    : '<option value="">— no available weeks in range —</option>';
+
+  // Override picker dropdown
+  const whoOpts = '<option value="">Auto (next in rotation)</option>'
+    + (g.pickOrder||[]).map(pid => {
+        const p = (S.physicians||[]).find(x => x.id === pid);
+        return p ? `<option value="${pid}">${_pgEsc(p.last+', '+p.first)}</option>` : '';
+      }).join('');
+
+  // Picks list (most recent first)
+  const pickRows = (g.picks||[]).slice().sort((a,b) => b.weekStart.localeCompare(a.weekStart)).map(pick => {
+    const origIdx = g.picks.indexOf(pick);
+    const p = (S.physicians||[]).find(x => x.id === pick.physId);
+    const name = p ? _pgEsc(p.last+', '+p.first) : `?phys ${pick.physId}`;
+    const vac = _pgPhysOnVacationThatWeek(pick.physId, pick.weekStart) ? ' <span class="tag" style="background:var(--amber);color:#fff;font-size:9px">vacation conflict</span>' : '';
+    return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0;padding:3px 6px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:3px">
+      <span style="flex:1"><strong>Wk ${pick.weekStart}</strong>: ${name} <span style="color:var(--txt3)">(round ${pick.pickRound})</span>${vac}</span>
+      <button class="bxs br" onclick="_pgUndoPick(${gid}, ${origIdx})" title="Undo this pick">✕</button>
+    </div>`;
+  }).join('') || '<em style="color:var(--txt3);font-size:11px">No picks yet.</em>';
+
+  const dowLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dowChks = dowLabels.map((n, i) => {
+    const ck = (g.dows||[]).includes(i);
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin-right:8px;cursor:pointer">
+      <input type="checkbox" class="pg-${gid}-dow" value="${i}" ${ck?'checked':''} onchange="_pgUpdateField(${gid}, 'dows')">${n}
+    </label>`;
+  }).join('');
+
+  slot.innerHTML = `<div class="card" style="margin-bottom:12px;border:2px solid var(--amber);padding:10px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <input type="text" value="${_pgEsc(g.name)}" onchange="_pgUpdateField(${gid}, 'name', this.value)"
+        style="flex:1;font-size:13px;font-weight:700;padding:4px 6px;border:1px solid var(--bdr);border-radius:4px">
+      <select onchange="_pgUpdateField(${gid}, 'shift', this.value)" style="font-size:11px">
+        <option value="2nd"${g.shift==='2nd'?' selected':''}>2nd Shift</option>
+        <option value="3rd"${g.shift==='3rd'?' selected':''}>3rd Shift</option>
+      </select>
+      <button class="br bsm" onclick="_pgDeleteGroup(${gid})" title="Delete group">🗑</button>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Site</label><select onchange="_pgUpdateField(${gid}, 'site', this.value)">${siteOpts}</select></div>
+      <div class="fg"><label>Subspecialty (optional)</label><select onchange="_pgUpdateField(${gid}, 'sub', this.value)">${subOpts}</select></div>
+      <div class="fg"><label>Notes</label><input value="${_pgEsc(g.notes||'')}" onchange="_pgUpdateField(${gid}, 'notes', this.value)"></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>Start Date</label><input type="date" value="${_pgEsc(g.startDate||'')}" onchange="_pgUpdateField(${gid}, 'startDate', this.value)"></div>
+      <div class="fg"><label>End Date</label><input type="date" value="${_pgEsc(g.endDate||'')}" onchange="_pgUpdateField(${gid}, 'endDate', this.value)"></div>
+      <div class="fg"><label>Days of Week</label><div style="margin-top:3px">${dowChks}</div></div>
+    </div>
+
+    <div style="margin-top:12px;padding:8px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:4px">
+      <strong style="font-size:11px">Members</strong>
+      <div style="margin-top:4px;max-height:140px;overflow-y:auto;border:1px solid var(--bdr);padding:6px;border-radius:4px">${memberChks}</div>
+    </div>
+
+    <div style="margin-top:8px;padding:8px;background:var(--bg2,rgba(0,0,0,0.03));border-radius:4px">
+      <strong style="font-size:11px">Pick Order (rotating)</strong>
+      <div style="margin-top:4px">${orderList}</div>
+    </div>
+
+    <div style="margin-top:8px;padding:8px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px">
+      <strong style="font-size:11px">Make a Pick</strong>
+      <div class="g3" style="margin-top:4px">
+        <div class="fg"><label>Week</label><select id="pg-${gid}-wk">${weekOpts}</select></div>
+        <div class="fg"><label>Picker <span style="color:var(--txt3);font-weight:400">(override optional)</span></label><select id="pg-${gid}-who">${whoOpts}</select></div>
+        <div class="fg" style="display:flex;align-items:flex-end"><button class="bp bsm" onclick="_pgCommitPick(${gid})" ${avail.length?'':'disabled'}>✓ Commit Pick</button></div>
+      </div>
+    </div>
+
+    <div style="margin-top:8px">
+      <strong style="font-size:11px">Picks (${(g.picks||[]).length})</strong>
+      <div style="margin-top:4px;max-height:180px;overflow-y:auto">${pickRows}</div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button class="bp bsm" onclick="_pgApplyGroup(${gid})" ${(g.picks||[]).length?'':'disabled'}>
+        ✓ Apply Group to Schedule
+      </button>
+      <span style="font-size:11px;color:var(--txt3)">Turns ${(g.picks||[]).length} pick(s) into ${g.shift} shift assignments on the selected days within each picked week.</span>
+    </div>
+  </div>`;
+}
 
 
 // Track active FTE tab explicitly — CSS display state is unreliable
@@ -7364,9 +7813,21 @@ function _myEventsInRange(startISO, endISO){
         // Multi-slot rotations may assign the user to any of several slots
         // for a given occurrence; checking the full list (not just the
         // first phys) catches all of them.
+        //
+        // Fail-safe: if rotation is enabled but NO stored assignment exists
+        // for this date AT ALL (e.g. it's beyond the auto-assign window or
+        // rotation slots haven't been configured yet), don't silently hide
+        // the event from every participant — that produces empty calendars
+        // and makes the admin think sync is broken. Instead, fall back to
+        // "every participant sees it" for that occurrence so coverage at
+        // least surfaces. The admin can then re-save the board to extend
+        // the auto-assign window.
         if(item.rotation && item.rotation.enabled){
           const ids = _rotationPhysIdsFor(item, occDate);
-          if(!ids.includes(myId)) continue;
+          if(ids.length){
+            if(!ids.includes(myId)) continue;
+          }
+          // ids empty → no stored assignment → treat as ungated for this date
         }
         const {endDate, endTime} = _tbEndTimeFor(item, occDate);
         const sites = (item.sites||[]).join(', ');
@@ -13957,15 +14418,42 @@ function saveTumorBoard(id){
   }
   tb.skipDates = skipDates.sort();
 
-  // If rotation is enabled and at least one slot has eligible candidates,
-  // run auto-assignment over the next 90 days so assignments show up on
-  // calendars/publish digests immediately.
+  // Run rotation auto-assignment over the next 365 days so assignments show
+  // up on calendars/publish digests immediately AND extend deep enough into
+  // the future that downstream calendars (Google/Apple) see a stable feed.
+  // Two intentional choices:
+  //   • force:true — rotation rules MUST take effect when the admin saves
+  //     changes. With force:false, an admin reordering rotation members or
+  //     changing slot filters would see no change in already-assigned dates.
+  //     Manual overrides (assignedBy:'manual') are still preserved by
+  //     _assignRotation regardless of force.
+  //   • 365 days — the prior 90-day window meant occurrences beyond the
+  //     window had no stored assignment, and _rotationPhysIdsFor returned
+  //     []. Calendar feeds gated on rotation produced empty events for
+  //     anything past the window. 365 days covers a year of forward
+  //     scheduling for the typical specialty practice; admins can still
+  //     re-save closer to the boundary if needed.
+  // Also: prune orphan stored assignments that no longer match an
+  // occurrence date (e.g. recurrence pattern changed). Otherwise old data
+  // accumulates and confuses fairness counts.
   const _hasFillableSlot = (tb.rotation.slots||[]).some(s => (s.physRotation||[]).length);
   if(rotEnabled && _hasFillableSlot){
     const today = fmtDate(new Date());
-    const future = new Date(); future.setDate(future.getDate()+90);
+    const future = new Date(); future.setDate(future.getDate()+365);
     const occs = _eventOccurrencesInRange(tb, today, fmtDate(future));
-    const result = _assignRotation(tb, occs, {force:false});
+    // Prune assignments for dates within the lookahead window that are no
+    // longer occurrences (recurrence change). Outside the window we leave
+    // history alone for audit purposes.
+    const occSet = new Set(occs);
+    const futureISO = fmtDate(future);
+    if(tb.rotation.assignments){
+      for(const d of Object.keys(tb.rotation.assignments)){
+        if(d >= today && d <= futureISO && !occSet.has(d)){
+          delete tb.rotation.assignments[d];
+        }
+      }
+    }
+    const result = _assignRotation(tb, occs, {force:true});
     if(result.skipped > 0){
       console.warn(`[TB ${tb.name}] ${result.skipped} slot-occurrences skipped during auto-assign:`, result.conflicts);
     }
@@ -14376,12 +14864,24 @@ function saveClinic(id){
   }
   c.skipDates = skipDates.sort();
 
+  // Same as saveTumorBoard: force re-compute on save so changes propagate,
+  // 365-day window so distant calendar dates have stored assignments, and
+  // prune orphan dates that no longer match an occurrence pattern.
   const _hasFillableSlot = (c.rotation.slots||[]).some(s => (s.physRotation||[]).length);
   if(rotEnabled && _hasFillableSlot){
     const today = fmtDate(new Date());
-    const future = new Date(); future.setDate(future.getDate()+90);
+    const future = new Date(); future.setDate(future.getDate()+365);
     const occs = _eventOccurrencesInRange(c, today, fmtDate(future));
-    const result = _assignRotation(c, occs, {force:false});
+    const occSet = new Set(occs);
+    const futureISO = fmtDate(future);
+    if(c.rotation.assignments){
+      for(const d of Object.keys(c.rotation.assignments)){
+        if(d >= today && d <= futureISO && !occSet.has(d)){
+          delete c.rotation.assignments[d];
+        }
+      }
+    }
+    const result = _assignRotation(c, occs, {force:true});
     if(result.skipped > 0){
       console.warn(`[Clinic ${c.name}] ${result.skipped} slot-occurrences skipped during auto-assign:`, result.conflicts);
     }
@@ -15219,7 +15719,9 @@ function _pubBuildDigest(physId, startISO, endISO, kinds){
             // rotations may assign the user to any slot; check the full list.
             if(item.rotation && item.rotation.enabled){
               const ids = _rotationPhysIdsFor(item, d);
-              if(!ids.includes(physId)) return;
+              // Fail-safe: if no stored assignment for this date, don't gate
+              // (mirrors calendar feed behavior). See _emitRecurringEvents.
+              if(ids.length && !ids.includes(physId)) return;
             }
             add(d, `${emoji} ${item.name} @ ${item.time||'07:00'} (${item.durationMin||60} min)`);
           });
@@ -15510,7 +16012,10 @@ function _conferenceDatesForPhys(physId, startISO, endISO, eventId){
     for(const d of occs){
       if(item.rotation && item.rotation.enabled){
         const ids = _rotationPhysIdsFor(item, d);
-        if(!ids.includes(physId)) continue;
+        // Fail-safe: ungated when no stored assignment exists. Mirrors
+        // calendar feed and digest behavior so conference rules don't
+        // mysteriously stop firing when assignments age out.
+        if(ids.length && !ids.includes(physId)) continue;
       }
       out.add(d);
     }
