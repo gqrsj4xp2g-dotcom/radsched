@@ -5258,6 +5258,28 @@ function bulkAssignMultiWeek(shift){
   if(!p){alert('Select a physician.');return;}
   const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
   if(!dates.length){alert('No days match the selected day-of-week filters in that date range.');return;}
+
+  // Collect rule violations across the whole date range so admins see the
+  // full picture before committing. Without this the bulk path was a silent
+  // bypass of ALL physician rules across many dates.
+  const _shiftKey = shift==='1st'?'s1':shift==='2nd'?'s2':shift==='3rd'?'s3':'';
+  const _perDateViolations = [];
+  for(const d of dates){
+    const ctx = {physId:pid, date:d, site, shift, sub, kind:'dr-shift', shiftKey:_shiftKey, ym:d.slice(0,7)};
+    const v = _gatherManualRuleViolations(p, ctx);
+    if(v.length) _perDateViolations.push({date:d, violations:v});
+  }
+  if(_perDateViolations.length){
+    // Collapse to unique violation messages with counts to keep the alert tractable
+    const counts = {};
+    _perDateViolations.forEach(({violations}) => violations.forEach(v => counts[v] = (counts[v]||0)+1));
+    const summary = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,6)
+      .map(([v,n]) => `  • ${v} (on ${n} date${n===1?'':'s'})`).join('\n');
+    const more = Object.keys(counts).length > 6 ? `\n  … and ${Object.keys(counts).length-6} more type(s)` : '';
+    const msg = `Bulk assignment would violate rules on ${_perDateViolations.length} of ${dates.length} dates:\n\n${summary}${more}\n\nContinue anyway?`;
+    if(!confirm(msg)) return;
+  }
+
   let added=0,skipped=0;
   dates.forEach(date=>{
     if(S.drShifts.find(s=>s.physId===pid&&s.date===date&&s.shift===shift&&s.site===site)){
@@ -5477,9 +5499,38 @@ function _pgApplyGroup(gid){
   const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
   if(!(g.picks||[]).length){ alert('This group has no picks to apply.'); return; }
   if(!g.site){ alert('Set a site for this group first.'); return; }
-  if(!confirm(`Apply ${g.picks.length} pick(s) from "${g.name}" as ${g.shift} shift assignments?`)) return;
-  let added = 0, skipped = 0;
+  // Scan all picks×days for rule violations before committing, so admins
+  // aren't surprised by rule breaches after the fact. Same warn-and-confirm
+  // semantics as bulkAssignMultiWeek.
   const dowSet = new Set(g.dows||[]);
+  const shiftKey = g.shift === '1st' ? 's1' : g.shift === '2nd' ? 's2' : g.shift === '3rd' ? 's3' : '';
+  const violationCounts = {};
+  let _violationDates = 0;
+  for(const pick of g.picks){
+    const p = (S.physicians||[]).find(x => x.id === pick.physId);
+    if(!p) continue;
+    for(let d = 0; d < 7; d++){
+      const date = addDays(pick.weekStart, d);
+      if(!dowSet.has(parseDateLocal(date).getDay())) continue;
+      const ctx = {physId: p.id, date, site: g.site, shift: g.shift, sub: g.sub||'',
+                   kind:'dr-shift', shiftKey, ym: date.slice(0,7)};
+      const v = _gatherManualRuleViolations(p, ctx);
+      if(v.length){
+        _violationDates++;
+        v.forEach(m => violationCounts[m] = (violationCounts[m]||0)+1);
+      }
+    }
+  }
+  if(_violationDates){
+    const summary = Object.entries(violationCounts).sort((a,b)=>b[1]-a[1]).slice(0,6)
+      .map(([v,n]) => `  • ${v} (${n}×)`).join('\n');
+    const more = Object.keys(violationCounts).length > 6 ? `\n  … and ${Object.keys(violationCounts).length-6} more type(s)` : '';
+    const msg = `Applying this pick group would violate rules on ${_violationDates} dates:\n\n${summary}${more}\n\nContinue?`;
+    if(!confirm(msg)) return;
+  } else {
+    if(!confirm(`Apply ${g.picks.length} pick(s) from "${g.name}" as ${g.shift} shift assignments?`)) return;
+  }
+  let added = 0, skipped = 0;
   for(const pick of g.picks){
     // Each pick covers its Mon-Sun week. Walk each day in the week, filter
     // by dows, and create a DR shift entry.
@@ -8578,6 +8629,26 @@ function addIRShift(){
     if(!confirm(`${p.last} already has a ${shift} shift at ${site} on ${date}. Add anyway?`)) return;
   }
 
+  // Physician-rule check — see addDRShift for rationale. Vacation gets its
+  // own hard check below because treating vacation as a warn-only would be
+  // reliably confusing. Other rule violations warn-and-confirm.
+  if(vacDays(physId).has(date)){
+    alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);
+    return;
+  }
+  const _ruleCtx = {
+    physId, date, site, shift, sub,
+    kind: 'ir-shift',
+    shiftKey: '',
+    ym: date.slice(0,7),
+    irGroup: p.irGroup||'',
+  };
+  const _violations = _gatherManualRuleViolations(p, _ruleCtx);
+  if(_violations.length){
+    const msg = `The following physician rule(s) would be violated:\n\n  • ${_violations.join('\n  • ')}\n\nAssign anyway?`;
+    if(!confirm(msg)) return;
+  }
+
   S.irShifts.push({id:S.nextId++, physId, date, shift, site, sub, notes, irGroup:p.irGroup||''});
   triggerSave();
   _afterMutation();
@@ -9263,6 +9334,28 @@ function claimShift(oid,pid){
   // Vacation conflict warning (not a hard block — admin may override after confirming)
   if(vacDays(p.id).has(o.date)){
     if(!confirm(`${pname(p.id)} has a vacation on ${o.date}. Claim anyway?`))return;
+  }
+  // Physician-rule check for the claimant. Same warn-and-confirm pattern as
+  // addDRShift/addIRShift — the claim path is effectively a manual
+  // assignment and should honor the same rule system. Without this check,
+  // any physician could claim any open shift regardless of their site
+  // restrictions, sequence caps, call-day-site requirements, etc.
+  const _claimCtx = (() => {
+    if(o.group === 'IR') {
+      return {physId:pid, date:o.date, site:o.site||p.irSitePrim||'', shift:'ir-call',
+              kind:'ir-call', shiftKey:'', ym:o.date.slice(0,7), irGroup:p.irGroup||''};
+    }
+    if(o.shiftType && o.shiftType.includes('Weekend')){
+      return {physId:pid, date:o.date, site:o.site||'', shift:'wknd', sub:o.sub,
+              kind:'dr-weekend', shiftKey:'', ym:o.date.slice(0,7)};
+    }
+    return {physId:pid, date:o.date, site:o.site||'', shift:'1st', sub:o.sub,
+            kind:'dr-shift', shiftKey:'s1', ym:o.date.slice(0,7)};
+  })();
+  const _violations = _gatherManualRuleViolations(p, _claimCtx);
+  if(_violations.length){
+    const msg = `Claiming this shift would violate ${_violations.length} physician rule(s):\n\n  • ${_violations.join('\n  • ')}\n\nClaim anyway?`;
+    if(!confirm(msg)) return;
   }
   o.claimedBy=pid;
   if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'',site:o.site,notes:'Claimed'});
@@ -12513,7 +12606,7 @@ function _aiExecuteTool(name, input) {
 
   if(name === 'assign_dr_shift'){
     if(!adminOk) return { ok:false, error:'Admin access required.' };
-    const {physId, date, shift, site, sub, notes} = input;
+    const {physId, date, shift, site, sub, notes, force} = input;
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
     const vd = vacDays(physId);
@@ -12521,6 +12614,18 @@ function _aiExecuteTool(name, input) {
     const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
     if(existing) return { ok:false, error:`${p.last} already has a DR shift on ${date} (shift: ${existing.shift}).` };
     const siteName = site || (shift==='Home'?'At Home / Remote': (p.anchorSite||S.sites[0]?.name||''));
+    // Physician-rule check. AI tools can't prompt for confirmation, so rule
+    // violations are a hard error unless the caller passes force:true.
+    // Returning the violation list lets the AI agent decide whether to
+    // propose an alternative or retry with force.
+    const _shiftKey = shift==='1st'?'s1':shift==='2nd'?'s2':shift==='3rd'?'s3':shift==='Home'?'home':'';
+    const _violations = _gatherManualRuleViolations(p, {
+      physId, date, site:siteName, shift, sub, kind:'dr-shift',
+      shiftKey:_shiftKey, ym:date.slice(0,7),
+    });
+    if(_violations.length && !force){
+      return { ok:false, error:`Physician rule violations:\n  • ${_violations.join('\n  • ')}\n\nRetry with force:true to override.` };
+    }
     S.drShifts.push({
       id: S.nextId++, physId, date,
       shift, site: siteName,
@@ -12533,7 +12638,8 @@ function _aiExecuteTool(name, input) {
       subject:`New DR shift: ${date} (${shift})`,
       body:`You've been assigned a new DR shift:\n\nDate: ${date}\nShift: ${shift}\nSite: ${siteName}\n${sub?'Subspecialty: '+sub+'\n':''}\nView in RadScheduler → My Schedule.`
     });
-    return { ok:true, message:`Assigned ${shift} DR shift to ${p.last} on ${date} at ${siteName}.` };
+    const _overrideNote = _violations.length ? ` (overrode ${_violations.length} rule violation(s))` : '';
+    return { ok:true, message:`Assigned ${shift} DR shift to ${p.last} on ${date} at ${siteName}.${_overrideNote}` };
   }
 
   if(name === 'remove_shift'){
@@ -12612,12 +12718,19 @@ function _aiExecuteTool(name, input) {
 
   if(name === 'assign_ir_shift'){
     if(!adminOk) return { ok:false, error:'Admin access required.' };
-    const {physId, date, shift, site, sub, notes} = input;
+    const {physId, date, shift, site, sub, notes, force} = input;
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
     if((S.irShifts||[]).find(s=>s.physId===physId&&s.date===date))
       return { ok:false, error:`${p.last} already has an IR shift on ${date}.` };
     const siteName = site || p.irSitePrim || '';
+    const _violations = _gatherManualRuleViolations(p, {
+      physId, date, site:siteName, shift:shift||'1st', sub,
+      kind:'ir-shift', shiftKey:'', ym:date.slice(0,7), irGroup:p.irGroup||'',
+    });
+    if(_violations.length && !force){
+      return { ok:false, error:`Physician rule violations:\n  • ${_violations.join('\n  • ')}\n\nRetry with force:true to override.` };
+    }
     S.irShifts.push({
       id:S.nextId++, physId, date, shift: shift||'1st',
       site: siteName, sub: sub||'', notes: notes||'AI assigned',
@@ -12629,7 +12742,8 @@ function _aiExecuteTool(name, input) {
       subject:`New IR shift: ${date} (${shift||'1st'})`,
       body:`You've been assigned a new IR shift:\n\nDate: ${date}\nShift: ${shift||'1st'}\nSite: ${siteName}\n${sub?'Subspecialty: '+sub+'\n':''}\nView in RadScheduler → My Schedule.`
     });
-    return {ok:true, message:`Assigned IR ${shift} shift to ${p.last} on ${date} at ${siteName}.`};
+    const _overrideNote = _violations.length ? ` (overrode ${_violations.length} rule violation(s))` : '';
+    return {ok:true, message:`Assigned IR ${shift} shift to ${p.last} on ${date} at ${siteName}.${_overrideNote}`};
   }
 
   // ── SITE MANAGEMENT ───────────────────────────────────────────────────────
@@ -16816,6 +16930,66 @@ function updateSbInfo(){
     ${c?ancBadge(c):''}${ancInfo}
   </div>`;
 }
+/**
+ * _gatherManualRuleViolations(p, ctx) — runs every physician-rule check a
+ * manual assignment path should respect and returns an array of
+ * human-readable violation messages. Returns [] when everything is clean.
+ *
+ * Semantically a collector, not a blocker — the caller decides whether to
+ * warn-and-confirm or hard-refuse. Manual assignment paths traditionally
+ * use warn-and-confirm so admins can override in exceptional cases while
+ * still being surfaced the risks. Auto-assign paths call the individual
+ * functions directly (`!siteRuleOk(...) return false`) because they need
+ * hard eligibility filtering, not advisory.
+ *
+ * ctx = {date, site, shift, sub?, irGroup?, kind, shiftKey?, slotLabel?, ym?}
+ *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
+ *   shiftKey ∈ {'s1','s2','s3','home'} for DR shifts; '' / absent for IR
+ */
+function _gatherManualRuleViolations(p, ctx){
+  const out = [];
+  if(!p || !ctx) return out;
+
+  // Site rules — site limits / blackouts / shift whitelist / per-period caps
+  if(ctx.site){
+    if(ctx.kind === 'ir-shift' || ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend'){
+      if(!irSiteRuleOk(p, ctx.site, ctx.date)) out.push(`site rule blocks ${p.last} at ${ctx.site} on ${ctx.date}`);
+    } else {
+      if(!siteRuleOk(p, ctx.site, ctx.ym || ctx.date.slice(0,7), ctx.date, ctx.shiftKey||'')){
+        out.push(`site rule blocks ${p.last} at ${ctx.site} on ${ctx.date}`);
+      }
+    }
+  }
+
+  // Day-of-week conditions tied to site
+  if(ctx.site){
+    const dcCtx = (ctx.kind === 'ir-shift') ? 'ir-shift'
+                : (ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend') ? 'ir-call'
+                : 'dr-shift';
+    if(!dayConditionSiteOk(p, ctx.site, ctx.date, dcCtx)){
+      out.push(`day condition blocks ${p.last} at ${ctx.site} on ${ctx.date} (day-of-week restriction)`);
+    }
+  }
+
+  // Sequence rules: max consecutive + min rest (global + site/slot-scoped)
+  if(!sequenceOk(p, ctx.date, ctx.ym || ctx.date.slice(0,7), ctx.site||'', ctx.slotLabel||'')){
+    out.push(`sequence rule violated (max-consecutive or min-rest)`);
+  }
+
+  // Natural-language if/then rules
+  if(!natLangRulesOk(ctx)) out.push(`natural-language rule blocks this assignment`);
+
+  // Conference (tumor board / clinic) rules
+  if(!tbRulesOk(p, ctx)) out.push(`conference rule (tumor board / clinic) blocks this assignment`);
+
+  // Call-day site rule — only meaningful when candidate is a day shift
+  if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
+    if(!callDayRulesOk(p, ctx)) out.push(`call-day site rule requires a different site for this physician`);
+  }
+
+  return out;
+}
+
 function addDRShift(){
   if(!_adminOnly('assign DR shifts'))return;
   const pid=+document.getElementById('sb-phys').value;
@@ -16858,6 +17032,25 @@ function addDRShift(){
   if(k&&!p.shiftElig[k]&&!confirm(`${p.last} is not designated for ${shift} shift. Continue?`))return;
   if(p.allowedSites?.length&&!p.allowedSites.includes(site)&&!confirm(`${p.last} is not normally assigned to ${site}. Continue?`))return;
   if(drCnt(pid,date.slice(0,7))>=maxDR(p,'wd')&&!confirm(`${p.last} at FTE cap. Add anyway?`))return;
+  // Physician-rule check: site rules, day conditions, sequence rules,
+  // natural-language rules, conference rules, call-day site rules. Admins
+  // can override (warn-and-confirm) since manual assignment is by design
+  // an admin override context, but surfacing the violations is critical —
+  // prior behavior was to silently bypass every rule, which is what caused
+  // "rules added to physicians aren't being obeyed."
+  const _shiftKey = shift==='1st'?'s1':shift==='2nd'?'s2':shift==='3rd'?'s3':shift==='Home'?'home':'';
+  const _ruleCtx = {
+    physId: pid, date, site, shift,
+    sub: document.getElementById('sb-sub').value,
+    kind: 'dr-shift',
+    shiftKey: _shiftKey,
+    ym: date.slice(0,7),
+  };
+  const _violations = _gatherManualRuleViolations(p, _ruleCtx);
+  if(_violations.length){
+    const msg = `The following physician rule(s) would be violated by this assignment:\n\n  • ${_violations.join('\n  • ')}\n\nAssign anyway?`;
+    if(!confirm(msg)) return;
+  }
   S.drShifts.push({id:S.nextId++,physId:pid,date,shift,site,sub:document.getElementById('sb-sub').value,notes:document.getElementById('sb-notes').value,autoHome:false});
   triggerSave();updateSbInfo();
   _afterMutation();
