@@ -1030,11 +1030,12 @@ tbody tr:hover{background:var(--bg3)}
           <div class="fg"><label>Site</label><select id="sr-st-site"></select></div>
           <div class="fg"><label>Allowed Shift Types</label>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-              <label class="chk"><input type="checkbox" id="sr-st-1st" checked> 1st Shift</label>
-              <label class="chk"><input type="checkbox" id="sr-st-2nd" checked> 2nd Shift</label>
-              <label class="chk"><input type="checkbox" id="sr-st-3rd"> 3rd Shift</label>
-              <label class="chk"><input type="checkbox" id="sr-st-wknd" checked> Weekend Call</label>
-              <label class="chk"><input type="checkbox" id="sr-st-ir" checked> IR Call</label>
+              <label class="chk"><input type="checkbox" id="sr-st-1st" checked> 1st Shift (DR)</label>
+              <label class="chk"><input type="checkbox" id="sr-st-2nd" checked> 2nd Shift (DR)</label>
+              <label class="chk"><input type="checkbox" id="sr-st-3rd"> 3rd Shift (DR)</label>
+              <label class="chk"><input type="checkbox" id="sr-st-wknd" checked> Weekend Call (DR)</label>
+              <label class="chk"><input type="checkbox" id="sr-st-ir-shift" checked> IR Procedure Shift</label>
+              <label class="chk"><input type="checkbox" id="sr-st-ir-call" checked> IR Call</label>
             </div>
           </div>
         </div>
@@ -8387,19 +8388,23 @@ function _irsaBlocked(p,date,assigned){
   for(k=0;k<assigned.length;k++){if(assigned[k].physId===p.id&&assigned[k].date===date)return true;}
   // Pre-existing manually-assigned shifts and calls. Before this check was
   // added the auto-assigner treated a physician with a manual shift that day
-  // as "fully available," double-booking them on top of manual work. The
-  // check is intentionally conservative: any procedure-shift, any daily IR
-  // call, or any weekend IR call (Fri–Sun span) that overlaps the date makes
-  // the physician unavailable. Home shifts don't block because Home means
-  // "not at a clinical site" — the physician can be pulled into procedure
-  // coverage which will displace their home shift.
+  // as "fully available," double-booking them on top of manual work. ANY
+  // existing IR shift (procedure OR home) blocks — if the physician is
+  // already marked for the day, the admin's intent is preserved. If the
+  // admin WANTS to replace a Home with a procedure shift, they can delete
+  // the Home entry first. Leaving Home unblocked created visible double-
+  // scheduling because auto-assign doesn't currently displace Home shifts
+  // (only previewIRRebalance day-fill does, on admin opt-in).
   var irS = S.irShifts || [];
   for(k=0;k<irS.length;k++){
-    if(irS[k].physId===p.id && irS[k].date===date && irS[k].shift!=='Home') return true;
+    if(irS[k].physId===p.id && irS[k].date===date) return true;
   }
+  // DR day/evening shifts also block — no Radiologist should double-book
+  // across specialties on the same day. DR Home still blocks here for
+  // parity with IR Home (same rationale).
   var drS = S.drShifts || [];
   for(k=0;k<drS.length;k++){
-    if(drS[k].physId===p.id && drS[k].date===date && drS[k].shift!=='Home') return true;
+    if(drS[k].physId===p.id && drS[k].date===date) return true;
   }
   var irC = S.irCalls || [];
   for(k=0;k<irC.length;k++){
@@ -12356,7 +12361,12 @@ function addShiftTypeRule(){
   if(document.getElementById('sr-st-2nd')?.checked) allowed.push('2nd');
   if(document.getElementById('sr-st-3rd')?.checked) allowed.push('3rd');
   if(document.getElementById('sr-st-wknd')?.checked) allowed.push('wknd');
-  if(document.getElementById('sr-st-ir')?.checked) allowed.push('ir');
+  // IR procedure shifts and IR call are now tracked separately so admins
+  // can allow one without the other. Legacy 'ir' (both) is still read by
+  // irSiteRuleOk / irCallSiteRuleOk for backward compatibility with any
+  // snapshot created before this split.
+  if(document.getElementById('sr-st-ir-shift')?.checked) allowed.push('ir-shift');
+  if(document.getElementById('sr-st-ir-call')?.checked)  allowed.push('ir-call');
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
   let r=p.siteRules.find(x=>x.site===site);
   if(!r){r={site};p.siteRules.push(r);}
@@ -16230,15 +16240,37 @@ function siteRuleOk(p, siteName, ym, date, shiftKey){
  * based on day-of-week restrictions in their site rules.
  * context: 'dr-shift' | 'ir-call' | 'ir-shift'
  */
-// IR-specific site rule check — checks blocked/blackout/allowedShifts('ir')
-// but NOT maxPerMonth/maxPerWeek (those count S.drShifts and are DR-only)
+// IR-specific site rule check — checks blocked/blackout/allowedShifts
+// but NOT maxPerMonth/maxPerWeek (those count S.drShifts and are DR-only).
+// Used for IR PROCEDURE SHIFTS. IR call has its own check (irCallSiteRuleOk)
+// so admins can allow procedure shifts without allowing call, or vice versa.
 function irSiteRuleOk(p, siteName, date){
   const rule = (p.siteRules||[]).find(r => r.site===siteName);
   if(!rule) return true;                          // no rule = unrestricted
   if(rule.blocked) return false;                  // hard blocked from this site
   if((rule.blackouts||[]).some(b => date>=b.start && date<=b.end)) return false;
-  // If allowedShifts is set and 'ir' is NOT in it, physician can't do IR shifts here
-  if(rule.allowedShifts?.length && !rule.allowedShifts.includes('ir')) return false;
+  // If allowedShifts is set, require 'ir-shift' (new explicit code) or 'ir'
+  // (legacy — meant "both IR types"). Legacy back-compat matters because
+  // older snapshots saved rules with 'ir' and those should continue to
+  // allow procedure shifts until the admin re-opens the rule.
+  if(rule.allowedShifts?.length){
+    const allowed = rule.allowedShifts;
+    if(!allowed.includes('ir-shift') && !allowed.includes('ir')) return false;
+  }
+  return true;
+}
+
+// IR call–specific site rule check. Mirrors irSiteRuleOk but gates on
+// 'ir-call' instead of 'ir-shift'. Legacy 'ir' allows call too.
+function irCallSiteRuleOk(p, siteName, date){
+  const rule = (p.siteRules||[]).find(r => r.site===siteName);
+  if(!rule) return true;
+  if(rule.blocked) return false;
+  if((rule.blackouts||[]).some(b => date>=b.start && date<=b.end)) return false;
+  if(rule.allowedShifts?.length){
+    const allowed = rule.allowedShifts;
+    if(!allowed.includes('ir-call') && !allowed.includes('ir')) return false;
+  }
   return true;
 }
 
@@ -17183,10 +17215,16 @@ function _gatherManualRuleViolations(p, ctx){
   const out = [];
   if(!p || !ctx) return out;
 
-  // Site rules — site limits / blackouts / shift whitelist / per-period caps
+  // Site rules — site limits / blackouts / shift whitelist / per-period caps.
+  // Route to the appropriate predicate:
+  //   ir-shift → irSiteRuleOk (checks 'ir-shift' or legacy 'ir')
+  //   ir-call / ir-weekend → irCallSiteRuleOk (checks 'ir-call' or legacy 'ir')
+  //   dr-* → siteRuleOk (checks DR shift types)
   if(ctx.site){
-    if(ctx.kind === 'ir-shift' || ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend'){
+    if(ctx.kind === 'ir-shift'){
       if(!irSiteRuleOk(p, ctx.site, ctx.date)) out.push(`site rule blocks ${p.last} at ${ctx.site} on ${ctx.date}`);
+    } else if(ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend'){
+      if(!irCallSiteRuleOk(p, ctx.site, ctx.date)) out.push(`site rule blocks ${p.last} at ${ctx.site} on ${ctx.date}`);
     } else {
       if(!siteRuleOk(p, ctx.site, ctx.ym || ctx.date.slice(0,7), ctx.date, ctx.shiftKey||'')){
         out.push(`site rule blocks ${p.last} at ${ctx.site} on ${ctx.date}`);
@@ -18004,6 +18042,58 @@ function renderIRCal(){
           </div>`;
         }
       });
+
+      // ── TUMOR BOARDS & CLINICS ──
+      // Recurring conferences render on the IR calendar when an IR-eligible
+      // physician is assigned (via rotation slots or blanket allowedPhysIds).
+      // Gating mirrors _emitRecurringEvents in the calendar feed so what
+      // shows here matches what physicians see on their subscribed calendars:
+      //   • Respect the phys filter — only show occurrences where the
+      //     selected physician is an assigned participant.
+      //   • Respect the group filter — only show when at least one assigned
+      //     phys is in the selected IR group (or any IR group if 'both').
+      //   • Fail-safe: when rotation is enabled but no assignment is stored
+      //     yet (brand-new board, or date past the auto-assign window),
+      //     treat the occurrence as ungated and surface it. Hiding in that
+      //     case produced the "my clinics don't show up" symptom.
+      const _emitRecur = (items, emoji, kindLabel, bgStyle) => {
+        (items||[]).forEach(item => {
+          if(!item.active && item.active !== undefined) return;
+          const occs = _eventOccurrencesInRange(item, c.date, c.date);
+          if(!occs.length || occs[0] !== c.date) return;
+          const assignedIds = _rotationPhysIdsFor(item, c.date);
+          let participantIds;
+          if(item.rotation && item.rotation.enabled && assignedIds.length){
+            participantIds = assignedIds;
+          } else {
+            participantIds = item.allowedPhysIds || [];
+          }
+          if(fpid && !participantIds.includes(fpid)) return;
+          const irParticipants = participantIds.filter(pid => {
+            const pp = S.physicians.find(x => x.id === pid);
+            return pp && (pp.irFte > 0);
+          });
+          if(!irParticipants.length) return;
+          if(fg){
+            const hasGroupMatch = irParticipants.some(pid => {
+              const pp = S.physicians.find(x => x.id === pid);
+              return pp && pp.irGroup === fg;
+            });
+            if(!hasGroupMatch) return;
+          }
+          const namesShort = irParticipants.map(pid => pshort(pid)).join(', ');
+          const namesFull  = irParticipants.map(pid => pname(pid)).join(', ');
+          const time = item.time || '07:00';
+          const dur  = item.durationMin || 60;
+          shiftEvs += `<div class="ev" style="${bgStyle}" title="${emoji} ${(item.name||'').replace(/</g,'&lt;')} · ${time} (${dur}m) · ${namesFull}">
+            <div style="font-weight:700;font-size:11px">${emoji} ${(item.name||'').slice(0,18).replace(/</g,'&lt;')}</div>
+            <div style="font-size:9px;opacity:.85">${kindLabel} · ${time}</div>
+            <div style="font-size:9px;opacity:.7">${namesShort}</div>
+          </div>`;
+        });
+      };
+      _emitRecur(S.tumorBoards, '🔬', 'Tumor Bd', 'background:#fef3c7;color:#78350f;border:1px solid #fbbf24');
+      _emitRecur(S.clinics,     '🏥', 'Clinic',   'background:#cffafe;color:#155e75;border:1px solid #67e8f9');
     }
 
     // ── SEPARATOR between call and shifts ──
@@ -18576,6 +18666,9 @@ function previewIRAA(){
           !vacDays(p.id).has(date)&&!isSoldBackDate(p.id,date)&&
           !isIRCallBlackout(p.id,date)&&
           !_has2ndOr3rdShift(p.id,date)&&
+          // IR call site rule — gate on 'ir-call' allowedShifts so admins
+          // can allow procedure shifts at a site without allowing call
+          irCallSiteRuleOk(p, p.irSitePrim||'', date) &&
           dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')&&
           sequenceOk(p,date,date.slice(0,7),p.irSitePrim||'','')
         ).length;
@@ -18602,6 +18695,7 @@ function previewIRAA(){
             if(vd.has(date)){ reasons[p.id]='vacation'; return false; }
             if(isSoldBackDate(p.id,date)){ reasons[p.id]='sold-back'; return false; }
             if(isIRCallBlackout(p.id,date)){ reasons[p.id]='blackout'; return false; }
+            if(!irCallSiteRuleOk(p, p.irSitePrim||'', date)){ reasons[p.id]='site rule blocks IR call'; return false; }
             if(irOnDate(p.id,date)){ reasons[p.id]='already on IR this date'; return false; }
             if(_has2ndOr3rdShift(p.id,date)){ reasons[p.id]='2nd/3rd DR shift'; return false; }
             if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')){ reasons[p.id]='day condition'; return false; }
@@ -18747,6 +18841,10 @@ function previewIRAA(){
             if(span.some(d=>isSoldBackDate(p.id,d))){ reasons[p.id]='sold-back'; return false; }
             // IR call blackout on any day in span
             if(span.some(d=>isIRCallBlackout(p.id,d))){ reasons[p.id]='blackout'; return false; }
+            // Site rule — weekend call treated as 'ir-call' for rule purposes.
+            // Check ONCE on the Friday (not every span day) since the site is
+            // the physician's primary; blackouts are per-day above.
+            if(!irCallSiteRuleOk(p, p.irSitePrim||'', friday)){ reasons[p.id]='site rule blocks IR call'; return false; }
             // 2nd or 3rd DR shift on any day in span
             if(span.some(d=>_has2ndOr3rdShift(p.id,d))){ reasons[p.id]='2nd/3rd DR shift'; return false; }
             if(!natLangRulesOk({physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})){
