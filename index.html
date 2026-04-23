@@ -2951,6 +2951,13 @@ function _buildSaveHTML(){
     openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
     shiftPickGroups:S.shiftPickGroups||[],
+    // Tumor boards, clinics, and the publish-digest audit log need to round-
+    // trip through the portable HTML save too — otherwise exporting /
+    // importing the file drops them, even though the Supabase path
+    // preserves them. Keep them symmetric with _pushToSupabase.
+    tumorBoards:S.tumorBoards||[],
+    clinics:S.clinics||[],
+    publishLog:S.publishLog||[],
     irGroups:S.irGroups||[],
     nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
     chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
@@ -3005,6 +3012,9 @@ function clearAllData(){
     siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
     irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,nextId:S.nextId,
     shiftPickGroups:S.shiftPickGroups||[],
+    tumorBoards:S.tumorBoards||[],
+    clinics:S.clinics||[],
+    publishLog:S.publishLog||[],
     irGroups:S.irGroups,
   };
   const usersBackup=[...USERS];
@@ -3017,6 +3027,11 @@ function clearAllData(){
   S.swapRequests=[];S.physicians=[];S.holidayDefs=[];
   S.holidayBlackouts=[];S.holidayNeeds=[];
   S.siteSlots={};S.siteSlotsSubs={};S.irSlots={};S.irShiftSlots={};S.wkndNeeds={};
+  // Clear later-added state so a Reset gives a truly fresh practice instead of
+  // keeping tumor boards, clinics, and slot labels from the previous install.
+  S.tumorBoards=[]; S.clinics=[]; S.publishLog=[];
+  S.shiftPickGroups=[];
+  S.irShiftSlotLabels={}; S.siteSlotLabels={};
   S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
   S.irGroups=['North','South'];
   S.nextId=100;
@@ -21375,6 +21390,18 @@ async function _pushToSupabase(){
         natLangRules:S.natLangRules||[],
         broadcasts:S.broadcasts||[],
         shiftListings:S.shiftListings||[],
+        // Recurring conferences (tumor boards, outpatient clinics) plus the
+        // audit log of published schedule digests. Without these three fields
+        // every Supabase push dropped them from the stored state, so any
+        // reload after the debounce fired showed the feature as "gone." Same
+        // fix applies to the label maps and pick groups — all later-added
+        // features that had been missing from the payload.
+        tumorBoards:S.tumorBoards||[],
+        clinics:S.clinics||[],
+        publishLog:S.publishLog||[],
+        irShiftSlotLabels:S.irShiftSlotLabels||{},
+        siteSlotLabels:S.siteSlotLabels||{},
+        shiftPickGroups:S.shiftPickGroups||[],
         vacPicking:S.vacPicking,
         driveTimes:S.driveTimes||{},
         nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
