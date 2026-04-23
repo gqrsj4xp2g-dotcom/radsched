@@ -2924,6 +2924,113 @@ function clearIRCalls(mode){
   _updateSaveUI(`✓ Cleared ${ids.size} IR call(s)`,'var(--green-t)');
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   PERSISTENCE MANIFEST — single source of truth for save/export/reset paths
+   ═══════════════════════════════════════════════════════════════════════════
+   Every new persistable state field MUST be added here. The manifest drives:
+     • _pushToSupabase       (primary online save, fires on every mutation)
+     • _buildSaveHTML        (portable offline export of the HTML shell)
+     • the reset-to-fresh    (clears all persisted fields to their default)
+   In the past, new features (tumor boards, clinics, slot labels, pick groups)
+   were added to the state seed + hydration but forgotten in one or more save
+   paths, causing silent data loss: the feature worked in memory, rendered in
+   UI, then evaporated on next Supabase push. Routing all three save paths
+   through this manifest means adding a new field requires editing exactly
+   ONE place — the manifest — and all three paths pick it up automatically.
+
+   Each entry:
+     key     — the S[key] property name (also the payload field name)
+     type    — 'array' | 'object' | 'scalar'. Used ONLY for reset defaults.
+               Arrays reset to [], objects to {}. Scalars reset from the
+               optional `reset` field; omit `reset` to leave scalar alone.
+     reset   — optional explicit reset value (overrides type default)
+     scope   — optional: 'online-only' | 'file-only' | undefined (=both).
+               Used for fields that should only persist in one path (e.g.
+               chatGroups is online-only to avoid polluting portable files).
+*/
+const _PERSISTED_KEYS = [
+  // Core roster + schedule
+  {key:'physicians',        type:'array'},
+  {key:'drSubs',            type:'array'},
+  {key:'irSubs',            type:'array'},
+  {key:'sites',             type:'array'},
+  {key:'irGroups',          type:'array'},
+  {key:'vacations',         type:'array'},
+  {key:'drShifts',          type:'array'},
+  {key:'weekendCalls',      type:'array'},
+  {key:'irShifts',          type:'array'},
+  {key:'irCalls',           type:'array'},
+  {key:'holidays',          type:'array'},
+  {key:'openShifts',        type:'array'},
+  // Site / slot configuration
+  {key:'siteSlots',         type:'object'},
+  {key:'siteSlotsSubs',     type:'object'},
+  {key:'irSlots',           type:'object'},
+  {key:'irShiftSlots',      type:'object'},
+  {key:'irShiftSlotLabels', type:'object'},
+  {key:'siteSlotLabels',    type:'object'},
+  {key:'wkndNeeds',         type:'object'},
+  // Config + misc
+  {key:'cfg',               type:'object'},
+  {key:'driveTimes',        type:'object'},
+  // Communication + messaging
+  {key:'chatMessages',      type:'array'},
+  {key:'chatGroups',        type:'array'},
+  {key:'swapRequests',      type:'array'},
+  {key:'broadcasts',        type:'array'},
+  {key:'shiftListings',     type:'array'},
+  // Holiday system
+  {key:'holidayBlackouts',  type:'array'},
+  {key:'holidayNeeds',      type:'array'},
+  {key:'holidayDefs',       type:'array'},
+  // Rules + scheduling features
+  {key:'natLangRules',      type:'array'},
+  {key:'shiftPickGroups',   type:'array'},
+  // Recurring conferences (tumor boards / clinics) and publish audit log
+  {key:'tumorBoards',       type:'array'},
+  {key:'clinics',           type:'array'},
+  {key:'publishLog',        type:'array'},
+  // Vacation picking state
+  {key:'vacPicking',        type:'object'},
+  // Bookkeeping
+  {key:'nextId',            type:'scalar', reset:100},
+];
+
+// Build the persistable payload object from S. Honors scope:
+//   • 'online-only'  → included only when pathKind === 'online'
+//   • 'file-only'    → included only when pathKind === 'file'
+//   • (unset)        → included in both
+// Missing S fields default to the manifest type's empty ({} / []). This
+// makes the payload deterministic regardless of when the field was
+// introduced relative to an older snapshot.
+function _buildPersistedPayload(pathKind){
+  const out = {};
+  for(const entry of _PERSISTED_KEYS){
+    if(entry.scope === 'online-only' && pathKind !== 'online') continue;
+    if(entry.scope === 'file-only'   && pathKind !== 'file')   continue;
+    const v = S[entry.key];
+    if(v === undefined || v === null){
+      // Fall back to an empty default so the payload is schema-complete
+      out[entry.key] = entry.type === 'array' ? [] : entry.type === 'object' ? {} : null;
+    } else {
+      out[entry.key] = v;
+    }
+  }
+  return out;
+}
+
+// Reset every manifest-tracked field to its default. Called from the reset-
+// to-fresh flow so introducing a new feature doesn't leave its state
+// lingering across a Reset. Scalars without an explicit `reset` value are
+// left alone (we don't know what "empty" means for them).
+function _resetPersistedState(){
+  for(const entry of _PERSISTED_KEYS){
+    if(entry.type === 'array')  S[entry.key] = [];
+    else if(entry.type === 'object') S[entry.key] = {};
+    else if(Object.prototype.hasOwnProperty.call(entry, 'reset')) S[entry.key] = entry.reset;
+  }
+}
+
 function triggerSave(){
   if(_isRestoring)return;
   _hasUnsavedChanges=true;
@@ -2944,29 +3051,16 @@ function _buildSaveHTML(){
   // Embed live Supabase credentials so any device opening the file auto-connects
   const liveUrl=_getUrl()||'';
   const liveKey=_getKey()||'';
-  const sData='let S=/*S_START*/'+JSON.stringify({
-    physicians:S.physicians,drSubs:S.drSubs,irSubs:S.irSubs,sites:S.sites,
-    vacations:S.vacations,drShifts:S.drShifts,weekendCalls:S.weekendCalls,
-    irShifts:S.irShifts,irCalls:S.irCalls,holidays:S.holidays,
-    openShifts:S.openShifts,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,cfg:S.cfg,driveTimes:S.driveTimes||{},
-    shiftPickGroups:S.shiftPickGroups||[],
-    // Tumor boards, clinics, and the publish-digest audit log need to round-
-    // trip through the portable HTML save too — otherwise exporting /
-    // importing the file drops them, even though the Supabase path
-    // preserves them. Keep them symmetric with _pushToSupabase.
-    tumorBoards:S.tumorBoards||[],
-    clinics:S.clinics||[],
-    publishLog:S.publishLog||[],
-    irGroups:S.irGroups||[],
-    nextId:S.nextId,aaPreview:[],iraPreview:[],irsaPreview:[],
-    chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],swapRequests:S.swapRequests,
-    holidayBlackouts:S.holidayBlackouts,holidayNeeds:S.holidayNeeds,holidayDefs:S.holidayDefs||[],
-    natLangRules:S.natLangRules||[],
-    broadcasts:S.broadcasts||[],
-    shiftListings:S.shiftListings||[],
-    _lastSaved:null,
-  })+'/*S_END*/';
+  const sData='let S=/*S_START*/'+JSON.stringify(Object.assign(
+    _buildPersistedPayload('file'),
+    {
+      // File-save-specific extras. Preview arrays are intentionally blanked
+      // so a cold-boot from the exported HTML doesn't resurrect stale
+      // preview state. _lastSaved null signals "needs to be loaded fresh."
+      aaPreview:[], iraPreview:[], irsaPreview:[],
+      _lastSaved:null,
+    }
+  ))+'/*S_END*/';
   const uData='let USERS = /*USERS_START*/'+JSON.stringify(USERS)+'/*USERS_END*/';
   return source
     .replace(/let S=\/\*S_START\*\/[\s\S]*?\/\*S_END\*\//,sData)
@@ -3022,19 +3116,15 @@ function clearAllData(){
   // user accounts, only the superuser. Customers who click Reset get the
   // same clean slate a brand-new install gets. Preserves the "At Home /
   // Remote" pseudo-site since code assumes it always exists.
-  S.drShifts=[];S.weekendCalls=[];S.irCalls=[];S.irShifts=[];
-  S.vacations=[];S.holidays=[];S.openShifts=[];S.chatMessages=[];
-  S.swapRequests=[];S.physicians=[];S.holidayDefs=[];
-  S.holidayBlackouts=[];S.holidayNeeds=[];
-  S.siteSlots={};S.siteSlotsSubs={};S.irSlots={};S.irShiftSlots={};S.wkndNeeds={};
-  // Clear later-added state so a Reset gives a truly fresh practice instead of
-  // keeping tumor boards, clinics, and slot labels from the previous install.
-  S.tumorBoards=[]; S.clinics=[]; S.publishLog=[];
-  S.shiftPickGroups=[];
-  S.irShiftSlotLabels={}; S.siteSlotLabels={};
+  //
+  // Driven by the _PERSISTED_KEYS manifest so adding a new state field
+  // only requires updating the manifest — Reset will clear it automatically.
+  // A few fields need custom post-reset seeding (Sites retains the "At
+  // Home / Remote" pseudo-site; irGroups retains the default N/S; nextId
+  // is the manifest's 100).
+  _resetPersistedState();
   S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
   S.irGroups=['North','South'];
-  S.nextId=100;
   USERS.length=0;
   USERS.push(
     {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'}
@@ -16481,44 +16571,103 @@ function _conferenceShiftPreferenceFor(p, ctx){
 }
 
 /**
- * callDayRulesOk(p, ctx) — when the candidate is a DAY SHIFT and the physician
- * is already on call that day, enforce any callDayRules requirement that the
- * day shift be at a specific site. Returns true if no rule blocks.
+ * callDayRulesOk(p, ctx) — enforces per-physician rules that tie day-shift
+ * site to call assignment. Two directions:
  *
- * Order of evaluation: this function checks if p has ANY existing call
- * assignment on ctx.date that matches a configured rule's callType, and if
- * so, requires ctx.site === rule.requiredSite (and optionally ctx.shift
- * matches rule.shift).
+ * Direction 1 (original): candidate is a DAY SHIFT and the physician is
+ *   already on call that day. The rule's requiredSite must match the day
+ *   shift's site. Prevents admins from scheduling a call physician's day
+ *   shift at the wrong site.
+ *
+ * Direction 2 (added): candidate is a CALL (ir-call / ir-weekend / weekend)
+ *   and the physician has an existing day shift on that date. The rule's
+ *   requiredSite must match the existing day shift's site — e.g. a rule
+ *   "IR call only when scheduled at North" blocks call assignment on a day
+ *   the physician is scheduled at Riverview. Before this added direction,
+ *   IR call auto-assign would ignore these rules entirely and happily
+ *   assign calls regardless of where the physician was physically working.
+ *
+ * Returns true if no rule blocks; false if any matching rule fails.
  */
 function callDayRulesOk(p, ctx){
   const rules = (p && p.callDayRules) || [];
   if(!rules.length) return true;
   if(!ctx || !ctx.date) return true;
-  if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') return true;
-  // Index existing calls on ctx.date for this physician.
   const date = ctx.date;
-  const callsToday = {
-    'ir-call': false, 'ir-weekend': false, 'weekend-call': false
-  };
-  (S.irCalls||[]).forEach(c => {
-    if(c.physId !== p.id || c.date !== date) return;
-    if(c.callType === 'weekend') callsToday['ir-weekend'] = true;
-    else callsToday['ir-call'] = true;
-  });
-  (S.weekendCalls||[]).forEach(w => {
-    if(w.physId !== p.id) return;
-    if(w.satDate === date || w.sunDate === date || w.date === date) callsToday['weekend-call'] = true;
-  });
-  for(const r of rules){
-    if(!r || !r.requiredSite) continue;
-    const ct = r.callType || 'any-call';
-    const matchesCall = (ct === 'any-call') || callsToday[ct];
-    if(!matchesCall) continue;
-    // Optional shift filter — rule only applies if shift matches (or rule has no filter).
-    if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
-    // Day shift on a call day must be at requiredSite.
-    if(ctx.site !== r.requiredSite) return false;
+
+  // Direction 1: day-shift candidate, check existing call
+  if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
+    const callsToday = {
+      'ir-call': false, 'ir-weekend': false, 'weekend-call': false
+    };
+    (S.irCalls||[]).forEach(c => {
+      if(c.physId !== p.id || c.date !== date) return;
+      if(c.callType === 'weekend') callsToday['ir-weekend'] = true;
+      else callsToday['ir-call'] = true;
+    });
+    (S.weekendCalls||[]).forEach(w => {
+      if(w.physId !== p.id) return;
+      if(w.satDate === date || w.sunDate === date || w.date === date) callsToday['weekend-call'] = true;
+    });
+    for(const r of rules){
+      if(!r || !r.requiredSite) continue;
+      const ct = r.callType || 'any-call';
+      const matchesCall = (ct === 'any-call') || callsToday[ct];
+      if(!matchesCall) continue;
+      if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
+      if(ctx.site !== r.requiredSite) return false;
+    }
+    return true;
   }
+
+  // Direction 2: call-candidate, check existing day shift
+  // ctx.kind ∈ {'ir-call', 'ir-weekend', 'dr-weekend'}.
+  if(ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend' || ctx.kind === 'dr-weekend'){
+    // Figure out which callType(s) the candidate represents, since rules
+    // can scope to a specific call type.
+    const candCallType = ctx.kind === 'ir-call'     ? 'ir-call'
+                       : ctx.kind === 'ir-weekend'  ? 'ir-weekend'
+                       : 'weekend-call';
+    for(const r of rules){
+      if(!r || !r.requiredSite) continue;
+      const ct = r.callType || 'any-call';
+      // Only apply rules that target this call type (or any-call)
+      if(ct !== 'any-call' && ct !== candCallType) continue;
+      // Find the physician's EXISTING day shift on this date (or across the
+      // weekend span for weekend call). If they have no day shift, the rule
+      // doesn't block — the requirement is about WHERE they're working,
+      // not about whether they're working.
+      const datesToCheck = (candCallType === 'ir-weekend' || candCallType === 'weekend-call')
+        ? [date, addDays(date,1), addDays(date,2), addDays(date,3)]
+        : [date];
+      // Does ANY day in the span include an existing shift that conflicts
+      // with the required site? If the rule's shift filter is set, only
+      // check shifts of that type.
+      for(const d of datesToCheck){
+        const existingShifts = [];
+        (S.irShifts||[]).forEach(s => {
+          if(s.physId !== p.id || s.date !== d) return;
+          if(s.shift === 'Home') return;
+          if(r.shift && s.shift !== r.shift) return;
+          existingShifts.push(s);
+        });
+        (S.drShifts||[]).forEach(s => {
+          if(s.physId !== p.id || s.date !== d) return;
+          if(s.shift === 'Home') return;
+          if(r.shift && s.shift !== r.shift) return;
+          existingShifts.push(s);
+        });
+        // If the physician has a shift on this date and NONE of them is at
+        // the required site, the rule blocks. If they have no shift, the
+        // rule is silent for this date.
+        if(existingShifts.length && !existingShifts.some(s => s.site === r.requiredSite)){
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   return true;
 }
 
@@ -18721,6 +18870,13 @@ function previewIRAA(){
             if(!tbRulesOk(p,{physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
               reasons[p.id]='conference rule (tumor board / clinic)'; return false;
             }
+            // Call-day site rule — requires existing day shift on this date
+            // to be at the rule's required site. Example: "IR call only when
+            // scheduled at North" blocks call when phys has a day shift at
+            // Riverview or any non-North site.
+            if(!callDayRulesOk(p,{physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
+              reasons[p.id]='call-day site rule (must be scheduled at required site)'; return false;
+            }
             // FTE cap — waived only on pass 3 (last-resort to avoid unfilled gap)
             if(pass<3 && cntD[p.id] >= dailyCapFn(p)){ reasons[p.id]='FTE cap reached'; return false; }
             if(pass<=1){
@@ -18869,6 +19025,12 @@ function previewIRAA(){
             // tumor board on Saturday correctly excludes a phys with no-call-on-day.
             if(span.some(d => !tbRulesOk(p,{physId:p.id,date:d,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'}))){
               reasons[p.id]='conference rule (tumor board / clinic)'; return false;
+            }
+            // Call-day site rule — checks that the physician's existing day
+            // shifts on any day of the Fri→Mon span are at the required site.
+            // The rule itself iterates the span internally via ctx.kind.
+            if(!callDayRulesOk(p,{physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})){
+              reasons[p.id]='call-day site rule (must be scheduled at required site)'; return false;
             }
             // Hard FTE cap — waived only on final pass 3 (pass 3 lets us fill a weekend
             // even when the chosen physician exceeds their rounded cap by 1 or more)
@@ -21377,35 +21539,18 @@ async function _pushToSupabase(){
     _updateSaveUI('⏳ Saving…','var(--txt3)');
     const payload={
       id:_ROW_ID,
-      data:JSON.stringify({
-        physicians:S.physicians,vacations:S.vacations,drShifts:S.drShifts,
-        weekendCalls:S.weekendCalls,irShifts:S.irShifts,irCalls:S.irCalls,
-        holidays:S.holidays,openShifts:S.openShifts,chatMessages:S.chatMessages,chatGroups:S.chatGroups||[],
-        swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
-        holidayNeeds:S.holidayNeeds,siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs||{},irSlots:S.irSlots,
-        irShiftSlots:S.irShiftSlots,wkndNeeds:S.wkndNeeds,cfg:S.cfg,
-        irGroups:S.irGroups||[],
-        sites:S.sites,drSubs:S.drSubs,irSubs:S.irSubs,
-        holidayDefs:S.holidayDefs||[],
-        natLangRules:S.natLangRules||[],
-        broadcasts:S.broadcasts||[],
-        shiftListings:S.shiftListings||[],
-        // Recurring conferences (tumor boards, outpatient clinics) plus the
-        // audit log of published schedule digests. Without these three fields
-        // every Supabase push dropped them from the stored state, so any
-        // reload after the debounce fired showed the feature as "gone." Same
-        // fix applies to the label maps and pick groups — all later-added
-        // features that had been missing from the payload.
-        tumorBoards:S.tumorBoards||[],
-        clinics:S.clinics||[],
-        publishLog:S.publishLog||[],
-        irShiftSlotLabels:S.irShiftSlotLabels||{},
-        siteSlotLabels:S.siteSlotLabels||{},
-        shiftPickGroups:S.shiftPickGroups||[],
-        vacPicking:S.vacPicking,
-        driveTimes:S.driveTimes||{},
-        nextId:S.nextId,users:USERS,savedAt:new Date().toISOString(),
-      })
+      data:JSON.stringify(Object.assign(
+        _buildPersistedPayload('online'),
+        {
+          // Non-manifest fields handled separately — these are either
+          // derived/ephemeral or require special serialization that the
+          // manifest doesn't model yet (USERS is a sibling array, savedAt
+          // is a timestamp). Keep adding new persistable fields to the
+          // _PERSISTED_KEYS manifest, not here.
+          users: USERS,
+          savedAt: new Date().toISOString(),
+        }
+      ))
     };
     const {error}=await _supabase.from(_TABLE).upsert(payload);
     if(error)throw error;
