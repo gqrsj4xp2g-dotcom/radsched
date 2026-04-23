@@ -8459,19 +8459,63 @@ function previewIRShiftAA(){
       if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
       /* Pass 4: over-quota fill */
       if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned);});
+      /* Pass 5: cross-group fill-in fallback.
+         Only reached when the same-group pool is completely exhausted across
+         all prior passes (nobody in this group is eligible + available). We
+         then look at the SITE's fill-in list and pull any physician listed
+         there regardless of their irGroup. This rescues coverage in cases
+         like: the whole group is on vacation that week, or the site is only
+         covered by a handful of cross-group anchors who happen to be busy.
+         Cross-group fill-ins don't count toward their own group's quota —
+         these shifts are bonus (noted 'cross-group fill-in') and the
+         receiving group's fairness is unaffected. */
+      if(!pool.length){
+        var _siteObj=null; for(var _si2=0;_si2<allS.length;_si2++){if(allS[_si2].name===_s.site){_siteObj=allS[_si2];break;}}
+        var xFillins=_siteObj?(_siteObj.irFillins||[]):[];
+        if(xFillins.length){
+          pool=allP.filter(function(p){
+            // Must have IR FTE, be a registered cross-group fill-in for THIS
+            // site, and not already be blocked (vacation / already-assigned
+            // somewhere today / holiday call etc.) Sequence rules are
+            // honored — a cross-group rescue shouldn't violate rest rules.
+            if(!(p.irFte>0))return false;
+            if(p.irGroup===grp)return false;                         // already considered in main pool
+            if(xFillins.indexOf(p.id)<0)return false;                // not a registered fill-in here
+            if(_irsaBlocked(p,_s.date,assigned))return false;
+            if(!dayConditionSiteOk(p,_s.site,_s.date,'ir-shift'))return false;
+            if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||''))return false;
+            return true;
+          });
+        }
+      }
       if(!pool.length){totalU++;continue;}
-      pool.sort(function(a,b){return _irsaScore(b,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE,_s)-_irsaScore(a,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE,_s);});
-      picked=pool[0];
-      var countsQ=_irsaCountsForQuota(picked,_s);
-      note=!countsQ?'Auto (fill-in)':(_cnt[picked.id]>=_irsaEffQ(picked,_r,_cd,months)?'Auto (over-quota)':'Auto');
+      // When the picked physician came from the cross-group fallback, their
+      // irGroup !== grp AND the site isn't theirs. Mark the assignment so
+      // the preview row and the final note make the override visible.
+      var _picked=null; pool.sort(function(a,b){return _irsaScore(b,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE,_s)-_irsaScore(a,_s.site,_cnt,_anc,_r,_cd,months,ANC_RATE,_s);});
+      _picked=pool[0];
+      picked=_picked;
+      var _isCross=picked.irGroup!==grp;
+      var countsQ=!_isCross&&_irsaCountsForQuota(picked,_s);
+      note=_isCross?'Auto (cross-group fill-in)'
+         :(!countsQ?'Auto (fill-in)'
+         :(_cnt[picked.id]>=_irsaEffQ(picked,_r,_cd,months)?'Auto (over-quota)':'Auto'));
       // Carry slotLabel onto the assignment so it survives into S.irShifts
       // (via _irsaPreview below) and can be inspected by sequence rules
       // that scope to a specific labeled slot.
-      assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note,slotLabel:slot.slotLabel||''});
+      assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note,slotLabel:slot.slotLabel||'',isFillIn:_isCross||!countsQ});
       if(countsQ){cnt[picked.id]++;if(picked.anchorSite&&picked.anchorSite===slot.site)anc[picked.id]++;}
       totalA++;
     }
-    for(ai=0;ai<assigned.length;ai++)_irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:grp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||''});
+    for(ai=0;ai<assigned.length;ai++){
+      // Record the PHYSICIAN's actual irGroup, not the loop group — for
+      // cross-group fill-ins (Pass 5) these differ. Downstream consumers
+      // that group by irGroup need the physician's real group for stats
+      // and fairness; the site-level coverage is independent.
+      var _ap=null; for(var _apIdx=0;_apIdx<allP.length;_apIdx++){if(allP[_apIdx].id===assigned[ai].physId){_ap=allP[_apIdx];break;}}
+      var _realGrp=_ap?(_ap.irGroup||grp):grp;
+      _irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:_realGrp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||'',isFillIn:!!assigned[ai].isFillIn});
+    }
     for(pi=0;pi<phys.length;pi++){
       phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;
       phys[pi]._irsaQta=_irsaEffQ(phys[pi],rawQ,callDays,months);
@@ -8578,13 +8622,56 @@ function updateIRSbInfo(){
   if(!siteSel || !subSel) return;
 
   const p = S.physicians.find(x => x.id === physId);
+  // Site eligibility is broader than just matching IR group — a physician in
+  // the North group can legitimately cover at a South site if they're listed
+  // as a mini-anchor (site.irAnchors) or a fill-in (site.irFillins), or if
+  // the admin has explicitly allowed the site via p.allowedSites. Previously
+  // this dropdown only showed sites matching p.irGroup, which hid valid
+  // coverage options and forced admins to either loosen the physician's
+  // group (wrong) or give up on the UI and edit state directly.
   const irSites = p
-    ? S.sites.filter(s => (s.irGroup === p.irGroup || s.irGroup === 'Both') && s.name !== 'At Home / Remote')
+    ? S.sites.filter(s => {
+        if(s.name === 'At Home / Remote') return false;
+        // Must be an IR-capable site (has some IR group)
+        if(!s.irGroup) return false;
+        // Match by group, or 'Both', or by anchor/fill-in listing, or by
+        // admin-granted allowedSites.
+        if(s.irGroup === p.irGroup) return true;
+        if(s.irGroup === 'Both') return true;
+        if((s.irAnchors||[]).includes(p.id)) return true;
+        if((s.irFillins||[]).includes(p.id)) return true;
+        if((p.allowedSites||[]).includes(s.name)) return true;
+        return false;
+      })
     : S.sites.filter(s => s.irGroup && s.name !== 'At Home / Remote');
 
   const curSite = siteSel.value;
-  siteSel.innerHTML = irSites.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
-  if(curSite && irSites.find(s => s.name === curSite)) siteSel.value = curSite;
+  // Annotate each option so admins can tell WHY a cross-group site is
+  // eligible (anchor, fill-in, allowed). Keeps the dropdown dense but
+  // transparent. The base option value remains the bare site name so
+  // downstream reads aren't disturbed.
+  siteSel.innerHTML = irSites.map(s => {
+    let tag = '';
+    if(p && s.irGroup !== p.irGroup && s.irGroup !== 'Both'){
+      if((s.irAnchors||[]).includes(p.id))      tag = ' (mini-anchor)';
+      else if((s.irFillins||[]).includes(p.id)) tag = ' (fill-in)';
+      else if((p.allowedSites||[]).includes(s.name)) tag = ' (allowed)';
+    }
+    const esc = (s.name||'').replace(/</g,'&lt;');
+    return `<option value="${esc}">${esc}${tag}</option>`;
+  }).join('');
+  // Auto-select: prefer p.irSitePrim if still in the list, else the first
+  // same-group site, else keep whatever was selected. This solves "site
+  // allowed but doesn't autofill" by actively picking a sensible default
+  // whenever the physician changes.
+  if(curSite && irSites.find(s => s.name === curSite)){
+    siteSel.value = curSite;
+  } else if(p && p.irSitePrim && irSites.find(s => s.name === p.irSitePrim)){
+    siteSel.value = p.irSitePrim;
+  } else if(p){
+    const sameGroup = irSites.find(s => s.irGroup === p.irGroup);
+    if(sameGroup) siteSel.value = sameGroup.name;
+  }
 
   // Subspecialty from per-site list if configured, else global irSubs
   const subs = siteIRSubsByName(siteSel.value);
@@ -16901,7 +16988,60 @@ function _dreRefreshSub(id){
 function updateSbInfo(){
   const pid=+document.getElementById('sb-phys')?.value;
   const date=document.getElementById('sb-date')?.value;
-  const site=document.getElementById('sb-site')?.value;
+  const siteSel = document.getElementById('sb-site');
+  const p = pid ? S.physicians.find(x => x.id === pid) : null;
+
+  // Site dropdown: narrow to sites the physician can actually work at.
+  // Inclusion rules:
+  //   • Site has no admin-set restriction for this phys (default: included)
+  //   • If p.allowedSites is set and non-empty, restrict to that list
+  //   • Always include the physician's anchorSite if set
+  //   • Always include sites where p is listed as mini-anchor (irAnchors)
+  //     or fill-in (irFillins) — cross-group coverage is legit in those cases
+  //   • Always include At Home / Remote
+  // Previously this dropdown was populated with EVERY site regardless of the
+  // physician's eligibility, which matched admin intent for global site
+  // visibility but didn't auto-select a sensible default. Now we narrow +
+  // auto-select the physician's primary/anchor site when they change.
+  if(siteSel){
+    const allowedSet = new Set(p?.allowedSites || []);
+    const hasAllowlist = allowedSet.size > 0;
+    const candidates = S.sites.filter(s => {
+      if(s.name === 'At Home / Remote') return true;
+      if(!p) return true;   // no phys selected → show all
+      if(hasAllowlist && allowedSet.has(s.name)) return true;
+      if(!hasAllowlist) return true;  // no allowlist → all allowed
+      if(p.anchorSite && s.name === p.anchorSite) return true;
+      if((s.irAnchors||[]).includes(p.id)) return true;
+      if((s.irFillins||[]).includes(p.id)) return true;
+      return false;
+    });
+    // Annotate cross-group / special-access sites
+    const curSite = siteSel.value;
+    siteSel.innerHTML = candidates.map(s => {
+      let tag = '';
+      if(p){
+        if(s.name === p.anchorSite) tag = ' (anchor)';
+        else if((s.irAnchors||[]).includes(p.id)) tag = ' (mini-anchor)';
+        else if((s.irFillins||[]).includes(p.id)) tag = ' (fill-in)';
+      }
+      const esc = (s.name||'').replace(/</g,'&lt;');
+      return `<option value="${esc}">${esc}${tag}</option>`;
+    }).join('');
+    // Auto-select: keep current if still valid, else anchorSite, else drSite,
+    // else first candidate.
+    if(curSite && candidates.find(s => s.name === curSite)){
+      siteSel.value = curSite;
+    } else if(p && p.anchorSite && candidates.find(s => s.name === p.anchorSite)){
+      siteSel.value = p.anchorSite;
+    } else if(p && p.drSite && candidates.find(s => s.name === p.drSite)){
+      siteSel.value = p.drSite;
+    } else if(candidates[0]){
+      siteSel.value = candidates[0].name;
+    }
+  }
+  const site = siteSel?.value || '';
+
   // Re-filter the subspecialty dropdown whenever the site changes. Previously
   // the sub list was populated once from the global S.drSubs and never refreshed,
   // so per-site filtering had no effect in the DR builder.
@@ -16917,7 +17057,7 @@ function updateSbInfo(){
     }
   }
   if(!pid||!date){document.getElementById('sb-info').innerHTML='';return;}
-  const p=S.physicians.find(x=>x.id===pid);if(!p)return;
+  if(!p)return;
   const ym=date.slice(0,7);
   const used=drCnt(pid,ym),max=maxDR(p,'wd');
   const pct=max?Math.min(100,Math.round(used/max*100)):0;
@@ -19234,6 +19374,33 @@ function previewIRRebalance(){
           // Note: physicians on Home shift ARE eligible — we will displace their Home shift
         });
 
+        // Cross-group fill-in fallback: if no one from this group can cover
+        // the slot, look at every physician registered as a fill-in at this
+        // site regardless of their group. These assignments are flagged
+        // isFillIn so they don't count toward any group's quota.
+        let _fromCrossGroup=false;
+        if(!eligible.length){
+          const xFillins = slot.fillins || [];
+          if(xFillins.length){
+            const xPool = (S.physicians||[]).filter(p => {
+              if(!(p.irFte>0)) return false;
+              if(p.irGroup === g) return false;
+              if(xFillins.indexOf(p.id) < 0) return false;
+              if(vd(p.id).has(slot.date)) return false;
+              if(_has2ndOr3rdShift(p.id,slot.date)) return false;
+              if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
+              return true;
+            });
+            if(xPool.length){
+              _fromCrossGroup = true;
+              // Replace eligible with the cross-group pool so the existing
+              // sort+pick logic below still works. Use FTE as the only tier
+              // since these aren't tracked in `cnt` (no quota accounting).
+              eligible.push(...xPool);
+            }
+          }
+        }
+
         if(!eligible.length){
           plan.unfilled++;
           plan.failedDates.push(slot.date);
@@ -19253,8 +19420,8 @@ function previewIRRebalance(){
         });
 
         const picked=eligible[0];
-        const countsQ=_irsaCountsForQuota(picked,slot);
-        if(countsQ) cnt[picked.id]++; // only count if not a fill-in at a mixed site
+        const countsQ=!_fromCrossGroup && _irsaCountsForQuota(picked,slot);
+        if(countsQ) cnt[picked.id]++; // only count if not a fill-in at a mixed site AND not cross-group
         if(!assignedOnDate[slot.date]) assignedOnDate[slot.date]=new Set();
         assignedOnDate[slot.date].add(picked.id);
 
@@ -19267,10 +19434,18 @@ function previewIRRebalance(){
           plan.homesDisplaced++;
         }
 
-        const noteBase = displacingHome?'Auto-fill (Home→Proc)':'Auto-fill';
+        const noteBase = _fromCrossGroup ? 'Auto-fill (cross-group fill-in)'
+                        : displacingHome ? 'Auto-fill (Home→Proc)'
+                        : 'Auto-fill';
         plan.shifts.push({
-          physId:picked.id,date:slot.date,site:slot.site,irGroup:g,
-          shift:'1st',sub:'',notes:countsQ?noteBase:noteBase+' (fill-in)'
+          physId:picked.id,date:slot.date,site:slot.site,
+          // Record the physician's REAL irGroup so downstream group-based
+          // views (quota attainment, anchor rates) use the right bucket.
+          irGroup:_fromCrossGroup ? (picked.irGroup||g) : g,
+          shift:'1st',sub:'',
+          notes:_fromCrossGroup ? noteBase
+              : (countsQ ? noteBase : noteBase+' (fill-in)'),
+          isFillIn: _fromCrossGroup || !countsQ,
         });
         plan.filled++;
       });
