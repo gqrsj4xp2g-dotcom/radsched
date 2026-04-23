@@ -1413,6 +1413,13 @@ tbody tr:hover{background:var(--bg3)}
   <div class="ibox">
     <div class="g3">
       <div class="fg"><label>Month</label><input id="aa-mo" type="month"></div>
+      <div class="fg"><label>Build period</label>
+        <select id="aa-period" title="Run auto-assign over a month or just a half-month">
+          <option value="month">Full month</option>
+          <option value="semi-1">1st half (1st – 15th)</option>
+          <option value="semi-2">2nd half (16th – end)</option>
+        </select>
+      </div>
       <div class="fg"><label>Type</label><select id="aa-type"><option value="both">Weekday + Weekend</option><option value="weekday">Weekday Only</option><option value="weekend">Weekend Only</option></select></div>
       <div class="flexe" style="gap:6px;align-items:flex-end;padding-bottom:1px">
         <button class="ba" onclick="previewAA()">▶ Preview</button>
@@ -1597,13 +1604,20 @@ tbody tr:hover{background:var(--bg3)}
   <div class="ibox">
     <div class="g3" style="flex-wrap:wrap;align-items:flex-end">
       <div class="fg"><label>Period</label>
-        <select id="irsa-period">
+        <select id="irsa-period" onchange="_irsaTogglePeriodInputs()">
           <option value="H1">H1 (Jan &ndash; Jun)</option>
           <option value="H2">H2 (Jul &ndash; Dec)</option>
+          <option value="month">Single month</option>
+          <option value="semi-1">1st half of month (1st – 15th)</option>
+          <option value="semi-2">2nd half of month (16th – end)</option>
         </select>
       </div>
       <div class="fg"><label>Year</label>
         <select id="irsa-yr" style="width:100px"></select>
+      </div>
+      <!-- Month picker shown only for monthly / semi-monthly periods. -->
+      <div class="fg" id="irsa-mo-wrap" style="display:none"><label>Month</label>
+        <input type="month" id="irsa-mo" style="width:140px">
       </div>
       <div class="fg"><label>IR Group</label>
         <select id="irsa-grp">
@@ -1643,10 +1657,17 @@ tbody tr:hover{background:var(--bg3)}
         </select>
       </div>
       <div class="fg"><label>Period</label>
-        <select id="ira-period" style="width:175px">
+        <select id="ira-period" style="width:175px" onchange="_iraTogglePeriodInputs()">
           <option value="H1">H1 — Jan through Jun</option>
           <option value="H2">H2 — Jul through Dec</option>
+          <option value="month">Single month</option>
+          <option value="semi-1">1st half of month (1–15)</option>
+          <option value="semi-2">2nd half of month (16–end)</option>
         </select>
+      </div>
+      <!-- Month picker shown only for monthly / semi-monthly periods. -->
+      <div class="fg" id="ira-mo-wrap" style="display:none"><label>Month</label>
+        <input type="month" id="ira-mo" style="width:140px">
       </div>
       <div class="fg"><label>Assignment Type</label>
         <select id="ira-type">
@@ -7861,9 +7882,12 @@ function previewIRShiftAA(){
   if(!_adminOnly('preview IR shift auto-assign'))return;
   var period=(document.getElementById('irsa-period')||{}).value||'H2';
   var yr=(document.getElementById('irsa-yr')||{}).value||String(new Date().getFullYear());
-  var startMo=period==='H1'?1:7;
-  var months=[],mi2;for(mi2=startMo;mi2<startMo+6;mi2++)months.push(yr+'-'+(mi2<10?'0':'')+mi2);
-  var periodLbl=period+' '+yr+' ('+months[0].slice(5)+' \u2013 '+months[5].slice(5)+')';
+  var monthYM=(document.getElementById('irsa-mo')||{}).value||'';
+  // _periodToMonths returns the right list whether the admin picked H1/H2
+  // (six months from yr) or month/semi-* (single month from monthYM, falling
+  // back to current month if blank).
+  var months=_periodToMonths(period, yr, monthYM);
+  var periodLbl=_periodLabel(period, months);
   var grpSel=(document.getElementById('irsa-grp')||{}).value||'both';
   var ancTgt=S.cfg?(S.cfg.anchorPct||70):70;
   var ANC_RATE=ancTgt/100;
@@ -7879,7 +7903,14 @@ function previewIRShiftAA(){
     phys=allP.filter(function(p){return p.irFte>0&&p.irGroup===grp;});
     if(!phys.length){errors.push('No IR physicians in '+grp+'.');continue;}
     cells=[];
-    var moi;for(moi=0;moi<months.length;moi++){var mc=buildCal(months[moi]).filter(function(c){return c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date);});for(var ci3=0;ci3<mc.length;ci3++)cells.push(mc[ci3]);}
+    var moi;for(moi=0;moi<months.length;moi++){
+      // Apply the build-period day filter BEFORE the weekday/blackout filter
+      // so semi-1/semi-2 narrow correctly to the right half of the month.
+      // For H1/H2 the period filter is a no-op so behavior is unchanged.
+      var mc=_filterCellsByPeriod(buildCal(months[moi]), period)
+        .filter(function(c){return c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date);});
+      for(var ci3=0;ci3<mc.length;ci3++)cells.push(mc[ci3]);
+    }
     slots=_irsaBuildSlots(grp,cells,allS,slots_cfg,phys);
     if(!slots.length){errors.push('No slots configured for '+grp+'.');continue;}
     callMap=_irsaBuildCallMap(grp,months,allC);
@@ -16494,12 +16525,101 @@ function drEffectiveTarget(p, ym){
 }
 
 
+/* ─── BUILD-PERIOD HELPERS ────────────────────────────────────────────────
+   Auto-assign builders (DR shifts, IR shifts, IR call) accept a "build
+   period" that scopes how much of the calendar gets filled in one run.
+   Options:
+     'month'  → entire month
+     'semi-1' → days 1..15 of the month
+     'semi-2' → days 16..end of the month
+     'H1'     → Jan..Jun of year (IR-only — full half-year sweep)
+     'H2'     → Jul..Dec of year
+   The helpers below convert a period selection into either:
+     • a list of ISO month strings ('YYYY-MM') for multi-month builders, or
+     • a day-filter that auto-assign call sites apply to the buildCal output.
+   This keeps the period concept in one place so future periods (quarters,
+   custom date ranges) can be added without touching every preview function.
+*/
+
+// True when the period is a half-month variant. Used by callers to decide
+// whether to require a month input vs a year input.
+function _isSemiMonthPeriod(p){ return p === 'semi-1' || p === 'semi-2'; }
+
+// Filter a cells array (output of buildCal) down to just the days inside
+// the given period. cells without a `day` (padding cells) are dropped here
+// so callers don't have to filter twice. Returns a new array.
+//   period ∈ {'month','semi-1','semi-2','H1','H2'}
+//   For 'month'/'semi-*' the cells should already be from the right month;
+//   we just narrow on day-of-month. For 'H1'/'H2' we accept any cells and
+//   return them unchanged (the multi-month builder feeds them in already).
+function _filterCellsByPeriod(cells, period){
+  if(!period || period === 'month' || period === 'H1' || period === 'H2'){
+    return (cells||[]).filter(c => c.day);
+  }
+  if(period === 'semi-1') return (cells||[]).filter(c => c.day && c.day <= 15);
+  if(period === 'semi-2') return (cells||[]).filter(c => c.day && c.day >= 16);
+  return (cells||[]).filter(c => c.day);
+}
+
+// Resolve which months a builder run covers, given a period and the relevant
+// year/month inputs. Returns an array of 'YYYY-MM' strings.
+//   • month/semi-* → just the picked month
+//   • H1/H2 → six months from the picked year
+function _periodToMonths(period, year, monthYM){
+  if(period === 'H1' || period === 'H2'){
+    const startM = period === 'H1' ? 1 : 7;
+    return Array.from({length:6},(_,i)=>`${year}-${String(startM+i).padStart(2,'0')}`);
+  }
+  // monthly / semi-monthly → use the month picker value
+  if(monthYM && /^\d{4}-\d{2}$/.test(monthYM)) return [monthYM];
+  // Fall back to the current month if nothing was picked
+  const now = new Date();
+  return [`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`];
+}
+
+// Human-readable label for a period selection, used in preview headers.
+function _periodLabel(period, months){
+  if(period === 'H1' || period === 'H2'){
+    const [y,m0]=months[0].split('-').map(Number);
+    const [,m1]=months[5].split('-').map(Number);
+    const fmt=m=>new Date(y,m-1,1).toLocaleString('default',{month:'short'});
+    return `${period} ${y} (${fmt(m0)}–${fmt(m1)})`;
+  }
+  const ym = months[0];
+  if(period === 'semi-1') return `${ym} · 1st half (1–15)`;
+  if(period === 'semi-2') return `${ym} · 2nd half (16–end)`;
+  return ym;
+}
+
+// IR Shift AA period-input toggler — shows the month picker only when a
+// monthly or semi-monthly period is selected. Wired via onchange on the
+// period <select> in the IR Shift AA panel.
+function _irsaTogglePeriodInputs(){
+  const period = document.getElementById('irsa-period')?.value || 'H2';
+  const moWrap = document.getElementById('irsa-mo-wrap');
+  if(moWrap) moWrap.style.display = (period === 'month' || _isSemiMonthPeriod(period)) ? '' : 'none';
+}
+
+// IR Auto-Assign equivalent toggler.
+function _iraTogglePeriodInputs(){
+  const period = document.getElementById('ira-period')?.value || 'H1';
+  const moWrap = document.getElementById('ira-mo-wrap');
+  if(moWrap) moWrap.style.display = (period === 'month' || _isSemiMonthPeriod(period)) ? '' : 'none';
+}
+
 function previewAA(){
   if(!_adminOnly('preview auto-assign')) return;
   const ym=document.getElementById('aa-mo').value||new Date().toISOString().slice(0,7);
   const typ=document.getElementById('aa-type').value;
+  // Build period: 'month' (default), 'semi-1', or 'semi-2'. The half-month
+  // options narrow the cell set so admins can fill the schedule in two
+  // smaller passes — useful when the second half of the month isn't yet
+  // finalized vacation-wise. effTarget intentionally still uses the full
+  // month; we don't shrink quotas just because we're filling fewer days,
+  // since the next semi-build will pick up where we left off.
+  const period = document.getElementById('aa-period')?.value || 'month';
   const preview=[],gaps=[];
-  const cells=buildCal(ym);
+  const cells = _filterCellsByPeriod(buildCal(ym), period);
   // DR auto-assign candidate pool: DR-role and MIXED-role physicians with
   // drFte > 0. Previously this filter used `role === 'DR'` which silently
   // excluded MIXED physicians from auto-assign, leaving them out of new
@@ -17410,14 +17530,12 @@ function renderIRList(){
 function _iraMonths(){
   const yr = parseInt(document.getElementById('ira-yr')?.value||new Date().getFullYear());
   const period = document.getElementById('ira-period')?.value||'H1';
-  const startM = period==='H1'?1:7;
-  return Array.from({length:6},(_,i)=>`${yr}-${String(startM+i).padStart(2,'0')}`);
+  const monthYM = document.getElementById('ira-mo')?.value || '';
+  return _periodToMonths(period, yr, monthYM);
 }
 function _iraPeriodLabel(months){
-  const [y,m0]=months[0].split('-').map(Number);
-  const [,m1]=months[5].split('-').map(Number);
-  const fmt=m=>new Date(y,m-1,1).toLocaleString('default',{month:'short'});
-  return `${fmt(m0)}–${fmt(m1)} ${y}`;
+  const period = document.getElementById('ira-period')?.value||'H1';
+  return _periodLabel(period, months);
 }
 
 function previewIRAA(){
@@ -17430,7 +17548,7 @@ function previewIRAA(){
   // Reset holiday-excluded weekend tracker for this run
   S._lastIRAAExcludedHolidayWknds = [];
 
-  const allCells = months.flatMap(ym=>buildCal(ym).filter(c=>c.day));
+  const allCells = months.flatMap(ym => _filterCellsByPeriod(buildCal(ym), document.getElementById('ira-period')?.value||'H1'));
   const irPs = S.physicians.filter(p=>p.irFte>0);
 
   const cntD={}, cntW={};
