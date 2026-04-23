@@ -8317,7 +8317,15 @@ function _irsaMixedSiteOwnerGroup(site){
 function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
   /* A site belongs to this group if irGroup matches OR (mixed-role site with ownership=grp).
      Ownership of mixed-role sites is deterministic (first anchor's group) so each slot is
-     emitted exactly once across N/S runs — fixing the double-generation bug. */
+     emitted exactly once across N/S runs — fixing the double-generation bug.
+
+     Already-filled slots are skipped: if the admin has manually placed shifts
+     at (site,date) for '1st', the slot count is reduced by that many. This
+     prevents the auto-assigner from trying to re-fill positions that are
+     already covered AND from double-booking physicians whose manual shift
+     would otherwise be ignored. Before this fix, a manually-assigned shift
+     at Main on Monday could coexist with an auto-assigned shift at Main on
+     Monday targeting the same slot index. */
   var r=[],gs=[],si,ci,ni,st,c,n,i;
   for(i=0;i<allSites.length;i++){
     st=allSites[i];
@@ -8325,22 +8333,43 @@ function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
     var hasRoles=(st.irAnchors&&st.irAnchors.length)||(st.irFillins&&st.irFillins.length);
     if(hasRoles && _irsaMixedSiteOwnerGroup(st)===grp){gs.push(st);}
   }
+  // Pre-index existing IR shifts by (site|date) so the slot build can
+  // efficiently subtract already-covered capacity without rescanning S.irShifts
+  // per cell. Only '1st' shifts count — Home shifts don't consume slot
+  // capacity (they mean "off").
+  var existing={}, ei, es;
+  var allIrs = S.irShifts || [];
+  for(ei=0; ei<allIrs.length; ei++){
+    es = allIrs[ei];
+    if(es.shift !== '1st') continue;
+    var key = es.site + '|' + es.date;
+    existing[key] = (existing[key]||0) + 1;
+  }
   for(si=0;si<gs.length;si++){
     st=gs[si];
     for(ci=0;ci<calCells.length;ci++){
       c=calCells[ci];
       n=shiftSlots[st.name+'|'+c.dow+'|1st']||0;
+      if(!n) continue;
+      // Subtract already-filled capacity at this (site,date)
+      var alreadyFilled = existing[st.name + '|' + c.date] || 0;
+      var remaining = n - alreadyFilled;
+      if(remaining <= 0) continue;
       var isMixed=(st.irAnchors&&st.irAnchors.length)||(st.irFillins&&st.irFillins.length);
       // Each slot now carries its index + optional admin-set label so
       // physician sequence rules can target a specific position
       // (e.g. "max 2 consecutive Mondays at Main slot stfs1"). The label
       // pulls from S.irShiftSlotLabels keyed `<site>|<dow>|1st#<index>`.
-      for(ni=0;ni<n;ni++){
-        var slotKey = st.name+'|'+c.dow+'|1st#'+ni;
+      // Slot indices start AFTER the already-filled positions so manual
+      // shifts implicitly claim indices 0..alreadyFilled-1, and auto-fill
+      // picks up at index `alreadyFilled`.
+      for(ni=0; ni<remaining; ni++){
+        var realIdx = alreadyFilled + ni;
+        var slotKey = st.name+'|'+c.dow+'|1st#'+realIdx;
         var slotLabel = (S.irShiftSlotLabels||{})[slotKey] || '';
         r.push({date:c.date,site:st.name,mixed:!!isMixed,
                 anchors:st.irAnchors||[],fillins:st.irFillins||[],
-                slotIndex:ni, slotLabel:slotLabel});
+                slotIndex:realIdx, slotLabel:slotLabel});
       }
     }
   }
@@ -8349,7 +8378,41 @@ function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
 }
 function _irsaBuildCallMap(grp,monthsOrYm,allCalls){var map={},ci,ic,mi,ms=Array.isArray(monthsOrYm)?monthsOrYm:[monthsOrYm];for(ci=0;ci<allCalls.length;ci++){ic=allCalls[ci];if(ic.callType!=='daily'||ic.irGroup!==grp)continue;for(mi=0;mi<ms.length;mi++){if(ic.date.startsWith(ms[mi])){if(!map[ic.date])map[ic.date]=ic.physId;break;}}}return map;}
 function _irsaEffQ(p,rawQ,callDays,ym){var bq=rawQ[p.id],base;base=(bq!=null&&bq>0)?bq:Math.max(Math.round(irShiftTargetMonth(p,ym)),1);return Math.max(base,callDays[p.id]||0);}
-function _irsaBlocked(p,date,assigned){var vd=vacDays(p.id),k;if(vd.has(date))return true;if(_has2ndOr3rdShift(p.id,date))return true;if(isSoldBackDate(p.id,date))return true;for(k=0;k<assigned.length;k++){if(assigned[k].physId===p.id&&assigned[k].date===date)return true;}return false;}
+function _irsaBlocked(p,date,assigned){
+  var vd=vacDays(p.id),k;
+  if(vd.has(date))return true;
+  if(_has2ndOr3rdShift(p.id,date))return true;
+  if(isSoldBackDate(p.id,date))return true;
+  // Current preview pass — don't double-book within this run
+  for(k=0;k<assigned.length;k++){if(assigned[k].physId===p.id&&assigned[k].date===date)return true;}
+  // Pre-existing manually-assigned shifts and calls. Before this check was
+  // added the auto-assigner treated a physician with a manual shift that day
+  // as "fully available," double-booking them on top of manual work. The
+  // check is intentionally conservative: any procedure-shift, any daily IR
+  // call, or any weekend IR call (Fri–Sun span) that overlaps the date makes
+  // the physician unavailable. Home shifts don't block because Home means
+  // "not at a clinical site" — the physician can be pulled into procedure
+  // coverage which will displace their home shift.
+  var irS = S.irShifts || [];
+  for(k=0;k<irS.length;k++){
+    if(irS[k].physId===p.id && irS[k].date===date && irS[k].shift!=='Home') return true;
+  }
+  var drS = S.drShifts || [];
+  for(k=0;k<drS.length;k++){
+    if(drS[k].physId===p.id && drS[k].date===date && drS[k].shift!=='Home') return true;
+  }
+  var irC = S.irCalls || [];
+  for(k=0;k<irC.length;k++){
+    if(irC[k].physId!==p.id) continue;
+    if(irC[k].callType==='daily' && irC[k].date===date) return true;
+    if(irC[k].callType==='weekend'){
+      // weekend call spans Fri..Mon; block all four days for the on-call phys
+      var fri = irC[k].date;
+      if(date===fri || date===addDays(fri,1) || date===addDays(fri,2) || date===addDays(fri,3)) return true;
+    }
+  }
+  return false;
+}
 function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,months,ANC_RATE,slot){
   var q=_irsaEffQ(p,rawQ,callDays,months),got=cnt[p.id];
   var fte=q>0?(q-got)/q:0;
@@ -8430,7 +8493,37 @@ function previewIRShiftAA(){
     rawQ=_irrQuotas(phys,slots.length,function(p){var t=irShiftTargetPeriod(p,months);return t>0?t:slots.length*(p.irFte/gFt);});
     callDays={};for(pi=0;pi<phys.length;pi++)callDays[phys[pi].id]=0;
     var cds=Object.keys(callMap);for(di=0;di<cds.length;di++){var cpid=callMap[cds[di]];if(callDays.hasOwnProperty(cpid))callDays[cpid]++;}
-    assigned=[];cnt={};anc={};for(pi=0;pi<phys.length;pi++){cnt[phys[pi].id]=0;anc[phys[pi].id]=0;}
+    // Seed cnt[] and anc[] from existing manually-assigned IR shifts within
+    // the target month(s). Previously both started at 0, which let
+    // pre-existing shifts be ignored for quota purposes — a physician with 5
+    // manual shifts could still get their full FTE quota on top, pushing
+    // them well over. Seeding makes the auto-assigner treat existing work
+    // as part of attainment. We only count '1st' shifts (not Home) and only
+    // shifts within the build months so prior periods don't carry over.
+    assigned=[]; cnt={}; anc={};
+    for(pi=0;pi<phys.length;pi++){ cnt[phys[pi].id]=0; anc[phys[pi].id]=0; }
+    var _monthSet = {}; for(var _mi=0; _mi<months.length; _mi++) _monthSet[months[_mi]]=true;
+    var _allIr = S.irShifts || [];
+    for(var _ei=0; _ei<_allIr.length; _ei++){
+      var _es = _allIr[_ei];
+      if(_es.shift!=='1st') continue;
+      if(!_monthSet[_es.date.slice(0,7)]) continue;
+      if(cnt[_es.physId]==null) continue;    // only phys in this group
+      // Only count shifts at this group's sites (consistent with slot build)
+      var _esSite=null; for(var _sti=0; _sti<allS.length; _sti++){ if(allS[_sti].name===_es.site){ _esSite=allS[_sti]; break; } }
+      if(!_esSite) continue;
+      var _ownerGrp = (_esSite.irGroup===grp||_esSite.irGroup==='Both') ? grp
+                    : ((_esSite.irAnchors&&_esSite.irAnchors.length)||(_esSite.irFillins&&_esSite.irFillins.length))
+                      ? _irsaMixedSiteOwnerGroup(_esSite) : null;
+      if(_ownerGrp !== grp) continue;
+      // For mixed sites, only count toward quota if the phys is an anchor
+      // (matches _irsaCountsForQuota logic)
+      var _isMixed = (_esSite.irAnchors&&_esSite.irAnchors.length)||(_esSite.irFillins&&_esSite.irFillins.length);
+      if(_isMixed && (_esSite.irAnchors||[]).indexOf(_es.physId) < 0) continue;
+      cnt[_es.physId]++;
+      var _pp=null; for(var _ppi=0; _ppi<phys.length; _ppi++){ if(phys[_ppi].id===_es.physId){ _pp=phys[_ppi]; break; } }
+      if(_pp && _pp.anchorSite===_es.site) anc[_es.physId]++;
+    }
     for(si=0;si<slots.length;si++){
       slot=slots[si];var slotMo=slot.date.slice(0,7);
       cPid=callMap[slot.date];
@@ -17573,6 +17666,23 @@ function previewAA(){
               const vd=vacDays(p.id);if(vd.has(c.date))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
+              // Pre-existing manually-assigned shifts on this date. Previously
+              // only the current-preview pool was checked, so auto-assign could
+              // double-book a physician who already had a manual shift. Home
+              // shifts don't block — auto can displace them with procedure work.
+              if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
+              if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
+              // Also block on daily/weekend IR calls so auto-assign doesn't
+              // stack a DR day shift on top of call coverage.
+              if((S.irCalls||[]).some(ic=>{
+                if(ic.physId!==p.id) return false;
+                if(ic.callType==='daily') return ic.date===c.date;
+                if(ic.callType==='weekend'){
+                  return c.date===ic.date||c.date===addDays(ic.date,1)
+                       ||c.date===addDays(ic.date,2)||c.date===addDays(ic.date,3);
+                }
+                return false;
+              })) return false;
               const assumedSub = targetSub || p.drSubs?.[0] || '';
               const _ctx={physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'};
               if(!natLangRulesOk(_ctx))return false;
