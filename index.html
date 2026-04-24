@@ -20133,6 +20133,21 @@ function previewIRRebalance(){
           // Hard FTE cap — once at quota, physician is out of the pool
           if(isSoldBackDate(p.id,date)) return false;
           if(cntD[p.id] >= dailyCapFn(p)) return false;
+          // Physician rules — previously the rebalancer had NO rule checks,
+          // which meant admin-configured callDayRules, siteRules, conference
+          // rules, day-of-week conditions, sequence rules, and natural-
+          // language rules were all silently ignored whenever an admin ran
+          // the rebalance action. A physician with "IR call → must be at
+          // CHN" got placed on call regardless of their existing day shift
+          // site. Same rule stack as previewIRAA daily so rebalance and
+          // initial-assign behave identically.
+          const _ctx={physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'};
+          if(!irCallSiteRuleOk(p, p.irSitePrim||'', date)) return false;
+          if(!dayConditionSiteOk(p, p.irSitePrim||'', date, 'ir-call')) return false;
+          if(!sequenceOk(p, date, date.slice(0,7), p.irSitePrim||'', '')) return false;
+          if(!natLangRulesOk(_ctx)) return false;
+          if(!tbRulesOk(p, _ctx)) return false;
+          if(!callDayRulesOk(p, _ctx)) return false;
           return true;
         });
 
@@ -20235,6 +20250,16 @@ function previewIRRebalance(){
           // Hard FTE cap — once at quota, out of pool
           if(isSoldBackDate(p.id,fridayDate)) return false;
           if(cntW[p.id] >= wkndCapFn(p)) return false;
+          // Physician rules — mirrors previewIRAA weekend filter so rebalance
+          // and initial-assign enforce the same rule stack. Previously the
+          // rebalancer skipped ALL rule checks, so admin-configured call-day-
+          // site rules ("IR weekend → must be at CHN") were silently ignored.
+          const _ctx={physId:p.id,date:fridayDate,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'};
+          if(!irCallSiteRuleOk(p, p.irSitePrim||'', fridayDate)) return false;
+          if(span.some(d => !dayConditionSiteOk(p, p.irSitePrim||'', d, 'ir-call'))) return false;
+          if(!natLangRulesOk(_ctx)) return false;
+          if(span.some(d => !tbRulesOk(p, {physId:p.id,date:d,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'}))) return false;
+          if(!callDayRulesOk(p, _ctx)) return false;
           return true;
         });
 
