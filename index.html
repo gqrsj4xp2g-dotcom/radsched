@@ -1497,6 +1497,7 @@ tbody tr:hover{background:var(--bg3)}
     <span class="ev e-home-auto" style="padding:2px 7px">Home</span>
     <span class="ev ehol" style="padding:2px 7px">Holiday</span>
     <span class="ev evac" style="padding:2px 7px">Off</span>
+    <button class="bt bxs admin-only" style="margin-left:auto" onclick="scanScheduleRuleViolations('ir')" title="Scan all IR shifts and calls for physician-rule violations">🔍 Check Rule Violations</button>
   </div>
   <div class="cal-grid" id="irc-head"></div>
   <div class="cal-grid" id="irc-body"></div>
@@ -3616,6 +3617,30 @@ function _applyRemoteData(d){
     if(!Array.isArray(st.irAnchors)) st.irAnchors=[];
     if(!Array.isArray(st.irFillins)) st.irFillins=[];
   });
+  // ── Migrate weekend IR-call dates to Friday ──────────────────────────────
+  // Historical bug: if the IR Week Builder's "Week Starting Monday" input
+  // was ever filled with a non-Monday date (HTML date inputs don't enforce
+  // weekday), weekDates[4] could resolve to Thursday (when Sunday was
+  // selected) or Saturday (when Tuesday was selected). Clicking "Assign
+  // Weekend Call" then pushed a record with that wrong date, and renderIRCal
+  // correctly computes the Fri→Mon span starting from ic.date — meaning
+  // the chip rendered starting Thursday (or Saturday). This migration snaps
+  // any misdated weekend call to the Friday of the same Mon-Sun week.
+  let _wknMigrated = 0;
+  (S.irCalls||[]).forEach(ic => {
+    if(ic.callType !== 'weekend' || !ic.date) return;
+    const dow = parseDateLocal(ic.date).getDay(); // 0=Sun..6=Sat
+    if(dow === 5) return; // already Friday
+    // Snap to the Friday of the Mon-Sun week containing this date.
+    //   Mon(1)→+4, Tue(2)→+3, Wed(3)→+2, Thu(4)→+1, Fri(5)→0,
+    //   Sat(6)→-1, Sun(0)→-2 (treat Sun as end-of-week)
+    const offset = (dow === 0) ? -2 : (5 - dow);
+    ic.date = addDays(ic.date, offset);
+    _wknMigrated++;
+  });
+  if(_wknMigrated > 0){
+    try{ console.warn('[RS] Migrated '+_wknMigrated+' weekend call record(s) to Friday dates.'); }catch(_){}
+  }
   // ── Migrate legacy holiday data to 3-pool model ──────────────────────────
   // 1) Holiday assignments: legacy group='IR' → 'IR-<groupName>' by physician's irGroup
   (S.holidays||[]).forEach(h=>{
@@ -9055,6 +9080,22 @@ function saveEditIRShift(id){
   }
   if(vacDays(newPid).has(newDate)){
     if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
+  }
+  // Physician-rule check on the proposed NEW state. Editing a shift can
+  // move it into violation (e.g. changing site from CHN to Riverview when
+  // the physician has an on-call → CHN rule). Without this check, edits
+  // bypass the same rules that addIRShift enforces.
+  {
+    const _ctx = {
+      physId: newPid, date: newDate, site: newSite, shift: newShift,
+      kind: 'ir-shift', sub: subEl?.value || '', ym: newDate.slice(0,7),
+      shiftKey: newShift==='1st'?'s1':newShift==='2nd'?'s2':newShift==='3rd'?'s3':newShift==='Home'?'home':'',
+    };
+    const _v = _gatherManualRuleViolations(p, _ctx);
+    if(_v.length){
+      const msg = `Saving this edit would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nSave anyway?`;
+      if(!confirm(msg)) return;
+    }
   }
   s.physId  = newPid;
   s.date    = newDate;
@@ -17266,6 +17307,24 @@ function saveEditDRShift(id){
   if(vacDays(newPid).has(newDate)){
     if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
   }
+  // Physician-rule check — see saveEditIRShift for rationale. Editing a
+  // DR shift can move it into rule violation (different site, different
+  // date where the physician has an active call, etc.).
+  {
+    const _p = S.physicians.find(x=>x.id===newPid);
+    if(_p){
+      const _ctx = {
+        physId: newPid, date: newDate, site: newSite, shift: newShift,
+        kind: 'dr-shift', sub: subEl?.value || '', ym: newDate.slice(0,7),
+        shiftKey: newShift==='1st'?'s1':newShift==='2nd'?'s2':newShift==='3rd'?'s3':newShift==='Home'?'home':'',
+      };
+      const _v = _gatherManualRuleViolations(_p, _ctx);
+      if(_v.length){
+        const msg = `Saving this edit would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nSave anyway?`;
+        if(!confirm(msg)) return;
+      }
+    }
+  }
   s.physId = newPid;
   s.date   = newDate;
   s.shift  = newShift;
@@ -17484,6 +17543,125 @@ function _gatherManualRuleViolations(p, ctx){
   return out;
 }
 
+/**
+ * scanScheduleRuleViolations(scope) — diagnostic tool that scans all existing
+ * assignments (IR shifts, IR calls, DR shifts, weekend calls) and reports any
+ * that violate physician rules. Shows an alert with a bulleted list.
+ *
+ * This exists because rule enforcement happens AT ASSIGNMENT TIME. If:
+ *   • A rule was configured AFTER a shift/call was placed, or
+ *   • An admin clicked "Assign anyway" on the warn-and-confirm dialog, or
+ *   • A rule's config has a subtle mismatch (wrong callType, shift filter
+ *     accidentally set to Home, etc.)
+ * — then the assignment persists despite violating the rule, and there's no
+ * visible indicator. This scan makes violations visible so admins can either
+ * fix the rule config or manually re-place the physician.
+ *
+ * scope: 'ir' | 'dr' | 'all'. Defaults to 'all'. Filters to the currently-
+ * selected month in the IR calendar if one is visible.
+ */
+function scanScheduleRuleViolations(scope){
+  scope = scope || 'all';
+  const violations = [];
+  const phById = {};
+  (S.physicians||[]).forEach(p => phById[p.id] = p);
+
+  if(scope === 'ir' || scope === 'all'){
+    (S.irShifts||[]).forEach(s => {
+      const p = phById[s.physId]; if(!p) return;
+      const ctx = {
+        physId: s.physId, date: s.date, site: s.site,
+        shift: s.shift || '1st', kind: 'ir-shift',
+        shiftKey: s.shift==='1st'?'s1':s.shift==='2nd'?'s2':s.shift==='3rd'?'s3':s.shift==='Home'?'home':'',
+        ym: s.date.slice(0,7), sub: s.sub||'',
+      };
+      const v = _gatherManualRuleViolations(p, ctx);
+      if(v.length){
+        violations.push({
+          when: s.date, who: p.last, kind: 'IR ' + (s.shift||'1st') + ' @ ' + (s.site||'?'),
+          reasons: v,
+        });
+      }
+    });
+
+    (S.irCalls||[]).forEach(ic => {
+      const p = phById[ic.physId]; if(!p) return;
+      const kind = ic.callType === 'weekend' ? 'ir-weekend' : 'ir-call';
+      const ctx = {
+        physId: ic.physId, date: ic.date, site: ic.site||p.irSitePrim||'',
+        shift: kind, kind, irGroup: ic.irGroup||p.irGroup||'',
+        ym: ic.date.slice(0,7),
+      };
+      const v = _gatherManualRuleViolations(p, ctx);
+      if(v.length){
+        violations.push({
+          when: ic.date, who: p.last,
+          kind: (ic.callType === 'weekend' ? 'IR Weekend Call' : 'IR Daily Call') + ' (' + (ic.irGroup||'?') + ')',
+          reasons: v,
+        });
+      }
+    });
+  }
+
+  if(scope === 'dr' || scope === 'all'){
+    (S.drShifts||[]).forEach(s => {
+      const p = phById[s.physId]; if(!p) return;
+      const ctx = {
+        physId: s.physId, date: s.date, site: s.site,
+        shift: s.shift||'1st', kind: 'dr-shift',
+        shiftKey: s.shift==='1st'?'s1':s.shift==='2nd'?'s2':s.shift==='3rd'?'s3':s.shift==='Home'?'home':'',
+        ym: s.date.slice(0,7), sub: s.sub||'',
+      };
+      const v = _gatherManualRuleViolations(p, ctx);
+      if(v.length){
+        violations.push({
+          when: s.date, who: p.last, kind: 'DR ' + (s.shift||'1st') + ' @ ' + (s.site||'?'),
+          reasons: v,
+        });
+      }
+    });
+
+    (S.weekendCalls||[]).forEach(w => {
+      const p = phById[w.physId]; if(!p) return;
+      const date = w.satDate || w.date;
+      if(!date) return;
+      const ctx = {
+        physId: w.physId, date, site: w.site||'', shift: 'wknd',
+        kind: 'dr-weekend', sub: w.sub||'', ym: date.slice(0,7),
+      };
+      const v = _gatherManualRuleViolations(p, ctx);
+      if(v.length){
+        violations.push({
+          when: date, who: p.last, kind: 'DR Weekend Call @ ' + (w.site||'?'),
+          reasons: v,
+        });
+      }
+    });
+  }
+
+  // Filter to the currently-visible month if one is selected
+  const ymEl = document.getElementById('irc-mo');
+  const ymScope = ymEl && ymEl.value ? ymEl.value : '';
+  let filtered = violations;
+  if(ymScope){
+    filtered = violations.filter(v => (v.when||'').startsWith(ymScope));
+  }
+
+  if(!filtered.length){
+    const scopeLbl = ymScope ? ' for ' + ymScope : '';
+    alert('✓ No rule violations found' + scopeLbl + '.');
+    return;
+  }
+
+  filtered.sort((a,b) => (a.when||'').localeCompare(b.when||'') || a.who.localeCompare(b.who));
+
+  const lines = filtered.map(v =>
+    `${v.when} · ${v.who} · ${v.kind}\n     → ${v.reasons.join('\n     → ')}`
+  );
+  const header = `⚠ ${filtered.length} rule violation(s) found${ymScope ? ' in ' + ymScope : ''}:`;
+  alert(header + '\n\n' + lines.join('\n\n'));
+}
+
 function addDRShift(){
   if(!_adminOnly('assign DR shifts'))return;
   const pid=+document.getElementById('sb-phys').value;
@@ -17555,7 +17733,7 @@ function fillDRHomeShifts(){
   const date=document.getElementById('sb-date').value;
   if(!date){alert('Select a date in the DR builder first.');return;}
   const vm=vacMap();const vacOnDate=new Set(vm[date]||[]);
-  let added=0;
+  let added=0, skippedRules=0;
   const _fdow=parseDateLocal(date).getDay();
   if(_fdow===0||_fdow===6){alert('Cannot fill home shifts on weekends. Use the Weekend Calls builder for Saturday/Sunday assignments.');return;}
   S.physicians.filter(p=>p.drFte>0&&p.role!=='IR').forEach(p=>{
@@ -17573,13 +17751,25 @@ function fillDRHomeShifts(){
                     || physSubs[0]
                     || siteSubs[0]
                     || 'General Procedures';
+      // Rule check — Home placement for a physician on call can violate a
+      // call-day-site rule ("when on call, must be at CHN"). Skip silently
+      // rather than prompting (bulk action; prompts would be disruptive).
+      // Skipped physicians simply stay unscheduled for that date; the admin
+      // can place them manually if needed.
+      const _v = _gatherManualRuleViolations(p, {
+        physId: p.id, date, site: siteName, shift: 'Home',
+        kind: 'dr-shift', shiftKey: 'home', sub: subPick,
+        ym: date.slice(0,7),
+      });
+      if(_v.length){ skippedRules++; return; }
       S.drShifts.push({id:S.nextId++,physId:p.id,date,shift:'Home',site:siteName,
         sub:subPick,notes:'Auto home-fill',autoHome:true});
       added++;
     }
   });
   if(added > 0){ triggerSave(); _afterMutation(); }
-  alert(`Added ${added} auto-home shift(s).`);renderDRBuilder();
+  const ruleNote = skippedRules > 0 ? ` (${skippedRules} skipped due to physician rules)` : '';
+  alert(`Added ${added} auto-home shift(s)${ruleNote}.`);renderDRBuilder();
 }
 
 /* ─── WEEKEND BUILDER ─── */
@@ -17619,6 +17809,25 @@ function saveEditWkCall(id){
   const newSun = addDays(newSat, 1);
   if(vd.has(newSat) || vd.has(newSun)){
     if(!confirm(`${pname(newPid)} is on vacation during this weekend. Save anyway?`)) return;
+  }
+  // Physician-rule check — edited weekend call can now violate call-day-
+  // site rules (phys has a non-CHN shift on the weekend span). Direction
+  // 2 iterates the Fri-Mon span internally.
+  {
+    const _p = S.physicians.find(x=>x.id===newPid);
+    if(_p){
+      const _newSite = siteEl?.value || w.site || '';
+      const _ctx = {
+        physId: newPid, date: newSat, site: _newSite,
+        shift: 'wknd', kind: 'dr-weekend', sub: subEl?.value || '',
+        ym: newSat.slice(0,7),
+      };
+      const _v = _gatherManualRuleViolations(_p, _ctx);
+      if(_v.length){
+        const msg = `Saving this edit would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nSave anyway?`;
+        if(!confirm(msg)) return;
+      }
+    }
   }
   w.physId  = newPid;
   w.satDate = newSat;
@@ -18421,8 +18630,28 @@ function getWeekDates(mon){
 const DOW_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function renderIRWeekBuilder(){
-  const mondayVal=document.getElementById('irb-week')?.value;
-  if(!mondayVal){document.getElementById('irb-week-content').innerHTML='<div class="note nw">Select a Monday to start the week.</div>';return;}
+  const rawInput=document.getElementById('irb-week')?.value;
+  if(!rawInput){document.getElementById('irb-week-content').innerHTML='<div class="note nw">Select a Monday to start the week.</div>';return;}
+  // Normalize to the Monday of the week containing the selected date.
+  // HTML date inputs don't enforce a weekday. If an admin picked Sunday,
+  // weekDates[4] resolved to Thursday and "Assign Weekend Call" pushed a
+  // record dated to Thursday. Snapping to Monday first guarantees that
+  // weekDates[4] is always Friday and weekend-call records are always
+  // dated correctly.
+  let mondayVal = rawInput;
+  {
+    const d = parseDateLocal(rawInput);
+    const dow = d.getDay(); // 0=Sun..6=Sat
+    const toMonOffset = (dow === 0) ? -6 : (1 - dow);
+    if(toMonOffset !== 0){
+      d.setDate(d.getDate() + toMonOffset);
+      mondayVal = fmtDate(d);
+      // Reflect the correction in the input so the admin sees which week
+      // they're actually building.
+      const _el = document.getElementById('irb-week');
+      if(_el) _el.value = mondayVal;
+    }
+  }
   const grp=document.getElementById('irb-grp')?.value||'North';
   const weekDates=getWeekDates(mondayVal); // 0=Mon...6=Sun
   const fridayDate=weekDates[4]; // index 4 = Friday
@@ -18703,6 +18932,19 @@ function addIRWeekend(group,fridayDate){
   const physId=+document.getElementById(`irwk-phys-${group}`)?.value;
   const site=document.getElementById(`irwk-site-${group}`)?.value||'';
   if(!physId){alert('Select physician');return;}
+  // Defensive: snap non-Friday dates to Friday. If the Week Builder input was
+  // a non-Monday, weekDates[4] would resolve to some other day and the button
+  // passes that through as fridayDate. Silently correcting prevents a weekend
+  // call chip from rendering starting Thursday (or Saturday).
+  {
+    const _dow = parseDateLocal(fridayDate).getDay();
+    if(_dow !== 5){
+      const _oldDate = fridayDate;
+      const _offset = (_dow === 0) ? -2 : (5 - _dow);
+      fridayDate = addDays(fridayDate, _offset);
+      console.warn('[RS] Weekend call date '+_oldDate+' is a '+DOW_NAMES[_dow]+', snapped to Friday '+fridayDate);
+    }
+  }
   const p=S.physicians.find(x=>x.id===physId);
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
   if(isIRCallBlackout(physId,fridayDate)){alert(pname(physId)+' has an IR call blackout covering this weekend.');return;}
@@ -18729,9 +18971,23 @@ function addIRWeekend(group,fridayDate){
 
 function addIRCallManual(){
   if(!_adminOnly('add IR call'))return;
-  const physId=+document.getElementById('ird-phys').value;const date=document.getElementById('ird-date').value;
+  const physId=+document.getElementById('ird-phys').value;
+  let date=document.getElementById('ird-date').value;
   if(!date){alert('Select date');return;}
   const callType=document.getElementById('ird-ctype').value;
+  // Defensive: for weekend call, snap the admin-entered date to the Friday
+  // of that week. Without this, a user who picks any day could produce a
+  // weekend call record dated to Thursday/Saturday/etc., which renders the
+  // Fri→Mon span starting on the wrong day.
+  if(callType === 'weekend'){
+    const _dow = parseDateLocal(date).getDay();
+    if(_dow !== 5){
+      const _old = date;
+      const _offset = (_dow === 0) ? -2 : (5 - _dow);
+      date = addDays(date, _offset);
+      console.warn('[RS] Weekend call date '+_old+' is a '+DOW_NAMES[_dow]+', snapped to Friday '+date);
+    }
+  }
   if(callType==='2nd'||callType==='3rd'){alert('2nd and 3rd shifts are not used for IR call. Choose Daily Call or Weekend Call.');return;}
   const irGroup=document.getElementById('ird-grp').value;const site=document.getElementById('ird-site').value;
   const p=S.physicians.find(x=>x.id===physId);
@@ -18788,9 +19044,35 @@ function saveEditIRCall(id){
   const newPid = +physEl?.value || ic.physId;
   const p = S.physicians.find(x => x.id === newPid);
   if(!p){ alert('Physician not found.'); return; }
+  let newDate = dateEl.value;
+  const newType = typeEl?.value || ic.callType;
+  // Snap weekend-call dates to Friday (see addIRWeekend rationale).
+  if(newType === 'weekend'){
+    const _dow = parseDateLocal(newDate).getDay();
+    if(_dow !== 5){
+      const _old = newDate;
+      const _offset = (_dow === 0) ? -2 : (5 - _dow);
+      newDate = addDays(newDate, _offset);
+      console.warn('[RS] saveEditIRCall: weekend date '+_old+' snapped to Friday '+newDate);
+    }
+  }
+  // Physician-rule check — see saveEditIRShift for rationale.
+  {
+    const kind = newType === 'weekend' ? 'ir-weekend' : 'ir-call';
+    const _ctx = {
+      physId: newPid, date: newDate, site: siteEl?.value || p.irSitePrim || '',
+      shift: kind, kind, irGroup: p.irGroup || ic.irGroup || '',
+      ym: newDate.slice(0,7),
+    };
+    const _v = _gatherManualRuleViolations(p, _ctx);
+    if(_v.length){
+      const msg = `Saving this edit would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nSave anyway?`;
+      if(!confirm(msg)) return;
+    }
+  }
   ic.physId   = newPid;
-  ic.date     = dateEl.value;
-  ic.callType = typeEl?.value || ic.callType;
+  ic.date     = newDate;
+  ic.callType = newType;
   ic.irGroup  = p.irGroup || ic.irGroup;
   ic.site     = siteEl?.value || '';
   ic.notes    = notesEl?.value || '';
