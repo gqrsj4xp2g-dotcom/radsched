@@ -19594,21 +19594,112 @@ function applyIRAA(){
   const toApply=[...S.iraPreview];
   S.iraPreview=[];
   let procShiftsAdded=0;
+  let procShiftsSkipped=0;
+  const skippedLog=[];
   toApply.forEach(a=>{
     S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:'Auto'});
-    // Auto-create a 1st proc shift for daily calls where physician had none scheduled
+    // Auto-create a 1st proc shift for daily calls where physician had none scheduled.
+    // CRITICAL: if the physician has callDayRules that pin them to a specific
+    // site when on call (e.g. "Greene: IR call → must be at CHN"), we MUST
+    // honor that. Using irSitePrim blindly (Riverview for Greene) creates a
+    // shift that directly violates the rule we just created the call against.
     if(a.callType==='daily'&&a.needsProcShift&&!_hasIRShiftOnDate(a.physId,a.date)){
       const p=S.physicians.find(x=>x.id===a.physId);
-      const site=p?.irSitePrim||(S.sites.find(s=>s.irGroup===a.irGroup)?.name||'');
-      S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',
-        site,sub:'',notes:'Auto (with call)',irGroup:a.irGroup});
-      procShiftsAdded++;
+      if(!p) return;
+      // ── 1. Figure out which sites are rule-valid for this phys+call combo.
+      //
+      // A site is a valid candidate if BOTH directions of callDayRulesOk
+      // pass when we put the physician there with an IR 1st shift AND the
+      // call we're about to create on the same date. We simulate this by
+      // calling callDayRulesOk with kind='ir-shift' and a ctx.site of each
+      // candidate; the rules evaluate against the already-created call (we
+      // pushed above) so direction 1 fires correctly.
+      //
+      // We also enforce the site's own rules (site.irAnchors / fillins /
+      // allowedSites) and existing IR shift eligibility (site rule, day
+      // condition) so the auto-shift isn't itself invalid for some other
+      // reason.
+      const candidateSites = [];
+      const primSite = p.irSitePrim || '';
+      // Build candidate list: primary first, then group sites, then any
+      // site listed as valid by rule (deduplicated).
+      const seen = new Set();
+      function _push(siteName){
+        if(!siteName || seen.has(siteName)) return;
+        seen.add(siteName);
+        candidateSites.push(siteName);
+      }
+      _push(primSite);
+      // Check if callDayRules explicitly require a specific site for this callType —
+      // if yes, prioritize that site.
+      (p.callDayRules||[]).forEach(r => {
+        if(!r || !r.requiredSite) return;
+        const ct = r.callType || 'any-call';
+        // This call is 'ir-call' (daily). Match 'any-call' or 'ir-call'.
+        if(ct !== 'any-call' && ct !== 'ir-call') return;
+        // If rule has a shift filter that excludes 1st, skip it.
+        if(r.shift && r.shift !== '1st') return;
+        // Put requiredSite FIRST — highest priority.
+        candidateSites.unshift(r.requiredSite);
+        seen.add(r.requiredSite);
+      });
+      // Then all sites in the phys's group.
+      (S.sites||[]).forEach(s => {
+        if(s.irGroup === a.irGroup || s.irGroup === 'Both') _push(s.name);
+      });
+      // Dedup while preserving order (requiredSite-prioritized → primary → group)
+      const orderedCandidates = [];
+      const seen2 = new Set();
+      candidateSites.forEach(s => {
+        if(s && !seen2.has(s)){ seen2.add(s); orderedCandidates.push(s); }
+      });
+      // ── 2. Pick the first candidate that passes all rule checks.
+      let chosenSite = null;
+      for(const siteName of orderedCandidates){
+        const ctx = {
+          physId: p.id, date: a.date, site: siteName, shift: '1st',
+          kind: 'ir-shift', irGroup: a.irGroup,
+          shiftKey: 's1', ym: a.date.slice(0,7), sub: '',
+        };
+        // callDayRulesOk direction 1: must match requiredSite when on call.
+        if(!callDayRulesOk(p, ctx)) continue;
+        // Site rule must allow IR shift at this site for this phys.
+        if(!irSiteRuleOk(p, siteName, a.date)) continue;
+        // Day-of-week condition must pass.
+        if(!dayConditionSiteOk(p, siteName, a.date, 'ir-shift')) continue;
+        // Sequence rule too.
+        if(!sequenceOk(p, a.date, a.date.slice(0,7), siteName, '')) continue;
+        // Natural-language rule.
+        if(!natLangRulesOk(ctx)) continue;
+        // Conference rule.
+        if(!tbRulesOk(p, ctx)) continue;
+        chosenSite = siteName;
+        break;
+      }
+      if(chosenSite){
+        S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',
+          site:chosenSite,sub:'',notes:'Auto (with call)',irGroup:a.irGroup});
+        procShiftsAdded++;
+      } else {
+        // No rule-valid site could be found. Skip the auto-shift rather
+        // than force a violation. Admin will see the call without a shift
+        // and can place one manually if needed.
+        procShiftsSkipped++;
+        skippedLog.push(`${a.date} · ${p.last} — no rule-valid site for auto-shift (call was still assigned)`);
+      }
     }
   });
   const n=toApply.length;
   triggerSave();
-  const note=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';
-  document.getElementById('ira-box').innerHTML=`<div class="note ns">${n} IR call assignment(s) applied across ${_iraPeriodLabel(_iraMonths())}${note}.</div>`;
+  _afterMutation();
+  let note=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';
+  if(procShiftsSkipped) note+=` · ${procShiftsSkipped} proc shift(s) skipped (no rule-valid site)`;
+  let html=`<div class="note ns">${n} IR call assignment(s) applied across ${_iraPeriodLabel(_iraMonths())}${note}.</div>`;
+  if(skippedLog.length){
+    html+=`<div class="note nw" style="margin-top:8px"><strong>Proc shifts not auto-created:</strong><br>
+      <span style="font-family:monospace;font-size:11px">${skippedLog.map(escHtml).join('<br>')}</span></div>`;
+  }
+  document.getElementById('ira-box').innerHTML=html;
   document.getElementById('ira-apply').style.display='none';
 }
 
