@@ -4616,10 +4616,17 @@ function renderMySched(){
           <div style="font-size:9px;opacity:.7">${(ic.site||'').split(' ')[0]}</div>
         </div>`;
       } else {
-        evs+=`<div class="ev eir" title="Daily Call (${ic.irGroup}) @ ${ic.site}">
+        // Daily (weekday) IR call covers the entire group — it is NOT
+        // per-hospital. Previously the chip showed a hospital short name
+        // on the third line, which was misleading: a physician on daily
+        // call is the group's call coverage regardless of where they happen
+        // to be physically doing procedure shifts that day. The chip now
+        // represents the GROUP as the call owner, with the physician
+        // prominent. Hospital info (if any) stays on the adjacent IR shift
+        // chip where it belongs.
+        evs+=`<div class="ev eir" title="Daily Call (${ic.irGroup})">
           <div style="font-weight:700;font-size:11px">📟 Daily Call</div>
           <div style="font-size:9px;opacity:.85">${ic.irGroup}</div>
-          <div style="font-size:9px;opacity:.7">${(ic.site||'').split(' ')[0]}</div>
         </div>`;
       }
     });
@@ -8642,20 +8649,26 @@ function previewIRShiftAA(){
         // and eligible for this slot, place them here so they're physically
         // at a hospital that works with their call coverage.
         //
-        // Deliberately does NOT enforce callDayRulesOk here. The admin's
-        // preferred precedence is:
-        //   • IR Shift AA places physicians at anchor / FTE-fair sites.
-        //   • IR Call AA respects those placements (callDayRulesOk dir-2
-        //     skips candidates whose day shift isn't at the required site).
-        // If shift AA enforced the rule, it would reroute the shift to CHN
-        // instead of leaving someone else to take the call — the opposite
-        // of what the admin wants. Same rationale for the main pool below.
+        // callDayRulesOk IS enforced here (direction 1 — day-shift candidate
+        // checked against existing call). Rationale: admins set call-day-
+        // site rules to pin a physician's day shift to a specific hospital
+        // WHEN they're on call (e.g. "Schacht: IR call → must be at CHN").
+        // If we skipped the rule here, Schacht with a pre-assigned call
+        // would get placed at any slot that happened to iterate first
+        // (CHE, Riverview, etc.) in direct violation of the rule. The
+        // prior design assumed IR Call AA's direction-2 check would catch
+        // it, but that only works when IR Shift AA runs BEFORE call AA.
+        // For admins who run call first then shift (or manually place
+        // call), direction 2 has nothing to check and the rule silently
+        // fails. Enforcing both directions makes the rule work regardless
+        // of run order.
         if(cP && !_irsaBlocked(cP,slot.date,assigned) && _irsaEligibleForSlot(cP,slot)){
           var _cpCtx={physId:cP.id,date:slot.date,site:slot.site,shift:'1st',kind:'ir-shift'};
           var _cpPassesRules = irSiteRuleOk(cP,slot.site,slot.date)
                             && dayConditionSiteOk(cP,slot.site,slot.date,'ir-shift')
                             && sequenceOk(cP,slot.date,slotMo,slot.site,slot.slotLabel||'')
                             && tbRulesOk(cP,_cpCtx)
+                            && callDayRulesOk(cP,_cpCtx)
                             && natLangRulesOk(_cpCtx);
           if(_cpPassesRules){
             var cpCounts=_irsaCountsForQuota(cP,slot);
@@ -8663,16 +8676,13 @@ function previewIRShiftAA(){
             if(cpCounts){cnt[cP.id]++;if(cP.anchorSite&&cP.anchorSite===slot.site)anc[cP.id]++;}
             callF++;totalA++;continue;
           }
-          // Rules block: fall through to normal pool assignment below.
+          // Rules block: fall through to normal pool assignment below. The
+          // on-call physician may still be picked in Pass 1 for a slot
+          // where they DO pass rules (e.g. the CHN slot their rule requires).
         }
       }
       var _r=rawQ,_cd=callDays,_s=slot,_cnt=cnt,_anc=anc,_mo=slotMo;
-      /* Pass 1: eligible + all rules + within quota.
-         NOTE: callDayRulesOk intentionally NOT checked here. See rationale
-         on the on-call preference block above — shift AA should not reroute
-         shifts to satisfy call-day-site rules. IR Call AA enforces the rule
-         in the opposite direction (skip call candidates whose day shift is
-         at the wrong site) which is what the admin wants. */
+      /* Pass 1: eligible + all rules + within quota */
       pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
@@ -8680,22 +8690,31 @@ function previewIRShiftAA(){
           &&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')
           &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
           &&tbRulesOk(p,_ictx)
+          &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
-      /* Pass 2: relax site rules */
+      /* Pass 2: relax site rules (but NOT callDayRulesOk — the rule is an
+         admin-configured hard constraint that ties call to a specific day-
+         shift site; relaxing it would silently violate admin intent). */
       if(!pool.length)pool=phys.filter(function(p){
+        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
           &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
+          &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
-      /* Pass 3: relax sequence */
+      /* Pass 3: relax sequence (still honors callDayRulesOk). */
       if(!pool.length)pool=phys.filter(function(p){
+        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
-      /* Pass 4: over-quota fill */
+      /* Pass 4: over-quota fill (still honors callDayRulesOk). */
       if(!pool.length)pool=phys.filter(function(p){
-        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned);
+        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
+        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&callDayRulesOk(p,_ictx);
       });
       /* Pass 5: cross-group fill-in fallback.
          Only reached when the same-group pool is completely exhausted across
@@ -18181,7 +18200,14 @@ function renderIRCal(){
             ${siteSh?`<div style="font-size:9px;opacity:.7">${siteSh}</div>`:''}
           </div>`;
         } else {
-          ev=`<div class="ev" style="${grpColor}" title="${pname(ic.physId)} — Daily Call (${ic.irGroup}) @ ${ic.site}${ic.notes?' · '+ic.notes:''}">
+          // Daily (weekday) call covers the entire IR group. The chip is
+          // the group-level representation; hospital is intentionally not
+          // shown because daily-call ownership is group-wide, not
+          // per-hospital. If a site happened to be stored on the call
+          // record (it shouldn't be for daily, but defensively handle it),
+          // that info stays on the physician's IR shift chip alongside
+          // where it naturally belongs.
+          ev=`<div class="ev" style="${grpColor}" title="${pname(ic.physId)} — Daily Call (${ic.irGroup})${ic.notes?' · '+ic.notes:''}">
             <div style="font-weight:700;font-size:11px">${holNote}${pshort(ic.physId)}</div>
             <div style="font-size:9px;opacity:.85">Daily Call · ${ic.irGroup}</div>
           </div>`;
@@ -18799,8 +18825,15 @@ function renderIRList(){
     }
     const dates=ic.callType==='weekend'?`${ic.date} → ${addDays(ic.date,3)}`:ic.date;
     const dt=ic.site&&ic.site!=='At Home / Remote'?_driveTimeCell(ic.physId,ic.site):'';
+    // Site column — for daily call we deliberately render only the IR
+    // group (no hospital suffix) because daily call covers the group, not
+    // a single hospital. Weekend call legitimately ties to a site, so it
+    // keeps the hospital short-name tail.
+    const _siteCell = ic.callType === 'daily'
+      ? ic.irGroup
+      : `${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}`;
     return`<tr><td>${pname(ic.physId)}</td><td><span class="tag ${irGroupColorClass(ic.irGroup)}">${ic.irGroup}</span></td>
-    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${ic.irGroup}${ic.site?' · '+ic.site.split(' ')[0]:''}</td>
+    <td><span class="tag ${ctColors[ic.callType]||'tgr'}">${ic.callType==='daily'?'Daily Call':ic.callType==='weekend'?'Weekend Call':ic.callType}</span></td><td>${dates}</td><td>${_siteCell}</td>
     <td style="text-align:center">${dt||'—'}</td>
     <td>${ic.notes||'—'}</td>
     <td style="white-space:nowrap">
