@@ -1538,6 +1538,7 @@ tbody tr:hover{background:var(--bg3)}
     <span class="ev ehol" style="padding:2px 7px">Holiday</span>
     <span class="ev evac" style="padding:2px 7px">Off</span>
     <button class="bt bxs admin-only" style="margin-left:auto" onclick="scanScheduleRuleViolations('ir')" title="Scan all IR shifts and calls for physician-rule violations">🔍 Check Rule Violations</button>
+    <button class="bt bxs admin-only" onclick="explainPhysicianState()" title="Dump a physician's full rule + assignment state for a specific date. Use this when auto-assign does something unexpected.">🔬 Explain Why</button>
   </div>
   <div class="cal-grid" id="irc-head"></div>
   <div class="cal-grid" id="irc-body"></div>
@@ -8685,17 +8686,71 @@ function _irsaBlocked(p,date,assigned){
   // handled separately by sequenceOk and the weekend-call adjacency logic
   // in previewIRAA.
   //
-  // Implicit tumor board / clinic participation block — if this physician
-  // is an assigned participant of any conference on this date, they're
-  // committed and can't take a day shift. Admins previously had to
-  // configure a per-physician tbRule with action 'no-shift-on-day' to
-  // achieve this; the sensible default is that conference participation
-  // already implies unavailability. Rotation gating honored by the helper.
-  try {
-    var _parts = _conferenceDatesForPhys(p.id, date, date, null);
-    if(_parts && _parts.has(date)) return true;
-  } catch(_){}
+  // Implicit tumor board / clinic participation — if this physician is an
+  // assigned participant of any conference on this date, they're partly
+  // committed. Whether that blocks a day shift depends on WHERE the
+  // conference is held:
+  //   • Conference has a `sites` list including this slot's site: the
+  //     physician is physically AT that site already. Allow the IR shift —
+  //     they work the shift and attend the conference at the same hospital.
+  //     (That's typically the admin's intent: e.g. Yedlicka at vein clinic
+  //     at CHN should be placed at CHN for his IR shift too.)
+  //   • Conference has NO `sites` list, or its sites don't include this
+  //     slot's site: the physician is physically at a different location
+  //     during the conference and can't work this slot. Block.
+  //
+  // NOTE: _irsaBlocked doesn't know the target slot's site — it only sees
+  // `date`. So we return the result of a site-aware helper that the caller
+  // can use separately. For safety, if no slot info is available, we
+  // default to "block" (conservative: if the caller hasn't scoped to a
+  // site, assume unavailability).
+  //
+  // CORRECTED: refactored to no longer block here. The per-slot filters in
+  // previewIRShiftAA now check conference-site compatibility via
+  // _conferenceBlocksSlot below, which has the slot context. _irsaBlocked
+  // remains slot-agnostic.
   return false;
+}
+
+/**
+ * _conferenceBlocksSlot — returns true if this physician can NOT take a
+ * shift at the given site on this date due to tumor board / clinic
+ * participation. Matches the semantics documented above in _irsaBlocked.
+ *
+ * site can be null/undefined → treats all conferences as blocking (legacy
+ * behavior). Pass a site name to enable the "conference at same site →
+ * allow" exception.
+ */
+function _conferenceBlocksSlot(physId, date, site){
+  try {
+    if(!site){
+      const parts = _conferenceDatesForPhys(physId, date, date, null);
+      return !!(parts && parts.has(date));
+    }
+    // Site-aware check: find every conference this phys is attending on this
+    // date, and allow the shift if ANY of them is held at this site.
+    const _ns = s => (s||'').toString().trim().toLowerCase();
+    const targetSite = _ns(site);
+    const candidates = [];
+    (S.tumorBoards||[]).forEach(tb => candidates.push(tb));
+    (S.clinics||[]).forEach(cl => candidates.push(cl));
+    let attendingAnywhere = false;
+    for(const ev of candidates){
+      if(!(ev.allowedPhysIds||[]).includes(physId)) continue;
+      const occs = _eventOccurrencesInRange(ev, date, date);
+      if(!occs.length) continue;
+      if(ev.rotation && ev.rotation.enabled){
+        const ids = _rotationPhysIdsFor(ev, date);
+        if(ids.length && !ids.includes(physId)) continue;
+      }
+      attendingAnywhere = true;
+      // If this conference is held at the slot's site, shift is allowed.
+      const sites = ev.sites || [];
+      if(sites.some(s => _ns(s) === targetSite)) return false; // allowed at same-site
+    }
+    // Attending a conference, but none of them at this site → block.
+    return attendingAnywhere;
+  } catch(_){ return false; }
 }
 function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,months,ANC_RATE,slot){
   var q=_irsaEffQ(p,rawQ,callDays,months),got=cnt[p.id];
@@ -8869,6 +8924,7 @@ function previewIRShiftAA(){
       pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&irSiteRuleOk(p,_s.site,_s.date)
           &&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')
           &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
@@ -8882,6 +8938,7 @@ function previewIRShiftAA(){
       if(!pool.length)pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
           &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
@@ -8890,6 +8947,7 @@ function previewIRShiftAA(){
       if(!pool.length)pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
@@ -8897,6 +8955,7 @@ function previewIRShiftAA(){
       if(!pool.length)pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&callDayRulesOk(p,_ictx);
       });
       /* Pass 5: cross-group fill-in fallback.
@@ -8926,6 +8985,7 @@ function previewIRShiftAA(){
             if(p.irGroup===grp)return false;                         // already considered in main pool
             if(xFillins.indexOf(p.id)<0)return false;                // not a registered fill-in here
             if(_irsaBlocked(p,_s.date,assigned))return false;
+            if(_conferenceBlocksSlot(p.id,_s.date,_s.site))return false;
             var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,ym:_mo};
             if(!dayConditionSiteOk(p,_s.site,_s.date,'ir-shift'))return false;
             if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||''))return false;
@@ -18050,6 +18110,142 @@ function scanScheduleRuleViolations(scope){
   );
   const header = `⚠ ${filtered.length} rule violation(s) found${ymScope ? ' in ' + ymScope : ''}:`;
   alert(header + '\n\n' + lines.join('\n\n'));
+}
+
+/**
+ * explainPhysicianState — deep-dive diagnostic. Prompts the admin for a
+ * physician (by last name) and a date, then reports:
+ *   1. All rules configured for that physician, with full field values.
+ *   2. Their actual assignments on that date (IR shift, DR shift, IR call,
+ *      DR weekend call), including neighboring dates within a weekend-call span.
+ *   3. A hypothetical eligibility trace: "if we tried to place this phys on
+ *      an IR day shift at SITE X on DATE Y, each rule check would say...".
+ *      Runs once per site so admins can see exactly which site is rule-valid
+ *      and which isn't.
+ *
+ * The goal: when auto-assign puts Yedlicka at CHE on his call day instead of
+ * CHN, this tool tells the admin whether the rule exists, whether it's
+ * firing, and if not, which specific field caused the mismatch.
+ */
+function explainPhysicianState(){
+  if(!_adminOnly('run physician diagnostic')) return;
+  const who = prompt('Physician last name (case-insensitive):', '');
+  if(!who) return;
+  const q = who.trim().toLowerCase();
+  const candidates = (S.physicians||[]).filter(p => (p.last||'').toLowerCase().includes(q));
+  if(!candidates.length){ alert('No physician matching "'+who+'" found.'); return; }
+  let p;
+  if(candidates.length === 1){
+    p = candidates[0];
+  } else {
+    const names = candidates.map((c,i)=>`${i+1}. ${c.first||''} ${c.last||''} (${c.role||'?'})`).join('\n');
+    const pick = prompt('Multiple matches. Enter number:\n\n' + names, '1');
+    const n = +pick - 1;
+    if(isNaN(n) || !candidates[n]) return;
+    p = candidates[n];
+  }
+  const dateIn = prompt('Date (YYYY-MM-DD):', (new Date()).toISOString().slice(0,10));
+  if(!dateIn || !/^\d{4}-\d{2}-\d{2}$/.test(dateIn)){ alert('Invalid date.'); return; }
+  const date = dateIn;
+  const ym = date.slice(0,7);
+
+  const out = [];
+  out.push('═══ Physician Diagnostic ═══');
+  out.push(`${p.first||''} ${p.last||''} (id:${p.id}) · role ${p.role||'?'} · IR group ${p.irGroup||'—'}`);
+  out.push(`IR FTE: ${p.irFte||0} · DR FTE: ${p.drFte||0}`);
+  out.push(`IR primary site: ${p.irSitePrim||'(none)'} · Anchor site: ${p.anchorSite||'(none)'}`);
+  out.push(`Allowed sites: ${(p.allowedSites||[]).join(', ')||'(none set)'}`);
+  out.push('');
+
+  // Call-day-site rules
+  out.push('── Call-Day Site Rules ──');
+  const cdr = p.callDayRules||[];
+  if(!cdr.length){ out.push('(none configured)'); }
+  else cdr.forEach((r,i) => {
+    out.push(`  ${i+1}. callType="${r.callType||'any-call'}" requiredSite="${r.requiredSite||''}" shift="${r.shift||''}" shiftKind="${r.shiftKind||''}" notes="${r.notes||''}"`);
+  });
+  out.push('');
+
+  // Conference rules
+  out.push('── Conference (TB/Clinic) Rules ──');
+  const tbr = p.tbRules||[];
+  if(!tbr.length){ out.push('(none configured)'); }
+  else tbr.forEach((r,i) => {
+    const ev = _eventById(r.eventId);
+    out.push(`  ${i+1}. action="${r.action}" event=${r.eventId==null?'(any)':(ev?`"${ev.name}"`:`(deleted #${r.eventId})`)} n=${r.nMin||r.n||0}-${r.nMax||r.n||0} requiredSite="${r.requiredSite||''}" shift="${r.shift||''}" shiftKind="${r.shiftKind||''}" breakable=${!!r.allowBreakForUnfilledIR}`);
+  });
+  out.push('');
+
+  // Site-based rules
+  out.push('── Site Rules ──');
+  const sr = p.siteRules||[];
+  if(!sr.length){ out.push('(none configured)'); }
+  else sr.forEach((r,i) => {
+    out.push(`  ${i+1}. site="${r.site}" blocked=${!!r.blocked} allowedShifts=[${(r.allowedShifts||[]).join(',')}] blackouts=${(r.blackouts||[]).length}`);
+  });
+  out.push('');
+
+  // Current assignments on and around the date
+  out.push(`── Actual Assignments On/Near ${date} ──`);
+  const span = [addDays(date,-3), addDays(date,-2), addDays(date,-1), date, addDays(date,1), addDays(date,2), addDays(date,3)];
+  span.forEach(d => {
+    const shifts = [];
+    (S.irShifts||[]).filter(s=>s.physId===p.id&&s.date===d).forEach(s=>shifts.push(`IR ${s.shift||'1st'} @ ${s.site||'?'}${s.sub?' ('+s.sub+')':''}`));
+    (S.drShifts||[]).filter(s=>s.physId===p.id&&s.date===d).forEach(s=>shifts.push(`DR ${s.shift||'1st'} @ ${s.site||'?'}${s.sub?' ('+s.sub+')':''}`));
+    (S.irCalls||[]).filter(c=>c.physId===p.id).forEach(c=>{
+      if(c.callType==='daily' && c.date===d) shifts.push(`IR daily call`);
+      else if(c.callType==='weekend'){
+        if(d>=c.date && d<=addDays(c.date,3)) shifts.push(`IR weekend call (day ${Math.round((parseDateLocal(d)-parseDateLocal(c.date))/86400000)+1} of 4, span ${c.date}→${addDays(c.date,3)})`);
+      }
+    });
+    (S.weekendCalls||[]).filter(w=>w.physId===p.id&&(w.satDate===d||w.sunDate===d||w.date===d)).forEach(w=>shifts.push(`DR weekend call`));
+    const vac = vacDays(p.id).has(d) ? ' [VACATION]' : '';
+    out.push(`  ${d}${d===date?' ←':''}${vac}: ${shifts.join(' · ')||'(no assignments)'}`);
+  });
+  out.push('');
+
+  // Hypothetical eligibility trace per site
+  out.push(`── Hypothetical: "Can ${p.last} take an IR 1st shift at SITE on ${date}?" ──`);
+  (S.sites||[]).forEach(st => {
+    const ctx = {physId:p.id, date, site:st.name, shift:'1st', kind:'ir-shift', shiftKey:'s1', ym, sub:'', irGroup:p.irGroup||''};
+    const reasons = [];
+    const vd = vacDays(p.id); if(vd.has(date)) reasons.push('vacation');
+    if(_has2ndOr3rdShift(p.id,date)) reasons.push('2nd/3rd DR shift');
+    if(isSoldBackDate(p.id,date)) reasons.push('sold-back');
+    // Existing IR/DR shift
+    const anyIR = (S.irShifts||[]).some(s=>s.physId===p.id&&s.date===date);
+    const anyDR = (S.drShifts||[]).some(s=>s.physId===p.id&&s.date===date);
+    if(anyIR) reasons.push('already has IR shift that day');
+    if(anyDR) reasons.push('already has DR shift that day');
+    if(!irSiteRuleOk(p,st.name,date)) reasons.push('siteRule blocks this site');
+    if(!dayConditionSiteOk(p,st.name,date,'ir-shift')) reasons.push('day-of-week condition blocks');
+    if(!sequenceOk(p,date,ym,st.name,'')) reasons.push('sequence rule blocks');
+    if(!callDayRulesOk(p,ctx)) reasons.push(`callDayRulesOk blocks (rule wants different site)`);
+    if(!tbRulesOk(p,ctx)) reasons.push('tbRulesOk blocks');
+    if(!natLangRulesOk(ctx)) reasons.push('natLangRulesOk blocks');
+    // Implicit conference participation
+    const pd = _conferenceDatesForPhys(p.id, date, date, null);
+    if(pd && pd.has(date)) reasons.push(`participating in conference on ${date}`);
+    const verdict = reasons.length ? '✗ BLOCKED: ' + reasons.join('; ') : '✓ eligible';
+    out.push(`  ${st.name}: ${verdict}`);
+  });
+
+  // Log to console in full (alert has length limits) and summarize to alert.
+  console.log(out.join('\n'));
+  const msg = out.join('\n');
+  // Use a textarea modal so admin can copy+paste easily even if long
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:var(--bg,white);border-radius:8px;padding:16px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>Physician Diagnostic — ${p.last} · ${date}</strong>
+        <button class="br bxs" onclick="this.closest('div[style*=fixed]').remove()">Close</button>
+      </div>
+      <textarea readonly style="flex:1;min-height:400px;font-family:monospace;font-size:11px;white-space:pre;overflow:auto">${msg.replace(/</g,'&lt;')}</textarea>
+      <div style="margin-top:8px;font-size:11px;color:var(--txt3)">Also logged to browser console. Copy the relevant sections and share them.</div>
+    </div>`;
+  document.body.appendChild(modal);
 }
 
 function addDRShift(){
