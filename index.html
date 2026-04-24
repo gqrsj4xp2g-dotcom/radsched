@@ -16690,6 +16690,12 @@ function callDayRulesOk(p, ctx){
   if(!ctx || !ctx.date) return true;
   const date = ctx.date;
 
+  // Normalize site strings: trim whitespace and lowercase. Historical cause of
+  // "rule doesn't fire" reports: rule stored 'CHN ' (trailing space) while
+  // shift stored 'CHN', or case mismatch ('Chn' vs 'CHN'). Strict equality
+  // silently skipped the rule. Normalization is the forgiving default.
+  const _ns = s => (s||'').toString().trim().toLowerCase();
+
   // Direction 1: day-shift candidate, check existing call
   if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
     const callsToday = {
@@ -16710,7 +16716,7 @@ function callDayRulesOk(p, ctx){
       const matchesCall = (ct === 'any-call') || callsToday[ct];
       if(!matchesCall) continue;
       if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
-      if(ctx.site !== r.requiredSite) return false;
+      if(_ns(ctx.site) !== _ns(r.requiredSite)) return false;
     }
     return true;
   }
@@ -16755,7 +16761,7 @@ function callDayRulesOk(p, ctx){
         // If the physician has a shift on this date and NONE of them is at
         // the required site, the rule blocks. If they have no shift, the
         // rule is silent for this date.
-        if(existingShifts.length && !existingShifts.some(s => s.site === r.requiredSite)){
+        if(existingShifts.length && !existingShifts.some(s => _ns(s.site) === _ns(r.requiredSite))){
           return false;
         }
       }
@@ -19142,371 +19148,341 @@ function _iraPeriodLabel(months){
 
 function previewIRAA(){
   if(!_adminOnly('preview IR auto-assign')) return;
-  const months   = _iraMonths();
-  const label    = _iraPeriodLabel(months);
-  const typ      = document.getElementById('ira-type').value;
-  const grpFilter= document.getElementById('ira-grp')?.value||'both';
-  const preview  = [], gaps = [];
+
+  // ─── INPUTS & SETUP ────────────────────────────────────────────────────
+  const months    = _iraMonths();
+  const label     = _iraPeriodLabel(months);
+  const typ       = document.getElementById('ira-type').value;           // 'daily' | 'weekend' | 'both'
+  const grpFilter = document.getElementById('ira-grp')?.value || 'both';
+  const period    = document.getElementById('ira-period')?.value || 'H1';
+
+  const preview = [];
+  const gaps    = [];
+
   // Reset holiday-excluded weekend tracker for this run
   S._lastIRAAExcludedHolidayWknds = [];
 
-  const allCells = months.flatMap(ym => _filterCellsByPeriod(buildCal(ym), document.getElementById('ira-period')?.value||'H1'));
-  const irPs = S.physicians.filter(p=>p.irFte>0);
+  const allCells = months.flatMap(ym => _filterCellsByPeriod(buildCal(ym), period));
+  const irPs     = S.physicians.filter(p => p.irFte > 0);
+  const groups   = getIRGroups().filter(g => grpFilter === 'both' || g === grpFilter);
 
-  const cntD={}, cntW={};
-  irPs.forEach(p=>{
-    cntD[p.id]=months.reduce((s,ym)=>s+irDailyCnt(p.id,ym),0);
-    cntW[p.id]=months.reduce((s,ym)=>s+irWkndCnt(p.id,ym),0);
+  // Running counts (existing + preview) used for FTE deficit ordering.
+  // Existing counts are pulled from S.irCalls for the entire period so we
+  // balance across the full horizon, not just unfilled slots.
+  const cntD = {}, cntW = {};
+  irPs.forEach(p => {
+    cntD[p.id] = months.reduce((s, ym) => s + irDailyCnt(p.id, ym), 0);
+    cntW[p.id] = months.reduce((s, ym) => s + irWkndCnt(p.id, ym),  0);
   });
+  // Capacity (vacation-adjusted rounded-up targets). Used only for DEFICIT
+  // ORDERING and for labeling when someone is "over FTE" — never for hard
+  // exclusion. Per user requirement: "Do not schedule any call back to back
+  // even if that causes someone to take more call than they have to."
+  const dailyCapFn = p => Math.max(Math.ceil(irDailyTargetAdjusted(p, months)), 1);
+  const wkndCapFn  = p => Math.max(Math.ceil(irWkndTargetAdjusted(p, months)),  1);
 
-  // Use vacation-adjusted targets as caps so over-burdening of available physicians
-  // is avoided and everyone reaches close to their realistic 100% FTE target
-  const dailyCapFn = p=>Math.max(Math.ceil(irDailyTargetAdjusted(p,months)),1);
-  const wkndCapFn  = p=>Math.max(Math.ceil(irWkndTargetAdjusted(p,months)),1);
-  const groups = getIRGroups().filter(g=>grpFilter==='both'||g===grpFilter);
+  // ─── HARD ADJACENCY PREDICATES ─────────────────────────────────────────
+  // Adjacency checks are strict: a candidate is rejected if it would create
+  // ANY back-to-back situation, across both existing assignments and the
+  // current preview. Considered sources:
+  //   - S.irCalls            (existing daily + weekend IR calls)
+  //   - preview              (assignments made earlier in this same run)
+  //
+  // A "daily call on date D" conflicts with:
+  //   • another daily call on D-1 or D+1
+  //   • a weekend span whose Fri→Mon includes D-1 or D+1 or D
+  //   • a weekend whose Thu-pre is D (i.e. weekend starting D+1)
+  //   • a weekend whose Tue-post is D (i.e. weekend starting D-4)
+  //
+  // A "weekend call starting Friday F" (span F..F+3) conflicts with:
+  //   • any call whose date falls in F..F+3 (double-booked)
+  //   • a daily call on F-1 (Thu-pre) or F+4 (Tue-post)
+  //   • a weekend call whose span overlaps F..F+3 (shouldn't occur — different
+  //     physician would have it — but safety)
+  //   • another weekend within ±7 days (same physician)
+  function _iterCallsFor(pid){
+    // Yield every call record (existing + preview) for this physician.
+    const out = [];
+    for(const c of S.irCalls){ if(c.physId === pid) out.push(c); }
+    for(const c of preview){ if(c.physId === pid) out.push(c); }
+    return out;
+  }
+  function _coversDate(c, date){
+    // Does call-record c "cover" the given ISO date?
+    if(c.callType === 'daily') return c.date === date;
+    if(c.callType === 'weekend'){
+      // Fri..Mon inclusive (4 days)
+      return date >= c.date && date <= addDays(c.date, 3);
+    }
+    return false;
+  }
+  function adjacencyReasonDaily(pid, date){
+    const calls = _iterCallsFor(pid);
+    const prev  = addDays(date, -1);
+    const next  = addDays(date,  1);
+    for(const c of calls){
+      // Same-day overlap
+      if(_coversDate(c, date)){
+        return c.callType === 'weekend'
+          ? `already on weekend call (${c.date}→${addDays(c.date,3)})`
+          : `already on daily call this date`;
+      }
+      // Prev-day adjacency
+      if(_coversDate(c, prev)){
+        return c.callType === 'weekend'
+          ? `back-to-back (weekend call ends ${addDays(c.date,3)})`
+          : `back-to-back (daily call on ${prev})`;
+      }
+      // Next-day adjacency
+      if(_coversDate(c, next)){
+        return c.callType === 'weekend'
+          ? `back-to-back (weekend call starts ${c.date})`
+          : `back-to-back (daily call on ${next})`;
+      }
+      // Thu-pre of a weekend: if candidate is the Thursday before this
+      // physician's Friday-weekend, that's back-to-back.
+      if(c.callType === 'weekend' && date === addDays(c.date, -1)){
+        return `day before their weekend call (Fri ${c.date})`;
+      }
+      // Tue-post of a weekend: if candidate is the Tuesday after Mon-end.
+      if(c.callType === 'weekend' && date === addDays(c.date, 4)){
+        return `day after their weekend call (Mon ${addDays(c.date,3)})`;
+      }
+    }
+    return null;
+  }
+  function adjacencyReasonWeekend(pid, fri){
+    const calls = _iterCallsFor(pid);
+    const thu   = addDays(fri, -1);
+    const tue   = addDays(fri,  4);
+    const span  = [fri, addDays(fri,1), addDays(fri,2), addDays(fri,3)];
+    for(const c of calls){
+      // Overlap within span
+      for(const d of span){
+        if(_coversDate(c, d)){
+          if(c.callType === 'weekend' && c.date === fri) continue; // self
+          return c.callType === 'weekend'
+            ? `another weekend call covers ${d} (${c.date}→${addDays(c.date,3)})`
+            : `daily call on ${d} within the weekend span`;
+        }
+      }
+      // Thu-pre
+      if(_coversDate(c, thu)){
+        return c.callType === 'weekend'
+          ? `weekend call on ${c.date} ends day before`
+          : `daily call on Thu-pre (${thu})`;
+      }
+      // Tue-post
+      if(_coversDate(c, tue)){
+        return c.callType === 'weekend'
+          ? `weekend call on ${c.date} starts day after`
+          : `daily call on Tue-post (${tue})`;
+      }
+      // Another weekend within ±7 days
+      if(c.callType === 'weekend' && c.date !== fri){
+        const dd = Math.abs(parseDateLocal(fri).getTime() - parseDateLocal(c.date).getTime()) / 86400000;
+        if(dd <= 7) return `another weekend call within 7 days (${c.date})`;
+      }
+    }
+    return null;
+  }
 
-  function _sortByFte(pool,gPhys,cntMap,capFn){
-    const n=Math.max(gPhys.length,1);
-    const offset=Object.values(cntMap).reduce((s,v)=>s+v,0)%n;
-    return pool.slice().sort((a,b)=>{
-      const mA=capFn(a)||1,mB=capFn(b)||1;
-      const rA=cntMap[a.id]/mA,rB=cntMap[b.id]/mB;
-      if(Math.abs(rA-rB)>1e-9) return rA-rB;
-      const iA=(gPhys.findIndex(x=>x.id===a.id)-offset+n)%n;
-      const iB=(gPhys.findIndex(x=>x.id===b.id)-offset+n)%n;
-      return iA-iB;
+  // ─── ELIGIBILITY EVALUATION ────────────────────────────────────────────
+  // Returns null if the physician is eligible, or a human-readable reason
+  // string if blocked. `kind` ∈ {'daily', 'weekend'}.
+  // `skipAdjacency` is used only for the "most-constrained date" ordering
+  // pass — adjacency is always enforced in the actual pick loop.
+  function whyBlocked(p, date, kind, g, skipAdjacency){
+    const isWkd = (kind === 'weekend');
+    const span  = isWkd ? [date, addDays(date,1), addDays(date,2), addDays(date,3)] : [date];
+    const ym    = date.slice(0,7);
+
+    // Vacation — any day of span
+    const vd = vacDays(p.id);
+    for(const d of span) if(vd.has(d)) return 'vacation';
+    // Sold-back
+    for(const d of span) if(isSoldBackDate(p.id, d)) return 'sold-back';
+    // IR call blackout (admin-configured per-physician)
+    for(const d of span) if(isIRCallBlackout(p.id, d)) return 'IR call blackout';
+    // DR 2nd/3rd shift on any day — physician can't be on call
+    for(const d of span) if(_has2ndOr3rdShift(p.id, d)) return '2nd/3rd DR shift that day';
+    // Site rule — IR call must be allowed at physician's primary site
+    if(!irCallSiteRuleOk(p, p.irSitePrim || '', date)) return 'site rule blocks IR call';
+    // Day-of-week condition
+    if(!dayConditionSiteOk(p, p.irSitePrim || '', date, 'ir-call')) return 'day-of-week condition';
+    // Sequence rule
+    if(!sequenceOk(p, date, ym, p.irSitePrim || '', '')) return 'sequence rule';
+    // Natural-language rule
+    const nlCtx = {
+      physId: p.id, date, site: p.irSitePrim || '',
+      shift: isWkd ? 'ir-weekend' : 'ir-call',
+      kind:  isWkd ? 'ir-weekend' : 'ir-call',
+      irGroup: g, ym
+    };
+    if(!natLangRulesOk(nlCtx)) return 'natural-language rule';
+    // Conference rule — check each day of span
+    for(const d of span){
+      const tbCtx = {
+        physId: p.id, date: d, site: p.irSitePrim || '',
+        shift: isWkd ? 'ir-weekend' : 'ir-call',
+        kind:  isWkd ? 'ir-weekend' : 'ir-call',
+        irGroup: g, ym
+      };
+      if(!tbRulesOk(p, tbCtx)) return 'conference rule (tumor board / clinic)';
+    }
+    // Call-day-site rule (direction 2) — if physician has an EXISTING day
+    // shift on any date in the span at the wrong site, block. This is THE
+    // rule the user reports is being ignored — it is now checked in single
+    // pass with no relaxation and with case-insensitive site comparison.
+    if(!callDayRulesOk(p, nlCtx)) return 'call-day site rule (day shift at wrong site)';
+    // Adjacency — HARD. Never back-to-back.
+    if(!skipAdjacency){
+      const adj = isWkd ? adjacencyReasonWeekend(p.id, date) : adjacencyReasonDaily(p.id, date);
+      if(adj) return adj;
+    }
+    return null;
+  }
+
+  // ─── SORTING ───────────────────────────────────────────────────────────
+  // Primary: FTE deficit (count / cap) — most behind gets picked first.
+  // Secondary: prefer physician who already has an IR procedure shift on this
+  //            date (they're already at work; call is a smaller imposition).
+  // Tertiary: lastname alphabetical for deterministic tie-breaking.
+  function sortDaily(pool, date){
+    return pool.slice().sort((a, b) => {
+      const ra = cntD[a.id] / (dailyCapFn(a) || 1);
+      const rb = cntD[b.id] / (dailyCapFn(b) || 1);
+      if(Math.abs(ra - rb) > 1e-6) return ra - rb;
+      const shA = _hasIRShiftOnDate(a.id, date) ? 0 : 1;
+      const shB = _hasIRShiftOnDate(b.id, date) ? 0 : 1;
+      if(shA !== shB) return shA - shB;
+      return (a.last||'').localeCompare(b.last||'');
+    });
+  }
+  function sortWeekend(pool){
+    return pool.slice().sort((a, b) => {
+      const ra = cntW[a.id] / (wkndCapFn(a) || 1);
+      const rb = cntW[b.id] / (wkndCapFn(b) || 1);
+      if(Math.abs(ra - rb) > 1e-6) return ra - rb;
+      return (a.last||'').localeCompare(b.last||'');
     });
   }
 
-  // irOnDate: checks S.irCalls + preview (including preview weekend span Fri-Mon)
-  function irOnDate(pid,date){
-    if(S.irCalls.find(ic=>ic.physId===pid&&ic.date===date)) return true;
-    if(S.irCalls.find(ic=>ic.physId===pid&&ic.callType==='weekend'&&date>=ic.date&&date<=addDays(ic.date,3))) return true;
-    if(preview.find(a=>a.physId===pid&&a.date===date)) return true;
-    if(preview.find(a=>a.physId===pid&&a.callType==='weekend'&&date>=a.date&&date<=addDays(a.date,3))) return true;
-    return false;
-  }
-
-  // Adjacency checks used only in pass 0 (daily) or passes 0-1 (weekend)
-  function previewAdjacentToDaily(pid,date){
-    const prev=addDays(date,-1),next=addDays(date,1);
-    return preview.some(a=>a.physId===pid&&(
-      (a.callType==='daily'&&(a.date===prev||a.date===next))||
-      (a.callType==='weekend'&&(
-        (date>=a.date&&date<=addDays(a.date,4))||
-        date===addDays(a.date,-1)
-      ))
-    ));
-  }
-
-  function previewConflictsWeekend(pid,fridayDate){
-    const thu=addDays(fridayDate,-1),mon=addDays(fridayDate,3),tue=addDays(fridayDate,4);
-    return preview.some(a=>a.physId===pid&&(
-      (a.callType==='daily'&&(a.date===thu||a.date===mon||a.date===tue))||
-      (a.callType==='weekend'&&a.date!==fridayDate&&
-        Math.abs(parseDateLocal(fridayDate).getTime()-parseDateLocal(a.date).getTime())/86400000<=7)
-    ));
-  }
-
-  let relaxedFills=0;
-
-  groups.forEach(g=>{
-    const gPhys=irPs.filter(p=>p.irGroup===g);
+  // ─── MAIN LOOP ─────────────────────────────────────────────────────────
+  groups.forEach(g => {
+    const gPhys = irPs.filter(p => p.irGroup === g);
     if(!gPhys.length) return;
 
-    // ── DAILY CALLS — Mon-Thu, holidays auto-blocked ─────────────────────
-    // Three passes with progressively relaxed back-to-back constraints.
-    // Dates are sorted most-constrained-first (fewest base-eligible physicians)
-    // to maximise coverage before adjacency conflicts cascade.
-    // Pass 0: full constraints   Pass 1: relax preview adj   Pass 2: relax all adj
-    if(typ==='daily'||typ==='both'){
-      const dailyDates=allCells
-        .filter(c=>c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date))
-        .map(c=>c.date);
+    // ── DAILY CALLS — Mon-Thu non-holiday dates ──
+    if(typ === 'daily' || typ === 'both'){
+      const dailyDates = allCells
+        .filter(c => c.dow >= 1 && c.dow <= 4 && !isHolidayBlackout(c.date))
+        .map(c => c.date)
+        .filter(d => !S.irCalls.find(ic => ic.date === d && ic.irGroup === g && ic.callType === 'daily'));
 
-      const baseElig={};
-      dailyDates.forEach(date=>{
-        baseElig[date]=gPhys.filter(p=>
-          !vacDays(p.id).has(date)&&!isSoldBackDate(p.id,date)&&
-          !isIRCallBlackout(p.id,date)&&
-          !_has2ndOr3rdShift(p.id,date)&&
-          // IR call site rule — gate on 'ir-call' allowedShifts so admins
-          // can allow procedure shifts at a site without allowing call
-          irCallSiteRuleOk(p, p.irSitePrim||'', date) &&
-          dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')&&
-          sequenceOk(p,date,date.slice(0,7),p.irSitePrim||'','')
-        ).length;
+      // Most-constrained-first ordering (excluding adjacency since that's
+      // dynamic based on assignment order).
+      const baseCount = {};
+      dailyDates.forEach(d => {
+        baseCount[d] = gPhys.filter(p => !whyBlocked(p, d, 'daily', g, true)).length;
       });
+      dailyDates.sort((a, b) => baseCount[a] - baseCount[b] || (a < b ? -1 : 1));
 
-      let remaining=dailyDates
-        .filter(d=>!S.irCalls.find(ic=>ic.date===d&&ic.irGroup===g&&ic.callType==='daily'))
-        .sort((a,b)=>baseElig[a]-baseElig[b]);
-
-      // Track rejection reasons for diagnostic breakdown on unfilled gaps
-      const dailyReasons={};
-
-      // Pass 0: full   Pass 1: relax back-to-back with existing S.irCalls
-      // Pass 2: waive all adjacency   Pass 3: waive FTE cap (last resort)
-      for(let pass=0;pass<4&&remaining.length>0;pass++){
-        const stillUnfilled=[];
-        for(const date of remaining){
-          if(preview.find(a=>a.date===date&&a.irGroup===g&&a.callType==='daily')) continue;
-          const adjPrev=addDays(date,-1),adjNext=addDays(date,1);
-          const reasons=(dailyReasons[date]=dailyReasons[date]||{});
-
-          const eligible=gPhys.filter(p=>{
-            const vd=vacDays(p.id);
-            if(vd.has(date)){ reasons[p.id]='vacation'; return false; }
-            if(isSoldBackDate(p.id,date)){ reasons[p.id]='sold-back'; return false; }
-            if(isIRCallBlackout(p.id,date)){ reasons[p.id]='blackout'; return false; }
-            if(!irCallSiteRuleOk(p, p.irSitePrim||'', date)){ reasons[p.id]='site rule blocks IR call'; return false; }
-            if(irOnDate(p.id,date)){ reasons[p.id]='already on IR this date'; return false; }
-            if(_has2ndOr3rdShift(p.id,date)){ reasons[p.id]='2nd/3rd DR shift'; return false; }
-            if(!dayConditionSiteOk(p,p.irSitePrim||'',date,'ir-call')){ reasons[p.id]='day condition'; return false; }
-            if(!sequenceOk(p,date,date.slice(0,7),p.irSitePrim||'','')){ reasons[p.id]='sequence rule'; return false; }
-            if(!natLangRulesOk({physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
-              reasons[p.id]='natural-language rule'; return false;
-            }
-            if(!tbRulesOk(p,{physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
-              reasons[p.id]='conference rule (tumor board / clinic)'; return false;
-            }
-            // Call-day site rule — requires existing day shift on this date
-            // to be at the rule's required site. Example: "IR call only when
-            // scheduled at North" blocks call when phys has a day shift at
-            // Riverview or any non-North site.
-            if(!callDayRulesOk(p,{physId:p.id,date,site:p.irSitePrim||'',shift:'ir-call',irGroup:g,kind:'ir-call'})){
-              reasons[p.id]='call-day site rule (must be scheduled at required site)'; return false;
-            }
-            // FTE cap — waived only on pass 3 (last-resort to avoid unfilled gap)
-            if(pass<3 && cntD[p.id] >= dailyCapFn(p)){ reasons[p.id]='FTE cap reached'; return false; }
-            if(pass<=1){
-              if(S.irCalls.some(ic=>ic.physId===p.id&&(
-                (ic.callType==='daily'&&(ic.date===adjPrev||ic.date===adjNext))||
-                (ic.callType==='weekend'&&(
-                  (date>=ic.date&&date<=addDays(ic.date,4))||
-                  date===addDays(ic.date,-1)
-                ))
-              ))){ reasons[p.id]='back-to-back call'; return false; }
-            }
-            if(pass===0){
-              if(previewAdjacentToDaily(p.id,date)){ reasons[p.id]='preview adjacent'; return false; }
-            }
-            delete reasons[p.id];
-            return true;
-          });
-
-          // Sort: on pass 3, prefer whoever has least cap overrun
-          let pool;
-          if(pass===3){
-            pool = eligible.slice().sort((a,b)=>{
-              const overrunA = Math.max(0, cntD[a.id] - dailyCapFn(a)+1) / (dailyCapFn(a)||1);
-              const overrunB = Math.max(0, cntD[b.id] - dailyCapFn(b)+1) / (dailyCapFn(b)||1);
-              if(Math.abs(overrunA-overrunB) > 1e-9) return overrunA - overrunB;
-              return cntD[a.id] - cntD[b.id];
-            });
-          } else {
-            // FTE deficit first, then prefer physician WITH existing proc shift
-            pool = _sortByFte(eligible,gPhys,cntD,dailyCapFn).sort((a,b)=>{
-              const ra=cntD[a.id]/(dailyCapFn(a)||1), rb=cntD[b.id]/(dailyCapFn(b)||1);
-              if(Math.abs(ra-rb)>0.01) return ra-rb;
-              return (_hasIRShiftOnDate(a.id,date)?0:1)-(_hasIRShiftOnDate(b.id,date)?0:1);
-            });
-          }
-
-          if(pool.length){
-            const p=pool[0];
-            const site='';
-            const needsProcShift=!_hasIRShiftOnDate(p.id,date);
-            const note=pass===0?'Auto'
-                     :pass===1?'Auto (back-to-back waived)'
-                     :pass===2?'Auto (all adj. waived)'
-                     :'Auto (FTE cap waived — over-assigned to avoid gap)';
-            preview.push({physId:p.id,date,callType:'daily',irGroup:g,site,notes:note,_pass:pass,needsProcShift});
-            cntD[p.id]++;
-            if(pass>0) relaxedFills++;
-          } else {
-            stillUnfilled.push(date);
-          }
+      for(const date of dailyDates){
+        const reasons = {};
+        const eligible = [];
+        for(const p of gPhys){
+          const r = whyBlocked(p, date, 'daily', g, false);
+          if(r){ reasons[p.id] = r; continue; }
+          eligible.push(p);
         }
-        remaining=stillUnfilled;
+        if(!eligible.length){
+          const breakdown = gPhys.map(p => `${p.last}=${reasons[p.id] || 'unknown'}`).join(', ');
+          gaps.push(`${date} ${g} [${breakdown}]`);
+          continue;
+        }
+        const picked   = sortDaily(eligible, date)[0];
+        const overFte  = cntD[picked.id] >= dailyCapFn(picked);
+        preview.push({
+          physId: picked.id, date, callType: 'daily', irGroup: g, site: '',
+          notes: overFte ? 'Auto (over FTE target — no other eligible physician)' : 'Auto',
+          needsProcShift: !_hasIRShiftOnDate(picked.id, date),
+          _overFte: overFte,
+        });
+        cntD[picked.id]++;
       }
-
-      // Diagnostic breakdown on truly unfilled daily gaps
-      remaining.forEach(date=>{
-        const reasons=dailyReasons[date]||{};
-        const breakdown=gPhys.map(p=>{
-          const r=reasons[p.id]||'unknown';
-          return `${p.last}=${r}`;
-        }).join(', ');
-        gaps.push(`${date} ${g} [${breakdown}]`);
-      });
     }
 
-    // ── WEEKEND CALLS — all Fridays ───────────────────────────────────────
-    // Pass 0: full   Pass 1: relax preview conflicts   Pass 2: relax all adj
-    // Pass 3: waive FTE cap so we don't leave weekends unfilled when everyone
-    //         is at-or-over their rounded Math.ceil(target) cap
-    // Weekends whose Fri→Mon span touches a holiday blackout are skipped entirely —
-    // the Holiday Auto-Assign tool handles those days.
-    if(typ==='weekend'||typ==='both'){
-      const excludedIRWknds = []; // holiday-skipped Fridays for diagnostic output
-      const wkndDates=allCells.filter(c=>c.dow===5).map(c=>c.date)
-        .filter(fri=>{
-          // Skip ONLY when every day of the Fri→Mon span is covered by a holiday
-          // definition. If even one day (e.g. Monday after a Fri-Sun holiday) is
-          // NOT a holiday, we still need an IR weekend call person — they cover
-          // the non-holiday portion while the holiday call person covers the
-          // defined holiday days. Holiday call takes precedence on its specific
-          // dates; the weekend call person fills the gap.
-          // Example: Holiday def = [7/3, 7/4, 7/5]. Span for Fri 7/3 = [7/3, 7/4,
-          // 7/5, 7/6]. Only 3 of 4 days are in the def, so Mon 7/6 needs weekend
-          // call coverage → DO NOT skip. Assign the IR weekend call person.
+    // ── WEEKEND CALLS — Fridays; skip all-holiday spans ──
+    if(typ === 'weekend' || typ === 'both'){
+      const excludedWknds = [];
+      const wkndDates = allCells.filter(c => c.dow === 5).map(c => c.date)
+        .filter(fri => {
+          // Skip ONLY when every day of the Fri→Mon span is a defined holiday.
+          // Mixed spans (some holiday + some non-holiday) still need an IR
+          // weekend call person to cover the non-holiday portion.
           const span = [fri, addDays(fri,1), addDays(fri,2), addDays(fri,3)];
           const allHoliday = span.every(d => isHolidayBlackout(d));
           if(allHoliday){
-            // Find the holiday def that matched for diagnostic output
             const matched = span[0];
-            const reason = _holidayReasonFor(matched);
-            excludedIRWknds.push({friday: fri, matchedDate: matched, reason, group: g, allHoliday: true});
+            const reason  = _holidayReasonFor(matched);
+            excludedWknds.push({ friday: fri, matchedDate: matched, reason, group: g, allHoliday: true });
             return false;
           }
           return true;
-        });
-      // Stash for diagnostic display
-      if(!S._lastIRAAExcludedHolidayWknds) S._lastIRAAExcludedHolidayWknds = [];
-      S._lastIRAAExcludedHolidayWknds.push(...excludedIRWknds);
+        })
+        .filter(fri => !S.irCalls.find(ic => ic.date === fri && ic.irGroup === g && ic.callType === 'weekend'));
+      S._lastIRAAExcludedHolidayWknds.push(...excludedWknds);
 
-      const baseEligW={};
-      wkndDates.forEach(fri=>{
-        const span=[fri,addDays(fri,1),addDays(fri,2),addDays(fri,3)];
-        baseEligW[fri]=gPhys.filter(p=>{
-          const vd=vacDays(p.id);
-          // Check vacation across full Fri→Mon span (not just Fri and Mon)
-          if(span.some(d=>vd.has(d))) return false;
-          // Check sold-back across full span
-          if(span.some(d=>isSoldBackDate(p.id,d))) return false;
-          return true;
-        }).length;
+      const baseCount = {};
+      wkndDates.forEach(fri => {
+        baseCount[fri] = gPhys.filter(p => !whyBlocked(p, fri, 'weekend', g, true)).length;
       });
+      wkndDates.sort((a, b) => baseCount[a] - baseCount[b] || (a < b ? -1 : 1));
 
-      let remaining=wkndDates
-        .filter(fri=>!S.irCalls.find(ic=>ic.date===fri&&ic.irGroup===g&&ic.callType==='weekend'))
-        .sort((a,b)=>baseEligW[a]-baseEligW[b]);
-
-      // Track rejection reasons for diagnostic output on gaps (which physician was blocked by what)
-      const wkndReasons = {};
-
-      for(let pass=0;pass<4&&remaining.length>0;pass++){
-        const stillUnfilled=[];
-        for(const friday of remaining){
-          if(preview.find(a=>a.date===friday&&a.irGroup===g&&a.callType==='weekend')) continue;
-          const mon=addDays(friday,3);
-          const span=[friday,addDays(friday,1),addDays(friday,2),mon];
-          const reasons = (wkndReasons[friday] = wkndReasons[friday] || {});
-
-          const eligible=gPhys.filter(p=>{
-            const vd=vacDays(p.id);
-            // Vacation on ANY day in the Fri→Mon span blocks the whole weekend
-            if(span.some(d=>vd.has(d))){ reasons[p.id]='vacation'; return false; }
-            // Sold-back on any day in span
-            if(span.some(d=>isSoldBackDate(p.id,d))){ reasons[p.id]='sold-back'; return false; }
-            // IR call blackout on any day in span
-            if(span.some(d=>isIRCallBlackout(p.id,d))){ reasons[p.id]='blackout'; return false; }
-            // Site rule — weekend call treated as 'ir-call' for rule purposes.
-            // Check ONCE on the Friday (not every span day) since the site is
-            // the physician's primary; blackouts are per-day above.
-            if(!irCallSiteRuleOk(p, p.irSitePrim||'', friday)){ reasons[p.id]='site rule blocks IR call'; return false; }
-            // 2nd or 3rd DR shift on any day in span
-            if(span.some(d=>_has2ndOr3rdShift(p.id,d))){ reasons[p.id]='2nd/3rd DR shift'; return false; }
-            if(!natLangRulesOk({physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})){
-              reasons[p.id]='natural-language rule'; return false;
-            }
-            // Conference rules — check every date in the Fri→Mon span so a
-            // tumor board on Saturday correctly excludes a phys with no-call-on-day.
-            if(span.some(d => !tbRulesOk(p,{physId:p.id,date:d,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'}))){
-              reasons[p.id]='conference rule (tumor board / clinic)'; return false;
-            }
-            // Call-day site rule — checks that the physician's existing day
-            // shifts on any day of the Fri→Mon span are at the required site.
-            // The rule itself iterates the span internally via ctx.kind.
-            if(!callDayRulesOk(p,{physId:p.id,date:friday,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'})){
-              reasons[p.id]='call-day site rule (must be scheduled at required site)'; return false;
-            }
-            // Hard FTE cap — waived only on final pass 3 (pass 3 lets us fill a weekend
-            // even when the chosen physician exceeds their rounded cap by 1 or more)
-            if(pass<3 && cntW[p.id] >= wkndCapFn(p)){ reasons[p.id]='FTE cap reached'; return false; }
-            if(pass===0){
-              if(_hasAdjacentIRCall(p.id,friday)){ reasons[p.id]='adjacent call'; return false; }
-              if(_hasIRCallNearWeekend(p.id,friday)){ reasons[p.id]='nearby weekend call'; return false; }
-              if(previewConflictsWeekend(p.id,friday)){ reasons[p.id]='preview conflict'; return false; }
-            } else if(pass===1){
-              if(_hasAdjacentIRCall(p.id,friday)){ reasons[p.id]='adjacent call'; return false; }
-              if(_hasIRCallNearWeekend(p.id,friday)){ reasons[p.id]='nearby weekend call'; return false; }
-            }
-            // pass 2 and 3: all adjacency waived
-            delete reasons[p.id]; // this physician passed
-            return true;
-          });
-
-          // Sort by FTE deficit. On pass 3 (cap waived), prefer whoever has the LEAST overrun.
-          let pool;
-          if(pass===3){
-            pool = eligible.slice().sort((a,b)=>{
-              const overrunA = Math.max(0, cntW[a.id] - wkndCapFn(a)+1) / (wkndCapFn(a)||1);
-              const overrunB = Math.max(0, cntW[b.id] - wkndCapFn(b)+1) / (wkndCapFn(b)||1);
-              if(Math.abs(overrunA-overrunB) > 1e-9) return overrunA - overrunB;
-              return cntW[a.id] - cntW[b.id];
-            });
-          } else {
-            pool = _sortByFte(eligible,gPhys,cntW,wkndCapFn);
-          }
-
-          if(pool.length){
-            const p=pool[0];
-            const site='';
-            const note=pass===0?'Auto'
-                     :pass===1?'Auto (preview adj. waived)'
-                     :pass===2?'Auto (all adj. waived)'
-                     :'Auto (FTE cap waived — over-assigned to avoid gap)';
-            preview.push({physId:p.id,date:friday,callType:'weekend',irGroup:g,site,notes:note,_pass:pass});
-            cntW[p.id]++;
-            if(pass>0) relaxedFills++;
-          } else {
-            stillUnfilled.push(friday);
-          }
+      for(const fri of wkndDates){
+        const reasons = {};
+        const eligible = [];
+        for(const p of gPhys){
+          const r = whyBlocked(p, fri, 'weekend', g, false);
+          if(r){ reasons[p.id] = r; continue; }
+          eligible.push(p);
         }
-        remaining=stillUnfilled;
+        if(!eligible.length){
+          const breakdown = gPhys.map(p => `${p.last}=${reasons[p.id] || 'unknown'}`).join(', ');
+          gaps.push(`Wknd ${fri} ${g} [${breakdown}]`);
+          continue;
+        }
+        const picked  = sortWeekend(eligible)[0];
+        const overFte = cntW[picked.id] >= wkndCapFn(picked);
+        preview.push({
+          physId: picked.id, date: fri, callType: 'weekend', irGroup: g, site: '',
+          notes: overFte ? 'Auto (over FTE target — no other eligible physician)' : 'Auto',
+          _overFte: overFte,
+        });
+        cntW[picked.id]++;
       }
-
-      // For any truly unfilled weekends, build a diagnostic breakdown so the user
-      // can see exactly what's blocking assignment (vacation, blackout, cap, etc).
-      remaining.forEach(fri=>{
-        const reasons = wkndReasons[fri] || {};
-        const breakdown = gPhys.map(p=>{
-          const r = reasons[p.id] || 'unknown';
-          return `${p.last}=${r}`;
-        }).join(', ');
-        gaps.push(`Wknd ${fri} ${g} [${breakdown}]`);
-      });
     }
   });
+
+  // ─── TAIL: keep the rest (render) intact ───────────────────────────────
 
   S.iraPreview=preview;
   const dailyPrev=preview.filter(a=>a.callType==='daily');
   const wkndPrev=preview.filter(a=>a.callType==='weekend');
-  const pass1fills=preview.filter(a=>a._pass===1).length;
-  const pass2fills=preview.filter(a=>a._pass===2).length;
-  const pass3fills=preview.filter(a=>a._pass===3).length;
+  // Under the new single-pass algorithm, adjacency is hard-enforced: nothing
+  // is ever back-to-back. The only "waiver" possible is FTE cap — when all
+  // eligible physicians are already at or over their target, the least-
+  // overrun one is picked anyway to avoid a gap.
+  const overFteFills = preview.filter(a=>a._overFte).length;
 
   let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} call assignments \u2014 ${gaps.length} gap(s) \u2014 ${label}<br>
     <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily \u00b7 ${wkndPrev.length} weekend`;
-  if(pass1fills>0) html+=` \u00b7 <span style="color:var(--amber,#d97706)">${pass1fills} back-to-back waived</span>`;
-  if(pass2fills>0) html+=` \u00b7 <span style="color:var(--red-t)">${pass2fills} all-adj waived</span>`;
-  if(pass3fills>0) html+=` \u00b7 <span style="color:var(--red-t);font-weight:700">${pass3fills} FTE cap waived</span>`;
+  if(overFteFills>0) html+=` \u00b7 <span style="color:var(--red-t);font-weight:700">${overFteFills} over FTE target</span>`;
   html+=`</span></div>`;
 
-  if(relaxedFills>0)
-    html+=`<div class="note nw" style="margin-bottom:8px">&#9888; ${relaxedFills} slot(s) could only be filled by waiving back-to-back rest rules (highlighted below). Review before applying.</div>`;
+  if(overFteFills>0)
+    html+=`<div class="note nw" style="margin-bottom:8px">&#9888; ${overFteFills} slot(s) assigned to a physician already at or over their FTE target \u2014 no other eligible physician was available. Back-to-back and rule violations were NOT waived (per hard-rule policy). Review before applying.</div>`;
 
   // Holiday-excluded weekends panel — IR weekends skipped only when EVERY day of
   // the Fri→Mon span is a defined holiday. Mixed spans (some holiday + some non-
@@ -19539,8 +19515,8 @@ function previewIRAA(){
       const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
       const gSites=S.sites.filter(s=>s.irGroup===a.irGroup||s.irGroup==='Both').map(s=>s.name.split(' ')[0]).join(', ');
       const coverLbl=a.callType==='daily'?`All ${a.irGroup} sites (${gSites})`:a.site;
-      const rowStyle=a._pass===2?'background:var(--red-bg,#fef2f2)':a._pass===1?'background:var(--amber-bg,#fffbeb)':'';
-      const passBadge=a._pass>0?`<span class="tag ta" style="font-size:9px;margin-left:4px">pass ${a._pass+1}</span>`:'';
+      const rowStyle=a._overFte?'background:var(--red-bg,#fef2f2)':'';
+      const passBadge=a._overFte?`<span class="tag tr" style="font-size:9px;margin-left:4px" title="Assigned over FTE target — no other eligible physician">over FTE</span>`:'';
       html+=`<tr style="${rowStyle}">
         <td>${pname(a.physId)}${passBadge}</td>
         <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
