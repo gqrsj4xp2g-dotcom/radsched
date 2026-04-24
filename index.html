@@ -17072,7 +17072,16 @@ function callDayRulesOk(p, ctx){
     for(const r of rules){
       if(!r || !r.requiredSite) continue;
       const ct = r.callType || 'any-call';
-      const matchesCall = (ct === 'any-call') || callsToday[ct];
+      // "any-call" scope means "this rule fires when the physician is on
+      // ANY of the tracked call types" — NOT "always fires". Without this
+      // distinction, an 'any-call → CHN' rule would block the physician
+      // from every site except CHN for EVERY day shift, even on days when
+      // the physician isn't on call at all. Prior to this fix, the legacy-
+      // rule migration (ir-call → any-call) created exactly this cascade:
+      // every migrated physician was effectively pinned to CHN every
+      // working day.
+      const isOnAnyCall = callsToday['ir-call'] || callsToday['ir-weekend'] || callsToday['weekend-call'];
+      const matchesCall = (ct === 'any-call') ? isOnAnyCall : !!callsToday[ct];
       if(!matchesCall) continue;
       if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
       // shiftKind filter: if rule is scoped to only dr-shift or only ir-shift,
