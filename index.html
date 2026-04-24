@@ -1168,15 +1168,16 @@ tbody tr:hover{background:var(--bg3)}
       <!-- CALL-DAY SITE RULES -->
       <div id="srt-callsite" class="ibox" style="display:none;margin-top:8px">
         <div class="note ni" style="font-size:11px;margin-bottom:10px">
-          When this physician is on call, force their day shift on the same date to a specific hospital. Auto-assign uses this to keep call coverage geographically consistent (e.g. if they take call, they read at the call site so they're physically present).
+          When this physician is on call, force their day shift on the same date to a specific hospital. Auto-assign uses this to keep call coverage geographically consistent (e.g. if they take call, they read at the call site so they're physically present).<br>
+          <strong style="color:var(--amber,#d97706)">⚠ Tip:</strong> Pick <strong>"Any call type"</strong> if you want the rule to cover BOTH daily AND weekend calls. "IR daily call" ONLY fires on Mon-Thu daily calls. "IR weekend call" ONLY fires on Fri-Mon of a weekend. Most admins want "Any call type".
         </div>
         <div class="g3">
           <div class="fg"><label>Call type</label>
             <select id="sr-cs-calltype">
-              <option value="ir-call">IR daily call</option>
-              <option value="ir-weekend">IR weekend call</option>
-              <option value="weekend-call">DR weekend call</option>
-              <option value="any-call">Any call type</option>
+              <option value="any-call" selected>Any call type (recommended)</option>
+              <option value="ir-call">IR daily call only</option>
+              <option value="ir-weekend">IR weekend call only</option>
+              <option value="weekend-call">DR weekend call only</option>
             </select>
           </div>
           <div class="fg"><label>Required day-shift site</label>
@@ -1184,10 +1185,24 @@ tbody tr:hover{background:var(--bg3)}
           </div>
           <div class="fg"><label>Apply to shift type</label>
             <select id="sr-cs-shift">
-              <option value="">Any day shift</option>
+              <option value="">Any day shift (DR or IR)</option>
               <option value="1st">1st only</option>
               <option value="Home">Home / Remote only</option>
             </select>
+          </div>
+        </div>
+        <div class="g3">
+          <div class="fg"><label>Apply to shift kind</label>
+            <select id="sr-cs-shiftkind">
+              <option value="">Any (DR or IR day shift)</option>
+              <option value="dr-shift">DR day shift only</option>
+              <option value="ir-shift">IR day shift only</option>
+            </select>
+          </div>
+          <div class="fg" style="grid-column:span 2">
+            <span class="note nw" style="font-size:10.5px;padding:6px;display:block">
+              "Apply to shift kind" filters whether this rule gates DR shifts, IR shifts, or both. Pick <strong>"IR day shift only"</strong> to make the rule participate exclusively in the IR Shift auto-assign pool (e.g. "when on call, my IR shift must be at CHN, but DR shifts can be placed anywhere").
+            </span>
           </div>
         </div>
         <div class="fg"><label>Notes</label>
@@ -16709,6 +16724,38 @@ function _conferenceDatesForPhys(physId, startISO, endISO, eventId){
   return out;
 }
 
+/**
+ * _conferenceDatesForEvent — return the set of occurrence dates for a SPECIFIC
+ * event in [startISO, endISO], ignoring whether the physician is listed as a
+ * participant. Used by explicit per-physician tbRules: when an admin
+ * configures "no IR shift on Vein Clinic day for Dr. X", the admin is
+ * asserting Dr. X is affected regardless of the clinic's allowedPhysIds list
+ * (which exists for scheduling the clinic itself, not for rule scoping).
+ *
+ * Previously tbRulesOk only used _conferenceDatesForPhys, which REQUIRES the
+ * physician be in allowedPhysIds — so rules tied to a conference the
+ * physician doesn't participate in silently returned zero dates and the rule
+ * never fired. Rotation gating still applies: if the event has rotation
+ * enabled and a stored assignment doesn't include the physician, the day
+ * won't match. Events with no stored rotation fall through to all
+ * occurrences (same fail-safe semantics as the sibling helper).
+ */
+function _conferenceDatesForEvent(physId, startISO, endISO, eventId){
+  const out = new Set();
+  if(eventId == null) return out;
+  const ev = _eventById(eventId);
+  if(!ev) return out;
+  const occs = _eventOccurrencesInRange(ev, startISO, endISO);
+  for(const d of occs){
+    if(ev.rotation && ev.rotation.enabled){
+      const ids = _rotationPhysIdsFor(ev, d);
+      if(ids.length && !ids.includes(physId)) continue;
+    }
+    out.add(d);
+  }
+  return out;
+}
+
 // Add/subtract days from an ISO date, returning ISO. Wraps the existing
 // addDays helper if available; otherwise computes locally.
 function _isoShift(iso, deltaDays){
@@ -16752,7 +16799,17 @@ function tbRulesOk(p, ctx, opts){
     // Occurrence lookup window: widest possible span covering the rule.
     const startISO = _isoShift(ctx.date, -nMax);
     const endISO   = _isoShift(ctx.date,  nMax);
-    const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
+    // For rules scoped to a SPECIFIC event, use the event-based helper so the
+    // rule fires regardless of whether the physician is in allowedPhysIds.
+    // An admin configuring "no IR shift on Vein Clinic day for Dr. X" is
+    // asserting the rule applies to Dr. X — the clinic's allowedPhysIds is
+    // for scheduling the clinic itself, not for scoping per-physician rules.
+    // For rules scoped to "any conference" (eventId null), participant gating
+    // still applies — otherwise the rule would fire on every conference in
+    // the system, which is never what an admin means.
+    const occDates = (r.eventId != null)
+      ? _conferenceDatesForEvent(p.id, startISO, endISO, r.eventId)
+      : _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
     if(!occDates.size) continue;
 
     if(r.action === 'no-call-on-day'){
@@ -16822,7 +16879,11 @@ function _conferenceShiftPreferenceFor(p, ctx){
     const nMax = (r.nMax != null) ? Math.max(nMin, +r.nMax) : nMin;
     const startISO = _isoShift(ctx.date, -nMax);
     const endISO   = _isoShift(ctx.date,  nMax);
-    const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
+    // Use event-based lookup for explicit per-event rules; participant gating
+    // only applies to "any conference" scope. See tbRulesOk for rationale.
+    const occDates = (r.eventId != null)
+      ? _conferenceDatesForEvent(p.id, startISO, endISO, r.eventId)
+      : _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
     for(const occ of occDates){
       for(let k = Math.max(0, nMin); k <= Math.max(0, nMax); k++){
         const target = r.action === 'schedule-shift-prior'
@@ -16897,6 +16958,9 @@ function callDayRulesOk(p, ctx){
       const matchesCall = (ct === 'any-call') || callsToday[ct];
       if(!matchesCall) continue;
       if(r.shift && ctx.shift && ctx.shift !== r.shift) continue;
+      // shiftKind filter: if rule is scoped to only dr-shift or only ir-shift,
+      // skip candidates of the other kind. Default (empty) applies to both.
+      if(r.shiftKind && r.shiftKind !== ctx.kind) continue;
       if(_ns(ctx.site) !== _ns(r.requiredSite)) return false;
     }
     return true;
@@ -16924,21 +16988,28 @@ function callDayRulesOk(p, ctx){
         : [date];
       // Does ANY day in the span include an existing shift that conflicts
       // with the required site? If the rule's shift filter is set, only
-      // check shifts of that type.
+      // check shifts of that type. If shiftKind is set (dr-shift only or
+      // ir-shift only), only collect shifts of that kind — a rule scoped to
+      // "IR day shift only" should ignore DR shifts when checking existing
+      // placements, and vice versa.
       for(const d of datesToCheck){
         const existingShifts = [];
-        (S.irShifts||[]).forEach(s => {
-          if(s.physId !== p.id || s.date !== d) return;
-          if(s.shift === 'Home') return;
-          if(r.shift && s.shift !== r.shift) return;
-          existingShifts.push(s);
-        });
-        (S.drShifts||[]).forEach(s => {
-          if(s.physId !== p.id || s.date !== d) return;
-          if(s.shift === 'Home') return;
-          if(r.shift && s.shift !== r.shift) return;
-          existingShifts.push(s);
-        });
+        if(r.shiftKind !== 'dr-shift'){
+          (S.irShifts||[]).forEach(s => {
+            if(s.physId !== p.id || s.date !== d) return;
+            if(s.shift === 'Home') return;
+            if(r.shift && s.shift !== r.shift) return;
+            existingShifts.push(s);
+          });
+        }
+        if(r.shiftKind !== 'ir-shift'){
+          (S.drShifts||[]).forEach(s => {
+            if(s.physId !== p.id || s.date !== d) return;
+            if(s.shift === 'Home') return;
+            if(r.shift && s.shift !== r.shift) return;
+            existingShifts.push(s);
+          });
+        }
         // If the physician has a shift on this date and NONE of them is at
         // the required site, the rule blocks. If they have no shift, the
         // rule is silent for this date.
@@ -17170,16 +17241,19 @@ function addCallSiteRule(){
     return;
   }
   const shift = document.getElementById('sr-cs-shift')?.value || '';
+  const shiftKind = document.getElementById('sr-cs-shiftkind')?.value || '';
   const notes = (document.getElementById('sr-cs-notes')?.value || '').trim();
   if(!Array.isArray(p.callDayRules)) p.callDayRules = [];
   const existing = p.callDayRules.find(r =>
     r.callType === callType &&
     r.requiredSite === requiredSite &&
-    (r.shift||'') === (shift||'')
+    (r.shift||'') === (shift||'') &&
+    (r.shiftKind||'') === (shiftKind||'')
   );
   if(existing){ alert('That call-day site rule already exists for this physician.'); return; }
   const rule = {callType, requiredSite, notes};
   if(shift) rule.shift = shift;
+  if(shiftKind) rule.shiftKind = shiftKind;
   p.callDayRules.push(rule);
   const notesEl = document.getElementById('sr-cs-notes'); if(notesEl) notesEl.value = '';
   triggerSave();
@@ -17233,7 +17307,10 @@ function _describeCallSiteRule(r){
     'ir-call':'IR call', 'ir-weekend':'IR weekend call',
     'weekend-call':'DR weekend call', 'any-call':'Any call'
   }[r.callType] || r.callType;
-  return `📞 If on <strong>${ctLabel}</strong>, day shift must be at <strong>${_tbEsc(r.requiredSite||'?')}</strong>${r.shift?` (${r.shift})`:''}`;
+  const kindLabel = r.shiftKind === 'dr-shift' ? 'DR day shift'
+                  : r.shiftKind === 'ir-shift' ? 'IR day shift'
+                  : 'day shift';
+  return `📞 If on <strong>${ctLabel}</strong>, ${kindLabel} must be at <strong>${_tbEsc(r.requiredSite||'?')}</strong>${r.shift?` (${r.shift})`:''}`;
 }
 
 /**
