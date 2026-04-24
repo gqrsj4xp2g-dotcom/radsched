@@ -8764,19 +8764,37 @@ function _conferenceBlocksSlot(physId, date, site){
   try {
     const _ns = s => (s||'').toString().trim().toLowerCase();
     const targetSite = _ns(site);
+    // Slot-agnostic legacy path (used by a small number of call-side callers).
+    // For call candidates the semantics are "participating → can't take call";
+    // that's intentional and remains strict. Shift-side callers always pass
+    // a site, so this legacy branch isn't what IR Shift AA hits.
     if(!site){
       const parts = _conferenceDatesForPhys(physId, date, date, null);
       return !!(parts && parts.has(date));
     }
-    // Find this physician so we can check their must-be-at-site rules.
+    // Site-aware semantics (IR Shift AA path):
+    //
+    // Conference participation is INFORMATIONAL by default — a physician who
+    // attends a short tumor board in the morning can still work their IR
+    // shift the rest of the day. Blocking would force admins to reorganize
+    // their entire schedule every time someone joins a tumor board.
+    //
+    // Shifts are blocked ONLY when an EXPLICIT rule says so:
+    //   • no-shift-on-day rule → block every site on that event's date.
+    //   • must-be-at-site-on-day rule → block every site EXCEPT the required
+    //     one (the required site is ALLOWED).
+    //
+    // Participation with no such rule → allow the shift everywhere.
     const phys = (S.physicians||[]).find(p => p.id === physId);
-    const mbRules = phys && Array.isArray(phys.tbRules)
-      ? phys.tbRules.filter(r => r && r.action === 'must-be-at-site-on-day')
-      : [];
+    const tbRules = phys && Array.isArray(phys.tbRules) ? phys.tbRules : [];
+    if(!tbRules.length) return false; // no rules means no conference-based blocking
+
+    // Collect the events this physician is attending today (with rotation
+    // gating respected). We need the event IDs to scope rules properly.
+    const attendingEventIds = new Set();
     const candidates = [];
     (S.tumorBoards||[]).forEach(tb => candidates.push(tb));
     (S.clinics||[]).forEach(cl => candidates.push(cl));
-    let attendingAnywhere = false;
     for(const ev of candidates){
       if(!(ev.allowedPhysIds||[]).includes(physId)) continue;
       const occs = _eventOccurrencesInRange(ev, date, date);
@@ -8785,28 +8803,49 @@ function _conferenceBlocksSlot(physId, date, site){
         const ids = _rotationPhysIdsFor(ev, date);
         if(ids.length && !ids.includes(physId)) continue;
       }
-      attendingAnywhere = true;
-      // Path 1: event has a `sites` list configured AND it includes the slot
-      // site. Same-hospital collocation → allow.
-      const evSites = ev.sites || [];
-      if(evSites.some(s => _ns(s) === targetSite)) return false;
-      // Path 2: physician has a must-be-at-site-on-day rule for THIS event
-      // pointing at the current slot's site. The rule is the admin's explicit
-      // directive for where the physician should be when attending — trust it.
-      // This covers the case where the event itself has no `sites`
-      // configured but the admin has set up a rule to pin the physician.
-      for(const r of mbRules){
-        if(r.eventId != null && r.eventId !== ev.id) continue; // rule scoped to different event
-        if(_ns(r.requiredSite) === targetSite){
-          // Optional shift filter on the rule — respect it
-          if(r.shift && r.shift !== '1st') continue;
-          return false; // explicit rule says "be at targetSite" → allow
-        }
+      attendingEventIds.add(ev.id);
+    }
+    if(!attendingEventIds.size) return false; // not attending anything → allow
+
+    // Walk the physician's rules. Only rules scoped to an event the phys is
+    // actively attending (or rule with eventId=null = any event) are active.
+    let mustBeAtSomeSite = null; // requiredSite from any matching must-be rule
+    let blockedByNoShift  = false;
+    for(const r of tbRules){
+      if(!r || !r.action) continue;
+      // Rule's shift filter — if set and doesn't match 1st, ignore for shift
+      // assignment purposes. Our candidate is always a 1st-shift slot.
+      if(r.shift && r.shift !== '1st') continue;
+      // Rule scope: if eventId is set, only fires for that event; if null,
+      // any attending event triggers it.
+      const scopeMatches = (r.eventId == null) || attendingEventIds.has(r.eventId);
+      if(!scopeMatches) continue;
+
+      if(r.action === 'no-shift-on-day'){
+        blockedByNoShift = true;
+        // Don't break — a must-be rule might override for a specific site,
+        // though typically an admin wouldn't configure both.
+      } else if(r.action === 'must-be-at-site-on-day' && r.requiredSite){
+        mustBeAtSomeSite = _ns(r.requiredSite);
       }
     }
-    // Path 3: physician is attending some conference(s), but neither the
-    // event config nor any must-be-at-site rule ties them to this site → block.
-    return attendingAnywhere;
+
+    // Decide.
+    if(mustBeAtSomeSite){
+      // Must-be rule wins: allow only the required site.
+      return targetSite !== mustBeAtSomeSite;
+    }
+    if(blockedByNoShift){
+      // No-shift rule: block everywhere.
+      return true;
+    }
+    // Also honor event's own `sites` list as an ALLOW-list for sites it
+    // explicitly names. If the event has a configured sites list, shifts at
+    // those sites are always fine (the physician is there anyway). This
+    // keeps the earlier clinic-at-same-site behavior as a non-blocking
+    // convenience, without ever blocking shifts based purely on attendance.
+    // No explicit rule → allow.
+    return false;
   } catch(_){ return false; }
 }
 function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,months,ANC_RATE,slot){
