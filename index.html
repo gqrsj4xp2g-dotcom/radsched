@@ -8514,7 +8514,35 @@ function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
   r.sort(function(a,b){return a.date>b.date?1:-1;});
   return r;
 }
-function _irsaBuildCallMap(grp,monthsOrYm,allCalls){var map={},ci,ic,mi,ms=Array.isArray(monthsOrYm)?monthsOrYm:[monthsOrYm];for(ci=0;ci<allCalls.length;ci++){ic=allCalls[ci];if(ic.callType!=='daily'||ic.irGroup!==grp)continue;for(mi=0;mi<ms.length;mi++){if(ic.date.startsWith(ms[mi])){if(!map[ic.date])map[ic.date]=ic.physId;break;}}}return map;}
+// _irsaBuildCallMap — maps each date the physician is on IR call (daily OR
+// weekend) to their physId, for the given group and months. Previously only
+// DAILY calls were included, which meant IR Shift AA had no idea a physician
+// was on weekend call. Consequences:
+//   • The on-call preference path ("put the call phys at a slot they can
+//     work from") never fired for weekend-call physicians, so their Fri
+//     and Mon day shifts got assigned like any other physician's — often
+//     at the wrong site (Riverview instead of CHN for Greene, etc.).
+//   • The callDays[] count driving quotas and fairness was understated,
+//     since weekend-call physicians weren't counted as "on call" days.
+// Weekend calls expand to their Fri→Mon span (4 consecutive days).
+function _irsaBuildCallMap(grp, monthsOrYm, allCalls){
+  const map = {};
+  const ms = Array.isArray(monthsOrYm) ? monthsOrYm : [monthsOrYm];
+  const inMonths = iso => ms.some(m => iso.startsWith(m));
+  for(const ic of allCalls){
+    if(ic.irGroup !== grp) continue;
+    if(ic.callType === 'daily'){
+      if(inMonths(ic.date) && !map[ic.date]) map[ic.date] = ic.physId;
+    } else if(ic.callType === 'weekend'){
+      // Fri, Sat, Sun, Mon
+      for(let k = 0; k < 4; k++){
+        const d = addDays(ic.date, k);
+        if(inMonths(d) && !map[d]) map[d] = ic.physId;
+      }
+    }
+  }
+  return map;
+}
 function _irsaEffQ(p,rawQ,callDays,ym){var bq=rawQ[p.id],base;base=(bq!=null&&bq>0)?bq:Math.max(Math.round(irShiftTargetMonth(p,ym)),1);return Math.max(base,callDays[p.id]||0);}
 function _irsaBlocked(p,date,assigned){
   var vd=vacDays(p.id),k;
@@ -8758,14 +8786,22 @@ function previewIRShiftAA(){
           pool=allP.filter(function(p){
             // Must have IR FTE, be a registered cross-group fill-in for THIS
             // site, and not already be blocked (vacation / already-assigned
-            // somewhere today / holiday call etc.) Sequence rules are
-            // honored — a cross-group rescue shouldn't violate rest rules.
+            // somewhere today / holiday call etc.) ALL physician rules are
+            // honored — a cross-group rescue must not silently violate an
+            // admin-configured rule. Previously this pass skipped
+            // callDayRulesOk, tbRulesOk, and natLangRulesOk entirely, which
+            // meant cross-group rescue could place a phys on weekend call at
+            // Riverview even when their rule required CHN.
             if(!(p.irFte>0))return false;
             if(p.irGroup===grp)return false;                         // already considered in main pool
             if(xFillins.indexOf(p.id)<0)return false;                // not a registered fill-in here
             if(_irsaBlocked(p,_s.date,assigned))return false;
+            var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,ym:_mo};
             if(!dayConditionSiteOk(p,_s.site,_s.date,'ir-shift'))return false;
             if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||''))return false;
+            if(!callDayRulesOk(p,_ictx))return false;
+            if(!tbRulesOk(p,_ictx))return false;
+            if(!natLangRulesOk(_ictx))return false;
             return true;
           });
         }
@@ -16702,9 +16738,20 @@ function callDayRulesOk(p, ctx){
       'ir-call': false, 'ir-weekend': false, 'weekend-call': false
     };
     (S.irCalls||[]).forEach(c => {
-      if(c.physId !== p.id || c.date !== date) return;
-      if(c.callType === 'weekend') callsToday['ir-weekend'] = true;
-      else callsToday['ir-call'] = true;
+      if(c.physId !== p.id) return;
+      if(c.callType === 'weekend'){
+        // Weekend call covers Fri → Mon (4 consecutive days). Previously
+        // this function only matched c.date === date, which meant a
+        // physician on weekend call Fri 6/5 → Mon 6/8 appeared "on call"
+        // only on 6/5 for rule-checking. Their Monday day shift wasn't
+        // gated against the rule, letting it be placed at Riverview
+        // even when the physician had an "on weekend call → CHN" rule.
+        if(date >= c.date && date <= addDays(c.date, 3)){
+          callsToday['ir-weekend'] = true;
+        }
+      } else {
+        if(c.date === date) callsToday['ir-call'] = true;
+      }
     });
     (S.weekendCalls||[]).forEach(w => {
       if(w.physId !== p.id) return;
@@ -17538,8 +17585,27 @@ function _gatherManualRuleViolations(p, ctx){
   // Natural-language if/then rules
   if(!natLangRulesOk(ctx)) out.push(`natural-language rule blocks this assignment`);
 
-  // Conference (tumor board / clinic) rules
+  // Conference (tumor board / clinic) rules — explicit per-physician rules
   if(!tbRulesOk(p, ctx)) out.push(`conference rule (tumor board / clinic) blocks this assignment`);
+
+  // Implicit participation block — if this is a call candidate and the
+  // physician is an assigned participant in any tumor board / clinic on
+  // the candidate date, flag. Admins can still "assign anyway" via confirm
+  // if needed, but the violation is surfaced. Call-only because on shift
+  // days the conflict is usually with sub-speciality arrangements, not
+  // the fact of participation itself.
+  if(ctx.kind === 'ir-call' || ctx.kind === 'ir-weekend' || ctx.kind === 'dr-weekend'){
+    const span = ctx.kind === 'ir-call'
+      ? [ctx.date]
+      : [ctx.date, addDays(ctx.date,1), addDays(ctx.date,2), addDays(ctx.date,3)];
+    for(const d of span){
+      const parts = _conferenceDatesForPhys(p.id, d, d, null);
+      if(parts && parts.has(d)){
+        out.push(`participating in tumor board / clinic on ${d}`);
+        break;
+      }
+    }
+  }
 
   // Call-day site rule — only meaningful when candidate is a day shift
   if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
@@ -19320,7 +19386,7 @@ function previewIRAA(){
       irGroup: g, ym
     };
     if(!natLangRulesOk(nlCtx)) return 'natural-language rule';
-    // Conference rule — check each day of span
+    // Conference rule — check each day of span for configured tbRules.
     for(const d of span){
       const tbCtx = {
         physId: p.id, date: d, site: p.irSitePrim || '',
@@ -19330,10 +19396,21 @@ function previewIRAA(){
       };
       if(!tbRulesOk(p, tbCtx)) return 'conference rule (tumor board / clinic)';
     }
+    // Implicit tumor-board / clinic participation — block call on any day
+    // the physician is an assigned participant of a tumor board or clinic
+    // (via allowedPhysIds + rotation gating if enabled). A physician at a
+    // conference can't simultaneously be fielding IR call; admins shouldn't
+    // have to configure a per-physician rule for the obvious case. If the
+    // admin WANTS the physician to take call anyway on a conference day,
+    // they can still do so manually via the call list.
+    for(const d of span){
+      const participantDates = _conferenceDatesForPhys(p.id, d, d, null);
+      if(participantDates && participantDates.has(d)){
+        return 'participating in tumor board / clinic that day';
+      }
+    }
     // Call-day-site rule (direction 2) — if physician has an EXISTING day
-    // shift on any date in the span at the wrong site, block. This is THE
-    // rule the user reports is being ignored — it is now checked in single
-    // pass with no relaxation and with case-insensitive site comparison.
+    // shift on any date in the span at the wrong site, block.
     if(!callDayRulesOk(p, nlCtx)) return 'call-day site rule (day shift at wrong site)';
     // Adjacency — HARD. Never back-to-back.
     if(!skipAdjacency){
@@ -20497,6 +20574,13 @@ function previewIRRebalance(){
           if(!natLangRulesOk(_ctx)) return false;
           if(!tbRulesOk(p, _ctx)) return false;
           if(!callDayRulesOk(p, _ctx)) return false;
+          // Implicit tumor board / clinic participation block — mirrors
+          // previewIRAA. A physician in the allowedPhysIds of a conference
+          // occurring on `date` can't take call that day.
+          {
+            const _parts = _conferenceDatesForPhys(p.id, date, date, null);
+            if(_parts && _parts.has(date)) return false;
+          }
           return true;
         });
 
@@ -20609,6 +20693,12 @@ function previewIRRebalance(){
           if(!natLangRulesOk(_ctx)) return false;
           if(span.some(d => !tbRulesOk(p, {physId:p.id,date:d,site:p.irSitePrim||'',shift:'ir-weekend',irGroup:g,kind:'ir-weekend'}))) return false;
           if(!callDayRulesOk(p, _ctx)) return false;
+          // Implicit tumor board / clinic participation — block if physician
+          // is an assigned participant on ANY day of the Fri→Mon span.
+          if(span.some(d => {
+            const _parts = _conferenceDatesForPhys(p.id, d, d, null);
+            return _parts && _parts.has(d);
+          })) return false;
           return true;
         });
 
