@@ -2854,6 +2854,35 @@ Once set, ask me anything about your schedule!</div>
 </main>
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 /* ═══════════════════════════════════════════════════
+   GLOBAL ERROR HANDLER — installed first so it catches ANY uncaught
+   error in subsequent code, including button onclick throws that
+   browsers normally silently swallow. Without this, a typo or
+   reference error inside a button handler leaves the button looking
+   "dead" (it ran but threw, and the error vanished into devtools).
+═══════════════════════════════════════════════════ */
+window.addEventListener('error', function(ev){
+  try {
+    const msg = (ev.error && ev.error.message) || ev.message || 'Unknown error';
+    const stk = (ev.error && ev.error.stack) ? ev.error.stack.split('\n').slice(0,4).join('\n') : '';
+    const src = ev.filename ? `\n(at ${ev.filename}:${ev.lineno||'?'}:${ev.colno||'?'})` : '';
+    console.error('[RS-GlobalError]', ev.error || ev.message, stk);
+    // Only alert for errors from our own inline script (not extensions, ad blockers, etc.)
+    if(!ev.filename || ev.filename.includes(location.pathname) || ev.filename === ''){
+      alert('⚠ RadScheduler error:\n' + msg + src + (stk ? '\n\n' + stk : ''));
+    }
+  } catch(_e){}
+});
+// Unhandled Promise rejection — async functions swallow errors otherwise.
+window.addEventListener('unhandledrejection', function(ev){
+  try {
+    const reason = ev.reason;
+    const msg = (reason && reason.message) || String(reason);
+    const stk = (reason && reason.stack) ? reason.stack.split('\n').slice(0,4).join('\n') : '';
+    console.error('[RS-UnhandledRejection]', reason);
+    alert('⚠ RadScheduler async error:\n' + msg + (stk ? '\n\n' + stk : ''));
+  } catch(_e){}
+});
+/* ═══════════════════════════════════════════════════
    AUTH STATE
 ═══════════════════════════════════════════════════ */
 
@@ -8581,6 +8610,16 @@ function _irsaBlocked(p,date,assigned){
       if(date===fri || date===addDays(fri,1) || date===addDays(fri,2) || date===addDays(fri,3)) return true;
     }
   }
+  // Implicit tumor board / clinic participation block — if this physician
+  // is an assigned participant of any conference on this date, they're
+  // committed and can't take a day shift. Admins previously had to
+  // configure a per-physician tbRule with action 'no-shift-on-day' to
+  // achieve this; the sensible default is that conference participation
+  // already implies unavailability. Rotation gating honored by the helper.
+  try {
+    var _parts = _conferenceDatesForPhys(p.id, date, date, null);
+    if(_parts && _parts.has(date)) return true;
+  } catch(_){}
   return false;
 }
 function _irsaScore(p,site,cnt,ancCnt,rawQ,callDays,months,ANC_RATE,slot){
@@ -22437,6 +22476,41 @@ function applyPickImport(){
   triggerSave();
   _xlPickData=[];
 }
+
+/* ═══════════════════════════════════════════════════
+   DIAGNOSTIC WRAPPERS — install AFTER every function has been defined.
+   These wrap high-value button handlers so runtime errors become visible
+   alerts instead of silently dying (which makes a button look "dead").
+   The pattern: save original reference, replace with a wrapper that
+   runs the original inside try/catch and surfaces the error via alert.
+   Any handler referenced from inline onclick= HTML needs to be wrapped
+   on the window/global; local-only functions already have the global
+   error listener as backstop.
+═══════════════════════════════════════════════════ */
+(function _installDiagnosticWrappers(){
+  const TARGETS = [
+    'previewIRShiftAA', 'applyIRShiftAA',
+    'previewIRAA',      'applyIRAA',
+    'previewIRRebalance','applyIRRebalance',
+    'previewAA',        'applyAA',
+    'previewWkndCalls', 'applyWkndCalls',
+    'previewAssignHolidays','applyAssignHolidays',
+  ];
+  TARGETS.forEach(function(name){
+    const orig = window[name];
+    if(typeof orig !== 'function') return; // not every build has every function
+    window[name] = function(){
+      try {
+        return orig.apply(this, arguments);
+      } catch(err){
+        const msg  = (err && err.message) || String(err);
+        const stk  = (err && err.stack)   ? err.stack.split('\n').slice(0,6).join('\n') : '';
+        console.error('[RS-AA]', name, err);
+        alert('⚠ ' + name + ' threw an error:\n\n' + msg + (stk ? '\n\n' + stk : ''));
+      }
+    };
+  });
+})();
 
 </script>
 
