@@ -8638,14 +8638,41 @@ function previewIRShiftAA(){
       slot=slots[si];var slotMo=slot.date.slice(0,7);
       cPid=callMap[slot.date];
       if(cPid){cP=null;for(pi=0;pi<phys.length;pi++){if(phys[pi].id===cPid){cP=phys[pi];break;}}
-        if(cP&&!_irsaBlocked(cP,slot.date,assigned)&&_irsaEligibleForSlot(cP,slot)){
-          var cpCounts=_irsaCountsForQuota(cP,slot);
-          assigned.push({physId:cP.id,date:slot.date,site:slot.site,notes:cpCounts?'Auto (on-call)':'Auto (on-call fill-in)'});
-          if(cpCounts){cnt[cP.id]++;if(cP.anchorSite&&cP.anchorSite===slot.site)anc[cP.id]++;}
-          callF++;totalA++;continue;
-        }}
+        // On-call preference path: when the on-call physician is available
+        // and eligible for this slot, place them here so they're physically
+        // at a hospital that works with their call coverage.
+        //
+        // Deliberately does NOT enforce callDayRulesOk here. The admin's
+        // preferred precedence is:
+        //   • IR Shift AA places physicians at anchor / FTE-fair sites.
+        //   • IR Call AA respects those placements (callDayRulesOk dir-2
+        //     skips candidates whose day shift isn't at the required site).
+        // If shift AA enforced the rule, it would reroute the shift to CHN
+        // instead of leaving someone else to take the call — the opposite
+        // of what the admin wants. Same rationale for the main pool below.
+        if(cP && !_irsaBlocked(cP,slot.date,assigned) && _irsaEligibleForSlot(cP,slot)){
+          var _cpCtx={physId:cP.id,date:slot.date,site:slot.site,shift:'1st',kind:'ir-shift'};
+          var _cpPassesRules = irSiteRuleOk(cP,slot.site,slot.date)
+                            && dayConditionSiteOk(cP,slot.site,slot.date,'ir-shift')
+                            && sequenceOk(cP,slot.date,slotMo,slot.site,slot.slotLabel||'')
+                            && tbRulesOk(cP,_cpCtx)
+                            && natLangRulesOk(_cpCtx);
+          if(_cpPassesRules){
+            var cpCounts=_irsaCountsForQuota(cP,slot);
+            assigned.push({physId:cP.id,date:slot.date,site:slot.site,notes:cpCounts?'Auto (on-call)':'Auto (on-call fill-in)'});
+            if(cpCounts){cnt[cP.id]++;if(cP.anchorSite&&cP.anchorSite===slot.site)anc[cP.id]++;}
+            callF++;totalA++;continue;
+          }
+          // Rules block: fall through to normal pool assignment below.
+        }
+      }
       var _r=rawQ,_cd=callDays,_s=slot,_cnt=cnt,_anc=anc,_mo=slotMo;
-      /* Pass 1: eligible + all rules + within quota */
+      /* Pass 1: eligible + all rules + within quota.
+         NOTE: callDayRulesOk intentionally NOT checked here. See rationale
+         on the on-call preference block above — shift AA should not reroute
+         shifts to satisfy call-day-site rules. IR Call AA enforces the rule
+         in the opposite direction (skip call candidates whose day shift is
+         at the wrong site) which is what the admin wants. */
       pool=phys.filter(function(p){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
@@ -8653,15 +8680,23 @@ function previewIRShiftAA(){
           &&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')
           &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
           &&tbRulesOk(p,_ictx)
-          &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
       /* Pass 2: relax site rules */
-      if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
+      if(!pool.length)pool=phys.filter(function(p){
+        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
+          &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
+      });
       /* Pass 3: relax sequence */
-      if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)&&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));});
+      if(!pool.length)pool=phys.filter(function(p){
+        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
+          &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
+      });
       /* Pass 4: over-quota fill */
-      if(!pool.length)pool=phys.filter(function(p){return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned);});
+      if(!pool.length)pool=phys.filter(function(p){
+        return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned);
+      });
       /* Pass 5: cross-group fill-in fallback.
          Only reached when the same-group pool is completely exhausted across
          all prior passes (nobody in this group is eligible + available). We
@@ -17083,16 +17118,21 @@ function renderDRCal(){
       const nonAnc=p?.anchorSite&&s.site!==p.anchorSite?' eanc':'';
       const siteSh=(s.site||'').split(' ')[0];
       const subLbl=s.sub?s.sub.slice(0,6):'';
+      // Admin-configured slot label (e.g. "chn 1", "chn 2") disambiguates
+      // multiple positions at the same site/shift. Previously the chip
+      // showed just the site short name, so two shifts at CHN looked
+      // identical. Falls back to empty string when no label is set.
+      const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
       if(s.shift==='Home'||s.autoHome){
         evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} — ${s.autoHome?'Auto-':''}Home">
           <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
           <div style="font-size:9px;opacity:.8">${s.autoHome?'Auto-Home':'Home'}</div>
         </div>`;
       } else {
-        evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} — ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+        evs+=`<div class="ev ${cls}${nonAnc}" title="${pname(s.physId)} — ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
           <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
           <div style="font-size:9px;opacity:.85">${s.shift} Shift</div>
-          <div style="font-size:9px;opacity:.7">${siteSh}${subLbl?' · '+subLbl:''}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'DR')}</div>
+          <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl?' · '+subLbl:''}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'DR')}</div>
         </div>`;
       }
     });
@@ -18160,6 +18200,13 @@ function renderIRCal(){
         else                        style='background:#fefce8;color:#713f12;border:1px solid #fcd34d';
         const siteSh=(s.site||'').split(' ')[0];
         const subLbl=s.sub?` · ${s.sub.slice(0,6)}`:'';
+        // Slot labels (e.g. "chn 1", "chn 2") let admins name distinct
+        // positions within the same site/shift. Previously the calendar
+        // rendered only the site short name ("CHN") so two positions at
+        // the same site were visually indistinguishable. Now the slot
+        // label appears after the site short. Falls back gracefully when
+        // no slotLabel is configured.
+        const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
         const shiftLbl=s.shift==='1st'?'Day Shift':s.shift==='Home'?'Home':s.shift+' Shift';
         if(s.shift==='Home'){
           shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — Home @ ${s.site}">
@@ -18167,10 +18214,10 @@ function renderIRCal(){
             <div style="font-size:9px;opacity:.8">Home</div>
           </div>`;
         } else {
-          shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — ${shiftLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+          shiftEvs+=`<div class="ev" style="${style}" title="${pname(s.physId)} — ${shiftLbl} @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
             <div style="font-size:9px;opacity:.85">${shiftLbl}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
+            <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
           </div>`;
         }
       });
@@ -18199,10 +18246,12 @@ function renderIRCal(){
                         :                   'background:#fdf4ff;color:#7e22ce;border:1px solid #f0abfc';
           const siteSh = (s.site||'').split(' ')[0];
           const subLbl = s.sub ? ` · ${s.sub.slice(0,6)}` : '';
-          shiftEvs+=`<div class="ev" style="${drStyle}" title="${pname(s.physId)} — DR ${s.shift} Shift @ ${s.site}${s.sub?' ('+s.sub+')':''}">
+          // DR slot label — see comment in IR branch above; same pattern.
+          const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
+          shiftEvs+=`<div class="ev" style="${drStyle}" title="${pname(s.physId)} — DR ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
             <div style="font-size:9px;opacity:.85">DR ${s.shift}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${subLbl}</div>
+            <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl}</div>
           </div>`;
         }
       });
@@ -18591,6 +18640,7 @@ function fillDRHomeForIR(){
 function addIRCallFromGrid(sel,date,callType,group){
   if(!_adminOnly('assign IR call')){sel.value='';return;}
   const physId=+sel.value;if(!physId){return;}
+  const p=S.physicians.find(x=>x.id===physId);
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===group&&ic.callType==='daily')){
     alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
@@ -18601,6 +18651,19 @@ function addIRCallFromGrid(sel,date,callType,group){
     alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');sel.value='';return;}
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){
     alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');sel.value='';return;}
+  // Full physician-rule check — call-day-site rules ("only on call when at
+  // CHN"), site rules, day conditions, sequence rules, natural-language
+  // rules, conference rules. Previously these were bypassed entirely by the
+  // grid dropdown, so a physician with "call requires site X" rule could be
+  // manually placed on call at a date when they were scheduled elsewhere.
+  if(p){
+    const _ctx={physId,date,site:p.irSitePrim||'',shift:'ir-call',kind:'ir-call',irGroup:group,ym:date.slice(0,7)};
+    const _v=_gatherManualRuleViolations(p,_ctx);
+    if(_v.length){
+      const msg=`Assigning IR call would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nAssign anyway?`;
+      if(!confirm(msg)){sel.value='';return;}
+    }
+  }
   // Daily call covers the entire group — no single hospital site
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site:'',notes:''});
   sel.value='';
@@ -18614,6 +18677,7 @@ function addIRWeekend(group,fridayDate){
   const physId=+document.getElementById(`irwk-phys-${group}`)?.value;
   const site=document.getElementById(`irwk-site-${group}`)?.value||'';
   if(!physId){alert('Select physician');return;}
+  const p=S.physicians.find(x=>x.id===physId);
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
   if(isIRCallBlackout(physId,fridayDate)){alert(pname(physId)+' has an IR call blackout covering this weekend.');return;}
   if(_hasAdjacentIRCall(physId,fridayDate)||_hasIRCallNearWeekend(physId,fridayDate)){alert('Back-to-back call not allowed: '+pname(physId)+' has daily call adjacent to this weekend.');return;}
@@ -18621,6 +18685,16 @@ function addIRWeekend(group,fridayDate){
   const _wkSpan=[fridayDate,addDays(fridayDate,1),addDays(fridayDate,2),addDays(fridayDate,3)];
   if(_wkSpan.some(d=>_has2ndOr3rdShift(physId,d))){
     alert(pname(physId)+' has a 2nd/3rd shift during this weekend span and cannot take IR weekend call.');return;}
+  // Full physician-rule check — call-day-site rules apply across the Fri→Mon
+  // span (callDayRulesOk direction 2 iterates the span internally).
+  if(p){
+    const _ctx={physId,date:fridayDate,site:site||p.irSitePrim||'',shift:'ir-weekend',kind:'ir-weekend',irGroup:group,ym:fridayDate.slice(0,7)};
+    const _v=_gatherManualRuleViolations(p,_ctx);
+    if(_v.length){
+      const msg=`Assigning IR weekend call would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nAssign anyway?`;
+      if(!confirm(msg))return;
+    }
+  }
   S.irCalls.push({id:S.nextId++,physId,date:fridayDate,callType:'weekend',irGroup:group,site,notes:''});
   triggerSave();
   renderIRWeekBuilder();
@@ -18642,6 +18716,17 @@ function addIRCallManual(){
   if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
   const callSite=callType==='daily'?'':site;
+  // Full physician-rule check — routes to ir-call or ir-weekend context
+  // based on the form's selected call type.
+  if(p){
+    const ctxKind = callType==='weekend' ? 'ir-weekend' : 'ir-call';
+    const _ctx={physId,date,site:callSite||p.irSitePrim||'',shift:ctxKind,kind:ctxKind,irGroup,ym:date.slice(0,7)};
+    const _v=_gatherManualRuleViolations(p,_ctx);
+    if(_v.length){
+      const msg=`Assigning IR call would violate ${_v.length} physician rule(s):\n\n  • ${_v.join('\n  • ')}\n\nAssign anyway?`;
+      if(!confirm(msg))return;
+    }
+  }
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup,site:callSite,notes:document.getElementById('ird-notes').value});
   triggerSave();
   _afterMutation();
