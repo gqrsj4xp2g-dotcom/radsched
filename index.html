@@ -3711,6 +3711,45 @@ function _applyRemoteData(d){
   if(_wknMigrated > 0){
     try{ console.warn('[RS] Migrated '+_wknMigrated+' weekend call record(s) to Friday dates.'); }catch(_){}
   }
+  // ── Migrate legacy callDayRule callType='ir-call' → 'any-call' ──────────
+  // Historical: prior to the scope-clarification UI update, the default call-
+  // type option was labeled "IR daily call" (but meant different things to
+  // different admins — many picked it intending "any IR call"). When the
+  // user on weekend call ended up at the wrong hospital despite a rule that
+  // appeared correct, the root cause was nearly always this scope mismatch:
+  // 'ir-call' is strictly daily, not weekend. The new UI defaults to
+  // 'any-call' and clearly labels each option with "only", but rules saved
+  // previously retain 'ir-call'.
+  //
+  // Migration strategy: if a rule has callType === 'ir-call' AND the
+  // physician also has NO explicit 'ir-weekend' rule with the same
+  // requiredSite, broaden it to 'any-call'. This is the safest automatic
+  // change: if an admin already configured BOTH 'ir-call' and 'ir-weekend'
+  // rules (indicating they wanted fine-grained control), leave them alone;
+  // if they only have the single legacy 'ir-call' rule, upgrade it so it
+  // covers weekends too. Admins who genuinely want strict-daily can edit
+  // the rule back to 'ir-call' — the migration is logged so they know it
+  // happened.
+  let _cdrMigrated = 0;
+  (S.physicians||[]).forEach(p => {
+    const rules = p.callDayRules || [];
+    rules.forEach(r => {
+      if(!r || r.callType !== 'ir-call') return;
+      // Does this physician have a separate ir-weekend rule with the same site?
+      const hasWeekend = rules.some(other =>
+        other !== r &&
+        other.callType === 'ir-weekend' &&
+        (other.requiredSite||'') === (r.requiredSite||'')
+      );
+      if(hasWeekend) return; // admin has both — they want fine-grained control
+      r.callType = 'any-call';
+      r._migratedFrom = 'ir-call';
+      _cdrMigrated++;
+    });
+  });
+  if(_cdrMigrated > 0){
+    try{ console.warn('[RS] Migrated '+_cdrMigrated+' call-day rule(s) from callType=ir-call to any-call (now covers weekend calls too). If you intended strict daily-only scope, edit the rule to re-set callType to "IR daily call only".'); }catch(_){}
+  }
   // ── Migrate legacy holiday data to 3-pool model ──────────────────────────
   // 1) Holiday assignments: legacy group='IR' → 'IR-<groupName>' by physician's irGroup
   (S.holidays||[]).forEach(h=>{
@@ -8723,14 +8762,17 @@ function _irsaBlocked(p,date,assigned){
  */
 function _conferenceBlocksSlot(physId, date, site){
   try {
+    const _ns = s => (s||'').toString().trim().toLowerCase();
+    const targetSite = _ns(site);
     if(!site){
       const parts = _conferenceDatesForPhys(physId, date, date, null);
       return !!(parts && parts.has(date));
     }
-    // Site-aware check: find every conference this phys is attending on this
-    // date, and allow the shift if ANY of them is held at this site.
-    const _ns = s => (s||'').toString().trim().toLowerCase();
-    const targetSite = _ns(site);
+    // Find this physician so we can check their must-be-at-site rules.
+    const phys = (S.physicians||[]).find(p => p.id === physId);
+    const mbRules = phys && Array.isArray(phys.tbRules)
+      ? phys.tbRules.filter(r => r && r.action === 'must-be-at-site-on-day')
+      : [];
     const candidates = [];
     (S.tumorBoards||[]).forEach(tb => candidates.push(tb));
     (S.clinics||[]).forEach(cl => candidates.push(cl));
@@ -8744,11 +8786,26 @@ function _conferenceBlocksSlot(physId, date, site){
         if(ids.length && !ids.includes(physId)) continue;
       }
       attendingAnywhere = true;
-      // If this conference is held at the slot's site, shift is allowed.
-      const sites = ev.sites || [];
-      if(sites.some(s => _ns(s) === targetSite)) return false; // allowed at same-site
+      // Path 1: event has a `sites` list configured AND it includes the slot
+      // site. Same-hospital collocation → allow.
+      const evSites = ev.sites || [];
+      if(evSites.some(s => _ns(s) === targetSite)) return false;
+      // Path 2: physician has a must-be-at-site-on-day rule for THIS event
+      // pointing at the current slot's site. The rule is the admin's explicit
+      // directive for where the physician should be when attending — trust it.
+      // This covers the case where the event itself has no `sites`
+      // configured but the admin has set up a rule to pin the physician.
+      for(const r of mbRules){
+        if(r.eventId != null && r.eventId !== ev.id) continue; // rule scoped to different event
+        if(_ns(r.requiredSite) === targetSite){
+          // Optional shift filter on the rule — respect it
+          if(r.shift && r.shift !== '1st') continue;
+          return false; // explicit rule says "be at targetSite" → allow
+        }
+      }
     }
-    // Attending a conference, but none of them at this site → block.
+    // Path 3: physician is attending some conference(s), but neither the
+    // event config nor any must-be-at-site rule ties them to this site → block.
     return attendingAnywhere;
   } catch(_){ return false; }
 }
@@ -18223,9 +18280,33 @@ function explainPhysicianState(){
     if(!callDayRulesOk(p,ctx)) reasons.push(`callDayRulesOk blocks (rule wants different site)`);
     if(!tbRulesOk(p,ctx)) reasons.push('tbRulesOk blocks');
     if(!natLangRulesOk(ctx)) reasons.push('natLangRulesOk blocks');
-    // Implicit conference participation
-    const pd = _conferenceDatesForPhys(p.id, date, date, null);
-    if(pd && pd.has(date)) reasons.push(`participating in conference on ${date}`);
+    // Site-aware conference-participation check (same as what previewIRShiftAA uses)
+    if(_conferenceBlocksSlot(p.id, date, st.name)) reasons.push(`conference participation blocks this site`);
+    const verdict = reasons.length ? '✗ BLOCKED: ' + reasons.join('; ') : '✓ eligible';
+    out.push(`  ${st.name}: ${verdict}`);
+  });
+  out.push('');
+
+  // If the physician already has shifts/calls on this date, the above trace
+  // will say "already has IR shift" for every site — which hides what the
+  // auto-assign actually saw when it placed the physician. Run a second
+  // hypothetical ignoring current shifts/calls, showing what the scheduler
+  // COULD have done. This is the answer to "how did my physician end up
+  // at the wrong site?".
+  out.push(`── Hypothetical (ignoring existing shifts/calls): "What sites WERE valid on ${date}?" ──`);
+  (S.sites||[]).forEach(st => {
+    const ctx = {physId:p.id, date, site:st.name, shift:'1st', kind:'ir-shift', shiftKey:'s1', ym, sub:'', irGroup:p.irGroup||''};
+    const reasons = [];
+    const vd = vacDays(p.id); if(vd.has(date)) reasons.push('vacation');
+    if(_has2ndOr3rdShift(p.id,date)) reasons.push('2nd/3rd DR shift');
+    if(isSoldBackDate(p.id,date)) reasons.push('sold-back');
+    if(!irSiteRuleOk(p,st.name,date)) reasons.push('siteRule blocks this site');
+    if(!dayConditionSiteOk(p,st.name,date,'ir-shift')) reasons.push('day-of-week condition blocks');
+    if(!sequenceOk(p,date,ym,st.name,'')) reasons.push('sequence rule blocks');
+    if(!callDayRulesOk(p,ctx)) reasons.push(`callDayRulesOk blocks (rule wants different site)`);
+    if(!tbRulesOk(p,ctx)) reasons.push('tbRulesOk blocks');
+    if(!natLangRulesOk(ctx)) reasons.push('natLangRulesOk blocks');
+    if(_conferenceBlocksSlot(p.id, date, st.name)) reasons.push(`conference participation blocks this site`);
     const verdict = reasons.length ? '✗ BLOCKED: ' + reasons.join('; ') : '✓ eligible';
     out.push(`  ${st.name}: ${verdict}`);
   });
