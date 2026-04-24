@@ -1109,15 +1109,19 @@ tbody tr:hover{background:var(--bg3)}
               <option value="no-call-on-day">No call on event day</option>
               <option value="no-shift-on-day">No DR/IR day shift on event day</option>
               <option value="must-be-at-site-on-day">Must be at specific site on event day</option>
-              <option value="schedule-shift-prior">Schedule day shift N day(s) BEFORE event</option>
-              <option value="schedule-shift-after">Schedule day shift N day(s) AFTER event</option>
+              <option value="schedule-shift-prior">Schedule shift N day(s) BEFORE event</option>
+              <option value="schedule-shift-after">Schedule shift N day(s) AFTER event</option>
               <option value="block-day-prior">No shift the day BEFORE event</option>
               <option value="block-day-after">No shift the day AFTER event</option>
               <option value="prefer-light-day">Prefer light coverage on event day (avoid 2nd/3rd)</option>
             </select>
           </div>
-          <div class="fg" id="sr-tb-numeric-wrap"><label>N (days)</label>
-            <input type="number" id="sr-tb-num" min="0" max="60" value="1" style="width:100%">
+          <div class="fg" id="sr-tb-numeric-wrap"><label>Days (from – to)</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input type="number" id="sr-tb-num-min" min="0" max="60" value="1" style="width:50%" title="Minimum N">
+              <span style="color:var(--txt3)">–</span>
+              <input type="number" id="sr-tb-num-max" min="0" max="60" value="" placeholder="same" style="width:50%" title="Maximum N (blank = same as min, e.g. exactly N days). Use a larger value for a range like 'between 1 and 3 days before'.">
+            </div>
           </div>
         </div>
         <div class="g3" id="sr-tb-site-wrap" style="display:none">
@@ -1134,10 +1138,31 @@ tbody tr:hover{background:var(--bg3)}
           </div>
           <div class="fg">&nbsp;</div>
         </div>
+        <div class="g3" id="sr-tb-shiftkind-wrap" style="display:none">
+          <div class="fg"><label>Shift kind (for schedule-shift rules)</label>
+            <select id="sr-tb-shiftkind">
+              <option value="">Any day shift (DR or IR)</option>
+              <option value="dr-shift">DR day shift only</option>
+              <option value="ir-shift">IR day shift only</option>
+            </select>
+          </div>
+          <div class="fg">&nbsp;</div>
+          <div class="fg">&nbsp;</div>
+        </div>
         <div class="fg"><label>Notes / Reason</label>
           <input id="sr-tb-notes" placeholder="e.g. Needs to be at MAIN for breast TB attendance">
         </div>
-        <button class="bp bsm" onmousedown="_srRefreshTBEventOptions()" onclick="addTBRule()">＋ Add Conference Rule</button>
+        <div class="fg" style="margin:6px 0">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;color:var(--txt2);font-size:12px">
+            <input type="checkbox" id="sr-tb-breakable" style="margin:0">
+            <span>Allow auto-assign to break this rule if IR schedule has unfilled slots</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="bp bsm" id="sr-tb-add-btn" onmousedown="_srRefreshTBEventOptions()" onclick="saveTBRule()">＋ Add Conference Rule</button>
+          <button class="br bsm" id="sr-tb-cancel-btn" onclick="cancelEditTBRule()" style="display:none">Cancel</button>
+          <span id="sr-tb-edit-note" style="color:var(--amber,#d97706);font-size:11px;display:none">Editing existing rule</span>
+        </div>
       </div>
 
       <!-- CALL-DAY SITE RULES -->
@@ -12482,8 +12507,10 @@ function renderSiteRulesList(){
     html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Conference Rules</div>';
     html+=tbRules.map((r,i)=>{
       const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
+      const breakable = r.allowBreakForUnfilledIR ? ` <span class="tag ta" style="font-size:9px">breakable</span>` : '';
       return `<div class="row" style="margin-bottom:4px">
-        <div style="flex:1;font-size:12px">${_describeTBRule(r)}${note}</div>
+        <div style="flex:1;font-size:12px">${_describeTBRule(r)}${breakable}${note}</div>
+        <button class="bs bxs" onclick="startEditTBRule(${i})" title="Edit this rule">✎</button>
         <button class="br bxs" onclick="removeTBRule(${i})">✕</button>
       </div>`;
     }).join('');
@@ -16693,20 +16720,30 @@ function _isoShift(iso, deltaDays){
  * ctx = {physId, date, site?, shift?, kind}
  *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
  */
-function tbRulesOk(p, ctx){
+function tbRulesOk(p, ctx, opts){
   const rules = (p && p.tbRules) || [];
   if(!rules.length) return true;
   if(!ctx || !ctx.date) return true;
+  // opts.allowRelaxBreakable: when true, skip (ignore) rules flagged with
+  // allowBreakForUnfilledIR. Auto-assign uses this in a relaxation retry when
+  // the primary pass couldn't fill a slot; breakable rules are dropped so a
+  // physician can be placed despite a conference conflict, rather than leaving
+  // the schedule with a hole.
+  const allowRelax = !!(opts && opts.allowRelaxBreakable);
   for(const r of rules){
     if(!r || !r.action) continue;
-    // Window for occurrence lookup is rule-specific. "on day" rules need the
-    // exact date; "N days before/after" rules need to find conferences within
-    // N days on either side of the candidate. We compute the smallest window
-    // that still covers the rule, with no upper cap — admins can specify
-    // arbitrarily large N if their workflow demands it.
-    const n = Math.max(0, +r.n || 0);
-    const startISO = _isoShift(ctx.date, -n);
-    const endISO   = _isoShift(ctx.date,  n);
+    if(allowRelax && r.allowBreakForUnfilledIR) continue;
+
+    // Resolve the rule's day-offset range. Supports both new nMin/nMax and
+    // legacy single-n schema. All actions that use offsets iterate the full
+    // range so a "1-3 days before" rule covers every day in that window.
+    const nMin = (r.nMin != null) ? Math.max(0, +r.nMin)
+               : (r.n    != null) ? Math.max(0, +r.n)    : 0;
+    const nMax = (r.nMax != null) ? Math.max(nMin, +r.nMax) : nMin;
+
+    // Occurrence lookup window: widest possible span covering the rule.
+    const startISO = _isoShift(ctx.date, -nMax);
+    const endISO   = _isoShift(ctx.date,  nMax);
     const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
     if(!occDates.size) continue;
 
@@ -16727,21 +16764,21 @@ function tbRulesOk(p, ctx){
       if(r.shift && ctx.shift && ctx.shift !== r.shift) return false;
     }
     else if(r.action === 'block-day-prior'){
-      const nv = Math.max(1, +r.n || 1);
-      // For each occurrence, the date n days BEFORE is blocked.
+      // Block if ctx.date falls in [nMin, nMax] days BEFORE any occurrence.
       for(const occ of occDates){
-        if(_isoShift(occ, -nv) === ctx.date) return false;
+        for(let k = Math.max(1, nMin); k <= Math.max(1, nMax); k++){
+          if(_isoShift(occ, -k) === ctx.date) return false;
+        }
       }
     }
     else if(r.action === 'block-day-after'){
-      const nv = Math.max(1, +r.n || 1);
       for(const occ of occDates){
-        if(_isoShift(occ, nv) === ctx.date) return false;
+        for(let k = Math.max(1, nMin); k <= Math.max(1, nMax); k++){
+          if(_isoShift(occ, k) === ctx.date) return false;
+        }
       }
     }
     else if(r.action === 'prefer-light-day'){
-      // Block 2nd/3rd shifts on event days. 1st/Home/Wknd are preferences,
-      // not blocks (they're "lighter" already).
       if(ctx.kind !== 'dr-shift' && ctx.kind !== 'ir-shift') continue;
       if(!occDates.has(ctx.date)) continue;
       const sh = ctx.shift || '';
@@ -16768,16 +16805,23 @@ function _conferenceShiftPreferenceFor(p, ctx){
   let score = 0;
   for(const r of rules){
     if(r.action !== 'schedule-shift-prior' && r.action !== 'schedule-shift-after') continue;
-    const n = Math.max(0, +r.n || 1);
-    // Window precisely matches the rule's reach.
-    const startISO = _isoShift(ctx.date, -n);
-    const endISO   = _isoShift(ctx.date,  n);
+    // shiftKind filter: if rule is scoped to a specific kind (dr-shift or
+    // ir-shift), only apply the preference when the candidate matches.
+    if(r.shiftKind && r.shiftKind !== ctx.kind) continue;
+    // Resolve offset range.
+    const nMin = (r.nMin != null) ? Math.max(0, +r.nMin)
+               : (r.n    != null) ? Math.max(0, +r.n)    : 1;
+    const nMax = (r.nMax != null) ? Math.max(nMin, +r.nMax) : nMin;
+    const startISO = _isoShift(ctx.date, -nMax);
+    const endISO   = _isoShift(ctx.date,  nMax);
     const occDates = _conferenceDatesForPhys(p.id, startISO, endISO, r.eventId);
     for(const occ of occDates){
-      const target = r.action === 'schedule-shift-prior'
-        ? _isoShift(occ, -n)
-        : _isoShift(occ, n);
-      if(target === ctx.date) score--; // prefer this date
+      for(let k = Math.max(0, nMin); k <= Math.max(0, nMax); k++){
+        const target = r.action === 'schedule-shift-prior'
+          ? _isoShift(occ, -k)
+          : _isoShift(occ, k);
+        if(target === ctx.date){ score--; break; } // prefer this date
+      }
     }
   }
   return score;
@@ -16924,25 +16968,86 @@ function _srRefreshTBEventOptions(){
 // Show/hide the action-specific input groups when the action picker changes.
 function _srTBOnActionChange(){
   const action = document.getElementById('sr-tb-action')?.value;
-  const numWrap = document.getElementById('sr-tb-numeric-wrap');
-  const siteWrap = document.getElementById('sr-tb-site-wrap');
-  // N (days) only matters for *-prior / *-after actions
+  const numWrap   = document.getElementById('sr-tb-numeric-wrap');
+  const siteWrap  = document.getElementById('sr-tb-site-wrap');
+  const kindWrap  = document.getElementById('sr-tb-shiftkind-wrap');
+  // N (days) — both the "block" and "schedule-shift" variants need this.
   const needsN = ['schedule-shift-prior','schedule-shift-after','block-day-prior','block-day-after'].includes(action);
   if(numWrap) numWrap.style.display = needsN ? '' : 'none';
-  // Site picker only matters for must-be-at-site-on-day
+  // Required-site picker is only for must-be-at-site-on-day
   const needsSite = action === 'must-be-at-site-on-day';
   if(siteWrap) siteWrap.style.display = needsSite ? '' : 'none';
+  // Shift-kind picker (DR / IR / Any) only for schedule-shift-*
+  const needsKind = action === 'schedule-shift-prior' || action === 'schedule-shift-after';
+  if(kindWrap) kindWrap.style.display = needsKind ? '' : 'none';
 }
 
-function addTBRule(){
-  if(!_adminOnly('add conference rule')) return;
+// Tracks whether the Conference-rule form is in "edit" mode. When non-null,
+// saveTBRule replaces tbRules[_editingTBRuleIdx] instead of appending.
+let _editingTBRuleIdx = null;
+
+// Load an existing rule into the form for editing.
+function startEditTBRule(idx){
+  if(!_adminOnly('edit conference rule')) return;
+  const p = S.physicians.find(x => x.id === _srPhysId);
+  if(!p || !Array.isArray(p.tbRules) || !p.tbRules[idx]) return;
+  const r = p.tbRules[idx];
+  _editingTBRuleIdx = idx;
+  _srRefreshTBEventOptions();
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v == null ? '' : v; };
+  set('sr-tb-event',   r.eventId == null ? '' : String(r.eventId));
+  set('sr-tb-action',  r.action || '');
+  // Range fields: honor nMin/nMax if present, fall back to legacy n.
+  const legacyN = (r.n != null) ? r.n : 1;
+  set('sr-tb-num-min', r.nMin != null ? r.nMin : legacyN);
+  set('sr-tb-num-max', r.nMax != null && r.nMax !== r.nMin ? r.nMax : '');
+  set('sr-tb-site',    r.requiredSite || '');
+  set('sr-tb-shift',   r.shift || '');
+  set('sr-tb-shiftkind', r.shiftKind || '');
+  set('sr-tb-notes',   r.notes || '');
+  const breakEl = document.getElementById('sr-tb-breakable');
+  if(breakEl) breakEl.checked = !!r.allowBreakForUnfilledIR;
+  _srTBOnActionChange();
+  // Swap the button labels so it's clear we're editing.
+  const addBtn = document.getElementById('sr-tb-add-btn');
+  const canBtn = document.getElementById('sr-tb-cancel-btn');
+  const note   = document.getElementById('sr-tb-edit-note');
+  if(addBtn) addBtn.textContent = '✓ Update Rule';
+  if(canBtn) canBtn.style.display = 'inline-block';
+  if(note)   note.style.display = 'inline-block';
+  // Scroll form into view so the admin sees it react to the click.
+  document.getElementById('srt-tb')?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+// Revert edit mode and reset form labels.
+function cancelEditTBRule(){
+  _editingTBRuleIdx = null;
+  const addBtn = document.getElementById('sr-tb-add-btn');
+  const canBtn = document.getElementById('sr-tb-cancel-btn');
+  const note   = document.getElementById('sr-tb-edit-note');
+  if(addBtn) addBtn.textContent = '＋ Add Conference Rule';
+  if(canBtn) canBtn.style.display = 'none';
+  if(note)   note.style.display = 'none';
+  // Clear fields back to defaults
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  set('sr-tb-event', '');
+  set('sr-tb-action', 'no-call-on-day');
+  set('sr-tb-num-min', '1');
+  set('sr-tb-num-max', '');
+  set('sr-tb-site', '');
+  set('sr-tb-shift', '');
+  set('sr-tb-shiftkind', '');
+  set('sr-tb-notes', '');
+  const breakEl = document.getElementById('sr-tb-breakable');
+  if(breakEl) breakEl.checked = false;
+  _srTBOnActionChange();
+}
+
+// Save the currently-edited rule OR append a new one.
+function saveTBRule(){
+  if(!_adminOnly(_editingTBRuleIdx != null ? 'edit conference rule' : 'add conference rule')) return;
   const p = S.physicians.find(x => x.id === _srPhysId);
   if(!p){ alert('No physician selected.'); return; }
-  // Sanity-check: the event picker may be stale if the admin added or deleted
-  // a tumor board / clinic in another window. Refresh and validate before
-  // committing the rule. The mousedown handler on this button refreshes the
-  // <select> options too, so the only way to slip through with a stale value
-  // is keyboard activation — handled here by the find-or-fail check.
   const eventIdRaw = document.getElementById('sr-tb-event')?.value;
   let eventId = null;
   if(eventIdRaw !== '' && eventIdRaw != null){
@@ -16956,13 +17061,21 @@ function addTBRule(){
   }
   const action = document.getElementById('sr-tb-action')?.value;
   if(!action){ alert('Pick a rule type.'); return; }
+
   const rule = {
     eventId,
     action,
     notes: (document.getElementById('sr-tb-notes')?.value || '').trim(),
+    allowBreakForUnfilledIR: !!document.getElementById('sr-tb-breakable')?.checked,
   };
   if(['schedule-shift-prior','schedule-shift-after','block-day-prior','block-day-after'].includes(action)){
-    rule.n = Math.max(0, +(document.getElementById('sr-tb-num')?.value) || 1);
+    const minV = Math.max(0, +(document.getElementById('sr-tb-num-min')?.value) || 1);
+    const maxRaw = (document.getElementById('sr-tb-num-max')?.value || '').trim();
+    const maxV = maxRaw === '' ? minV : Math.max(0, +maxRaw);
+    rule.nMin = Math.min(minV, maxV);
+    rule.nMax = Math.max(minV, maxV);
+    // Keep legacy n for back-compat with any older code path still reading it.
+    rule.n = rule.nMin;
   }
   if(action === 'must-be-at-site-on-day'){
     rule.requiredSite = document.getElementById('sr-tb-site')?.value || '';
@@ -16970,28 +17083,55 @@ function addTBRule(){
     const sh = document.getElementById('sr-tb-shift')?.value || '';
     if(sh) rule.shift = sh;
   }
+  if(action === 'schedule-shift-prior' || action === 'schedule-shift-after'){
+    const kind = document.getElementById('sr-tb-shiftkind')?.value || '';
+    if(kind) rule.shiftKind = kind; // '' = any, 'dr-shift', 'ir-shift'
+  }
+
   if(!Array.isArray(p.tbRules)) p.tbRules = [];
-  // Block exact duplicates so admins can't accidentally double a rule.
-  const existing = p.tbRules.find(r =>
-    r.action === rule.action &&
-    (r.eventId||null) === (rule.eventId||null) &&
-    (r.n||null) === (rule.n||null) &&
-    (r.requiredSite||'') === (rule.requiredSite||'') &&
-    (r.shift||'') === (rule.shift||'')
-  );
-  if(existing){ alert('That exact rule already exists for this physician.'); return; }
-  p.tbRules.push(rule);
-  // Clear notes field so admin can add another rule without retyping
-  const notesEl = document.getElementById('sr-tb-notes'); if(notesEl) notesEl.value = '';
+
+  if(_editingTBRuleIdx != null){
+    // Update existing rule in place.
+    if(!p.tbRules[_editingTBRuleIdx]){
+      alert('The rule you were editing no longer exists. It may have been removed in another window.');
+      _editingTBRuleIdx = null;
+      cancelEditTBRule();
+      renderSiteRulesList();
+      return;
+    }
+    p.tbRules[_editingTBRuleIdx] = rule;
+    _editingTBRuleIdx = null;
+  } else {
+    // Block exact duplicates so admins can't accidentally double a rule.
+    const existing = p.tbRules.find(r =>
+      r.action === rule.action &&
+      (r.eventId||null) === (rule.eventId||null) &&
+      (r.nMin||null) === (rule.nMin||null) &&
+      (r.nMax||null) === (rule.nMax||null) &&
+      (r.requiredSite||'') === (rule.requiredSite||'') &&
+      (r.shift||'') === (rule.shift||'') &&
+      (r.shiftKind||'') === (rule.shiftKind||'')
+    );
+    if(existing){ alert('That exact rule already exists for this physician.'); return; }
+    p.tbRules.push(rule);
+  }
+
+  cancelEditTBRule(); // reset form + labels
   triggerSave();
   _afterMutation();
   renderSiteRulesList();
 }
 
+// Legacy alias — any stray inline onclick still calling addTBRule works.
+function addTBRule(){ return saveTBRule(); }
+
 function removeTBRule(idx){
   if(!_adminOnly('remove conference rule')) return;
   const p = S.physicians.find(x => x.id === _srPhysId);
   if(!p || !Array.isArray(p.tbRules)) return;
+  // If the admin is currently editing this rule, cancel edit mode first.
+  if(_editingTBRuleIdx === idx) cancelEditTBRule();
+  else if(_editingTBRuleIdx != null && _editingTBRuleIdx > idx) _editingTBRuleIdx--;
   p.tbRules.splice(idx, 1);
   triggerSave();
   _afterMutation();
@@ -17056,14 +17196,25 @@ function _describeTBRule(r){
   const ev = _eventById(r.eventId);
   const evName = ev ? ev.name : (r.eventId == null ? 'any conference' : `(deleted #${r.eventId})`);
   const evIcon = !ev ? '⚠' : (S.tumorBoards||[]).some(t=>t.id===r.eventId) ? '🔬' : '🏥';
+  // For *-prior / *-after actions, render either a single N or a range min–max.
+  const nRange = () => {
+    const mn = (r.nMin != null) ? r.nMin : (r.n != null ? r.n : 1);
+    const mx = (r.nMax != null) ? r.nMax : mn;
+    return mn === mx ? `${mn} day(s)` : `${mn}–${mx} day(s)`;
+  };
+  const kindLabel = () => {
+    if(r.shiftKind === 'dr-shift') return 'DR day shift';
+    if(r.shiftKind === 'ir-shift') return 'IR day shift';
+    return 'day shift';
+  };
   switch(r.action){
     case 'no-call-on-day':         return `${evIcon} <strong>No call</strong> on ${evName} day`;
     case 'no-shift-on-day':        return `${evIcon} <strong>No DR/IR shift</strong> on ${evName} day`;
     case 'must-be-at-site-on-day': return `${evIcon} On ${evName} day, must be at <strong>${_tbEsc(r.requiredSite||'?')}</strong>${r.shift?` (${r.shift})`:''}`;
-    case 'schedule-shift-prior':   return `${evIcon} <strong>Prefer day shift</strong> ${r.n||1} day(s) before ${evName}`;
-    case 'schedule-shift-after':   return `${evIcon} <strong>Prefer day shift</strong> ${r.n||1} day(s) after ${evName}`;
-    case 'block-day-prior':        return `${evIcon} <strong>No shift</strong> ${r.n||1} day(s) before ${evName}`;
-    case 'block-day-after':        return `${evIcon} <strong>No shift</strong> ${r.n||1} day(s) after ${evName}`;
+    case 'schedule-shift-prior':   return `${evIcon} <strong>Prefer ${kindLabel()}</strong> ${nRange()} before ${evName}`;
+    case 'schedule-shift-after':   return `${evIcon} <strong>Prefer ${kindLabel()}</strong> ${nRange()} after ${evName}`;
+    case 'block-day-prior':        return `${evIcon} <strong>No shift</strong> ${nRange()} before ${evName}`;
+    case 'block-day-after':        return `${evIcon} <strong>No shift</strong> ${nRange()} after ${evName}`;
     case 'prefer-light-day':       return `${evIcon} <strong>Light coverage</strong> on ${evName} day (no 2nd/3rd)`;
     default:                       return `${evIcon} ${_tbEsc(r.action)}`;
   }
@@ -19440,7 +19591,12 @@ function previewIRAA(){
   // string if blocked. `kind` ∈ {'daily', 'weekend'}.
   // `skipAdjacency` is used only for the "most-constrained date" ordering
   // pass — adjacency is always enforced in the actual pick loop.
-  function whyBlocked(p, date, kind, g, skipAdjacency){
+  // whyBlocked: returns null if the physician is eligible, or a reason string.
+  //   opts.allowRelaxBreakable = true → ignore tbRules flagged with
+  //     allowBreakForUnfilledIR. Used during the relaxation retry after a gap.
+  //     Adjacency, site rules, vacation, and participation are NEVER relaxed.
+  function whyBlocked(p, date, kind, g, skipAdjacency, opts){
+    const allowRelax = !!(opts && opts.allowRelaxBreakable);
     const isWkd = (kind === 'weekend');
     const span  = isWkd ? [date, addDays(date,1), addDays(date,2), addDays(date,3)] : [date];
     const ym    = date.slice(0,7);
@@ -19469,6 +19625,8 @@ function previewIRAA(){
     };
     if(!natLangRulesOk(nlCtx)) return 'natural-language rule';
     // Conference rule — check each day of span for configured tbRules.
+    // If relaxation is enabled, rules flagged allowBreakForUnfilledIR are
+    // ignored (the user explicitly opted-in to breaking them when needed).
     for(const d of span){
       const tbCtx = {
         physId: p.id, date: d, site: p.irSitePrim || '',
@@ -19476,15 +19634,14 @@ function previewIRAA(){
         kind:  isWkd ? 'ir-weekend' : 'ir-call',
         irGroup: g, ym
       };
-      if(!tbRulesOk(p, tbCtx)) return 'conference rule (tumor board / clinic)';
+      if(!tbRulesOk(p, tbCtx, {allowRelaxBreakable: allowRelax})) return 'conference rule (tumor board / clinic)';
     }
     // Implicit tumor-board / clinic participation — block call on any day
     // the physician is an assigned participant of a tumor board or clinic
-    // (via allowedPhysIds + rotation gating if enabled). A physician at a
-    // conference can't simultaneously be fielding IR call; admins shouldn't
-    // have to configure a per-physician rule for the obvious case. If the
-    // admin WANTS the physician to take call anyway on a conference day,
-    // they can still do so manually via the call list.
+    // (via allowedPhysIds + rotation gating if enabled). This is INTENTIONALLY
+    // not relaxed even under allowRelaxBreakable — a physician actually
+    // attending a conference can't simultaneously field call, regardless of
+    // scheduling preferences.
     for(const d of span){
       const participantDates = _conferenceDatesForPhys(p.id, d, d, null);
       if(participantDates && participantDates.has(d)){
@@ -19555,6 +19712,22 @@ function previewIRAA(){
           if(r){ reasons[p.id] = r; continue; }
           eligible.push(p);
         }
+        let relaxedPick = false;
+        if(!eligible.length){
+          // ── Relaxation retry ─────────────────────────────────────────────
+          // Primary filter returned no eligible physicians. Retry with
+          // allowRelaxBreakable=true, which skips tbRules flagged
+          // allowBreakForUnfilledIR. The admin explicitly opted into allowing
+          // those rules to be broken when the schedule would otherwise have a
+          // hole. Adjacency, participation, and call-day-site rules are NOT
+          // relaxed — only the per-rule breakable opt-in.
+          for(const p of gPhys){
+            const r = whyBlocked(p, date, 'daily', g, false, {allowRelaxBreakable: true});
+            if(r) continue;
+            eligible.push(p);
+          }
+          if(eligible.length) relaxedPick = true;
+        }
         if(!eligible.length){
           const breakdown = gPhys.map(p => `${p.last}=${reasons[p.id] || 'unknown'}`).join(', ');
           gaps.push(`${date} ${g} [${breakdown}]`);
@@ -19562,11 +19735,15 @@ function previewIRAA(){
         }
         const picked   = sortDaily(eligible, date)[0];
         const overFte  = cntD[picked.id] >= dailyCapFn(picked);
+        const noteBits = [];
+        if(overFte) noteBits.push('over FTE target');
+        if(relaxedPick) noteBits.push('conference rule relaxed');
         preview.push({
           physId: picked.id, date, callType: 'daily', irGroup: g, site: '',
-          notes: overFte ? 'Auto (over FTE target — no other eligible physician)' : 'Auto',
+          notes: noteBits.length ? `Auto (${noteBits.join(' · ')})` : 'Auto',
           needsProcShift: !_hasIRShiftOnDate(picked.id, date),
           _overFte: overFte,
+          _relaxedBreakable: relaxedPick,
         });
         cntD[picked.id]++;
       }
@@ -19607,6 +19784,16 @@ function previewIRAA(){
           if(r){ reasons[p.id] = r; continue; }
           eligible.push(p);
         }
+        let relaxedPick = false;
+        if(!eligible.length){
+          // Relaxation retry — see daily loop for rationale.
+          for(const p of gPhys){
+            const r = whyBlocked(p, fri, 'weekend', g, false, {allowRelaxBreakable: true});
+            if(r) continue;
+            eligible.push(p);
+          }
+          if(eligible.length) relaxedPick = true;
+        }
         if(!eligible.length){
           const breakdown = gPhys.map(p => `${p.last}=${reasons[p.id] || 'unknown'}`).join(', ');
           gaps.push(`Wknd ${fri} ${g} [${breakdown}]`);
@@ -19614,10 +19801,14 @@ function previewIRAA(){
         }
         const picked  = sortWeekend(eligible)[0];
         const overFte = cntW[picked.id] >= wkndCapFn(picked);
+        const noteBits = [];
+        if(overFte) noteBits.push('over FTE target');
+        if(relaxedPick) noteBits.push('conference rule relaxed');
         preview.push({
           physId: picked.id, date: fri, callType: 'weekend', irGroup: g, site: '',
-          notes: overFte ? 'Auto (over FTE target — no other eligible physician)' : 'Auto',
+          notes: noteBits.length ? `Auto (${noteBits.join(' · ')})` : 'Auto',
           _overFte: overFte,
+          _relaxedBreakable: relaxedPick,
         });
         cntW[picked.id]++;
       }
@@ -19630,18 +19821,25 @@ function previewIRAA(){
   const dailyPrev=preview.filter(a=>a.callType==='daily');
   const wkndPrev=preview.filter(a=>a.callType==='weekend');
   // Under the new single-pass algorithm, adjacency is hard-enforced: nothing
-  // is ever back-to-back. The only "waiver" possible is FTE cap — when all
-  // eligible physicians are already at or over their target, the least-
-  // overrun one is picked anyway to avoid a gap.
-  const overFteFills = preview.filter(a=>a._overFte).length;
+  // is ever back-to-back. The only "waivers" possible are:
+  //   1. FTE cap — when all eligible physicians are already at or over target,
+  //      the least-overrun one is picked anyway to avoid a gap.
+  //   2. Breakable conference rule — rules flagged allowBreakForUnfilledIR
+  //      are ignored on a relaxation retry when the primary filter can't
+  //      fill the slot. Admin explicitly opted in per-rule.
+  const overFteFills  = preview.filter(a=>a._overFte).length;
+  const relaxedFills  = preview.filter(a=>a._relaxedBreakable).length;
 
   let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} call assignments \u2014 ${gaps.length} gap(s) \u2014 ${label}<br>
     <span style="font-weight:400;font-size:11px;color:var(--txt2)">${dailyPrev.length} daily \u00b7 ${wkndPrev.length} weekend`;
   if(overFteFills>0) html+=` \u00b7 <span style="color:var(--red-t);font-weight:700">${overFteFills} over FTE target</span>`;
+  if(relaxedFills>0) html+=` \u00b7 <span style="color:var(--amber,#d97706);font-weight:700">${relaxedFills} conference rule relaxed</span>`;
   html+=`</span></div>`;
 
   if(overFteFills>0)
     html+=`<div class="note nw" style="margin-bottom:8px">&#9888; ${overFteFills} slot(s) assigned to a physician already at or over their FTE target \u2014 no other eligible physician was available. Back-to-back and rule violations were NOT waived (per hard-rule policy). Review before applying.</div>`;
+  if(relaxedFills>0)
+    html+=`<div class="note nw" style="margin-bottom:8px;background:#fef3c7;border-color:#d97706">&#9888; ${relaxedFills} slot(s) filled by relaxing a conference rule explicitly flagged <em>"allow break if IR schedule has unfilled slots"</em>. The assigned physician has a conference that day but admin opted-in to breaking the rule when needed to avoid gaps. Review before applying.</div>`;
 
   // Holiday-excluded weekends panel — IR weekends skipped only when EVERY day of
   // the Fri→Mon span is a defined holiday. Mixed spans (some holiday + some non-
@@ -19674,8 +19872,12 @@ function previewIRAA(){
       const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
       const gSites=S.sites.filter(s=>s.irGroup===a.irGroup||s.irGroup==='Both').map(s=>s.name.split(' ')[0]).join(', ');
       const coverLbl=a.callType==='daily'?`All ${a.irGroup} sites (${gSites})`:a.site;
-      const rowStyle=a._overFte?'background:var(--red-bg,#fef2f2)':'';
-      const passBadge=a._overFte?`<span class="tag tr" style="font-size:9px;margin-left:4px" title="Assigned over FTE target — no other eligible physician">over FTE</span>`:'';
+      const rowStyle = a._overFte ? 'background:var(--red-bg,#fef2f2)'
+                     : a._relaxedBreakable ? 'background:#fef3c7'
+                     : '';
+      let passBadge = '';
+      if(a._overFte) passBadge += `<span class="tag tr" style="font-size:9px;margin-left:4px" title="Assigned over FTE target — no other eligible physician">over FTE</span>`;
+      if(a._relaxedBreakable) passBadge += `<span class="tag ta" style="font-size:9px;margin-left:4px;background:#fde68a;color:#92400e" title="Conference rule broken — no other eligible physician and rule was flagged breakable">rule relaxed</span>`;
       html+=`<tr style="${rowStyle}">
         <td>${pname(a.physId)}${passBadge}</td>
         <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
