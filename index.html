@@ -19638,14 +19638,41 @@ function previewIRAA(){
     }
     // Implicit tumor-board / clinic participation — block call on any day
     // the physician is an assigned participant of a tumor board or clinic
-    // (via allowedPhysIds + rotation gating if enabled). This is INTENTIONALLY
-    // not relaxed even under allowRelaxBreakable — a physician actually
-    // attending a conference can't simultaneously field call, regardless of
-    // scheduling preferences.
+    // (via allowedPhysIds + rotation gating if enabled). A physician at a
+    // conference can't simultaneously field call; admins shouldn't have to
+    // configure a per-physician rule for the obvious case.
+    //
+    // HOWEVER: if the admin has explicitly configured a breakable
+    // no-call-on-day tbRule for this physician (or for any conference),
+    // that is a direct opt-in to breaking the same invariant this implicit
+    // check enforces — and the explicit rule should win. Without this
+    // concession, breakable rules never have any effect in practice,
+    // because the implicit block short-circuits before the physician can
+    // be considered. The only way for breakable to fire was for the
+    // physician to NOT be listed as a participant, which defeats the
+    // purpose entirely.
+    //
+    // Semantics: if allowRelax is true AND the physician has ANY no-call-on-day
+    // tbRule flagged allowBreakForUnfilledIR that matches the current date,
+    // we skip the implicit participation block for that date.
     for(const d of span){
       const participantDates = _conferenceDatesForPhys(p.id, d, d, null);
       if(participantDates && participantDates.has(d)){
-        return 'participating in tumor board / clinic that day';
+        // Check for a matching breakable explicit rule.
+        let bypassed = false;
+        if(allowRelax){
+          const tbRules = p.tbRules || [];
+          for(const r of tbRules){
+            if(!r || r.action !== 'no-call-on-day') continue;
+            if(!r.allowBreakForUnfilledIR) continue;
+            // Rule scope: eventId null/undefined = any conference; otherwise
+            // must match a specific event that this date is an occurrence of.
+            if(r.eventId == null){ bypassed = true; break; }
+            const occDates = _conferenceDatesForPhys(p.id, d, d, r.eventId);
+            if(occDates && occDates.has(d)){ bypassed = true; break; }
+          }
+        }
+        if(!bypassed) return 'participating in tumor board / clinic that day';
       }
     }
     // Call-day-site rule (direction 2) — if physician has an EXISTING day
