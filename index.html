@@ -8652,16 +8652,24 @@ function _irsaBlocked(p,date,assigned){
   for(k=0;k<drS.length;k++){
     if(drS[k].physId===p.id && drS[k].date===date) return true;
   }
-  var irC = S.irCalls || [];
-  for(k=0;k<irC.length;k++){
-    if(irC[k].physId!==p.id) continue;
-    if(irC[k].callType==='daily' && irC[k].date===date) return true;
-    if(irC[k].callType==='weekend'){
-      // weekend call spans Fri..Mon; block all four days for the on-call phys
-      var fri = irC[k].date;
-      if(date===fri || date===addDays(fri,1) || date===addDays(fri,2) || date===addDays(fri,3)) return true;
-    }
-  }
+  // NOTE: IR call records on this date do NOT block a day shift. Taking IR
+  // call and working an IR day shift are COMPLEMENTARY — when a physician
+  // is on call, admins typically want them placed at the hospital their
+  // call-day-site rule requires (e.g. "Schacht on IR call → must be at
+  // CHN"). Previously this function returned true for any call match,
+  // which silently excluded the on-call physician from every pool pass
+  // (Pass 1-5). Consequence: if the on-call preference path at the top of
+  // the slot loop couldn't use them (first-iterated slot wasn't rule-
+  // compatible), they were never considered again for the CORRECT slot
+  // their rule required — and the schedule ended up with the call phys
+  // nowhere (or at the wrong site via another AA path).
+  //
+  // The call-day-site rule check in the main loop (callDayRulesOk) enforces
+  // site correctness for on-call physicians; that's the right place for
+  // that logic, not here. Adjacency rules (Fri-Mon weekend span) are
+  // handled separately by sequenceOk and the weekend-call adjacency logic
+  // in previewIRAA.
+  //
   // Implicit tumor board / clinic participation block — if this physician
   // is an assigned participant of any conference on this date, they're
   // committed and can't take a day shift. Admins previously had to
