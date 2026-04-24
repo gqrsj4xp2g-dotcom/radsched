@@ -8557,22 +8557,49 @@ function _irsaBuildSlots(grp,calCells,allSites,shiftSlots,phys){
 function _irsaBuildCallMap(grp, monthsOrYm, allCalls){
   const map = {};
   const ms = Array.isArray(monthsOrYm) ? monthsOrYm : [monthsOrYm];
-  const inMonths = iso => ms.some(m => iso.startsWith(m));
-  for(const ic of allCalls){
-    if(ic.irGroup !== grp) continue;
+  const inMonths = iso => ms.some(m => iso && iso.startsWith(m));
+  for(const ic of (allCalls||[])){
+    if(!ic || ic.irGroup !== grp) continue;
+    if(!ic.date || typeof ic.date !== 'string') continue; // defensive: skip malformed records
     if(ic.callType === 'daily'){
       if(inMonths(ic.date) && !map[ic.date]) map[ic.date] = ic.physId;
     } else if(ic.callType === 'weekend'){
-      // Fri, Sat, Sun, Mon
+      // Fri, Sat, Sun, Mon — expand the 4-day span. Defensive: wrap addDays
+      // in try so a bad date string (shouldn't happen, but migration edge
+      // cases have shown up historically) can't take down the whole run.
       for(let k = 0; k < 4; k++){
-        const d = addDays(ic.date, k);
-        if(inMonths(d) && !map[d]) map[d] = ic.physId;
+        try {
+          const d = addDays(ic.date, k);
+          if(d && inMonths(d) && !map[d]) map[d] = ic.physId;
+        } catch(_){ /* skip bad date */ }
       }
     }
   }
   return map;
 }
-function _irsaEffQ(p,rawQ,callDays,ym){var bq=rawQ[p.id],base;base=(bq!=null&&bq>0)?bq:Math.max(Math.round(irShiftTargetMonth(p,ym)),1);return Math.max(base,callDays[p.id]||0);}
+// _irsaEffQ — effective quota for a physician.
+//   rawQ: per-phys quota table keyed by id; use if > 0.
+//   callDays: per-phys count of in-period on-call days; floor the quota at this.
+//   ymOrMonths: EITHER a single 'YYYY-MM' string OR an array of months. Historically
+//     this parameter was called `ym` (singular) but every caller actually passes
+//     the `months` array. When rawQ[p.id] was non-zero (common case) the fallback
+//     path was skipped and the bug was invisible. For zero-quota physicians
+//     (legitimately possible with low FTE + few slots) the fallback
+//     `irShiftTargetMonth(p, ym)` called `ym.split('-')` on an array and threw
+//     'ym.split is not a function', crashing previewIRShiftAA entirely.
+//   This version detects array input and calls irShiftTargetPeriod, which is
+//   the correct period-aware sibling of irShiftTargetMonth.
+function _irsaEffQ(p, rawQ, callDays, ymOrMonths){
+  var bq = rawQ[p.id], base;
+  if(bq != null && bq > 0){
+    base = bq;
+  } else if(Array.isArray(ymOrMonths)){
+    base = Math.max(Math.round(irShiftTargetPeriod(p, ymOrMonths)), 1);
+  } else {
+    base = Math.max(Math.round(irShiftTargetMonth(p, ymOrMonths)), 1);
+  }
+  return Math.max(base, callDays[p.id] || 0);
+}
 function _irsaBlocked(p,date,assigned){
   var vd=vacDays(p.id),k;
   if(vd.has(date))return true;
@@ -8676,6 +8703,22 @@ function previewIRShiftAA(){
   var ancTgt=S.cfg?(S.cfg.anchorPct||70):70;
   var ANC_RATE=ancTgt/100;
   var groups = getIRGroups().filter(function(g){return grpSel==='both'||g===grpSel;});
+
+  // Diagnostic: if there's nothing to do, surface that explicitly in the
+  // preview box and via console. Without this, silent early-returns made
+  // the button look "dead" for admins with misconfigured data.
+  try { console.log('[RS] previewIRShiftAA start', {period, yr, monthYM, grpSel, months, groups}); } catch(_){}
+  if(!months || !months.length){
+    var _b0 = document.getElementById('irsa-box');
+    if(_b0) _b0.innerHTML = '<div class="note nw">⚠ No months resolved for period=\''+period+'\', year=\''+yr+'\', month=\''+monthYM+'\'. Pick a different period or month and try again.</div>';
+    return;
+  }
+  if(!groups || !groups.length){
+    var _b1 = document.getElementById('irsa-box');
+    if(_b1) _b1.innerHTML = '<div class="note nw">⚠ No IR groups configured (or selected filter excludes all). Configure IR groups on the Practices page, then retry.</div>';
+    return;
+  }
+
   var ancEl=document.getElementById('irsa-anc-target');
   if(ancEl)ancEl.textContent=ancTgt;
   var allP=S.physicians||[],allS=S.sites||[],allC=S.irCalls||[],slots_cfg=S.irShiftSlots||{};
