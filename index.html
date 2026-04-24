@@ -8936,8 +8936,130 @@ function previewIRShiftAA(){
       var _pp=null; for(var _ppi=0; _ppi<phys.length; _ppi++){ if(phys[_ppi].id===_es.physId){ _pp=phys[_ppi]; break; } }
       if(_pp && _pp.anchorSite===_es.site) anc[_es.physId]++;
     }
+
+    // ─── PRE-ALLOCATION PASS — must-be-at-site-on-day rules ─────────────
+    // A physician with action='must-be-at-site-on-day' for a conference
+    // occurring today has a HARD constraint: if they take any shift that
+    // day, it must be at the required site. Previously this was enforced
+    // only as a filter in the main slot loop — if another physician got
+    // picked for the required-site slot first (higher FTE deficit, earlier
+    // iteration, etc.), the must-be-at-site physician would end up with
+    // NO shift because every other site was blocked for them.
+    //
+    // This pre-allocation pass walks each physician's must-be-at-site rules
+    // and reserves the matching slot BEFORE the competitive scoring. If the
+    // required-site slot for that date is available (capacity not yet used),
+    // assign the physician. Conference participation is the admin's explicit
+    // commitment — losing out to a higher-scored candidate isn't acceptable.
+    //
+    // Order-within-date: process in a stable, deterministic order. Ties
+    // could theoretically arise if two physicians both must-be-at-site at
+    // CHN on the same day and CHN has only one slot. We pick the first
+    // encountered (stable sort by physician id); admin sees the unsatisfied
+    // physician in the "unfilled" output and can rearrange manually. This
+    // is rare in practice — admins configuring two simultaneous clinics at
+    // the same site usually have different sites or know they're conflicting.
+    (function _preAllocateMustBeAtSite(){
+      // Index slots by date+site for quick lookup + capacity tracking.
+      var _slotCapIdx = {}; // key = date + '|' + site, val = array of slot references
+      for(var _slotI=0; _slotI<slots.length; _slotI++){
+        var _sl = slots[_slotI];
+        var _key = _sl.date + '|' + _sl.site;
+        if(!_slotCapIdx[_key]) _slotCapIdx[_key] = [];
+        _slotCapIdx[_key].push(_sl);
+      }
+      // For each physician in group, check their must-be-at-site rules
+      // against every date in the build period.
+      for(var _pi=0; _pi<phys.length; _pi++){
+        var _p = phys[_pi];
+        var _mbRules = (_p.tbRules||[]).filter(function(r){
+          return r && r.action === 'must-be-at-site-on-day' && r.requiredSite;
+        });
+        if(!_mbRules.length) continue;
+        // Iterate dates from cells (already filtered to working days).
+        for(var _ci=0; _ci<cells.length; _ci++){
+          var _d = cells[_ci].date;
+          // Check each rule: is an occurrence today? Does it scope to this event?
+          for(var _ri=0; _ri<_mbRules.length; _ri++){
+            var _r = _mbRules[_ri];
+            var _occ;
+            try{
+              _occ = _conferenceDatesForEvent(_p.id, _d, _d, _r.eventId);
+            } catch(_){ _occ = null; }
+            if(!_occ || !_occ.has(_d)) continue;
+            // Rule's shift filter — if specified, only apply for matching shift
+            if(_r.shift && _r.shift !== '1st') continue; // our slots are 1st-shift only
+            // Does physician already have a slot assigned today? (Either via
+            // pre-existing S.irShifts — reflected in _irsaBlocked — or within
+            // this preview run.)
+            if(_irsaBlocked(_p, _d, assigned)){
+              // Already placed somewhere today; rule may or may not be
+              // satisfied by that placement. We don't override existing
+              // manual assignments. Admin can check via scanner.
+              break;
+            }
+            // Find a free slot at the required site for this date.
+            var _sKey = _d + '|' + _r.requiredSite;
+            var _slotsHere = _slotCapIdx[_sKey] || [];
+            var _target = null;
+            for(var _shi=0; _shi<_slotsHere.length; _shi++){
+              var _cand = _slotsHere[_shi];
+              // Has this exact slot already been assigned in this run?
+              // Match by slotIndex so multi-capacity sites work.
+              var _taken = false;
+              for(var _ai=0; _ai<assigned.length; _ai++){
+                if(assigned[_ai].date === _cand.date && assigned[_ai].site === _cand.site
+                   && assigned[_ai]._preAllocSlotIndex === _cand.slotIndex){
+                  _taken = true; break;
+                }
+              }
+              if(_taken) continue;
+              // Eligibility check — physician must actually be allowed at this site.
+              if(!_irsaEligibleForSlot(_p, _cand)) continue;
+              // Rule stack — mirror Pass 1 but less strict; must-be-at-site is
+              // itself one of the rules, so skip tbRulesOk? No — tbRulesOk
+              // passes because requiredSite === target site. All other rule
+              // checks still apply (call-day-site, sequence, etc.)
+              var _eCtx = {physId:_p.id, date:_cand.date, site:_cand.site, shift:'1st', kind:'ir-shift', irGroup:grp, ym:_cand.date.slice(0,7)};
+              if(!irSiteRuleOk(_p, _cand.site, _cand.date)) continue;
+              if(!dayConditionSiteOk(_p, _cand.site, _cand.date, 'ir-shift')) continue;
+              if(!sequenceOk(_p, _cand.date, _cand.date.slice(0,7), _cand.site, _cand.slotLabel||'')) continue;
+              if(!callDayRulesOk(_p, _eCtx)) continue;
+              if(!tbRulesOk(_p, _eCtx)) continue;
+              if(!natLangRulesOk(_eCtx)) continue;
+              _target = _cand;
+              break;
+            }
+            if(_target){
+              assigned.push({physId:_p.id, date:_target.date, site:_target.site,
+                notes:'Auto (must-be-at-site for '+(_eventById(_r.eventId)?.name||'conference')+')',
+                slotLabel:_target.slotLabel||'', isFillIn:false,
+                _preAllocSlotIndex:_target.slotIndex});
+              if(_irsaCountsForQuota(_p, _target)){
+                cnt[_p.id]++;
+                if(_p.anchorSite && _p.anchorSite===_target.site) anc[_p.id]++;
+              }
+              totalA++;
+              break; // found a slot for this date; move to next date
+            }
+          }
+        }
+      }
+    })();
+
     for(si=0;si<slots.length;si++){
       slot=slots[si];var slotMo=slot.date.slice(0,7);
+      // Skip if pre-allocation already placed someone in this exact slot
+      // (matched by date + site + slotIndex). slotIndex correctly
+      // disambiguates sites with multiple capacity (e.g. CHN has 2 slots).
+      var _preFilled=false;
+      for(var _pfi=0;_pfi<assigned.length;_pfi++){
+        if(assigned[_pfi].date===slot.date && assigned[_pfi].site===slot.site
+           && assigned[_pfi]._preAllocSlotIndex === slot.slotIndex){
+          _preFilled=true; break;
+        }
+      }
+      if(_preFilled) continue;
       cPid=callMap[slot.date];
       if(cPid){cP=null;for(pi=0;pi<phys.length;pi++){if(phys[pi].id===cPid){cP=phys[pi];break;}}
         // On-call preference path: when the on-call physician is available
