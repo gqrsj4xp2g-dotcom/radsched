@@ -303,12 +303,10 @@ tbody tr:hover{background:var(--bg3)}
         <div class="afield"><label>Password</label><input id="rf-pw" type="password" placeholder="Min 8 characters"></div>
         <div class="afield"><label>Confirm Password</label><input id="rf-pw2" type="password" placeholder="Repeat password"></div>
         <div class="afield"><label>Account Role</label>
-          <div class="arole-row">
-            <button class="arole-btn on" id="rrole-user" onclick="setRegRole('user')">Physician / User</button>
-            <button class="arole-btn" id="rrole-admin" onclick="setRegRole('admin')">Administrator</button>
+          <div class="note ni" style="font-size:11px;line-height:1.4; margin-top:4px">
+            New registrations are created as standard Physician / User accounts. Administrator accounts must be added by an existing admin from the practice dashboard.
           </div>
         </div>
-        <div class="afield" id="rf-code-wrap" style="display:none"><label>Admin Access Code</label><input id="rf-code" type="password" placeholder="Contact your IT department"></div>
         <button class="abtn" onclick="doRegister()">Create Account</button>
       </div>
     </div>
@@ -327,7 +325,7 @@ tbody tr:hover{background:var(--bg3)}
   <div class="topbar">
     <span class="tb-logo">RadScheduler</span>
     <div class="tb-divider"></div>
-    <span class="tb-practice">Radiology Practice</span>
+    <span id="tb-practice" class="tb-practice">Radiology Practice</span>
     <div class="tb-spacer"></div>
     <div class="tb-user">
       <div class="tb-av" id="tb-av">--</div>
@@ -964,6 +962,36 @@ tbody tr:hover{background:var(--bg3)}
         <div class="tab" onclick="srTab('tb',this)">🔬 Conferences</div>
         <div class="tab" onclick="srTab('callsite',this)">📞 Call-Day Site</div>
         <div class="tab" onclick="srTab('irblk',this)">🚫 IR Blackouts</div>
+        <div class="tab" onclick="srTab('custom',this)">✍️ Custom</div>
+      </div>
+
+      <!-- CUSTOM FREE-TEXT RULES TAB -->
+      <div id="srt-custom" class="ibox" style="display:none">
+        <div style="font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px">
+          Type any rule in plain English. Surfaced as a warning during manual assignment and visible to the AI scheduling agent. Use the structured tabs above for rules the auto-assigner enforces.
+        </div>
+        <div id="sr-custom-edit-banner" style="display:none;font-size:11px;color:var(--amber-t,#92400e);background:var(--amber-bg,#fef3c7);border:1px solid var(--amber-t,#92400e);padding:6px 10px;border-radius:6px;margin-bottom:8px"></div>
+        <div class="fg">
+          <label>Rule Text</label>
+          <textarea id="sr-custom-text" rows="3" placeholder="e.g. Prefers not to be on call the weekend before her board exam (May 10–11)" style="width:100%;resize:vertical;font-family:inherit;font-size:12px"></textarea>
+        </div>
+        <div class="g3" style="margin-top:6px">
+          <div class="fg">
+            <label>Severity</label>
+            <select id="sr-custom-severity">
+              <option value="info">ℹ️ Info — show on assignment</option>
+              <option value="warn" selected>⚠️ Warn — confirm before assigning</option>
+              <option value="block">🛑 Block — refuse without override</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="chk" style="margin-top:18px"><input type="checkbox" id="sr-custom-active" checked> Active</label>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="bp bsm" onclick="saveCustomRule()" id="sr-custom-save-btn">Add Custom Rule</button>
+          <button class="bs bsm" onclick="cancelEditCustomRule()" id="sr-custom-cancel-btn" style="display:none">Cancel</button>
+        </div>
       </div>
 
       <!-- SITE LIMITS TAB -->
@@ -2818,6 +2846,8 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <div style="border-top:1px solid var(--bdr);margin:4px 0 2px;padding-top:6px;font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em">Configure</div>
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('List all current scheduling rules and explain what each one does in plain English.')">🧠 List scheduling rules</button>
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I want to add a new scheduling rule. Walk me through what kind of rules you support and ask me for the details I need to provide.')">➕ Add a new rule</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Show me every per-physician rule (structured + custom). For each physician with rules, summarize them in 1–2 sentences.')">📋 List physician rules</button>
+          <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I want to add a custom (free-text) rule for a physician. Ask me which physician, what the rule says, and the severity (info / warn / block).')">✍️ Add custom physician rule</button>
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I need to add a new hospital site. Ask me for the name, IR group (if any), and any anchor physicians.')">🏥 Add a new site</button>
         </div>
       </div>
@@ -2845,9 +2875,13 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div style="padding:10px 16px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;justify-content:space-between;align-items:center">
           <div>
             <span style="font-weight:800;font-size:13px">AI Scheduling Agent</span>
-            <span style="font-size:11px;color:var(--txt3);margin-left:8px">claude-haiku-4-5</span>
+            <span style="font-size:11px;color:var(--txt3);margin-left:8px" id="ai-model-label">claude-sonnet-4-6</span>
+            <span id="ai-history-indicator" style="font-size:10px;color:var(--txt3);margin-left:10px"></span>
           </div>
-          <button class="br bsm" onclick="clearAIChat()" style="font-size:11px">Clear</button>
+          <div style="display:flex;gap:6px">
+            <button class="bs bsm" onclick="exportAIChat()" style="font-size:11px" title="Download conversation as Markdown">⤓ Export</button>
+            <button class="br bsm" onclick="clearAIChat()" style="font-size:11px">Clear</button>
+          </div>
         </div>
         <div id="ai-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px">
           <div style="display:flex;flex-direction:column;align-items:flex-start">
@@ -2866,6 +2900,7 @@ Once set, ask me anything about your schedule!</div>
               style="flex:1;resize:none;border-radius:8px;padding:8px 12px;font-size:13px;font-family:inherit;border:1px solid var(--bdr);background:var(--bg2);color:var(--txt1)"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage();}"></textarea>
             <button class="bp" onclick="sendAIMessage()" id="ai-send-btn" style="padding:8px 16px;height:fit-content">Send</button>
+            <button class="br" onclick="abortAIMessage()" id="ai-stop-btn" style="padding:8px 14px;height:fit-content;display:none" title="Stop the current request">⏹ Stop</button>
           </div>
           <div id="ai-status" style="font-size:10px;color:var(--txt3);margin-top:5px;min-height:14px"></div>
         </div>
@@ -2946,10 +2981,9 @@ let _supabase=null;
 // snapshot. Entries auto-expire after 30s.
 let _recentlyAddedUsers=[];
 let _saveTimeout=null;
-const _SUPABASE_URL=/*CREDS_URL_START*/'https://tpbgwvisikbuqhmlqtky.supabase.co'
-/*CREDS_URL_END*/;  // set by Settings → auto-embedded on Save
-const _SUPABASE_KEY=/*CREDS_KEY_START*/'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwYmd3dmlzaWtidXFobWxxdGt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODg0MzUsImV4cCI6MjA5MTY2NDQzNX0.biu0OD-zk1cUl2CImDkkuOmIaat3vQKsgZ9riFn65Yk'
-/*CREDS_KEY_END*/;  // set by Settings → auto-embedded on Save
+const _SUPABASE_URL=/*CREDS_URL_START*/''/*CREDS_URL_END*/;  // no embedded URL credential in published HTML
+const _SUPABASE_KEY=/*CREDS_KEY_START*/''/*CREDS_KEY_END*/;  // no embedded anon key in published HTML
+const _ALLOW_LEGACY_AUTH=false; // disable legacy plaintext local auth by default
 const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
 
@@ -3119,9 +3153,9 @@ function triggerSave(){
 function _buildSaveHTML(){
   const source = _SRC || document.documentElement.outerHTML;
   if(!source){alert('Cannot generate save file.');return '';}
-  // Embed live Supabase credentials so any device opening the file auto-connects
+  // Embed live Supabase URL only; do not include anon keys in exported HTML files
   const liveUrl=_getUrl()||'';
-  const liveKey=_getKey()||'';
+  const liveKey=''; // never embed anon key into exported HTML files
   const sData='let S=/*S_START*/'+JSON.stringify(Object.assign(
     _buildPersistedPayload('file'),
     {
@@ -3220,9 +3254,6 @@ function clearAllData(){
 
 
 
-const ADMIN_CODE = 'RAD2025';
-let _regRole = 'user';
-
 let USERS = /*USERS_START*/[
   {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
 ]/*USERS_END*/;
@@ -3238,12 +3269,6 @@ function authTab(t){
   document.getElementById('af-login').style.display = t==='login'?'block':'none';
   document.getElementById('af-reg').style.display = t==='reg'?'block':'none';
   document.getElementById('aerr').style.display='none';
-}
-function setRegRole(r){
-  _regRole=r;
-  document.getElementById('rrole-user').classList.toggle('on', r==='user');
-  document.getElementById('rrole-admin').classList.toggle('on', r==='admin');
-  document.getElementById('rf-code-wrap').style.display = r==='admin'?'block':'none';
 }
 function showErr(msg){const e=document.getElementById('aerr');e.textContent=msg;e.style.display=msg?'block':'none';}
 
@@ -3395,7 +3420,11 @@ async function doLogin(){
   showErr('');
   const sb=_initAuthClient();
   if(!sb){
-    // Fallback: local auth if Supabase not configured
+    if(!_ALLOW_LEGACY_AUTH){
+      showErr('Supabase is not configured. Offline login is disabled for security.');
+      if(btn) btn.textContent='Sign In';
+      return;
+    }
     const u=USERS.find(x=>x.email===email&&x.pw===pw);
     if(!u){showErr('Invalid email or password.');if(btn)btn.textContent='Sign In';return;}
     CU=u;
@@ -3428,22 +3457,26 @@ async function doRegister(){
   if(!first||!last||!email||!pw){showErr('All fields are required.');return;}
   if(pw.length<8){showErr('Password must be at least 8 characters.');return;}
   if(pw!==pw2){showErr('Passwords do not match.');return;}
-  if(_regRole==='admin'&&document.getElementById('rf-code').value!==ADMIN_CODE){showErr('Invalid admin access code.');return;}
   const btn=document.querySelector('#af-reg .abtn');
   if(btn) btn.textContent='Creating account…';
   showErr('');
   const sb=_initAuthClient();
   if(!sb){
+    if(!_ALLOW_LEGACY_AUTH){
+      showErr('Supabase is not configured. Offline registration is disabled for security.');
+      if(btn)btn.textContent='Create Account';
+      return;
+    }
     // Fallback: local registration
     if(USERS.find(x=>x.email===email)){showErr('An account with this email already exists.');if(btn)btn.textContent='Create Account';return;}
-    const nu={id:'u'+Date.now(),email,pw,role:_regRole,first,last,physId:null,joined:new Date().toISOString().slice(0,10),
+    const nu={id:'u'+Date.now(),email,pw,role:'user',first,last,physId:null,joined:new Date().toISOString().slice(0,10),
       notifPrefs:{master:true,chatDM:true,chatGroup:false,chatMention:true,swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,holiday:true,vacation:true,openShift:false,broadcast:true}};
     USERS.push(nu); CU=nu; if(btn)btn.textContent='Create Account'; launchApp(); return;
   }
   try{
     const {data,error}=await sb.auth.signUp({
       email, password:pw,
-      options:{data:{role:_regRole,first,last,physId:null,practiceId:_PRACTICE_ID||'main',joined:new Date().toISOString().slice(0,10)}}
+      options:{data:{role:'user',first,last,physId:null,practiceId:_PRACTICE_ID||'main',joined:new Date().toISOString().slice(0,10)}}
     });
     if(error) throw error;
     if(data.user){
@@ -3894,7 +3927,7 @@ function _subscribeRealtime(){
       }
     });
 
-  // Polling fallback: pull from Supabase every 30s in case realtime misses an event
+  // Polling fallback: pull from Supabase every 10s in case realtime misses an event
   clearInterval(_pollInterval);
   _pollInterval=setInterval(async()=>{
     if(!_supabase||_isRestoring) return;
@@ -4810,7 +4843,7 @@ function renderMySched(){
 
 /* ─── PROFILES ─── */
 function renderProfiles(){
-  const isAdm=CU?.role==='admin';
+  const isAdm=_isAdminOrSU();
   const list=isAdm?USERS:[USERS.find(u=>u.id===CU?.id)].filter(Boolean);
   document.getElementById('profiles-list').innerHTML=list.map(u=>{
     const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
@@ -4869,8 +4902,6 @@ function renderUserMgmt(){
     S.physicians.map(p=>`<option value="${p.id}">${p.last}, ${p.first} (${p.role})</option>`).join('');
   const ca=document.getElementById('ca-phys');
   if(ca) ca.innerHTML=physOpts;
-  const lm=document.getElementById('lm-phys');
-  if(lm) lm.innerHTML=physOpts;
 
   // Inline physician-link options, reused per row. Each row's select gets its
   // current value pre-selected via markup so the dropdown opens on the right
@@ -6978,7 +7009,7 @@ function showDriveTimeDetails(physId, siteName, date){
       </div>
     `;
   }
-  if(CU?.role === 'admin'){
+  if(_isAdminOrSU()){
     html += `
       <button class="bp" onclick="refreshSingleDriveTime(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date||'').replace(/'/g,"\\'")}')" style="width:100%;margin-top:6px">🔄 Refresh live traffic now</button>
       <div id="dtd-refresh-status" style="font-size:11px;color:var(--txt3);margin-top:6px;text-align:center"></div>
@@ -7842,7 +7873,7 @@ function renderVacRounds(){
     const picks=(vp.picks?.[physId]?.[round])||[];
     const assigned=vp.assignments?.[physId]?.[round];
     const assignedWeek=assigned!=null?weeks.find(w=>w.week===assigned):null;
-    const isAdmin=CU?.role==='admin';
+    const isAdmin=_isAdminOrSU();
     const isMe=CU?.physId===physId;
     const canEdit=isAdmin||isMe;
     const rowBg=assigned!=null?'background:var(--green-bg)':!participates?'opacity:0.5':'';
@@ -8174,14 +8205,15 @@ function _eventsToICS(events, calName){
     lines.push(`UID:${ev.uid}`);
     lines.push(`DTSTAMP:${stamp}`);
     if(ev.allDay && ev.endDate){
-      // Multi-day all-day (vacation block); DTEND is exclusive so add 1 day
-      const end = new Date(ev.endDate); end.setDate(end.getDate()+1);
+      // Multi-day all-day (vacation block); DTEND is exclusive so add 1 day.
+      // parseDateLocal avoids the JS quirk where `new Date("2026-04-25")` is parsed
+      // as UTC midnight, which rolls back a day in negative-UTC timezones and
+      // produces DTEND === DTSTART for users in the Americas.
       lines.push(`DTSTART;VALUE=DATE:${fmtDateOnly(ev.date)}`);
-      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(fmtDate(end))}`);
+      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(addDays(ev.endDate,1))}`);
     } else if(ev.allDay){
-      const next = new Date(ev.date); next.setDate(next.getDate()+1);
       lines.push(`DTSTART;VALUE=DATE:${fmtDateOnly(ev.date)}`);
-      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(fmtDate(next))}`);
+      lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(addDays(ev.date,1))}`);
     } else {
       const startDT = fmtDateTime(ev.date, ev.start);
       // If end < start (overnight shift like 23:00 → 07:00), end is on next day.
@@ -8190,8 +8222,7 @@ function _eventsToICS(events, calName){
       // needing the heuristic below.
       let endDate = ev._tbEndDate || ev.date;
       if(!ev._tbEndDate && (ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00'))){
-        const nxt = new Date(ev.date); nxt.setDate(nxt.getDate()+1);
-        endDate = fmtDate(nxt);
+        endDate = addDays(ev.date,1);
       }
       const endDT = fmtDateTime(endDate, ev.end);
       lines.push(`DTSTART:${startDT}`);
@@ -10226,7 +10257,7 @@ function _renderChatGroupList(){
   const groups=(S.chatGroups||[]).filter(g=>
     !g.memberIds?.length || // public groups
     g.memberIds.includes(CU?.id) || // member
-    CU?.role==='admin'
+    _isAdminOrSU()
   );
   if(!groups.length){
     el.innerHTML='<div style="font-size:11px;color:var(--txt3);font-style:italic">No groups yet</div>';
@@ -10289,7 +10320,7 @@ function _openChatContext(ctx){
   const editBtn=document.getElementById('chat-edit-group-btn');
   const inp=document.getElementById('chat-input');
   if(titleEl) titleEl.textContent=ctx.type==='group'?'# '+ctx.name:'💬 '+ctx.name;
-  if(editBtn) editBtn.style.display=(ctx.type==='group'&&CU?.role==='admin')?'block':'none';
+  if(editBtn) editBtn.style.display=(ctx.type==='group'&&_isAdminOrSU())?'block':'none';
   if(countEl){
     if(ctx.type==='group'){
       const g=(S.chatGroups||[]).find(x=>String(x.id)===ctx.id);
@@ -10516,7 +10547,7 @@ function renderSwaps(){
         </div>
         <span class="tag ${cls}">${status}</span>
       </div>
-      ${CU?.role==='admin'&&status==='pending'?`<div style="margin-top:8px;display:flex;gap:6px">
+      ${_isAdminOrSU()&&status==='pending'?`<div style="margin-top:8px;display:flex;gap:6px">
         <button class="bsm bg" onclick="resolveSwap(${s.id},'approved')">Approve</button>
         <button class="bsm br" onclick="resolveSwap(${s.id},'denied')">Deny</button>
       </div>`:''}
@@ -10526,21 +10557,6 @@ function renderSwaps(){
   if(pendEl) pendEl.innerHTML=pending.map(renderCard).join('')||'<div class="note ni">No pending swap requests.</div>';
   const histEl=document.getElementById('swp-history-list');
   if(histEl) histEl.innerHTML=history.map(renderCard).join('')||'<div class="note ni">No completed swaps yet.</div>';
-}
-function requestSwap(){
-  const toId=+document.getElementById('swap-to')?.value;
-  const date=document.getElementById('swap-date')?.value;
-  const reason=document.getElementById('swap-reason')?.value.trim()||'';
-  if(!toId||!date){alert('Select physician and date');return;}
-  S.swapRequests.push({id:S.nextId++,fromPhysId:CU?.physId||null,toPhysId:toId,date,shiftType:'1st Shift',site:'',reason,status:'pending',ts:new Date().toISOString()});
-  triggerSave();renderSwaps();
-  // Notify the target physician
-  const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
-  _notify('swapReq',{
-    physId:toId,
-    subject:`Shift swap requested by ${fromName}`,
-    body:`${fromName} requested to swap shifts with you on ${date}.${reason?'\n\nMessage: '+reason:''}\n\nReview and respond in RadScheduler → Shift Swaps.`
-  });
 }
 function resolveSwap(id,status){
   if(!_adminOnly('resolve swap'))return;
@@ -11163,7 +11179,7 @@ function removeSiteWithCascade(idx){
   renderSitesList();
   // Refresh anything that might be showing the deleted site
   if(document.getElementById('phys-list')) renderPhysicians();
-  if(document.getElementById('ss-list')) renderSiteSlots();
+  if(document.getElementById('ss-content')) renderSiteSlots();
   const si=document.getElementById('save-indicator');
   if(si){si.textContent=`\u2713 Removed site "${name}" and ${total} reference(s)`;si.style.color='var(--green-t)';
     setTimeout(()=>{if(si)si.textContent='';},4000);}
@@ -11274,86 +11290,6 @@ function addSite(){
 }
 
 /* ─── SITE SLOTS ─── */
-function renderSiteRoles(){
-  const el=document.getElementById('site-roles-list');
-  if(!el)return;
-  const sites=(S.sites||[]).filter(s=>s.name!='At Home / Remote');
-  if(!sites.length){el.innerHTML='<p style="color:var(--txt3)">No sites configured.</p>';return;}
-  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  let html='';
-  sites.forEach(site=>{
-    const anchors=(site.irAnchors||[]).map(pid=>escHtml(pname(pid))).join(', ')||'\u2014';
-    const fillins=(site.irFillins||[]).map(pid=>escHtml(pname(pid))).join(', ')||'\u2014';
-    const nameLit=JSON.stringify(site.name).replace(/'/g,"&#39;");
-    html+=`<div style="padding:10px;border:1px solid var(--bd);border-radius:6px;margin-bottom:8px">
-      <div style="font-weight:700;margin-bottom:6px">${escHtml(site.name)}</div>
-      <div style="font-size:12px;margin-bottom:4px"><strong>Anchors:</strong> ${anchors}</div>
-      <div style="font-size:12px;margin-bottom:8px"><strong>Fill-ins:</strong> ${fillins}</div>
-      <button class="ba bsm" onclick='editSiteRoles(${nameLit})'>Edit</button>
-    </div>`;
-  });
-  el.innerHTML=html;
-}
-
-function editSiteRoles(siteName){
-  const site=S.sites.find(s=>s.name===siteName);
-  if(!site)return;
-  /* Include ALL physicians (not just irFte>0) so we don't silently drop previously
-     configured anchors/fillins when someone's irFte was temporarily set to 0. Also
-     useful for DR-only physicians who might fill in. */
-  const existing=new Set([...(site.irAnchors||[]),...(site.irFillins||[])]);
-  const allPhys=S.physicians.filter(p=>p.irFte>0||existing.has(p.id)).sort((a,b)=>(a.last||'').localeCompare(b.last||''));
-  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const mkLabel=(p,prefix,checked)=>`<label style="display:block;margin:4px 0"><input type="checkbox" id="${prefix}-${p.id}" ${checked?'checked':''}/> ${escHtml(pname(p.id))}${p.irFte>0?'':' <small style="color:var(--txt3)">(no IR FTE)</small>'}</label>`;
-  const anchorsHtml=allPhys.map(p=>mkLabel(p,'anc',(site.irAnchors||[]).includes(p.id))).join('');
-  const fillinsHtml=allPhys.map(p=>mkLabel(p,'fin',(site.irFillins||[]).includes(p.id))).join('');
-  const dlg=document.createElement('div');
-  dlg.className='modal-overlay';
-  /* JSON.stringify gives a safely-escaped JS string literal for the onclick handler,
-     so site names containing apostrophes or quotes no longer break markup. */
-  const safeNameLit=JSON.stringify(siteName);
-  dlg.innerHTML=`<div class="modal-box" style="max-height:80vh;overflow-y:auto">
-    <div class="modal-title">Edit IR Roles: ${escHtml(siteName)}</div>
-    <div class="g2" style="margin-bottom:12px">
-      <div>
-        <label style="display:block;font-weight:700;margin-bottom:6px">IR Anchors <small style="color:var(--txt3);font-weight:400">(count toward IR FTE)</small></label>
-        ${anchorsHtml||'<p style="color:var(--txt3)">No IR physicians.</p>'}
-      </div>
-      <div>
-        <label style="display:block;font-weight:700;margin-bottom:6px">IR Fill-ins <small style="color:var(--txt3);font-weight:400">(don\u2019t count toward IR FTE)</small></label>
-        ${fillinsHtml||'<p style="color:var(--txt3)">No IR physicians.</p>'}
-      </div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="ba" onclick='saveSiteRoles(${safeNameLit.replace(/'/g,"&#39;")})'>Save</button>
-      <button class="br" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-    </div>
-  </div>`;
-  document.body.appendChild(dlg);
-  dlg.onclick=(e)=>{if(e.target===dlg)dlg.remove();};
-}
-
-function saveSiteRoles(siteName){
-  const site=S.sites.find(s=>s.name===siteName);
-  if(!site)return;
-  /* Read from DOM checkboxes directly — preserves any physician the user checked even
-     if their irFte is currently 0. Prefixes 'anc-' and 'fin-' identify the two lists. */
-  const collect=(prefix)=>{
-    const ids=[];
-    document.querySelectorAll(`input[id^="${prefix}-"]`).forEach(inp=>{
-      if(inp.checked){
-        const pid=parseInt(inp.id.slice(prefix.length+1),10);
-        if(pid && !isNaN(pid)) ids.push(pid);
-      }
-    });
-    return ids;
-  };
-  site.irAnchors=collect('anc');
-  site.irFillins=collect('fin');
-  document.querySelector('.modal-overlay')?.remove();
-  triggerSave();
-  renderSiteRoles();
-}
 function renderSiteSlots(){
   // The "Site Management" tab now also hosts the full site editor (previously
   // the editor only existed in Settings → Hospital Sites, which users didn't
@@ -11361,7 +11297,6 @@ function renderSiteSlots(){
   // Management"). renderSitesList writes to BOTH anchors — sites-list (in
   // Settings) and sites-list-ssl (on this tab) — so they stay in sync.
   renderSitesList();
-  renderSiteRoles(); // legacy orphan anchor; no-op if element missing
   const ym=document.getElementById('ss-mo')?.value||new Date().toISOString().slice(0,7);
   const [y,m]=ym.split('-').map(Number);
   const first=new Date(y,m-1,1);
@@ -12711,6 +12646,13 @@ Click Cancel to abort.`;
 
 /* ─── PHYSICIAN SITE RULES ─── */
 let _srPhysId=null;
+// ID of the custom rule currently being edited via the form (null = add mode).
+// When set, saveCustomRule mutates that rule rather than appending a new one.
+let _editingCustomRuleId=null;
+// ID of the structured rule currently being edited per category. We keep one
+// editing-id per category so opening one editor cancels the others. Indexed
+// by category key; value is the array index (or null when not editing).
+let _editingStructIdx={site:null,day:null,shift:null,siteSeq:null,callSite:null};
 function openPhysSiteRules(physId){
   _srPhysId=physId;
   const p=S.physicians.find(x=>x.id===physId);if(!p)return;
@@ -12734,10 +12676,93 @@ function openPhysSiteRules(physId){
 function closePhysSiteRules(){
   document.getElementById('phys-site-rules-wrap').style.display='none';
   _srPhysId=null;
+  _editingCustomRuleId=null;
+  _editingStructIdx={site:null,day:null,shift:null,siteSeq:null,callSite:null};
+}
+
+/* ─── CUSTOM FREE-TEXT RULES (per physician) ───
+   Custom rules are admin-typed sentences that don't map onto the structured
+   rule categories. They surface as warnings during manual assignment and are
+   readable by the AI scheduling agent. Three severities:
+     • info  — informational only; never blocks.
+     • warn  — admin must confirm a warn-and-proceed dialog.
+     • block — refuses without an explicit `force:true` override.
+   Stored on each physician as p.customRules = [{id, text, severity, active, createdAt}]
+*/
+function saveCustomRule(){
+  if(!_adminOnly('save custom rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const text=(document.getElementById('sr-custom-text')?.value||'').trim();
+  if(!text){ alert('Enter rule text.'); return; }
+  const severity=document.getElementById('sr-custom-severity')?.value||'warn';
+  const active=document.getElementById('sr-custom-active')?.checked!==false;
+  if(!Array.isArray(p.customRules)) p.customRules=[];
+  if(_editingCustomRuleId!=null){
+    const r=p.customRules.find(x=>x.id===_editingCustomRuleId);
+    if(r){ r.text=text; r.severity=severity; r.active=active; r.updatedAt=new Date().toISOString(); }
+    _editingCustomRuleId=null;
+  } else {
+    p.customRules.push({id:S.nextId++, text, severity, active, createdAt:new Date().toISOString()});
+  }
+  triggerSave();
+  _resetCustomRuleForm();
+  renderSiteRulesList();
+}
+
+function _resetCustomRuleForm(){
+  const t=document.getElementById('sr-custom-text'); if(t) t.value='';
+  const s=document.getElementById('sr-custom-severity'); if(s) s.value='warn';
+  const a=document.getElementById('sr-custom-active'); if(a) a.checked=true;
+  const banner=document.getElementById('sr-custom-edit-banner'); if(banner) banner.style.display='none';
+  const saveBtn=document.getElementById('sr-custom-save-btn'); if(saveBtn) saveBtn.textContent='Add Custom Rule';
+  const cancelBtn=document.getElementById('sr-custom-cancel-btn'); if(cancelBtn) cancelBtn.style.display='none';
+}
+
+function startEditCustomRule(ruleId){
+  if(!_adminOnly('edit custom rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.customRules||[]).find(x=>x.id===ruleId); if(!r) return;
+  _editingCustomRuleId=ruleId;
+  // Switch to the Custom tab so the form is visible
+  const tabEl=Array.from(document.querySelectorAll('#phys-site-rules-wrap .tab')).find(el=>(el.textContent||'').includes('Custom'));
+  srTab('custom', tabEl);
+  document.getElementById('sr-custom-text').value=r.text||'';
+  document.getElementById('sr-custom-severity').value=r.severity||'warn';
+  document.getElementById('sr-custom-active').checked=r.active!==false;
+  const banner=document.getElementById('sr-custom-edit-banner');
+  if(banner){ banner.textContent=`Editing rule #${r.id}. Save to apply changes, or Cancel to discard.`; banner.style.display='block'; }
+  document.getElementById('sr-custom-save-btn').textContent='Save Changes';
+  document.getElementById('sr-custom-cancel-btn').style.display='inline-block';
+  document.getElementById('sr-custom-text').focus();
+}
+
+function cancelEditCustomRule(){
+  _editingCustomRuleId=null;
+  _resetCustomRuleForm();
+}
+
+function deleteCustomRule(ruleId){
+  if(!_adminOnly('delete custom rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.customRules||[]).find(x=>x.id===ruleId); if(!r) return;
+  if(!confirm(`Delete this custom rule?\n\n"${r.text}"`)) return;
+  p.customRules=(p.customRules||[]).filter(x=>x.id!==ruleId);
+  if(_editingCustomRuleId===ruleId) cancelEditCustomRule();
+  triggerSave();
+  renderSiteRulesList();
+}
+
+function toggleCustomRuleActive(ruleId){
+  if(!_adminOnly('toggle custom rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.customRules||[]).find(x=>x.id===ruleId); if(!r) return;
+  r.active=!(r.active!==false);
+  triggerSave();
+  renderSiteRulesList();
 }
 function srTab(t,el){
   // Map tab keys to actual HTML panel IDs
-  const panelMap={site:'srt-site',day:'srt-day',shift:'srt-shift',seq:'srt-seq',tb:'srt-tb',callsite:'srt-callsite',irblk:'srt-irblk'};
+  const panelMap={site:'srt-site',day:'srt-day',shift:'srt-shift',seq:'srt-seq',tb:'srt-tb',callsite:'srt-callsite',irblk:'srt-irblk',custom:'srt-custom'};
   Object.values(panelMap).forEach(id=>{
     const p=document.getElementById(id);if(p)p.style.display='none';
   });
@@ -12770,6 +12795,7 @@ function renderSiteRulesList(){
       if(r.allowedShifts?.length) tags.push(`<span class="tag tb" style="font-size:9px">shifts: ${r.allowedShifts.join(',')}</span>`);
       return `<div class="row" style="margin-bottom:4px">
         <div style="flex:1;font-size:12px"><strong>${r.site}</strong> ${tags.join(' ')}</div>
+        <button class="bs bxs" onclick="startEditSiteRule(${i})" title="Edit this rule">✎</button>
         <button class="br bxs" onclick="removeSiteRule(${i})">✕</button>
       </div>`;
     }).join('');
@@ -12785,6 +12811,7 @@ function renderSiteRulesList(){
       const type=d.schedType&&d.schedType!=='any'?` (${d.schedType})`:'';
       return `<div class="row" style="margin-bottom:4px">
         <div style="flex:1;font-size:12px">${day}${type}: ${site}${d.notes?' — '+d.notes:''}</div>
+        <button class="bs bxs" onclick="startEditDayCondition(${i})" title="Edit this rule">✎</button>
         <button class="br bxs" onclick="removeDayCondition(${i})">✕</button>
       </div>`;
     }).join('');
@@ -12799,7 +12826,9 @@ function renderSiteRulesList(){
     if(seq.minRest) html+=`Min ${seq.minRest} day(s) off between shifts. `;
     if(seq.maxWkCalls) html+=`Max ${seq.maxWkCalls} weekend calls/mo. `;
     if(seq.notes) html+=`<span style="color:var(--txt3)">${seq.notes}</span>`;
-    html+=`</div><button class="br bxs" onclick="clearSeqRules()">✕</button></div>`;
+    html+=`</div>
+      <button class="bs bxs" onclick="startEditSeqRules()" title="Edit">✎</button>
+      <button class="br bxs" onclick="clearSeqRules()">✕</button></div>`;
   }
 
   // Conference (tumor board / clinic) rules
@@ -12825,6 +12854,7 @@ function renderSiteRulesList(){
       const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
       return `<div class="row" style="margin-bottom:4px">
         <div style="flex:1;font-size:12px">${_describeSiteSeqRule(r)}${note}</div>
+        <button class="bs bxs" onclick="startEditSiteSeqRule(${i})" title="Edit this rule">✎</button>
         <button class="br bxs" onclick="removeSiteSeqRule(${i})">✕</button>
       </div>`;
     }).join('');
@@ -12838,7 +12868,34 @@ function renderSiteRulesList(){
       const note = r.notes ? ` <span style="color:var(--txt3)">— ${_tbEsc(r.notes)}</span>` : '';
       return `<div class="row" style="margin-bottom:4px">
         <div style="flex:1;font-size:12px">${_describeCallSiteRule(r)}${note}</div>
+        <button class="bs bxs" onclick="startEditCallSiteRule(${i})" title="Edit this rule">✎</button>
         <button class="br bxs" onclick="removeCallSiteRule(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Custom free-text rules — typed in plain English, surfaced as warnings.
+  const customRules = p?.customRules || [];
+  if(customRules.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px">Custom Rules <span style="font-weight:400;text-transform:none;color:var(--txt3)">— free-text, AI-readable</span></div>';
+    const sevTag = (sev) => sev==='block'
+      ? '<span class="tag tr" style="font-size:9px">BLOCK</span>'
+      : sev==='warn'
+        ? '<span class="tag" style="font-size:9px;background:var(--amber-bg,#fef3c7);color:var(--amber-t,#92400e)">WARN</span>'
+        : '<span class="tag tb" style="font-size:9px">INFO</span>';
+    html+=customRules.slice().sort((a,b)=>(b.active!==false?1:0)-(a.active!==false?1:0)||a.id-b.id).map(r=>{
+      const dim = r.active===false ? 'opacity:.45;' : '';
+      return `<div class="row" style="margin-bottom:4px;align-items:flex-start;${dim}">
+        <div style="flex:1;font-size:12px">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:2px">
+            ${sevTag(r.severity||'warn')}
+            ${r.active===false?'<span class="tag" style="font-size:9px">disabled</span>':''}
+          </div>
+          <div>${_tbEsc(r.text||'')}</div>
+        </div>
+        <button class="bsm bt bxs" onclick="toggleCustomRuleActive(${r.id})" title="${r.active===false?'Enable':'Disable'}">${r.active===false?'○':'●'}</button>
+        <button class="bs bxs" onclick="startEditCustomRule(${r.id})" title="Edit">✎</button>
+        <button class="br bxs" onclick="deleteCustomRule(${r.id})" title="Delete">✕</button>
       </div>`;
     }).join('');
   }
@@ -12859,6 +12916,94 @@ function clearSeqRules(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   p.seqRules=null;
   triggerSave();renderSiteRulesList();
+}
+
+/* ─── EDIT HANDLERS for structured rule categories ───
+   Each `startEdit*` pre-fills the existing add-form with values from the
+   target rule and switches to that tab. The user changes values and clicks
+   the existing "Add" button — which already de-duplicates by primary key
+   for site/day/seq/siteSeq, effectively functioning as an in-place edit.
+   Call-day rules don't dedup by key, so addCallSiteRule reads
+   _editingStructIdx.callSite to splice-replace when set.
+*/
+function _srTabEl(label){
+  return Array.from(document.querySelectorAll('#phys-site-rules-wrap .tab'))
+    .find(el => (el.textContent||'').trim().toLowerCase().includes(label.toLowerCase()));
+}
+
+function startEditSiteRule(idx){
+  if(!_adminOnly('edit site rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.siteRules||[])[idx]; if(!r) return;
+  srTab('site', _srTabEl('Site Limits'));
+  const set=(id,v)=>{const e=document.getElementById(id); if(e){ if(e.type==='checkbox') e.checked=!!v; else e.value=v==null?'':v; }};
+  set('sr-site', r.site);
+  set('sr-max-mo', r.maxPerMonth);
+  set('sr-max-wk', r.maxPerWeek);
+  set('sr-blocked', r.blocked);
+  set('sr-preferred', r.preferred);
+  // Existing addSiteRule already overwrites by site, so the "Add" button acts
+  // as Save when a rule with that site already exists.
+}
+
+function startEditDayCondition(idx){
+  if(!_adminOnly('edit day condition')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.dayConditions||[])[idx]; if(!r) return;
+  srTab('day', _srTabEl('Day Conditions'));
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v==null?'':v;};
+  set('sr-dow', r.dow);
+  set('sr-sched-type', r.schedType||'any');
+  set('sr-req-site', r.requiredSite||'');
+  set('sr-day-notes', r.notes||'');
+  // Existing addDayCondition de-dups by (dow, schedType), so re-clicking Add
+  // overwrites the matching entry.
+}
+
+function startEditSeqRules(){
+  if(!_adminOnly('edit sequence rules')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=p.seqRules||{};
+  srTab('seq', _srTabEl('Sequence Rules'));
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v==null?'':v;};
+  set('sr-max-consec', r.maxConsec);
+  set('sr-min-rest', r.minRest);
+  set('sr-max-wk-calls', r.maxWkCalls);
+  set('sr-seq-notes', r.notes||'');
+  // p.seqRules is a single object; addSeqRule overwrites it on every save.
+}
+
+function startEditSiteSeqRule(idx){
+  if(!_adminOnly('edit site sequence rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.siteSeqRules||[])[idx]; if(!r) return;
+  srTab('seq', _srTabEl('Sequence Rules'));
+  // Refresh sites/labels first so the value we set has matching options
+  if(typeof _srRefreshSiteSeqOpts==='function') _srRefreshSiteSeqOpts();
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v==null?'':v;};
+  set('sr-ss-site', r.site||'');
+  if(typeof _srRefreshSlotLabelOpts==='function') _srRefreshSlotLabelOpts();
+  set('sr-ss-slot', r.slotLabel||'');
+  set('sr-ss-maxconsec', r.maxConsec);
+  set('sr-ss-minrest', r.minRest);
+  set('sr-ss-notes', r.notes||'');
+  // addSiteSeqRule de-dups by (site, slotLabel) so re-clicking Add overwrites.
+}
+
+function startEditCallSiteRule(idx){
+  if(!_adminOnly('edit call-day site rule')) return;
+  const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
+  const r=(p.callDayRules||[])[idx]; if(!r) return;
+  _editingStructIdx.callSite = idx;
+  srTab('callsite', _srTabEl('Call-Day Site'));
+  if(typeof _srRefreshCallSiteSiteOptions==='function') _srRefreshCallSiteSiteOptions();
+  const set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v==null?'':v;};
+  set('sr-cs-calltype', r.callType||'');
+  set('sr-cs-site', r.requiredSite||'');
+  set('sr-cs-shift', r.shift||'');
+  set('sr-cs-shiftkind', r.shiftKind||'');
+  set('sr-cs-notes', r.notes||'');
+  // addCallSiteRule reads _editingStructIdx.callSite and splice-replaces.
 }
 function addSiteRule(){
   if(!_srPhysId)return;
@@ -13076,7 +13221,9 @@ function addHoliday(){
 
 /* ─── AI SCHEDULING AGENT ─── */
 
-let _aiHistory = [];  // conversation history for multi-turn context
+let _aiHistory = [];  // conversation history for multi-turn context (sent to API)
+let _aiAbortController = null; // AbortController for the in-flight request, so Stop button can cancel
+let _aiAborted = false; // set by abortAIMessage; checked at the top of each loop iteration
 
 // ── Tool definitions ────────────────────────────────────────────────────
 const _AI_TOOLS = [
@@ -13407,12 +13554,63 @@ const _AI_TOOLS = [
       },
       required: ['physIds','subject','body']
     }
+  },
+  {
+    name: 'list_physician_rules',
+    description: 'Read every per-physician rule (structured + free-text) for one or all physicians. Use this BEFORE proposing rule edits or when an admin asks "what are X\'s rules?". Returns siteRules, dayConditions, seqRules, siteSeqRules, callDayRules, tbRules, AND customRules (the new free-text rules — admins type these in plain English).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number', description: 'Physician ID to fetch rules for. Omit to return rules for ALL physicians (use sparingly — output can be large).' }
+      }
+    }
+  },
+  {
+    name: 'add_physician_custom_rule',
+    description: 'Add a free-text custom rule to a physician. Use this when the admin describes a constraint that doesn\'t fit the structured categories (siteRules, dayConditions, etc.). Severity controls behavior at assignment time: info=AI-readable only, warn=show warn-and-confirm dialog, block=hard block unless force-overridden.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:   { type: 'number', description: 'Physician ID' },
+        text:     { type: 'string', description: 'The rule sentence in plain English. Be specific (mention dates / sites / shift types). Example: "Prefers not to be on call the weekend before her board exam (May 10–11, 2026)".' },
+        severity: { type: 'string', enum: ['info','warn','block'], description: 'info = AI-readable only, never blocks. warn = warn-and-confirm dialog at assignment. block = refuse without override. Default: warn.' },
+        active:   { type: 'boolean', description: 'Whether the rule is active (defaults to true).' }
+      },
+      required: ['physId','text']
+    }
+  },
+  {
+    name: 'update_physician_custom_rule',
+    description: 'Modify an existing custom rule (text, severity, or active state). Get the rule ID from list_physician_rules first.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId:   { type: 'number' },
+        ruleId:   { type: 'number', description: 'The custom rule ID returned by list_physician_rules.' },
+        text:     { type: 'string', description: 'New rule text (optional).' },
+        severity: { type: 'string', enum: ['info','warn','block'], description: 'New severity (optional).' },
+        active:   { type: 'boolean', description: 'Enable/disable (optional).' }
+      },
+      required: ['physId','ruleId']
+    }
+  },
+  {
+    name: 'delete_physician_custom_rule',
+    description: 'Permanently delete a custom rule from a physician.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        physId: { type: 'number' },
+        ruleId: { type: 'number' }
+      },
+      required: ['physId','ruleId']
+    }
   }
 ];
 
 // ── Tool execution ──────────────────────────────────────────────────────
 function _aiExecuteTool(name, input) {
-  const adminOk = CU?.role === 'admin';
+  const adminOk = _isAdminOrSU();
 
   if(name === 'get_schedule_data'){
     const result = {};
@@ -13486,8 +13684,8 @@ function _aiExecuteTool(name, input) {
     if(!arr) return { ok:false, error:'Unknown shift type.' };
     const removed = S[arr].find(x=>x.id===shiftId);
     if(!removed) return { ok:false, error:`No ${type} with ID ${shiftId} found.` };
+    // Reactive Proxy setter on `S` already calls triggerSave() for top-level array reassignment.
     S[arr] = S[arr].filter(x=>x.id!==shiftId);
-    triggerSave();
     // Notify affected physician
     if(removed.physId!=null){
       const shiftDate = removed.date || removed.satDate || '';
@@ -13861,6 +14059,98 @@ function _aiExecuteTool(name, input) {
     return { ok:true, message: parts.join(' ') };
   }
 
+  if(name === 'list_physician_rules'){
+    const { physId } = input || {};
+    const summarize = (p) => ({
+      physId: p.id,
+      name: `${p.last}, ${p.first}`,
+      role: p.role,
+      irGroup: p.irGroup || null,
+      siteRules:    (p.siteRules    || []).map((r,i)=>({idx:i, ...r})),
+      dayConditions:(p.dayConditions|| []).map((r,i)=>({idx:i, ...r})),
+      seqRules:      p.seqRules     || null,
+      siteSeqRules:(p.siteSeqRules || []).map((r,i)=>({idx:i, ...r})),
+      callDayRules:(p.callDayRules || []).map((r,i)=>({idx:i, ...r})),
+      tbRules:     (p.tbRules      || []).map((r,i)=>({idx:i, ...r})),
+      customRules: (p.customRules  || []).map(r=>({
+        id: r.id, text: r.text, severity: r.severity||'warn',
+        active: r.active!==false, createdAt: r.createdAt||null
+      })),
+    });
+    if(physId != null){
+      const p = S.physicians.find(x=>x.id===physId);
+      if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+      return { ok:true, data: summarize(p) };
+    }
+    return { ok:true, data: (S.physicians||[]).map(summarize) };
+  }
+
+  if(name === 'add_physician_custom_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const { physId, text, severity, active } = input || {};
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const cleanText = String(text||'').trim();
+    if(!cleanText) return { ok:false, error:'Rule text is required.' };
+    const sev = ['info','warn','block'].includes(severity) ? severity : 'warn';
+    if(!Array.isArray(p.customRules)) p.customRules = [];
+    const rule = {
+      id: S.nextId++,
+      text: cleanText,
+      severity: sev,
+      active: active !== false,
+      createdAt: new Date().toISOString(),
+    };
+    p.customRules.push(rule);
+    triggerSave();
+    if(_srPhysId === physId && document.getElementById('phys-site-rules-wrap')?.style.display !== 'none'){
+      renderSiteRulesList();
+    }
+    return { ok:true, message:`Added ${sev} custom rule to ${p.last}: "${cleanText}".`, ruleId: rule.id };
+  }
+
+  if(name === 'update_physician_custom_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const { physId, ruleId, text, severity, active } = input || {};
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const r = (p.customRules||[]).find(x=>x.id===ruleId);
+    if(!r) return { ok:false, error:`Custom rule ID ${ruleId} not found on ${p.last}.` };
+    const changes = [];
+    if(text != null){
+      const cleanText = String(text).trim();
+      if(!cleanText) return { ok:false, error:'Rule text cannot be empty.' };
+      r.text = cleanText; changes.push('text');
+    }
+    if(severity != null){
+      if(!['info','warn','block'].includes(severity)) return { ok:false, error:`severity must be one of info|warn|block.` };
+      r.severity = severity; changes.push('severity');
+    }
+    if(active != null){ r.active = !!active; changes.push('active'); }
+    if(!changes.length) return { ok:false, error:'No fields supplied to update.' };
+    r.updatedAt = new Date().toISOString();
+    triggerSave();
+    if(_srPhysId === physId && document.getElementById('phys-site-rules-wrap')?.style.display !== 'none'){
+      renderSiteRulesList();
+    }
+    return { ok:true, message:`Updated ${changes.join(', ')} on ${p.last}'s custom rule #${ruleId}.` };
+  }
+
+  if(name === 'delete_physician_custom_rule'){
+    if(!adminOk) return { ok:false, error:'Admin access required.' };
+    const { physId, ruleId } = input || {};
+    const p = S.physicians.find(x=>x.id===physId);
+    if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    const r = (p.customRules||[]).find(x=>x.id===ruleId);
+    if(!r) return { ok:false, error:`Custom rule ID ${ruleId} not found on ${p.last}.` };
+    p.customRules = (p.customRules||[]).filter(x=>x.id!==ruleId);
+    triggerSave();
+    if(_srPhysId === physId && document.getElementById('phys-site-rules-wrap')?.style.display !== 'none'){
+      renderSiteRulesList();
+    }
+    return { ok:true, message:`Deleted custom rule "${r.text}" from ${p.last}.` };
+  }
+
   return { ok:false, error:`Unknown tool: ${name}` };
 }
 
@@ -13891,12 +14181,20 @@ ${phyList}
 Current sites: ${(S.sites||[]).map(s=>`${s.name}${s.irGroup?' (IR '+s.irGroup+')':''}`).join(', ')||'(none)'}
 Current scheduling rules active: ${(S.natLangRules||[]).filter(r=>r.enabled!==false).length}
 
-Your tools fall into five categories:
+Your tools fall into six categories:
 1. DATA ACCESS: get_schedule_data — always call this FIRST before analyzing or changing anything.
 2. DIRECT ASSIGNMENTS: assign_dr_shift, assign_ir_shift, remove_shift, add_vacation, add_ir_call_blackout, fill_dr_home_for_ir.
 3. PRACTICE CONFIGURATION: create_site / update_site / delete_site; update_physician; add_physician_site_rule / remove_physician_site_rule; add_physician_day_condition; set_physician_seq_rules; create_holiday_definition.
-4. IF/THEN SCHEDULING RULES: create_natural_language_rule, list_natural_language_rules, toggle_natural_language_rule, delete_natural_language_rule.
-5. NOTIFICATIONS: send_notification — send an email to one or more physicians via the app's built-in email system.
+4. IF/THEN SCHEDULING RULES (global): create_natural_language_rule, list_natural_language_rules, toggle_natural_language_rule, delete_natural_language_rule.
+5. PER-PHYSICIAN RULES: list_physician_rules (read all structured + custom rules for a physician), add_physician_custom_rule / update_physician_custom_rule / delete_physician_custom_rule (manage free-text rules typed in plain English).
+6. NOTIFICATIONS: send_notification — send an email to one or more physicians via the app's built-in email system.
+
+CUSTOM (FREE-TEXT) PHYSICIAN RULES:
+- These are rules an admin types in plain English that don't fit the structured categories. Stored on the physician as customRules[].
+- Severity controls assignment-time behavior: 'info' (visible to you only, never blocks), 'warn' (warn-and-confirm dialog), 'block' (refuses without explicit force override).
+- When the admin describes a one-off, person-specific, or contextual constraint that can't be cleanly modeled with sites/shifts/days (e.g. "Prefers no call the weekend before her boards", "Avoid scheduling with Dr. Y if possible", "Wants Friday off in March 2026 for a personal trip"), use add_physician_custom_rule rather than trying to force it into the structured categories.
+- For constraints that DO fit the structured categories (site limits, day-of-week, max consecutive, etc.), prefer the structured tools — those are enforced by the auto-assigner; custom rules are not.
+- Always call list_physician_rules before adding a custom rule so you can confirm whether a similar rule already exists, and so you reference the correct physId.
 
 IMPORTANT — email notifications are built into this app:
 - The app HAS an email notification system powered by a Supabase edge function. You do NOT need to tell the admin to send emails manually.
@@ -13929,16 +14227,25 @@ Examples of natural-language rule translation:
 
 Always call get_schedule_data before analyzing or making changes — never assume what's in the schedule without reading it first.
 When the admin describes a scheduling rule, CONFIRM the structured form back to them before creating it, especially the physician ID, site name, and action type.
-Admin access is required for data-changing operations. The current user role is: ${CU?.role||'unknown'}.`;
+Admin access is required for data-changing operations. The current user role is: ${CU?.role||'unknown'}${CU?.role==='superuser'?' (has full admin privileges)':''}.`;
 
   _aiHistory.push({ role: 'user', content: text });
+  // Track this in the visible transcript so we can restore it across reloads.
+  _aiTranscript.push({ kind:'msg', role:'user', text, ts: Date.now() });
+
+  // Wire abort: a single AbortController per send. Stop button targets this.
+  _aiAbortController = new AbortController();
+  _aiAborted = false;
+  const stopBtn = document.getElementById('ai-stop-btn');
+  if(stopBtn) stopBtn.style.display = 'inline-block';
 
   try {
     let continueLoop = true;
     let loopCount = 0;
-    const MAX_LOOPS = 6; // prevent infinite tool loops
+    const MAX_LOOPS = 8; // prevent infinite tool loops
 
     while(continueLoop && loopCount < MAX_LOOPS){
+      if(_aiAborted) throw new Error('Stopped by user.');
       loopCount++;
       status.textContent = loopCount === 1 ? 'Thinking…' : `Using tools (step ${loopCount})…`;
 
@@ -13956,7 +14263,8 @@ Admin access is required for data-changing operations. The current user role is:
           system: systemPrompt,
           tools: _AI_TOOLS,
           messages: _aiHistory
-        })
+        }),
+        signal: _aiAbortController.signal
       });
 
       if(!resp.ok){
@@ -13991,12 +14299,18 @@ Admin access is required for data-changing operations. The current user role is:
             tool_use_id: block.id,
             content: JSON.stringify(result)
           });
+          // Render the tool call inline (collapsible) so the admin can audit
+          // exactly what the AI did. Track in transcript too.
+          _aiAppendToolCard(block.name, block.input, result);
+          _aiTranscript.push({ kind:'tool', name: block.name, input: block.input, result, ts: Date.now() });
         }
       }
 
       // Show any text blocks that came before tool use
       if(textBlocks.length && (!hasToolUse || data.stop_reason === 'end_turn')){
-        _aiAppendMsg('assistant', textBlocks.join('\n\n'));
+        const txt = textBlocks.join('\n\n');
+        _aiAppendMsg('assistant', txt);
+        _aiTranscript.push({ kind:'msg', role:'assistant', text: txt, ts: Date.now() });
       }
 
       if(hasToolUse){
@@ -14011,13 +14325,26 @@ Admin access is required for data-changing operations. The current user role is:
       }
     }
 
+    if(loopCount >= MAX_LOOPS){
+      _aiAppendMsg('error', `Hit max tool-call loop (${MAX_LOOPS} steps). The AI may be stuck — try rephrasing or breaking the task into smaller steps.`);
+    }
     status.textContent = '';
   } catch(e){
-    _aiAppendMsg('error', `Error: ${e.message}`);
+    const msg = e?.name === 'AbortError' ? 'Stopped by user.' : `Error: ${e.message}`;
+    _aiAppendMsg('error', msg);
+    _aiTranscript.push({ kind:'msg', role:'error', text: msg, ts: Date.now() });
     status.textContent = '';
   } finally {
     sendBtn.disabled = false;
+    if(stopBtn) stopBtn.style.display = 'none';
+    _aiAbortController = null;
+    _aiSaveSession();
   }
+}
+
+function abortAIMessage(){
+  _aiAborted = true;
+  if(_aiAbortController){ try{ _aiAbortController.abort(); }catch(_){} }
 }
 
 function aiQuick(prompt){
@@ -14035,7 +14362,7 @@ function _aiAppendMsg(role, text){
   const radius = isUser ? '14px 14px 3px 14px' : '14px 14px 14px 3px';
   const label = isUser ? (CU?.first||'You') : isError ? 'Error' : 'AI Scheduler';
   const align = isUser ? 'flex-end' : 'flex-start';
-  const formatted = text
+  const formatted = String(text||'')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
     .replace(/`([^`]+)`/g,'<code style="background:var(--bg2);padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
@@ -14048,17 +14375,160 @@ function _aiAppendMsg(role, text){
   el.scrollTop = el.scrollHeight;
 }
 
+// Render a collapsed tool-call card in the conversation. Expands on click to
+// show the full input and result JSON. Color-coded ok/error.
+function _aiAppendToolCard(name, input, result){
+  const el = document.getElementById('ai-messages');
+  if(!el) return;
+  const ok = !!result?.ok;
+  const color = ok ? 'var(--green-t)' : 'var(--red-t)';
+  const icon = ok ? '✓' : '✕';
+  const summary = ok
+    ? (result?.message ? String(result.message).slice(0,140) : '(read)')
+    : (result?.error ? String(result.error).slice(0,140) : 'failed');
+  const inputJSON  = JSON.stringify(input,  null, 2);
+  const resultJSON = JSON.stringify(result, null, 2);
+  const escapeAttr = (s) => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;width:100%';
+  div.innerHTML = `<details style="max-width:85%;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;font-size:11px;padding:6px 10px;color:var(--txt2)">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px">
+      <span style="color:${color};font-weight:700">${icon}</span>
+      <span style="font-family:ui-monospace,monospace;font-weight:700;color:var(--txt1)">${escapeAttr(name)}</span>
+      <span style="color:var(--txt3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">— ${escapeAttr(summary)}</span>
+      <span style="color:var(--txt3);font-size:10px">click to expand</span>
+    </summary>
+    <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+      <div>
+        <div style="font-size:10px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Input</div>
+        <pre style="margin:0;padding:6px 8px;background:var(--bg3);border-radius:4px;overflow-x:auto;font-size:10px;line-height:1.4">${escapeAttr(inputJSON)}</pre>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Result</div>
+        <pre style="margin:0;padding:6px 8px;background:var(--bg3);border-radius:4px;overflow-x:auto;font-size:10px;line-height:1.4">${escapeAttr(resultJSON)}</pre>
+      </div>
+    </div>
+  </details>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Conversation persistence (localStorage) ────────────────────────────────
+const _AI_STORAGE_KEY = 'rs.aiSession.v1';
+const _AI_MAX_STORED_BYTES = 250 * 1024; // 250 KB cap; avoid bloating localStorage
+let _aiTranscript = []; // visible-message log (for restore); see _aiAppendToolCard / _aiAppendMsg
+
+function _aiSaveSession(){
+  try{
+    const payload = { history: _aiHistory, transcript: _aiTranscript, savedAt: Date.now() };
+    let json = JSON.stringify(payload);
+    // If too big, drop oldest pairs from BOTH history and transcript until under cap.
+    while(json.length > _AI_MAX_STORED_BYTES && _aiHistory.length > 4){
+      _aiHistory.splice(0, 2);
+      _aiTranscript.splice(0, 2);
+      json = JSON.stringify({ history: _aiHistory, transcript: _aiTranscript, savedAt: Date.now() });
+    }
+    localStorage.setItem(_AI_STORAGE_KEY, json);
+    _aiUpdateHistoryIndicator();
+  }catch(e){
+    // QuotaExceeded or disabled storage — non-fatal.
+    console.warn('[RS] AI session save failed:', e);
+  }
+}
+
+function _aiRestoreSession(){
+  try{
+    const raw = localStorage.getItem(_AI_STORAGE_KEY);
+    if(!raw) return false;
+    const payload = JSON.parse(raw);
+    if(!payload || !Array.isArray(payload.history) || !Array.isArray(payload.transcript)) return false;
+    _aiHistory = payload.history;
+    _aiTranscript = payload.transcript;
+    // Rebuild the visible UI from the transcript log.
+    const el = document.getElementById('ai-messages');
+    if(el){
+      el.innerHTML = '';
+      for(const item of _aiTranscript){
+        if(item.kind === 'msg') _aiAppendMsg(item.role, item.text);
+        else if(item.kind === 'tool') _aiAppendToolCard(item.name, item.input, item.result);
+      }
+    }
+    _aiUpdateHistoryIndicator();
+    return true;
+  }catch(e){
+    console.warn('[RS] AI session restore failed:', e);
+    return false;
+  }
+}
+
+function _aiUpdateHistoryIndicator(){
+  const el = document.getElementById('ai-history-indicator'); if(!el) return;
+  const turns = _aiHistory.filter(m => m.role === 'user' && typeof m.content === 'string').length;
+  const tools = _aiTranscript.filter(t => t.kind === 'tool').length;
+  el.textContent = (turns || tools) ? `· ${turns} turn${turns===1?'':'s'} · ${tools} tool call${tools===1?'':'s'}` : '';
+}
+
 function clearAIChat(){
+  if(_aiHistory.length || _aiTranscript.length){
+    if(!confirm('Clear the entire AI conversation? This cannot be undone.')) return;
+  }
   _aiHistory = [];
+  _aiTranscript = [];
+  try{ localStorage.removeItem(_AI_STORAGE_KEY); }catch(_){}
   const el = document.getElementById('ai-messages');
   if(el) el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:flex-start">
     <div style="font-size:10px;color:var(--txt3);margin-bottom:4px">AI Scheduler</div>
     <div style="max-width:85%;padding:10px 14px;border-radius:14px 14px 14px 3px;font-size:13px;line-height:1.5;background:var(--bg3);color:var(--txt1)">Chat cleared. How can I help you?</div>
   </div>`;
+  _aiUpdateHistoryIndicator();
+}
+
+// Download the current conversation as a Markdown transcript.
+function exportAIChat(){
+  if(!_aiTranscript.length){ alert('No conversation to export yet.'); return; }
+  const lines = [`# AI Scheduler conversation`, `_Exported ${new Date().toLocaleString()}_`, ''];
+  for(const item of _aiTranscript){
+    if(item.kind === 'msg'){
+      const who = item.role === 'user' ? `**${CU?.first||'You'}**`
+                : item.role === 'error' ? '**Error**' : '**AI Scheduler**';
+      lines.push(`### ${who}`, item.text || '', '');
+    } else if(item.kind === 'tool'){
+      const ok = item.result?.ok;
+      lines.push(`### Tool: \`${item.name}\` ${ok?'✓':'✕'}`,
+        '```json', JSON.stringify(item.input, null, 2), '```',
+        '```json', JSON.stringify(item.result, null, 2), '```', '');
+    }
+  }
+  const blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `radscheduler-ai-${fmtDate(new Date())}.md`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
 
 function renderAIAgent(){
-  // Nothing to pre-render — conversation is live
+  // Restore prior session on first open. Idempotent — calling again with the
+  // same DOM rebuilds from the in-memory transcript without re-fetching from
+  // localStorage. After restore the indicator reflects how much history is
+  // loaded so admins know whether they're continuing or starting fresh.
+  if(_aiTranscript.length === 0){
+    _aiRestoreSession();
+  } else {
+    const el = document.getElementById('ai-messages');
+    if(el && el.children.length <= 1){
+      // Page was re-rendered (e.g. nav back) but we already have a transcript
+      // in memory — rehydrate the DOM from it so the user doesn't see an empty
+      // chat after navigating away.
+      el.innerHTML = '';
+      for(const item of _aiTranscript){
+        if(item.kind === 'msg') _aiAppendMsg(item.role, item.text);
+        else if(item.kind === 'tool') _aiAppendToolCard(item.name, item.input, item.result);
+      }
+    }
+    _aiUpdateHistoryIndicator();
+  }
 }
 
 
@@ -17531,17 +18001,27 @@ function addCallSiteRule(){
   const shiftKind = document.getElementById('sr-cs-shiftkind')?.value || '';
   const notes = (document.getElementById('sr-cs-notes')?.value || '').trim();
   if(!Array.isArray(p.callDayRules)) p.callDayRules = [];
-  const existing = p.callDayRules.find(r =>
+  const editIdx = _editingStructIdx.callSite;
+  // When editing, we splice-replace by index. Skip the duplicate check against
+  // the entry we're editing (it'd always match), but still block dupes against
+  // OTHER entries.
+  const existing = p.callDayRules.findIndex((r, i) =>
+    i !== editIdx &&
     r.callType === callType &&
     r.requiredSite === requiredSite &&
     (r.shift||'') === (shift||'') &&
     (r.shiftKind||'') === (shiftKind||'')
   );
-  if(existing){ alert('That call-day site rule already exists for this physician.'); return; }
+  if(existing >= 0){ alert('That call-day site rule already exists for this physician.'); return; }
   const rule = {callType, requiredSite, notes};
   if(shift) rule.shift = shift;
   if(shiftKind) rule.shiftKind = shiftKind;
-  p.callDayRules.push(rule);
+  if(editIdx != null && p.callDayRules[editIdx]){
+    p.callDayRules[editIdx] = rule;
+    _editingStructIdx.callSite = null;
+  } else {
+    p.callDayRules.push(rule);
+  }
   const notesEl = document.getElementById('sr-cs-notes'); if(notesEl) notesEl.value = '';
   triggerSave();
   _afterMutation();
@@ -17788,16 +18268,14 @@ function _driveTimeCell(physId, site){
 
 
 function logImport(msg, type='info'){
-  // Log to vacp-import-log if it exists, else console
-  const el = document.getElementById('vacp-import-log') ||
-              document.getElementById('vac-import-preview') ||
-              document.getElementById('shifts-import-preview');
+  const el = document.getElementById('import-log');
   if(el){
     const color = type==='success'?'var(--green-t)':type==='error'?'var(--red-t)':'var(--txt2)';
     const entry = document.createElement('div');
     entry.style.cssText = `font-size:11px;color:${color};margin-top:3px`;
     entry.textContent = msg;
     el.appendChild(entry);
+    return;
   }
   console.log('[Import]', msg);
 }
@@ -18215,6 +18693,18 @@ function _gatherManualRuleViolations(p, ctx){
   // Call-day site rule — only meaningful when candidate is a day shift
   if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
     if(!callDayRulesOk(p, ctx)) out.push(`call-day site rule requires a different site for this physician`);
+  }
+
+  // Custom free-text rules — surface 'warn' and 'block' as violations so the
+  // existing warn-and-confirm flow runs. 'info' rules are intentionally NOT
+  // surfaced here; they're for AI-agent context only.
+  const customRules = (p.customRules||[]).filter(r=>r.active!==false);
+  for(const r of customRules){
+    const sev = r.severity || 'warn';
+    if(sev === 'info') continue;
+    const tag = sev === 'block' ? 'BLOCK' : 'WARN';
+    const txt = String(r.text||'').trim();
+    if(txt) out.push(`custom rule [${tag}]: ${txt}`);
   }
 
   return out;
@@ -22952,8 +23442,10 @@ async function _pushToSupabase(){
   if(_isSaving){
     // Re-entrant call while previous save is in-flight. Mark that we need another push
     // when the current one finishes, so nothing is lost. _hasUnsavedChanges=true signals this.
+    // Return false so callers awaiting the result (e.g. hardSave) don't mistake the deferral
+    // for success and skip their "✓ Synced" UI update — the follow-up push in `finally` will run.
     _hasUnsavedChanges=true;
-    return;
+    return false;
   }
   _isSaving=true;
   // Snapshot the in-flight save's start so a mutation fired DURING the DB round-trip
