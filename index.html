@@ -2975,6 +2975,56 @@ let _dataRestored=false;
 let _hasUnsavedChanges=false;
 let _SRC=''; // kept for offline/export fallback
 let _supabase=null;
+
+// ─── TEMPORARY AUTH DIAGNOSTIC ─────────────────────────────────────────────
+// Visible banner that logs each step of the session-restore flow so we can
+// see why the user is getting auto-logged-out on refresh without needing
+// DevTools. Prints to console too. Remove once the issue is identified.
+function _authDiag(msg, level){
+  const stamp = new Date().toLocaleTimeString();
+  const line = `[${stamp}] ${msg}`;
+  // Console mirror — useful when DevTools IS open.
+  if(level === 'error') console.error('[AuthDiag]', msg);
+  else console.log('[AuthDiag]', msg);
+  // Lazily create the visible banner.
+  let panel = document.getElementById('auth-diag-panel');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'auth-diag-panel';
+    panel.style.cssText = 'position:fixed;top:8px;right:8px;width:380px;max-height:50vh;background:#1a1a1a;color:#dcdcdc;font:11px ui-monospace,monospace;padding:8px;border:1px solid #444;border-radius:6px;z-index:99999;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)';
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;border-bottom:1px solid #444;padding-bottom:4px">
+        <strong style="font-size:12px;color:#7dd3fc">🔍 Auth Diagnostic</strong>
+        <span>
+          <button id="auth-diag-copy" style="background:#374151;color:#fff;border:0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;margin-right:4px">Copy</button>
+          <button id="auth-diag-close" style="background:#7f1d1d;color:#fff;border:0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer">×</button>
+        </span>
+      </div>
+      <div id="auth-diag-log"></div>`;
+    // Defer insertion until body exists; if script ran before body parse, queue.
+    if(document.body){ document.body.appendChild(panel); }
+    else { document.addEventListener('DOMContentLoaded', () => document.body.appendChild(panel)); }
+    // Wire buttons after the next tick to ensure they're attached.
+    setTimeout(() => {
+      const copyBtn = document.getElementById('auth-diag-copy');
+      const closeBtn = document.getElementById('auth-diag-close');
+      if(copyBtn) copyBtn.onclick = () => {
+        const txt = document.getElementById('auth-diag-log')?.innerText || '';
+        navigator.clipboard?.writeText(txt).then(() => { copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',1500); });
+      };
+      if(closeBtn) closeBtn.onclick = () => panel.remove();
+    }, 0);
+  }
+  const log = document.getElementById('auth-diag-log');
+  if(log){
+    const entry = document.createElement('div');
+    entry.style.cssText = `margin:2px 0;padding:2px 0;border-bottom:1px dotted #333;color:${level==='error'?'#fca5a5':level==='warn'?'#fcd34d':'#dcdcdc'}`;
+    entry.textContent = line;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+}
+// ─── END TEMPORARY AUTH DIAGNOSTIC ─────────────────────────────────────────
 // Tracks user-ids added to USERS locally in the last N seconds that haven't
 // yet echoed back from the remote. Used by _applyRemoteData to avoid dropping
 // a just-created user when a concurrent poll/realtime event pulls a pre-push
@@ -3301,48 +3351,70 @@ function _initAuthClient(){
 // only displayed if there's any sign of a stored session (storage key present),
 // to avoid showing it to genuine first-time visitors.
 (async function _checkSession(){
+  _authDiag('▶ _checkSession started');
   // Make sure the latest Supabase config (URL, anon key) is loaded from localStorage
   // BEFORE we try to init the auth client. Without this, _SB_CFG could still be empty
   // and _getUrl()/_getKey() fall back to the baked-in constants — which is fine if
   // they're set, but the call ordering needs to happen this way for instances where
   // an admin overrode the URL/key in Settings.
   if(typeof _loadSupabaseConfig==='function') {
-    try{ _loadSupabaseConfig(); }catch(e){/* config load is best-effort */}
+    try{ _loadSupabaseConfig(); }catch(e){_authDiag('  config load threw: '+e.message,'warn');}
   }
+  const url = _getUrl(), key = _getKey();
+  _authDiag(`  URL set: ${!!url} (${url?url.slice(0,30)+'…':'<empty>'})`);
+  _authDiag(`  Key set: ${!!key} (len=${key?key.length:0})`);
 
   // Detect the storage key the SDK uses. If it exists, there's likely a session
   // to restore — show the overlay to suppress the auth screen flash.
   const overlay = document.getElementById('session-restore-overlay');
   let storedSession = null;
+  let storedKey = null;
   try{
-    storedSession = localStorage.getItem('radscheduler-auth')
-                 || localStorage.getItem('sb-' + (_getUrl()||'').replace(/https?:\/\//,'').split('.')[0] + '-auth-token');
-  }catch(e){/* localStorage may be blocked */}
+    const k1 = 'radscheduler-auth';
+    const k2 = 'sb-' + (_getUrl()||'').replace(/https?:\/\//,'').split('.')[0] + '-auth-token';
+    if(localStorage.getItem(k1)){ storedSession = localStorage.getItem(k1); storedKey = k1; }
+    else if(localStorage.getItem(k2)){ storedSession = localStorage.getItem(k2); storedKey = k2; }
+  }catch(e){_authDiag('  localStorage read threw: '+e.message,'error');}
+  _authDiag(`  Stored session in localStorage: ${storedSession ? `YES (key="${storedKey}", len=${storedSession.length})` : 'NO'}`);
   if(storedSession && overlay) overlay.style.display='flex';
 
   const sb=_initAuthClient();
+  _authDiag(`  _initAuthClient returned: ${sb ? 'client' : 'NULL'}`);
   if(!sb){
+    _authDiag('✕ No client — auth screen shown','error');
     if(overlay) overlay.style.display='none';
     return;
   }
   try{
+    _authDiag('  Calling sb.auth.getSession()…');
     const {data:{session}}=await sb.auth.getSession();
+    _authDiag(`  getSession returned session: ${session ? 'YES' : 'NO'}`);
     if(session?.user){
+      _authDiag(`  session.user.email: ${session.user.email}`);
+      _authDiag(`  session expires_at: ${session.expires_at ? new Date(session.expires_at*1000).toLocaleString() : '?'}`);
       _hydrateUserFromSession(session.user);
+      _authDiag(`  After hydrate, CU: ${CU ? `${CU.first} ${CU.last} (role=${CU.role})` : 'NULL'}`);
       if(CU){
         // Hide overlay just before launchApp swaps the screens, so the transition
         // is from "Restoring..." → app, never flashing the auth screen.
         if(overlay) overlay.style.display='none';
+        _authDiag('▶ Calling launchApp()');
         launchApp();
         return;
+      } else {
+        _authDiag('✕ CU not set after hydrate — staying on auth screen','error');
       }
+    } else {
+      _authDiag('✕ No session — staying on auth screen (this is normal if first visit / signed out)','warn');
     }
     if(overlay) overlay.style.display='none';
     // Listen for cross-tab signouts and silent token refresh failures. If another tab
     // signs out, or our token can't be refreshed (user disabled / expired / revoked),
     // this fires with SIGNED_OUT and we tear down cleanly.
     sb.auth.onAuthStateChange((event,sess)=>{
+      _authDiag(`◉ onAuthStateChange fired: ${event}${sess?.user?` (user=${sess.user.email})`:''}`, event==='SIGNED_OUT'?'warn':'info');
       if(event==='SIGNED_OUT' && CU){
+        _authDiag('  → triggering doLogout because event=SIGNED_OUT and CU was set','warn');
         console.log('[RS] Auth state changed to SIGNED_OUT — logging out');
         doLogout();
       }
@@ -3357,6 +3429,7 @@ function _initAuthClient(){
       }
     });
   }catch(e){
+    _authDiag('✕ Session check threw: '+e.message,'error');
     console.warn('[RS] Session check failed:',e);
     if(overlay) overlay.style.display='none';
   }
@@ -3494,6 +3567,8 @@ async function doRegister(){
 }
 
 async function doLogout(){
+  _authDiag('▶ doLogout called — capturing stack so we can see WHO logged out:','warn');
+  try{ throw new Error('doLogout origin'); }catch(e){ _authDiag('  '+(e.stack||'').split('\n').slice(1,5).join(' | '),'warn'); }
   // Cancel pending save + attempt one final sync so user's edits aren't lost
   clearTimeout(_saveTimeout); _saveTimeout=null;
   if(_hasUnsavedChanges){
@@ -3524,11 +3599,13 @@ async function doLogout(){
 async function launchApp(){
   // Re-entrance guard: _checkSession IIFE and doLogin can both race to call launchApp.
   // The second invocation would double-load from Supabase. Use a module-level flag.
-  if(launchApp._running) return;
+  if(launchApp._running){ _authDiag('  launchApp re-entry blocked','warn'); return; }
   launchApp._running=true;
+  _authDiag('▶ launchApp running');
   try{
     document.getElementById('auth').style.display='none';
     document.getElementById('app').style.display='flex';
+    _authDiag('  app screen shown, auth hidden');
     // Apply the user's saved font scale, if any
     if(typeof _applyFontScale==='function') _applyFontScale(CU?.fontScale || 1);
     const isSU = CU.role==='superuser';
@@ -3616,7 +3693,11 @@ async function launchApp(){
       if(si){si.textContent='Offline mode — use 💾 Save File';si.style.color='var(--txt3)';
         setTimeout(()=>{if(si)si.textContent='';},4000);}
     }
+    _authDiag('  reached renderDash() — login restore complete ✓');
     renderDash();
+  }catch(e){
+    _authDiag('✕ launchApp threw: '+e.message,'error');
+    throw e;
   }finally{
     launchApp._running=false;
   }
