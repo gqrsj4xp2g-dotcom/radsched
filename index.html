@@ -309,6 +309,31 @@ tbody tr:hover{background:var(--bg3)}
         </div>
         <button class="abtn" onclick="doRegister()">Create Account</button>
       </div>
+
+      <!-- ─── SUPABASE CONFIG (recovery / first-time setup) ─────────────────
+           Lets a user enter their Supabase URL + anon key without needing
+           to be logged in. Without this, a user whose `radscheduler_sb_config`
+           localStorage entry is missing or wiped is locked out — there'd be
+           no way to enter credentials except DevTools.
+      ─────────────────────────────────────────────────────────────────────── -->
+      <details id="auth-sb-config" style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:10px">
+        <summary style="cursor:pointer;font-size:11px;color:var(--txt3);user-select:none">
+          ⚙️ Configure Supabase connection
+          <span id="auth-sb-status" style="margin-left:6px;font-weight:600"></span>
+        </summary>
+        <div style="margin-top:8px;font-size:11px;color:var(--txt3);line-height:1.4">
+          Required for cross-device sync. Get these from your Supabase project: <strong>Settings → API</strong>.
+          The anon key is safe to share with end users.
+        </div>
+        <div class="afield" style="margin-top:8px"><label>Project URL</label>
+          <input id="auth-sb-url" type="url" placeholder="https://YOURPROJECT.supabase.co" autocomplete="off">
+        </div>
+        <div class="afield"><label>Anon (public) key</label>
+          <input id="auth-sb-key" type="password" placeholder="eyJhbGciOiJI…" autocomplete="off">
+        </div>
+        <button class="abtn" type="button" onclick="saveAuthSupabaseConfig()" style="margin-top:4px">💾 Save &amp; Reload</button>
+        <div id="auth-sb-msg" style="font-size:11px;margin-top:6px;min-height:14px"></div>
+      </details>
     </div>
   </div>
 </div>
@@ -2980,6 +3005,55 @@ let _supabase=null;
 // Visible banner that logs each step of the session-restore flow so we can
 // see why the user is getting auto-logged-out on refresh without needing
 // DevTools. Prints to console too. Remove once the issue is identified.
+// Auth-screen Supabase config form. Lets the user enter URL + anon key
+// without being logged in — the in-app Settings → Supabase form is only
+// reachable AFTER auth, which creates a chicken-and-egg lockout when the
+// config is missing or wiped.
+function saveAuthSupabaseConfig(){
+  const url=document.getElementById('auth-sb-url')?.value.trim()||'';
+  const key=document.getElementById('auth-sb-key')?.value.trim()||'';
+  const msg=document.getElementById('auth-sb-msg');
+  const setMsg=(t,c='var(--red-t)')=>{ if(msg){msg.textContent=t;msg.style.color=c;} };
+  if(!url||!key){ setMsg('Both URL and anon key are required.'); return; }
+  if(!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)/i.test(url)){
+    setMsg('URL should look like https://yourproject.supabase.co');
+    return;
+  }
+  try{
+    localStorage.setItem('radscheduler_sb_config', JSON.stringify({url,key}));
+    setMsg('✓ Saved — reloading…','var(--green-t)');
+    setTimeout(()=>location.reload(), 600);
+  }catch(e){
+    setMsg('✕ Could not save: '+(e.message||e));
+  }
+}
+// Pre-fill the auth-screen Supabase form if there's a partial config in
+// localStorage (e.g. URL set but key cleared) so the user can see what was
+// there before. Updates the status badge in the <summary> too.
+(function _initAuthSBConfigForm(){
+  const apply = () => {
+    try{
+      const raw = localStorage.getItem('radscheduler_sb_config');
+      const status = document.getElementById('auth-sb-status');
+      if(!raw){
+        if(status){ status.textContent = '⚠ not configured'; status.style.color='var(--red-t)'; }
+        return;
+      }
+      const c = JSON.parse(raw);
+      const urlEl = document.getElementById('auth-sb-url');
+      const keyEl = document.getElementById('auth-sb-key');
+      if(urlEl && c.url) urlEl.value = c.url;
+      if(keyEl && c.key) keyEl.value = c.key;
+      if(status){
+        if(c.url && c.key){ status.textContent = '✓ configured'; status.style.color='var(--green-t)'; }
+        else { status.textContent = '⚠ incomplete'; status.style.color='var(--amber,#d97706)'; }
+      }
+    }catch(_){}
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
+  else apply();
+})();
+
 function _authDiag(msg, level){
   const stamp = new Date().toLocaleTimeString();
   const line = `[${stamp}] ${msg}`;
