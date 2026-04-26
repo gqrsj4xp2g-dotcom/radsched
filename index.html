@@ -1002,6 +1002,22 @@ tbody tr:hover{background:var(--bg3)}
         <label class="chk"><input type="checkbox" id="pe-wknd" checked> Weekend Call</label>
       </div>
     </div>
+    <!-- Home / In-Person preference (DR auto-assigner reads this).
+         The slider is disabled until the "Honor preference" box is checked,
+         so admins explicitly opt in per physician. p.drHomePctPref is null
+         when unchecked → auto-assigner ignores; otherwise 0-100 (% Home). -->
+    <div class="fg" id="p-homepref-w">
+      <label>Home / In-Person preference <small style="color:var(--txt3)">(DR auto-assigner)</small></label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <label class="chk" style="font-size:11px">
+          <input type="checkbox" id="p-home-pref-on" onchange="document.getElementById('p-home-pref').disabled=!this.checked;document.getElementById('p-home-pref-val').style.opacity=this.checked?'1':'.45';">
+          Honor
+        </label>
+        <input id="p-home-pref" type="range" min="0" max="100" step="5" value="50" disabled style="flex:1" oninput="document.getElementById('p-home-pref-val').textContent=this.value+'% Home / '+(100-this.value)+'% In-Person'">
+        <code id="p-home-pref-val" style="font-size:11px;width:170px;opacity:.45">50% Home / 50% In-Person</code>
+      </div>
+      <small style="color:var(--txt3)">When honored, the DR auto-assigner targets this Home% over the month and adjusts pick order so the physician trends toward the target.</small>
+    </div>
     <input type="hidden" id="p-edit-id" value="">
     <button class="bp" id="phys-submit-btn" onclick="submitPhys()">Add Physician</button>
   </div>
@@ -4448,6 +4464,10 @@ function maxDR(p,t){
   return 0;
 }
 function drCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
+// Count of Home (read-from-home) DR shifts only — used by the auto-assigner's
+// home/in-person preference enforcement so it can compute current Home% per
+// physician relative to their drHomePctPref target.
+function drHomeCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)&&s.shift==='Home').length;}
 function wkCnt(pid,ym){return S.weekendCalls.filter(w=>(w.satDate||w.date||"").startsWith(ym)&&w.physId===pid).length;}
 // Regular IR call counters — exclude holiday-synced entries so they don't inflate
 // a physician's day/weekend totals. Those entries are created by _syncHolidayToIRCall
@@ -5373,6 +5393,14 @@ function editPhys(id){
     const el=document.getElementById('pe-'+k);
     if(el) el.checked=!!se[k];
   });
+  // Home / in-person preference — null/undefined = "no preference"
+  const hpOn = document.getElementById('p-home-pref-on');
+  const hpEl = document.getElementById('p-home-pref');
+  const hpVal= document.getElementById('p-home-pref-val');
+  const hp = (p.drHomePctPref==null) ? null : Math.max(0, Math.min(100, +p.drHomePctPref));
+  if(hpOn) hpOn.checked = (hp != null);
+  if(hpEl){ hpEl.disabled = (hp == null); hpEl.value = (hp != null) ? hp : 50; }
+  if(hpVal){ const v = (hp != null) ? hp : 50; hpVal.textContent = `${v}% Home / ${100-v}% In-Person`; hpVal.style.opacity = (hp != null) ? '1' : '.45'; }
   // Scroll form into view
   const paddrEl=document.getElementById('p-address');
   if(paddrEl) paddrEl.value=p.address||'';
@@ -5411,6 +5439,15 @@ function _saveEditPhys(id){
     home: !!document.getElementById('pe-home')?.checked,
     wknd: !!document.getElementById('pe-wknd')?.checked,
   };
+  // Home / in-person preference. Null = no preference (auto-assigner ignores).
+  // Honored only when the "Honor" checkbox is on AND the role uses DR FTE.
+  const _hpOn = !!document.getElementById('p-home-pref-on')?.checked;
+  if(_hpOn && (role==='DR' || role==='MIXED')){
+    const v = parseInt(document.getElementById('p-home-pref')?.value);
+    p.drHomePctPref = (isFinite(v) && v >= 0 && v <= 100) ? v : 50;
+  } else {
+    p.drHomePctPref = null;
+  }
   p.drSite=anchor||allowed[0]||S.sites[0]?.name||'';
   p.address=document.getElementById('p-address')?.value.trim()||'';
   // Ensure these fields exist on legacy physicians loaded from older saves
@@ -5439,6 +5476,13 @@ function cancelEditPhys(){
   document.querySelectorAll('[name="asite"],[name="drs"],[name="irs"]').forEach(cb=>cb.checked=false);
   const defaults={s1:true,s2:false,s3:false,home:true,wknd:true};
   Object.entries(defaults).forEach(([k,v])=>{const el=document.getElementById('pe-'+k);if(el)el.checked=v;});
+  // Reset home/in-person preference UI to "no preference set"
+  const _hpOnReset = document.getElementById('p-home-pref-on');
+  const _hpReset   = document.getElementById('p-home-pref');
+  const _hpVal     = document.getElementById('p-home-pref-val');
+  if(_hpOnReset) _hpOnReset.checked = false;
+  if(_hpReset){ _hpReset.disabled = true; _hpReset.value = 50; }
+  if(_hpVal){ _hpVal.textContent = '50% Home / 50% In-Person'; _hpVal.style.opacity = '.45'; }
 }
 
 function addPhys(){
@@ -5455,6 +5499,13 @@ function addPhys(){
   const anchor=document.getElementById('p-anchor').value||null;
   const allowed=[...document.querySelectorAll('[name="asite"]:checked')].map(c=>c.value);
   if(anchor&&!allowed.includes(anchor)) allowed.push(anchor);
+  // Honor home/in-person preference only when the checkbox is on AND DR FTE applies
+  const _hpOnAdd = !!document.getElementById('p-home-pref-on')?.checked;
+  let _drHomePctPref = null;
+  if(_hpOnAdd && (role==='DR' || role==='MIXED')){
+    const v = parseInt(document.getElementById('p-home-pref')?.value);
+    _drHomePctPref = (isFinite(v) && v >= 0 && v <= 100) ? v : 50;
+  }
   S.physicians.push({
     id:S.nextId++,first,last,degree,role,drFte,irFte,
     irGroup:role!=='DR'?document.getElementById('p-irgrp').value:null,
@@ -5469,6 +5520,7 @@ function addPhys(){
       home:!!document.getElementById('pe-home')?.checked,
       wknd:!!document.getElementById('pe-wknd')?.checked,
     },
+    drHomePctPref: _drHomePctPref,
     drSite:anchor||S.sites[0]?.name||'',
     address:document.getElementById('p-address')?.value.trim()||'',
     siteRules:[],
@@ -11497,7 +11549,7 @@ function addSite(){
   // kept for legacy/back-compat even though auto-assign currently only
   // reads 1st; removing them would orphan existing configuration.)
   S.sites.forEach(st=>{
-    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd'];
+    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd','Home'];
     shifts.forEach(sh=>{
       for(let w=1; w<=5; w++){
         const k = `${st.name}|${w}|${sh}`;
@@ -11544,7 +11596,7 @@ function addSiteFromSlots(){
   const ae=document.getElementById('new-site-address-ssl'); if(ae) ae.value='';
   triggerSave();
   S.sites.forEach(st=>{
-    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd'];
+    const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','2nd','3rd','Home'];
     shifts.forEach(sh=>{
       for(let w=1; w<=5; w++){
         const k = `${st.name}|${w}|${sh}`;
@@ -11577,13 +11629,15 @@ function renderSlotGrid(ym,week){
   const jsLit = (s) => escHtml(JSON.stringify(String(s==null?'':s)));
   let html='<div class="g2">';
   (S.sites||[]).forEach(st=>{
-    // Hospital sites show only 1st Shift slots. "Home" is not a hospital
-    // assignment — it's a physician-is-not-on-site designation, so it only
-    // makes sense at the "At Home / Remote" pseudo-site. Previously all
-    // hospital cards also showed a Home row, which encouraged confusion:
-    // admins would configure "CHN Home=3" thinking it meant something, but
-    // auto-assign only reads Home slots from the At Home / Remote entry.
-    const shifts=st.name==='At Home / Remote'?['Home']:['1st'];
+    // Hospital sites get BOTH 1st (in-person) and Home (read-from-home for
+    // this hospital's cases) rows. The auto-assigner reads each independently:
+    // a hospital Home slot means "we need N physicians reading THIS hospital's
+    // imaging from home that day" — the assignment's `site` field carries the
+    // hospital name so dashboards / FTE tracking attribute the read-from-home
+    // work to the right facility. Both rows support the per-specialty breakdown
+    // shown when the "by sub" toggle is expanded. The "At Home / Remote"
+    // pseudo-site keeps its own Home row for general / unattributed remote work.
+    const shifts=st.name==='At Home / Remote'?['Home']:['1st','Home'];
     html+=`<div class="card"><div class="card-title">${escHtml(st.name)}</div>`;
 
     // Slot labels panel — per-site, per-shift, NOT per-week. Renders one
@@ -19776,7 +19830,10 @@ function previewAA(){
   // Per-physician effective target (vacation-adjusted) for this month
   const effTarget={};
   drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym)||1; });
-  const cnt={};drs.forEach(p=>{cnt[p.id]={wd:drCnt(p.id,ym),wk:wkCnt(p.id,ym)};});
+  // wd = total weekday DR shifts, home = subset that are Home shifts. The
+  // home count powers the home/in-person preference tiebreaker in
+  // sortByDeficit so we can compare current Home% to p.drHomePctPref.
+  const cnt={};drs.forEach(p=>{cnt[p.id]={wd:drCnt(p.id,ym),wk:wkCnt(p.id,ym),home:drHomeCnt(p.id,ym)};});
 
   // Anchor % target — from Settings. When a physician is below this rate at
   // their anchor site, they get a ranked boost toward assignments there.
@@ -19801,9 +19858,33 @@ function previewAA(){
   // before/after my tumor board" preferences without overriding fairness.
   function sortByDeficit(pool, site, ctxDate, ctxShift, ctxKind){
     const wantPref = !!(ctxDate && ctxKind);
+    // Pre-compute whether the current slot is Home so the preference scorer
+    // below knows which direction to nudge.
+    const isHomeSlot = ctxShift === 'Home';
+    const isInPersonSlot = ctxShift === '1st' || ctxShift === '2nd' || ctxShift === '3rd';
+    // Returns a score where LOWER = sort earlier. 0 = neutral. Driven by the
+    // physician's drHomePctPref (0-100, target % Home of total DR shifts).
+    // For a Home slot, physicians UNDER their home target (need more home)
+    // get a negative score and sort first. For an in-person slot, physicians
+    // OVER their home target (need more in-person) get a negative score.
+    const homePrefScore = (p) => {
+      if(p.drHomePctPref == null) return 0;            // no preference set
+      if(!isHomeSlot && !isInPersonSlot) return 0;     // not a Home/in-person slot
+      const total = cnt[p.id].wd;
+      if(total <= 0) return 0;                          // no data yet — let normal sort decide
+      const target = (+p.drHomePctPref) / 100;
+      const currentHome = (cnt[p.id].home || 0) / total;
+      const distance = currentHome - target;            // + = over-home, - = under-home
+      return isHomeSlot ? distance : -distance;
+    };
     return pool.slice().sort((a,b)=>{
       const rA=cnt[a.id].wd/effTarget[a.id], rB=cnt[b.id].wd/effTarget[b.id];
       if(Math.abs(rA-rB)>0.005) return rA-rB; // lowest fill% first
+      // Home/in-person preference — only kicks in for physicians who set
+      // drHomePctPref. 5% threshold prevents micro-fluctuations from
+      // overriding the more important anchor / conference signals below.
+      const hpA = homePrefScore(a), hpB = homePrefScore(b);
+      if(Math.abs(hpA - hpB) > 0.05) return hpA - hpB;
       // Anchor target pressure — physicians below the anchorPct% target at their
       // anchor site get preference when the assignment IS their anchor site.
       // This actively drives the setting's value into the scheduling decision.
@@ -19835,12 +19916,19 @@ function previewAA(){
     cells.filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).forEach(c=>{
       const wk=getWeek(c.date,ym);
       S.sites.filter(st=>st.name!=='At Home / Remote').forEach(st=>{
-        ['1st'].forEach(sh=>{
+        // Hospital sites now process BOTH '1st' (in-person) and 'Home' (read-
+        // from-home attributed to this hospital). The same fillList / sub-
+        // breakdown / slot-label machinery handles both — only the eligKey
+        // and the shift string differ.
+        ['1st','Home'].forEach(sh=>{
           const need=S.siteSlots[`${st.name}|${wk}|${sh}`]||0;if(!need)return;
           const ex=S.drShifts.filter(s=>s.date===c.date&&s.site===st.name&&s.shift===sh).length
                   +preview.filter(a=>a.date===c.date&&a.site===st.name&&a.shift===sh).length;
           let slots=need-ex;if(slots<=0)return;
-          const kMap={s1:'1st',s2:'2nd',s3:'3rd'};const k=Object.entries(kMap).find(([,v])=>v===sh)?.[0];
+          // Map shift type → physician shiftElig key. 'home' is added so the
+          // hospital-Home pass uses the same Home-eligibility flag that the
+          // pseudo-site Home pass below relies on.
+          const kMap={s1:'1st',s2:'2nd',s3:'3rd',home:'Home'};const k=Object.entries(kMap).find(([,v])=>v===sh)?.[0];
 
           // Per-specialty breakdown: if S.siteSlotsSubs[site|wk|sh] is set,
           // build an ordered fill list where each entry targets a specific
@@ -19884,9 +19972,16 @@ function previewAA(){
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
               // Pre-existing manually-assigned shifts on this date. Previously
               // only the current-preview pool was checked, so auto-assign could
-              // double-book a physician who already had a manual shift. Home
-              // shifts don't block — auto can displace them with procedure work.
-              if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
+              // double-book a physician who already had a manual shift.
+              // For in-person shifts ('1st'/'2nd'/'3rd'): existing Home shifts
+              // don't block — auto can displace them with procedure work.
+              // For Home shifts: existing Home shifts DO block, otherwise we'd
+              // double-assign the same phys to two Home slots on the same day.
+              if(sh==='Home'){
+                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date))return false;
+              } else {
+                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
+              }
               if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
               // Also block on daily/weekend IR calls so auto-assign doesn't
               // stack a DR day shift on top of call coverage.
@@ -19920,6 +20015,9 @@ function previewAA(){
             const assignSub = targetSub || p.drSubs[0] || '';
             preview.push({type:'wd',physId:p.id,date:c.date,shift:sh,site:st.name,sub:assignSub,notes:'Auto',autoHome:false,slotLabel:_slotLabel});
             cnt[p.id].wd++;
+            // Track Home subset separately so the home/in-person preference
+            // tiebreaker can compute current Home% mid-run.
+            if(sh==='Home') cnt[p.id].home = (cnt[p.id].home||0) + 1;
           });
         });
       });
@@ -19944,7 +20042,8 @@ function previewAA(){
           const _hSlotIdx = hEx + i;
           const _hSlotLabel = (S.siteSlotLabels||{})[`At Home / Remote|Home|#${_hSlotIdx}`] || '';
           preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true,slotLabel:_hSlotLabel});
-          cnt[p.id].wd++;}
+          cnt[p.id].wd++;
+          cnt[p.id].home = (cnt[p.id].home||0) + 1;}
       }
       // Auto-home: fill ALL remaining physicians up to their effective FTE target
       sortByDeficit(drs,'At Home / Remote',c.date,'Home','dr-shift').forEach(p=>{
@@ -19956,6 +20055,7 @@ function previewAA(){
         if(!alreadyDR&&!alreadyWk&&!alreadyPrev&&cnt[p.id].wd<effTarget[p.id]){
           preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true});
           cnt[p.id].wd++;
+          cnt[p.id].home = (cnt[p.id].home||0) + 1;
         }
       });
     });
