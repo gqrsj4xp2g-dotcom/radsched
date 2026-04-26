@@ -1699,7 +1699,7 @@ tbody tr:hover{background:var(--bg3)}
   </div>
   <div class="card" style="overflow-x:auto">
     <table>
-      <thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>IR Group</th><th>Subspecialty</th><th>Notes</th><th></th></tr></thead>
+      <thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th><th>IR Group</th><th>Slot</th><th>Subspecialty</th><th>Notes</th><th></th></tr></thead>
       <tbody id="irs-tbody"></tbody>
     </table>
   </div>
@@ -9780,6 +9780,40 @@ function previewIRShiftAA(){
       phys[pi]._irsaIsFillIn=physAssigns.length>0&&physAssigns.every(a=>a.isFillIn);
     }
   }
+  // ── Slot rotation pass ─────────────────────────────────────────────────
+  // For each (date, site) where the auto-assigner placed multiple physicians,
+  // rotate their slot indices by (dayOfMonth % numSlots) so the same person
+  // doesn't always end up in slot 0/1. The physicians are sorted by physId for
+  // a deterministic rotation across days; combined with the date offset they
+  // each cycle through every slot label at a given site over time.
+  // Re-assigns the slotLabel from S.irShiftSlotLabels for the new index.
+  (function _rotateSlotsAcrossPicks(){
+    var byKey = {};
+    for(var i=0; i<_irsaPreview.length; i++){
+      var a = _irsaPreview[i];
+      var k = a.date + '|' + a.site;
+      if(!byKey[k]) byKey[k] = [];
+      byKey[k].push(a);
+    }
+    Object.keys(byKey).forEach(function(k){
+      var entries = byKey[k];
+      if(entries.length < 2) return; // single slot, nothing to rotate
+      var first = entries[0];
+      var d = parseDateLocal(first.date);
+      var dow = d.getDay();
+      // Stable per-day order: physician ID ascending. Combined with date-based
+      // offset this means physician set {A,B} alternates {A→0,B→1} ↔ {A→1,B→0}.
+      entries.sort(function(x,y){ return x.physId - y.physId; });
+      var n = entries.length;
+      var offset = d.getDate() % n;
+      var labelMap = S.irShiftSlotLabels || {};
+      for(var j=0; j<n; j++){
+        var newIdx = (j + offset) % n;
+        var labelKey = first.site + '|' + dow + '|1st#' + newIdx;
+        entries[j].slotLabel = labelMap[labelKey] || '';
+      }
+    });
+  })();
   var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
   if(!_irsaPreview.length){if(box)box.innerHTML='<div class="note '+(errors.length?'nw':'ni')+'">'+(errors.length?errors.join('<br>'):'No slots to fill for this period.')+'</div>';if(applyBtn)applyBtn.style.display='none';return;}
   var ancE=0,ancH=0,ri,row,rp,xi;
@@ -10077,6 +10111,12 @@ function saveEditIRShift(id){
   s.sub     = subEl?.value || '';
   s.notes   = notesEl?.value || '';
   s.irGroup = p.irGroup || s.irGroup;
+  // Per-shift slot label — overrides the auto-derived label for THIS specific
+  // shift instance. Doesn't change the master S.irShiftSlotLabels mapping
+  // (that lives in the IR Slots admin page); just lets the admin tag this
+  // one shift with a different name without rewriting the global slot config.
+  const slotEl = document.getElementById(`ire-slot-${id}`);
+  if(slotEl) s.slotLabel = (slotEl.value||'').trim();
   _editingIRShiftId = null;
   triggerSave();
   _afterMutation();
@@ -10094,7 +10134,7 @@ function renderIRShiftTable(){
     .sort((a,b) => a.date > b.date ? 1 : a.date < b.date ? -1 : 0);
 
   if(!rows.length){
-    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--txt3);text-align:center;padding:12px">
+    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--txt3);text-align:center;padding:12px">
       No IR shifts found${fmo?' for '+fmo:''}. Assign shifts above or run Auto-Assign.</td></tr>`;
     return;
   }
@@ -10103,22 +10143,41 @@ function renderIRShiftTable(){
     .map(p => `<option value="${p.id}">${p.last}, ${p.first}</option>`).join('');
   const shiftOpts = ['1st','2nd','3rd','Home'].map(sh=>`<option value="${sh}">${sh}</option>`).join('');
 
+  // Slot-label suggestions for the edit input come from S.irShiftSlotLabels
+  // for THIS shift's site/dow plus any custom labels the admin has typed
+  // anywhere at this site. <datalist> gives the user autocomplete without
+  // forcing the value to match.
+  const _slotLabelSuggestions = (siteName, dow) => {
+    const labels = new Set();
+    Object.entries(S.irShiftSlotLabels||{}).forEach(([k,v])=>{
+      if(!v) return;
+      const m = /^(.+)\|(\d+)\|1st#\d+$/.exec(k);
+      if(m && m[1] === siteName) labels.add(v);
+    });
+    return [...labels].sort();
+  };
+
   tbody.innerHTML = rows.map(s => {
     if(_editingIRShiftId === s.id){
       // Edit-mode row with full field controls
-      // Show sites in ANY IR group (or 'Both') plus the shift's current site
-      // as a fallback. Using getIRGroups() lets custom groups participate too.
       const _irGroupSet = new Set(getIRGroups());
       const siteOpts = S.sites.filter(st => _irGroupSet.has(st.irGroup) || st.irGroup==='Both' || st.name===s.site)
         .map(st => `<option value="${st.name}"${st.name===s.site?' selected':''}>${st.name}</option>`).join('');
       const subs = siteIRSubsByName(s.site);
       const subOpts = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}"${sub===s.sub?' selected':''}>${sub}</option>`).join('');
+      const dow = s.date ? parseDateLocal(s.date).getDay() : 1;
+      const dlId = `ire-slot-dl-${s.id}`;
+      const slotDlOpts = _slotLabelSuggestions(s.site, dow).map(l=>`<option value="${l.replace(/"/g,'&quot;')}">`).join('');
       return `<tr id="irs-row-${s.id}" style="background:var(--blue-bg)">
         <td><select id="ire-phys-${s.id}" style="font-size:11px;max-width:140px">${physOpts.replace(`value="${s.physId}"`, `value="${s.physId}" selected`)}</select></td>
         <td><input id="ire-date-${s.id}" type="date" value="${s.date}" style="font-size:11px"></td>
         <td><select id="ire-shift-${s.id}" style="font-size:11px">${shiftOpts.replace(`value="${s.shift}"`, `value="${s.shift}" selected`)}</select></td>
         <td><select id="ire-site-${s.id}" style="font-size:11px" onchange="_ireRefreshSub(${s.id})">${siteOpts}</select></td>
         <td><em style="color:var(--txt3);font-size:10px">auto</em></td>
+        <td>
+          <input id="ire-slot-${s.id}" list="${dlId}" value="${(s.slotLabel||'').replace(/"/g,'&quot;')}" placeholder="slot name" style="font-size:11px;width:100px">
+          <datalist id="${dlId}">${slotDlOpts}</datalist>
+        </td>
         <td><select id="ire-sub-${s.id}" style="font-size:11px">${subOpts}</select></td>
         <td><input id="ire-notes-${s.id}" value="${(s.notes||'').replace(/"/g,'&quot;')}" style="font-size:11px;width:100%"></td>
         <td style="white-space:nowrap">
@@ -10128,12 +10187,16 @@ function renderIRShiftTable(){
       </tr>`;
     }
     const shiftLbl = s.shift === '1st' ? 'Day Shift' : s.shift;
+    const slotChip = s.slotLabel
+      ? ` <span class="tag tb" style="font-size:9px;font-weight:600" title="Slot label">${escHtml(s.slotLabel)}</span>`
+      : '';
     return `<tr id="irs-row-${s.id}">
       <td style="font-weight:600">${pname(s.physId)}</td>
       <td>${s.date}</td>
       <td><span class="tag ${s.shift==='Home'?'':'eir'}" style="font-size:10px">${shiftLbl}</span></td>
       <td>${s.site||'—'}</td>
       <td><span class="tag ${irGroupColorClass((s.irGroup||''))}" style="font-size:10px">${s.irGroup||'—'}</span></td>
+      <td style="font-size:11px">${s.slotLabel?escHtml(s.slotLabel):'<span style="color:var(--txt3)">—</span>'}</td>
       <td style="font-size:11px">${s.sub||'—'}</td>
       <td style="font-size:11px">${s.notes||'—'}</td>
       <td style="white-space:nowrap">
