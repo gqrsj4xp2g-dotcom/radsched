@@ -3432,6 +3432,26 @@ function _initAuthClient(){
 // to avoid showing it to genuine first-time visitors.
 (async function _checkSession(){
   _authDiag('▶ _checkSession started');
+  // Dump the raw radscheduler_sb_config localStorage entry — tells us whether
+  // the config is missing, half-saved, or otherwise malformed.
+  try{
+    const raw = localStorage.getItem('radscheduler_sb_config');
+    if(raw === null) _authDiag('  radscheduler_sb_config: <missing from localStorage>','warn');
+    else if(raw === '') _authDiag('  radscheduler_sb_config: <empty string>','warn');
+    else {
+      try{
+        const c = JSON.parse(raw);
+        _authDiag(`  radscheduler_sb_config: url="${c.url||'(empty)'}" keyLen=${c.key?c.key.length:0}`);
+      }catch(pe){
+        _authDiag('  radscheduler_sb_config: <not valid JSON> raw[0..80]='+raw.slice(0,80),'error');
+      }
+    }
+    // Inventory all localStorage keys so we can see if other things are persisting (or not)
+    const allKeys = [];
+    for(let i=0;i<localStorage.length;i++){ allKeys.push(localStorage.key(i)); }
+    _authDiag(`  localStorage keys (${allKeys.length}): ${allKeys.join(', ')}`);
+  }catch(e){_authDiag('  localStorage inspect threw: '+e.message,'error');}
+
   // Make sure the latest Supabase config (URL, anon key) is loaded from localStorage
   // BEFORE we try to init the auth client. Without this, _SB_CFG could still be empty
   // and _getUrl()/_getKey() fall back to the baked-in constants — which is fine if
