@@ -7226,55 +7226,35 @@ function _checkTrafficStaleness(){
 // times in Settings → Drive Times).
 function _driveTimeBadge(physId,siteName,shiftType,date,role){
   if(!S.driveTimes) return '';
-  // No commute for Home shifts or the pseudo-site.
-  if(shiftType === 'Home') return '';
-  if(!siteName || siteName === 'At Home / Remote') return '';
+  // POLICY: only 1st shifts show drive-time badges.
+  if(shiftType !== '1st') return '';
   const dt=S.driveTimes[`${physId}|${siteName}`];
-  if(!dt||dt.mins===null||dt.mins===undefined) return '';
-
-  // Helper for the click-through to drive-time details modal.
-  const dateAttr = date ? `'${escHtml(date).replace(/'/g,"\\'")}'` : 'null';
-  const onclick = `event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}',${dateAttr})`;
-
-  // 1st-shift badges get the rich treatment: daily-traffic if cached for this
-  // date, otherwise the byShift snapshot computed by updateTrafficTimes.
-  // Other shift types (2nd, 3rd, weekend, IR call) only get base time because
-  // updateTrafficTimes only fetches Maps data for 1st-shift dep/return windows.
-  if(shiftType === '1st'){
-    const daily = date && dt.daily?.[date];
-    if(daily){
-      const col = daily.outMins<=20?'var(--green-t)':daily.outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
-      const deltaOut = daily.baseOutMins!=null ? daily.outMins - daily.baseOutMins : 0;
-      const deltaTxt = deltaOut > 2 ? ` (+${deltaOut}m)` : '';
-      return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
-        onclick="${onclick}"
-        title="Daily traffic · Click for details">🚦${daily.outText}${deltaTxt}</span>`;
-    }
-    // Fallback: byShift snapshot. Use role-specific key: IR → "IR 1st", DR → "1st".
-    // Fall back to the other if the role-specific one isn't populated yet.
-    const preferredKey = role==='IR' ? 'IR 1st' : '1st';
-    const fallbackKey  = role==='IR' ? '1st' : 'IR 1st';
-    const traffic = dt.byShift?.[preferredKey] || dt.byShift?.[fallbackKey];
-    const outMins = traffic ? traffic.outMins : dt.mins;
-    const outText = traffic ? traffic.outText : dt.text;
-    const rtMins  = traffic ? (traffic.outMins + traffic.retMins) : dt.mins*2;
-    const label   = traffic ? traffic.label : 'base';
-    const col = outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
-    const icon = traffic?'🚦':'🚗';
+  if(!dt||dt.mins===null) return '';
+  // Prefer daily traffic data if available for this specific date
+  const daily = date && dt.daily?.[date];
+  if(daily){
+    const col = daily.outMins<=20?'var(--green-t)':daily.outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
+    const deltaOut = daily.baseOutMins!=null ? daily.outMins - daily.baseOutMins : 0;
+    const deltaTxt = deltaOut > 2 ? ` (+${deltaOut}m)` : '';
     return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
-      onclick="${onclick}"
-      title="${escHtml(siteName)} | Out: ${outText} | RT: ${rtMins}min (${label}) · Click for details">${icon}${outText}</span>`;
+      onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date).replace(/'/g,"\\'")}')"
+      title="Daily traffic · Click for details">🚦${daily.outText}${deltaTxt}</span>`;
   }
-
-  // Non-1st (2nd, 3rd, weekend, etc.): base drive time only. Mark with the
-  // car icon (no 🚦 — we don't have traffic data at this hour). Tooltip
-  // explains why so users don't think the number is wrong.
-  const baseMins = dt.mins;
-  const baseText = dt.text || `${baseMins}m`;
-  const col = baseMins<=20?'var(--green-t)':baseMins<=40?'var(--txt3)':'var(--amber,#d97706)';
+  // Fallback: byShift snapshot. Use role-specific key: IR → "IR 1st", DR → "1st".
+  // Fall back to the other if the role-specific one isn't populated yet.
+  const preferredKey = role==='IR' ? 'IR 1st' : '1st';
+  const fallbackKey  = role==='IR' ? '1st' : 'IR 1st';
+  const traffic = dt.byShift?.[preferredKey] || dt.byShift?.[fallbackKey];
+  const outMins = traffic ? traffic.outMins : dt.mins;
+  const outText = traffic ? traffic.outText : dt.text;
+  const rtMins  = traffic ? (traffic.outMins + traffic.retMins) : dt.mins*2;
+  const label   = traffic ? traffic.label : 'base';
+  const col = outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
+  const icon = traffic?'🚦':'🚗';
+  const dateAttr = date ? `'${escHtml(date).replace(/'/g,"\\'")}'` : 'null';
   return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
-    onclick="${onclick}"
-    title="${escHtml(siteName)} | Base drive time: ${baseText} (no traffic data for ${escHtml(String(shiftType||''))} shift) · Click for details">🚗${baseText}</span>`;
+    onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}',${dateAttr})"
+    title="${siteName} | Out: ${outText} | RT: ${rtMins}min (${label}) · Click for details">${icon}${outText}</span>`;
 }
 
 function renderCommuteMatrix(){
@@ -10935,15 +10915,8 @@ function renderSitesList(){
         </div>
 
         <div class="fg" style="margin:0 0 8px">
-          <label style="font-size:11px">Street address <small style="color:var(--txt3)">(for drive-time calculation — press Enter or Save to commit)</small></label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input id="site-edit-addr-${i}" data-site-name="${escHtml(s.name)}" value="${escHtml(s.address||'')}" placeholder="e.g. 123 Main St, City, ST" style="font-size:12px;flex:1"
-              onblur="saveSiteAddress(this.dataset.siteName, this.value, this)"
-              onkeydown="if(event.key==='Enter'){event.preventDefault();saveSiteAddress(this.dataset.siteName,this.value,this);this.blur();}">
-            <button class="bp bxs" type="button" style="font-size:11px;padding:4px 10px"
-              onclick="const inp=document.getElementById('site-edit-addr-${i}'); saveSiteAddress(inp.dataset.siteName, inp.value, inp);">Save</button>
-            <span class="site-addr-status" style="font-size:10px;color:var(--green-t);min-width:50px"></span>
-          </div>
+          <label style="font-size:11px">Street address <small style="color:var(--txt3)">(for drive-time calculation)</small></label>
+          <input id="site-edit-addr-${i}" value="${escHtml(s.address||'')}" placeholder="e.g. 123 Main St, City, ST" style="font-size:12px;width:100%" onblur="saveSiteAddress(${i}, this.value)">
         </div>
 
         <div style="margin-bottom:8px;padding-top:6px;border-top:1px solid var(--bdr2)">
@@ -11085,43 +11058,13 @@ function saveSiteName(i, newName){
   _afterMutation();
 }
 
-function saveSiteAddress(siteRefOrIdx, val, inputEl){
+function saveSiteAddress(i, val){
   if(!_adminOnly('edit site address')) return;
-  // Accept either a site name (preferred — survives array reorders) or a
-  // numeric index (legacy callers). Looking up by name avoids the bug where
-  // a re-render between typing and blur could shift the index and route the
-  // save to the wrong site.
-  let s;
-  if(typeof siteRefOrIdx === 'number') s = S.sites[siteRefOrIdx];
-  else s = (S.sites||[]).find(x => x.name === siteRefOrIdx);
-  if(!s){
-    if(inputEl){
-      const status = inputEl.parentElement?.querySelector('.site-addr-status');
-      if(status){ status.textContent='✕ site missing'; status.style.color='var(--red-t)'; }
-    }
-    return;
-  }
-  const newVal = String(val||'').trim();
-  if((s.address||'') === newVal){
-    // No-op: don't bump the unsaved-changes flag for a save that doesn't
-    // change anything. Still surface a tiny confirmation so the user knows
-    // the click was received.
-    if(inputEl){
-      const status = inputEl.parentElement?.querySelector('.site-addr-status');
-      if(status){ status.textContent='No change'; status.style.color='var(--txt3)'; setTimeout(()=>{ if(status) status.textContent=''; }, 1500); }
-    }
-    return;
-  }
-  s.address = newVal;
+  const s = S.sites[i]; if(!s) return;
+  s.address = String(val||'').trim();
   triggerSave();
-  // Visual confirmation so the admin sees that the address was committed —
-  // previously there was zero feedback and users assumed nothing happened.
-  if(inputEl){
-    const status = inputEl.parentElement?.querySelector('.site-addr-status');
-    if(status){ status.textContent='Saved ✓'; status.style.color='var(--green-t)'; setTimeout(()=>{ if(status) status.textContent=''; }, 2000); }
-  }
-  // No _afterMutation — address doesn't affect schedule rendering, just
-  // drive-time lookups. Leave the panel open so the user can keep editing.
+  // No _afterMutation needed — address doesn't affect schedule rendering, just
+  // drive-time lookups. Leave the panel open.
 }
 
 function saveSiteGroup(i, val){
@@ -18322,21 +18265,12 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
  * Used in IR list table rows. Returns '' if no data available.
  */
 function _driveTimeCell(physId, site){
-  if(!S.driveTimes || !site || site === 'At Home / Remote') return '';
-  // Cache is keyed as `${physId}|${siteName}` (flat string) — NOT a nested
-  // object. Earlier versions of this helper used `S.driveTimes[physId][site]`
-  // which always returned undefined, so the IR list table never showed any
-  // drive times. Match the schema used by every writer in updateTrafficTimes
-  // and refreshDailyDriveTimes.
-  const dt = S.driveTimes[`${physId}|${site}`];
+  const dt = S.driveTimes?.[physId]?.[site];
   if(!dt) return '';
-  // Prefer the IR 1st traffic-aware figure since this cell is rendered in the
-  // IR list view; fall back to the base (no-traffic) drive time otherwise.
-  const traffic = dt.byShift?.['IR 1st'] || dt.byShift?.['1st'];
-  const mins = traffic?.outMins ?? dt.mins ?? null;
-  if(mins == null) return '';
+  const mins = dt.byShift?.['1st']?.trafficMins || dt.baseMins || null;
+  if(mins==null) return '';
   const color = mins<=20?'var(--green-t)':mins<=40?'var(--amber,#d97706)':'var(--red-t)';
-  return `<span style="font-size:9px;color:${color};margin-left:4px" title="Drive time to ${escHtml(site)}${traffic?' (with traffic)':' (base)'}">🚗 ${mins}m</span>`;
+  return `<span style="font-size:9px;color:${color};margin-left:4px" title="Drive time to ${site}">🚗 ${mins}m</span>`;
 }
 
 
