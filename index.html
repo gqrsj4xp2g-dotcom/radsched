@@ -2714,6 +2714,49 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <button class="bt" onclick="refreshUpcomingDailyTraffic(30)">📆 Refresh Next 30 Days</button>
           <button class="bt bsm" onclick="refreshUpcomingDailyTraffic(1)" title="Today + tomorrow only">🚀 Quick (2 days)</button>
         </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed var(--bdr)">
+          <div style="font-size:11px;color:var(--txt2);width:100%;margin-bottom:2px">
+            📜 <strong>Retrograde refresh</strong> — backfills past shifts with shift-time-based traffic estimates.
+            <small style="color:var(--txt3)">Maps doesn't expose true historical traffic; past timestamps are clamped to "now" so the result represents <em>current</em> traffic at each shift's hour-of-day. Useful for filling badges on past shifts that never had a daily fetch.</small>
+          </div>
+          <button class="bt" onclick="refreshPastDailyTraffic(7)" title="Approximate retrograde update for the past week">📜 Refresh Past 7 Days</button>
+          <button class="bt" onclick="refreshPastDailyTraffic(30)" title="Approximate retrograde update for the past month">📜 Refresh Past 30 Days</button>
+          <button class="bt bsm" onclick="refreshPastDailyTraffic(90)" title="Approximate retrograde update for the past quarter">🗓️ Past 90 Days</button>
+        </div>
+        <!-- ─── AUTO-REFRESH for future shifts ─────────────────────────── -->
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bdr)">
+          <div style="font-size:11px;color:var(--txt2);margin-bottom:6px">
+            🤖 <strong>Auto-refresh future drive times</strong> — runs in the background while the app is open so the badge on every upcoming shift always reflects current traffic patterns at that shift's hour.
+            <small style="color:var(--txt3)">First fire is 5 sec after login; subsequent checks every 30 min, but actually re-fetches only when the throttle interval has elapsed. Throttle is per-browser (uses localStorage) so multi-tab doesn't pile up duplicate Maps queries.</small>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:11px">
+            <label class="chk" style="font-size:11px">
+              <input type="checkbox" id="auto-traffic-enabled" checked onchange="saveAutoRefreshTrafficCfg()"> Enabled
+            </label>
+            <label style="display:flex;align-items:center;gap:4px">
+              Window:
+              <select id="auto-traffic-days" onchange="saveAutoRefreshTrafficCfg()" style="font-size:11px;padding:2px 4px">
+                <option value="3">Next 3 days</option>
+                <option value="7">Next 7 days</option>
+                <option value="14" selected>Next 14 days</option>
+                <option value="30">Next 30 days</option>
+                <option value="60">Next 60 days</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:4px">
+              Refresh every:
+              <select id="auto-traffic-hours" onchange="saveAutoRefreshTrafficCfg()" style="font-size:11px;padding:2px 4px">
+                <option value="1">1 hr</option>
+                <option value="3">3 hrs</option>
+                <option value="6" selected>6 hrs</option>
+                <option value="12">12 hrs</option>
+                <option value="24">24 hrs</option>
+              </select>
+            </label>
+            <button class="bt bsm" onclick="forceAutoRefreshTrafficNow()" title="Bypass the throttle and run now">⚡ Run Now</button>
+          </div>
+          <div id="auto-traffic-status" style="font-size:11px;color:var(--txt3);margin-top:6px"></div>
+        </div>
         <span id="gmaps-calc-status" style="font-size:12px;color:var(--txt2);margin-left:4px;display:block;margin-top:6px"></span>
 
         <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bdr)">
@@ -3822,6 +3865,9 @@ async function launchApp(){
         setTimeout(()=>{if(si)si.textContent='';},4000);}
     }
     renderDash();
+    // Kick off the periodic future-shift auto-refresh after the dashboard
+    // is on screen. Idempotent — safe to call on every launchApp.
+    if(typeof _startAutoRefreshTrafficLoop === 'function') _startAutoRefreshTrafficLoop();
   }finally{
     launchApp._running=false;
   }
@@ -7285,8 +7331,16 @@ function showDriveTimeDetails(physId, siteName, date){
     `;
   }
   if(_isAdminOrSU()){
+    // Detect whether the focused date is in the past so we can warn about the
+    // Maps API past-timestamp clamp before the user clicks refresh.
+    const _isPastDate = date && date < fmtDate(new Date());
+    const _refreshLabel = _isPastDate ? '🔄 Refresh (approximate current-traffic)' : '🔄 Refresh live traffic for this shift';
+    const _refreshHint  = _isPastDate
+      ? 'Past dates: Google Maps doesn\'t expose true historical traffic, so the refresh queries with departureTime="now". Result represents current traffic at this shift\'s hour-of-day pattern.'
+      : 'Refreshes drive time using this shift\'s configured departure & return hours.';
     html += `
-      <button class="bp" onclick="refreshSingleDriveTime(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date||'').replace(/'/g,"\\'")}')" style="width:100%;margin-top:6px">🔄 Refresh live traffic now</button>
+      <button class="bp" onclick="refreshSingleDriveTime(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date||'').replace(/'/g,"\\'")}')" style="width:100%;margin-top:6px">${_refreshLabel}</button>
+      <div style="font-size:10px;color:var(--txt3);margin-top:4px;line-height:1.4">${escHtml(_refreshHint)}</div>
       <div id="dtd-refresh-status" style="font-size:11px;color:var(--txt3);margin-top:6px;text-align:center"></div>
     `;
   } else {
@@ -7327,6 +7381,160 @@ async function refreshUpcomingDailyTraffic(days){
   const end = fmtDate(endDt);
   setStatus(`Scanning ${days||7}-day schedule for shifts to refresh…`);
   await refreshDailyDriveTimes(start, end, (p) => { setStatus(p.msg); });
+  if(_fteActiveTab==='commute') renderCommuteMatrix();
+}
+
+// ── AUTO-REFRESH for future shifts ────────────────────────────────────────
+// Periodically refreshes daily drive times so the badge on every upcoming
+// shift reflects what traffic is doing right now (and therefore the best
+// available estimate of what it will look like at the shift's hour).
+//
+// Throttled by S.cfg.autoRefreshTraffic.hourInterval (default 6h) and gated
+// on a per-browser localStorage timestamp so multiple tabs don't pile up
+// duplicate Maps queries. Runs:
+//   • Once shortly after launchApp completes (5s delay to avoid blocking
+//     login render), if due
+//   • Every 30 min thereafter, checking the throttle each time
+// Disable from Settings → Drive Times → Auto-refresh by clearing the
+// "enabled" checkbox.
+const _AUTO_TRAFFIC_LS_KEY = 'rs.lastAutoTrafficRefresh';
+let   _autoTrafficCheckTimer = null;
+
+function _autoRefreshTrafficCfg(){
+  const c = S.cfg?.autoRefreshTraffic || {};
+  return {
+    enabled: c.enabled !== false,        // default on
+    days: Math.max(1, Math.min(60, +c.days || 14)),
+    hourInterval: Math.max(1, Math.min(48, +c.hourInterval || 6)),
+  };
+}
+
+async function _autoRefreshTrafficIfDue(){
+  try{
+    if(!CU) return;                       // not logged in
+    const cfg = _autoRefreshTrafficCfg();
+    if(!cfg.enabled) return;
+    if(!_getGMapsKey()){
+      console.log('[RS] Auto-refresh skipped — no Google Maps key configured.');
+      return;
+    }
+    let last = 0;
+    try{ last = parseInt(localStorage.getItem(_AUTO_TRAFFIC_LS_KEY)||'0') || 0; }catch(_){}
+    const ageHours = (Date.now() - last) / 3_600_000;
+    if(ageHours < cfg.hourInterval) return;  // not due yet
+    // Mark BEFORE the fetch so concurrent tabs don't double-fire if both are
+    // open. Worst case a refresh fails and we wait the full interval to retry.
+    try{ localStorage.setItem(_AUTO_TRAFFIC_LS_KEY, String(Date.now())); }catch(_){}
+    const start = fmtDate(new Date());
+    const endDt = new Date(); endDt.setDate(endDt.getDate() + cfg.days);
+    const end = fmtDate(endDt);
+    console.log(`[RS] Auto-refresh: scanning ${cfg.days}-day window for shifts (${start} → ${end})…`);
+    const result = await refreshDailyDriveTimes(start, end, null);
+    console.log(`[RS] Auto-refresh complete — ${result.fetched} update(s)${result.errors?', '+result.errors+' errors':''}.`);
+    _updateAutoTrafficStatus();
+  }catch(e){
+    console.warn('[RS] Auto-refresh traffic failed:', e);
+  }
+}
+
+// Refresh the human-readable status line in Settings → Drive Times. Shows
+// whether auto-refresh is on, when it last ran, when it's next due.
+function _updateAutoTrafficStatus(){
+  const el = document.getElementById('auto-traffic-status');
+  if(!el) return;
+  const cfg = _autoRefreshTrafficCfg();
+  if(!cfg.enabled){
+    el.innerHTML = '<span style="color:var(--txt3)">Auto-refresh disabled.</span>';
+    return;
+  }
+  let last = 0;
+  try{ last = parseInt(localStorage.getItem(_AUTO_TRAFFIC_LS_KEY)||'0') || 0; }catch(_){}
+  if(!last){
+    el.innerHTML = `<span style="color:var(--txt2)">Auto-refresh on. First run pending (window: next ${cfg.days} days, every ${cfg.hourInterval}h).</span>`;
+    return;
+  }
+  const ageMin = Math.round((Date.now() - last) / 60_000);
+  const ageStr = ageMin < 60 ? `${ageMin} min ago`
+              : ageMin < 1440 ? `${Math.round(ageMin/60)} hr ago`
+                              : `${Math.round(ageMin/1440)} day(s) ago`;
+  const nextMin = Math.max(0, Math.round(cfg.hourInterval*60 - ageMin));
+  const nextStr = nextMin <= 0 ? 'now (will fire on next check)'
+              : nextMin < 60   ? `in ${nextMin} min`
+                               : `in ${Math.round(nextMin/60)} hr`;
+  el.innerHTML = `<span style="color:var(--txt2)">Auto-refresh on · last: <strong>${ageStr}</strong> · next: <strong>${nextStr}</strong> · window: next <strong>${cfg.days}</strong> days, every <strong>${cfg.hourInterval}</strong>h</span>`;
+}
+
+// Read S.cfg.autoRefreshTraffic into the Settings form so the inputs match
+// what's currently saved. Called when the Settings page renders.
+function _loadAutoTrafficCfgUI(){
+  const cfg = _autoRefreshTrafficCfg();
+  const enEl  = document.getElementById('auto-traffic-enabled');
+  const dayEl = document.getElementById('auto-traffic-days');
+  const hrEl  = document.getElementById('auto-traffic-hours');
+  if(enEl) enEl.checked = !!cfg.enabled;
+  if(dayEl) dayEl.value = String(cfg.days);
+  if(hrEl)  hrEl.value  = String(cfg.hourInterval);
+  _updateAutoTrafficStatus();
+}
+
+// Save the auto-refresh config from the Settings inputs.
+function saveAutoRefreshTrafficCfg(){
+  if(!_adminOnly('change auto-refresh schedule')) return;
+  if(!S.cfg) S.cfg = {};
+  if(!S.cfg.autoRefreshTraffic) S.cfg.autoRefreshTraffic = {};
+  const enabled = document.getElementById('auto-traffic-enabled')?.checked !== false;
+  const days = parseInt(document.getElementById('auto-traffic-days')?.value) || 14;
+  const hours = parseInt(document.getElementById('auto-traffic-hours')?.value) || 6;
+  S.cfg.autoRefreshTraffic = { enabled, days, hourInterval: hours };
+  triggerSave();
+  _updateAutoTrafficStatus();
+  // If user just enabled it, fire a check immediately so they don't have to wait.
+  if(enabled) setTimeout(_autoRefreshTrafficIfDue, 200);
+}
+
+// Start the periodic auto-refresh check. Idempotent — safe to call from
+// launchApp every login. Called once initially after a 5s delay so the
+// dashboard render isn't blocked by a Maps round-trip.
+function _startAutoRefreshTrafficLoop(){
+  if(_autoTrafficCheckTimer) return;
+  setTimeout(_autoRefreshTrafficIfDue, 5_000);
+  _autoTrafficCheckTimer = setInterval(_autoRefreshTrafficIfDue, 30 * 60 * 1000); // every 30 min
+}
+
+// Manual "force a refresh now" button — bypasses the throttle.
+async function forceAutoRefreshTrafficNow(){
+  if(!_adminOnly('force auto-refresh')) return;
+  try{ localStorage.removeItem(_AUTO_TRAFFIC_LS_KEY); }catch(_){}
+  await _autoRefreshTrafficIfDue();
+}
+
+// Retrograde refresh — walks BACKWARD over the past N days and re-fetches
+// drive times for every shift in that window. The Google Maps Distance Matrix
+// API rejects departure_time values in the past, so _dateTimeToUnix clamps
+// past timestamps to 'now' — meaning the data we get represents CURRENT
+// traffic at the same hour-of-day pattern, not literal historical traffic.
+// Useful as an approximate retrospective view: it lets the badge show a
+// shift-time-based estimate for past dates instead of just base time.
+async function refreshPastDailyTraffic(days){
+  const statusEl = document.getElementById('gmaps-calc-status');
+  const setStatus = (msg) => { if(statusEl) statusEl.textContent = msg; };
+  if(!_getGMapsKey()){ setStatus('✕ No Google Maps API key configured.'); return; }
+  const today = new Date();
+  const startDt = new Date(today); startDt.setDate(startDt.getDate() - (days||7));
+  const start = fmtDate(startDt);
+  // End at today (exclusive of "now") — yesterday is the last truly past day,
+  // but we include today so morning shifts already in the past also refresh.
+  const end = fmtDate(today);
+  if(!confirm(
+    `Retrograde refresh — re-fetch traffic for every shift in the last ${days||7} day(s).\n\n` +
+    `NOTE: Google Maps doesn't expose true historical traffic; past timestamps are ` +
+    `clamped to "now" automatically. The result is an approximation: current traffic ` +
+    `applied at each shift's hour-of-day. Useful for backfilling badges on past shifts ` +
+    `that never had a daily fetch.\n\nProceed?`
+  )) return;
+  setStatus(`Retrograde scan: ${days||7} day(s) → ${start} to ${end}…`);
+  const result = await refreshDailyDriveTimes(start, end, (p) => { setStatus(p.msg); });
+  setStatus(`✓ Retrograde refresh complete — ${result.fetched} update(s)${result.errors?', '+result.errors+' errors':''}.`);
   if(_fteActiveTab==='commute') renderCommuteMatrix();
 }
 
@@ -10902,6 +11110,7 @@ function renderSettings(){
   renderSettingsSupabaseStatus();
   if(typeof _restoreGMapsKeyField==='function') _restoreGMapsKeyField();
   if(typeof _themeRefreshControls==='function') _themeRefreshControls();
+  if(typeof _loadAutoTrafficCfgUI==='function') _loadAutoTrafficCfgUI();
   const cfgFields={
     'cfg-wd':'wdMax','cfg-wk':'wkMax','cfg-ir-daily':'irDailyMax',
     'cfg-ir-wknd':'irWkndMax','cfg-rest':'rest','cfg-anc':'anchorPct'
