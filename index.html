@@ -288,11 +288,11 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <div class="aerr" id="aerr"></div>
 
-      <div id="af-login">
-        <div class="afield"><label>Email</label><input id="li-email" type="email" placeholder="you@hospital.org"></div>
-        <div class="afield"><label>Password</label><input id="li-pw" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
-        <button class="abtn" onclick="doLogin()">Sign In</button>
-      </div>
+      <form id="af-login" onsubmit="event.preventDefault();doLogin();" autocomplete="on">
+        <div class="afield"><label>Email</label><input id="li-email" type="email" name="username" autocomplete="username" placeholder="you@hospital.org"></div>
+        <div class="afield"><label>Password</label><input id="li-pw" type="password" name="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+        <button class="abtn" type="submit">Sign In</button>
+      </form>
 
       <div id="af-reg" style="display:none">
         <div class="g2">
@@ -326,10 +326,16 @@ tbody tr:hover{background:var(--bg3)}
           The anon key is safe to share with end users.
         </div>
         <div class="afield" style="margin-top:8px"><label>Project URL</label>
-          <input id="auth-sb-url" type="url" placeholder="https://YOURPROJECT.supabase.co" autocomplete="off">
+          <input id="auth-sb-url" type="url" name="supabase-url" placeholder="https://YOURPROJECT.supabase.co" autocomplete="off" data-1p-ignore data-lpignore="true">
         </div>
-        <div class="afield"><label>Anon (public) key</label>
-          <input id="auth-sb-key" type="password" placeholder="eyJhbGciOiJI…" autocomplete="off">
+        <div class="afield"><label>Anon (public) key <small style="color:var(--txt3)">(safe to share — public)</small></label>
+          <!--
+            type="text" (NOT password) — keeps Safari/Chrome from picking this up
+            as a competing login password and disabling biometric autofill on
+            the real login form. The anon key is public anyway. data-1p-ignore /
+            data-lpignore tell 1Password / LastPass to skip it too.
+          -->
+          <input id="auth-sb-key" type="text" name="supabase-anon-key" placeholder="eyJhbGciOiJI…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" style="font-family:ui-monospace,monospace;font-size:11px">
         </div>
         <button class="abtn" type="button" onclick="saveAuthSupabaseConfig()" style="margin-top:4px">💾 Save &amp; Reload</button>
         <div id="auth-sb-msg" style="font-size:11px;margin-top:6px;min-height:14px"></div>
