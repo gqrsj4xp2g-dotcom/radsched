@@ -30,6 +30,11 @@ body{font-family:'Georgia',serif;background:var(--bg);color:var(--txt);font-size
    proportionally — wider support than `transform: scale()` and doesn't need
    width compensation. Supported in all major browsers including Firefox 126+. */
 #app{zoom:var(--user-font-scale,1)}
+/* Per-user density — affects line-height and base spacing throughout the app.
+   Set by the Appearance editor; default 1.0 = unchanged. The body line-height
+   multiplier is the most visible knob; cards/rows pick this up via existing
+   padding rules that scale relative to font-size. */
+body{line-height:calc(1.4 * var(--user-density, 1))}
 
 
 /* IR schedule builder cells */
@@ -151,12 +156,37 @@ body{font-family:'Georgia',serif;background:var(--bg);color:var(--txt);font-size
 label{font-size:10px;font-weight:800;color:var(--txt2);display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
 input,select,textarea{width:100%;padding:7px 10px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:12px;background:var(--bg2);color:var(--txt);font-family:inherit;transition:border .12s}
 input:focus,select:focus{outline:none;border-color:var(--blue)}
-input[type=checkbox],input[type=radio]{width:auto}
+/* Reset checkboxes/radios to native rendering — the global `input` rule above
+   applies padding/border/background to all inputs, which obscures the native
+   checkmark and made it impossible to tell which were checked. */
+input[type=checkbox],input[type=radio]{
+  width:auto;height:auto;padding:0;margin:0 4px 0 0;
+  background:transparent;border:0;border-radius:0;
+  appearance:auto;-webkit-appearance:auto;
+  vertical-align:middle;cursor:pointer;
+}
+/* Chip-style label for the per-site DR/IR subspecialty checkboxes. The chip's
+   background/border flip when its contained <input> is :checked so admins can
+   tell at a glance which subs are enabled at a site. */
+.site-sub-chip{
+  display:inline-flex;align-items:center;gap:4px;font-size:11px;
+  padding:3px 8px;border-radius:4px;cursor:pointer;
+  background:var(--bg2);border:1px solid var(--bdr2);color:var(--txt2);
+  transition:background .12s,border-color .12s,color .12s;
+}
+.site-sub-chip:hover{border-color:var(--blue)}
+.site-sub-chip:has(input:checked){
+  background:var(--blue-bg);border-color:var(--blue);color:var(--blue-t);font-weight:600;
+}
 input[type=number]{width:auto}
 
 /* ── BTNS ── */
 button{padding:6px 14px;border:1px solid var(--bdr2);border-radius:var(--r);font-size:12px;cursor:pointer;background:var(--bg2);color:var(--txt);font-family:inherit;font-weight:700;transition:.12s}
 button:hover{background:var(--bg3)}
+/* Disabled state — without this, sendBtn/calculate/etc. look identical to
+   their enabled state and users click them in vain. */
+button:disabled,button[disabled]{opacity:.45;cursor:not-allowed;filter:saturate(.5)}
+button:disabled:hover,button[disabled]:hover{background:var(--bg2)}
 .bp{background:var(--blue);color:#fff;border-color:var(--blue)}.bp:hover{background:var(--blue2)}
 .bg{background:var(--green);color:#fff;border-color:var(--green)}
 .ba{background:var(--amber);color:#fff;border-color:var(--amber)}
@@ -2489,6 +2519,74 @@ WHERE email = 'your-admin@example.com';</pre>
 <div id="page-settings" class="page admin-only">
   <div class="pg-title">⚙ Settings</div>
 
+  <!-- ─── APPEARANCE / THEME EDITOR ──────────────────────────────────────
+       Lets admins re-color the app, change density, font size, and corner
+       radius. Persists per-browser (not per-practice) so each user can
+       have their own preferred look. Settings stored in localStorage.
+  ─────────────────────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🎨 Appearance</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px">
+      Live theme editor — every change applies instantly and persists in this browser. Click <strong>Reset</strong> to revert to the original look.
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Quick Presets</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <button class="bsm" type="button" onclick="applyThemePreset('default')">☀️ Default</button>
+        <button class="bsm" type="button" onclick="applyThemePreset('dark')">🌙 Dark</button>
+        <button class="bsm" type="button" onclick="applyThemePreset('contrast')">🔆 High Contrast</button>
+        <button class="bsm" type="button" onclick="applyThemePreset('sepia')">📜 Sepia</button>
+        <button class="bsm" type="button" onclick="applyThemePreset('teal')">🌊 Teal</button>
+        <button class="bsm" type="button" onclick="applyThemePreset('plum')">🔮 Plum</button>
+      </div>
+    </div>
+
+    <div class="g3" style="margin-bottom:10px">
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Accent color</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="theme-accent" type="color" value="#2563eb" style="width:42px;height:32px;padding:0;cursor:pointer" oninput="_themeOnInput('accent', this.value)">
+          <code id="theme-accent-val" style="font-size:11px;color:var(--txt3)">#2563eb</code>
+        </div>
+      </div>
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Page background</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="theme-bg" type="color" value="#f5f4f0" style="width:42px;height:32px;padding:0;cursor:pointer" oninput="_themeOnInput('bg', this.value)">
+          <code id="theme-bg-val" style="font-size:11px;color:var(--txt3)">#f5f4f0</code>
+        </div>
+      </div>
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Text color</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="theme-txt" type="color" value="#18181b" style="width:42px;height:32px;padding:0;cursor:pointer" oninput="_themeOnInput('txt', this.value)">
+          <code id="theme-txt-val" style="font-size:11px;color:var(--txt3)">#18181b</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="g3" style="margin-bottom:10px">
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Corner radius <span id="theme-radius-val" style="color:var(--txt3)">6 px</span></label>
+        <input id="theme-radius" type="range" min="0" max="16" step="1" value="6" oninput="_themeOnInput('radius', this.value)" style="width:100%">
+      </div>
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Font scale <span id="theme-fs-val" style="color:var(--txt3)">1.00×</span></label>
+        <input id="theme-fs" type="range" min="0.85" max="1.30" step="0.05" value="1" oninput="_themeOnInput('fontScale', this.value)" style="width:100%">
+      </div>
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Density <span id="theme-density-val" style="color:var(--txt3)">Normal</span></label>
+        <input id="theme-density" type="range" min="0.85" max="1.20" step="0.05" value="1" oninput="_themeOnInput('density', this.value)" style="width:100%">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button class="br bsm" type="button" onclick="resetTheme()">↺ Reset to defaults</button>
+      <span id="theme-status" style="font-size:11px;color:var(--txt3);align-self:center"></span>
+    </div>
+  </div>
+
   <!-- Supabase Connection -->
   <div class="card" style="margin-bottom:14px;border:2px solid var(--blue)">
     <div class="card-title">🔗 Supabase — Shared Database</div>
@@ -2840,7 +2938,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 </div>
 
 <!-- LINK PHYSICIAN MODAL -->
-<div class="modal-wrap" id="link-modal">
+<div class="modal-wrap" id="link-modal" onclick="if(event.target===this)closeModal('link-modal')">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('link-modal')">✕</button>
     <div class="modal-title" id="link-modal-title">Link Physician</div>
@@ -2851,7 +2949,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 <!-- IR GROUP REMOVAL MODAL — shown when the group has references that need
      a decision (reassign vs strip). If nothing references the group we skip
      the modal and delete after a plain confirm(). -->
-<div class="modal-wrap" id="ir-group-remove-modal">
+<div class="modal-wrap" id="ir-group-remove-modal" onclick="if(event.target===this)closeModal('ir-group-remove-modal')">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('ir-group-remove-modal')">✕</button>
     <div class="modal-title" id="ir-group-remove-title">Remove IR Group</div>
@@ -3016,10 +3114,6 @@ let _supabase=null;
 // whose URL/key were saved in localStorage rather than baked into the HTML.
 const _SB_CFG={url:'',key:''};
 
-// ─── TEMPORARY AUTH DIAGNOSTIC ─────────────────────────────────────────────
-// Visible banner that logs each step of the session-restore flow so we can
-// see why the user is getting auto-logged-out on refresh without needing
-// DevTools. Prints to console too. Remove once the issue is identified.
 // Auth-screen Supabase config form. Lets the user enter URL + anon key
 // without being logged in — the in-app Settings → Supabase form is only
 // reachable AFTER auth, which creates a chicken-and-egg lockout when the
@@ -3069,51 +3163,6 @@ function saveAuthSupabaseConfig(){
   else apply();
 })();
 
-function _authDiag(msg, level){
-  const stamp = new Date().toLocaleTimeString();
-  const line = `[${stamp}] ${msg}`;
-  // Console mirror — useful when DevTools IS open.
-  if(level === 'error') console.error('[AuthDiag]', msg);
-  else console.log('[AuthDiag]', msg);
-  // Lazily create the visible banner.
-  let panel = document.getElementById('auth-diag-panel');
-  if(!panel){
-    panel = document.createElement('div');
-    panel.id = 'auth-diag-panel';
-    panel.style.cssText = 'position:fixed;top:8px;right:8px;width:380px;max-height:50vh;background:#1a1a1a;color:#dcdcdc;font:11px ui-monospace,monospace;padding:8px;border:1px solid #444;border-radius:6px;z-index:99999;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)';
-    panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;border-bottom:1px solid #444;padding-bottom:4px">
-        <strong style="font-size:12px;color:#7dd3fc">🔍 Auth Diagnostic</strong>
-        <span>
-          <button id="auth-diag-copy" style="background:#374151;color:#fff;border:0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;margin-right:4px">Copy</button>
-          <button id="auth-diag-close" style="background:#7f1d1d;color:#fff;border:0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer">×</button>
-        </span>
-      </div>
-      <div id="auth-diag-log"></div>`;
-    // Defer insertion until body exists; if script ran before body parse, queue.
-    if(document.body){ document.body.appendChild(panel); }
-    else { document.addEventListener('DOMContentLoaded', () => document.body.appendChild(panel)); }
-    // Wire buttons after the next tick to ensure they're attached.
-    setTimeout(() => {
-      const copyBtn = document.getElementById('auth-diag-copy');
-      const closeBtn = document.getElementById('auth-diag-close');
-      if(copyBtn) copyBtn.onclick = () => {
-        const txt = document.getElementById('auth-diag-log')?.innerText || '';
-        navigator.clipboard?.writeText(txt).then(() => { copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',1500); });
-      };
-      if(closeBtn) closeBtn.onclick = () => panel.remove();
-    }, 0);
-  }
-  const log = document.getElementById('auth-diag-log');
-  if(log){
-    const entry = document.createElement('div');
-    entry.style.cssText = `margin:2px 0;padding:2px 0;border-bottom:1px dotted #333;color:${level==='error'?'#fca5a5':level==='warn'?'#fcd34d':'#dcdcdc'}`;
-    entry.textContent = line;
-    log.appendChild(entry);
-    log.scrollTop = log.scrollHeight;
-  }
-}
-// ─── END TEMPORARY AUTH DIAGNOSTIC ─────────────────────────────────────────
 // Tracks user-ids added to USERS locally in the last N seconds that haven't
 // yet echoed back from the remote. Used by _applyRemoteData to avoid dropping
 // a just-created user when a concurrent poll/realtime event pulls a pre-push
@@ -3440,90 +3489,48 @@ function _initAuthClient(){
 // only displayed if there's any sign of a stored session (storage key present),
 // to avoid showing it to genuine first-time visitors.
 (async function _checkSession(){
-  _authDiag('▶ _checkSession started');
-  // Dump the raw radscheduler_sb_config localStorage entry — tells us whether
-  // the config is missing, half-saved, or otherwise malformed.
-  try{
-    const raw = localStorage.getItem('radscheduler_sb_config');
-    if(raw === null) _authDiag('  radscheduler_sb_config: <missing from localStorage>','warn');
-    else if(raw === '') _authDiag('  radscheduler_sb_config: <empty string>','warn');
-    else {
-      try{
-        const c = JSON.parse(raw);
-        _authDiag(`  radscheduler_sb_config: url="${c.url||'(empty)'}" keyLen=${c.key?c.key.length:0}`);
-      }catch(pe){
-        _authDiag('  radscheduler_sb_config: <not valid JSON> raw[0..80]='+raw.slice(0,80),'error');
-      }
-    }
-    // Inventory all localStorage keys so we can see if other things are persisting (or not)
-    const allKeys = [];
-    for(let i=0;i<localStorage.length;i++){ allKeys.push(localStorage.key(i)); }
-    _authDiag(`  localStorage keys (${allKeys.length}): ${allKeys.join(', ')}`);
-  }catch(e){_authDiag('  localStorage inspect threw: '+e.message,'error');}
-
   // Make sure the latest Supabase config (URL, anon key) is loaded from localStorage
   // BEFORE we try to init the auth client. Without this, _SB_CFG could still be empty
   // and _getUrl()/_getKey() fall back to the baked-in constants — which is fine if
   // they're set, but the call ordering needs to happen this way for instances where
   // an admin overrode the URL/key in Settings.
   if(typeof _loadSupabaseConfig==='function') {
-    try{ _loadSupabaseConfig(); }catch(e){_authDiag('  config load threw: '+e.message,'warn');}
+    try{ _loadSupabaseConfig(); }catch(e){/* config load is best-effort */}
   }
-  const url = _getUrl(), key = _getKey();
-  _authDiag(`  URL set: ${!!url} (${url?url.slice(0,30)+'…':'<empty>'})`);
-  _authDiag(`  Key set: ${!!key} (len=${key?key.length:0})`);
 
   // Detect the storage key the SDK uses. If it exists, there's likely a session
   // to restore — show the overlay to suppress the auth screen flash.
   const overlay = document.getElementById('session-restore-overlay');
   let storedSession = null;
-  let storedKey = null;
   try{
-    const k1 = 'radscheduler-auth';
-    const k2 = 'sb-' + (_getUrl()||'').replace(/https?:\/\//,'').split('.')[0] + '-auth-token';
-    if(localStorage.getItem(k1)){ storedSession = localStorage.getItem(k1); storedKey = k1; }
-    else if(localStorage.getItem(k2)){ storedSession = localStorage.getItem(k2); storedKey = k2; }
-  }catch(e){_authDiag('  localStorage read threw: '+e.message,'error');}
-  _authDiag(`  Stored session in localStorage: ${storedSession ? `YES (key="${storedKey}", len=${storedSession.length})` : 'NO'}`);
+    storedSession = localStorage.getItem('radscheduler-auth')
+                 || localStorage.getItem('sb-' + (_getUrl()||'').replace(/https?:\/\//,'').split('.')[0] + '-auth-token');
+  }catch(e){/* localStorage may be blocked */}
   if(storedSession && overlay) overlay.style.display='flex';
 
   const sb=_initAuthClient();
-  _authDiag(`  _initAuthClient returned: ${sb ? 'client' : 'NULL'}`);
   if(!sb){
-    _authDiag('✕ No client — auth screen shown','error');
     if(overlay) overlay.style.display='none';
     return;
   }
   try{
-    _authDiag('  Calling sb.auth.getSession()…');
     const {data:{session}}=await sb.auth.getSession();
-    _authDiag(`  getSession returned session: ${session ? 'YES' : 'NO'}`);
     if(session?.user){
-      _authDiag(`  session.user.email: ${session.user.email}`);
-      _authDiag(`  session expires_at: ${session.expires_at ? new Date(session.expires_at*1000).toLocaleString() : '?'}`);
       _hydrateUserFromSession(session.user);
-      _authDiag(`  After hydrate, CU: ${CU ? `${CU.first} ${CU.last} (role=${CU.role})` : 'NULL'}`);
       if(CU){
         // Hide overlay just before launchApp swaps the screens, so the transition
         // is from "Restoring..." → app, never flashing the auth screen.
         if(overlay) overlay.style.display='none';
-        _authDiag('▶ Calling launchApp()');
         launchApp();
         return;
-      } else {
-        _authDiag('✕ CU not set after hydrate — staying on auth screen','error');
       }
-    } else {
-      _authDiag('✕ No session — staying on auth screen (this is normal if first visit / signed out)','warn');
     }
     if(overlay) overlay.style.display='none';
     // Listen for cross-tab signouts and silent token refresh failures. If another tab
     // signs out, or our token can't be refreshed (user disabled / expired / revoked),
     // this fires with SIGNED_OUT and we tear down cleanly.
     sb.auth.onAuthStateChange((event,sess)=>{
-      _authDiag(`◉ onAuthStateChange fired: ${event}${sess?.user?` (user=${sess.user.email})`:''}`, event==='SIGNED_OUT'?'warn':'info');
       if(event==='SIGNED_OUT' && CU){
-        _authDiag('  → triggering doLogout because event=SIGNED_OUT and CU was set','warn');
         console.log('[RS] Auth state changed to SIGNED_OUT — logging out');
         doLogout();
       }
@@ -3538,7 +3545,6 @@ function _initAuthClient(){
       }
     });
   }catch(e){
-    _authDiag('✕ Session check threw: '+e.message,'error');
     console.warn('[RS] Session check failed:',e);
     if(overlay) overlay.style.display='none';
   }
@@ -3676,8 +3682,6 @@ async function doRegister(){
 }
 
 async function doLogout(){
-  _authDiag('▶ doLogout called — capturing stack so we can see WHO logged out:','warn');
-  try{ throw new Error('doLogout origin'); }catch(e){ _authDiag('  '+(e.stack||'').split('\n').slice(1,5).join(' | '),'warn'); }
   // Cancel pending save + attempt one final sync so user's edits aren't lost
   clearTimeout(_saveTimeout); _saveTimeout=null;
   if(_hasUnsavedChanges){
@@ -3708,13 +3712,11 @@ async function doLogout(){
 async function launchApp(){
   // Re-entrance guard: _checkSession IIFE and doLogin can both race to call launchApp.
   // The second invocation would double-load from Supabase. Use a module-level flag.
-  if(launchApp._running){ _authDiag('  launchApp re-entry blocked','warn'); return; }
+  if(launchApp._running) return;
   launchApp._running=true;
-  _authDiag('▶ launchApp running');
   try{
     document.getElementById('auth').style.display='none';
     document.getElementById('app').style.display='flex';
-    _authDiag('  app screen shown, auth hidden');
     // Apply the user's saved font scale, if any
     if(typeof _applyFontScale==='function') _applyFontScale(CU?.fontScale || 1);
     const isSU = CU.role==='superuser';
@@ -3802,11 +3804,7 @@ async function launchApp(){
       if(si){si.textContent='Offline mode — use 💾 Save File';si.style.color='var(--txt3)';
         setTimeout(()=>{if(si)si.textContent='';},4000);}
     }
-    _authDiag('  reached renderDash() — login restore complete ✓');
     renderDash();
-  }catch(e){
-    _authDiag('✕ launchApp threw: '+e.message,'error');
-    throw e;
   }finally{
     launchApp._running=false;
   }
@@ -5067,6 +5065,31 @@ function doLink(uid){
   _updateUserAuthMeta(u.id,{physId:u.physId}).catch(()=>{});
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+// Global Escape-to-close handler. Walks the known modal IDs from most-likely-
+// to-be-open to least and closes the first visible one. Skips when an input is
+// focused inside a textarea / contenteditable so users can press Esc without
+// losing typing context. Idempotent — safe to call when no modal is open.
+document.addEventListener('keydown', (e) => {
+  if(e.key !== 'Escape') return;
+  const ae = document.activeElement;
+  if(ae && (ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+  // Modal candidates in priority order. Each entry: [check-if-open, close-fn].
+  const modals = [
+    ['link-modal',           () => closeModal('link-modal')],
+    ['ir-group-remove-modal',() => closeModal('ir-group-remove-modal')],
+    ['chat-group-modal',     () => typeof closeChatGroupEditor === 'function' && closeChatGroupEditor()],
+    ['dtd-modal',            () => typeof closeDriveTimeDetails === 'function' && closeDriveTimeDetails()],
+  ];
+  for(const [id, close] of modals){
+    const el = document.getElementById(id);
+    if(!el) continue;
+    // .modal-wrap variants use .open class; inline-style variants set display
+    const isOpen = el.classList.contains('open') ||
+                   (el.style.display && el.style.display !== 'none');
+    if(isOpen){ close(); e.preventDefault(); return; }
+  }
+});
 
 // Update a Supabase Auth user's metadata (physId, role, etc.) via edge function
 async function _updateUserAuthMeta(userId, fields){
@@ -10801,6 +10824,7 @@ function resolveSwap(id,status){
 function renderSettings(){
   renderSettingsSupabaseStatus();
   if(typeof _restoreGMapsKeyField==='function') _restoreGMapsKeyField();
+  if(typeof _themeRefreshControls==='function') _themeRefreshControls();
   const cfgFields={
     'cfg-wd':'wdMax','cfg-wk':'wkMax','cfg-ir-daily':'irDailyMax',
     'cfg-ir-wknd':'irWkndMax','cfg-rest':'rest','cfg-anc':'anchorPct'
@@ -11078,14 +11102,17 @@ function renderSitesList(){
       const groupOpts = groupOptsRaw.map(([v,lbl]) =>
         `<option value="${escHtml(v)}"${cur===v?' selected':''}>${escHtml(lbl)}</option>`).join('');
 
+      // .site-sub-chip is styled so the chip's background/border flips when its
+      // contained checkbox is :checked — see the global CSS rule. Makes the
+      // checked state unmistakable even at a glance.
       const drSubsChk = allDRSubs.length
-        ? allDRSubs.map(sub => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:var(--bg2);border-radius:4px">
+        ? allDRSubs.map(sub => `<label class="site-sub-chip">
             <input type="checkbox" class="site-drsub-${i}" value="${escHtml(sub)}" ${drSet.has(sub)?'checked':''} onchange="saveSiteSubs(${i},'dr')">
             ${escHtml(sub)}
           </label>`).join(' ')
         : '<em style="color:var(--txt3);font-size:11px">No DR specialties defined — add some under DR Subspecialties below.</em>';
       const irSubsChk = allIRSubs.length
-        ? allIRSubs.map(sub => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:var(--bg2);border-radius:4px">
+        ? allIRSubs.map(sub => `<label class="site-sub-chip">
             <input type="checkbox" class="site-irsub-${i}" value="${escHtml(sub)}" ${irSet.has(sub)?'checked':''} onchange="saveSiteSubs(${i},'ir')">
             ${escHtml(sub)}
           </label>`).join(' ')
@@ -15259,6 +15286,207 @@ function _applyFontScale(scale){
   const n = Number(scale);
   const safe = (isFinite(n) && n >= 0.5 && n <= 2) ? n : 1;
   document.documentElement.style.setProperty('--user-font-scale', String(safe));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THEME / APPEARANCE EDITOR
+   Persists per-browser in localStorage (key `rs.theme.v1`). Each user can
+   have their own look without affecting the shared practice data. The
+   theme object shape:
+     { accent:'#hex', bg:'#hex', txt:'#hex',
+       radius:Number, fontScale:Number, density:Number, preset:'name' }
+═══════════════════════════════════════════════════════════════════════ */
+const _THEME_STORAGE_KEY = 'rs.theme.v1';
+const _THEME_DEFAULTS = {
+  accent: '#2563eb', bg: '#f5f4f0', txt: '#18181b',
+  radius: 6, fontScale: 1, density: 1, preset: 'default'
+};
+const _THEME_PRESETS = {
+  default:  { accent:'#2563eb', bg:'#f5f4f0', txt:'#18181b', radius:6,  fontScale:1,    density:1    },
+  dark:     { accent:'#60a5fa', bg:'#0f172a', txt:'#e2e8f0', radius:6,  fontScale:1,    density:1    },
+  contrast: { accent:'#1d4ed8', bg:'#ffffff', txt:'#000000', radius:4,  fontScale:1.05, density:1.05 },
+  sepia:    { accent:'#a16207', bg:'#f5e9d3', txt:'#3f2f1d', radius:8,  fontScale:1,    density:1    },
+  teal:     { accent:'#0d9488', bg:'#f0fdfa', txt:'#134e4a', radius:8,  fontScale:1,    density:1    },
+  plum:     { accent:'#7c3aed', bg:'#faf5ff', txt:'#3b0764', radius:10, fontScale:1,    density:1    },
+};
+
+// ── Color helpers — derive shades from a single accent / bg / txt input.
+// Pure functions; used by _themeApply.
+function _hexToHsl(hex){
+  hex = String(hex||'').replace('#','');
+  if(hex.length === 3) hex = hex.split('').map(c=>c+c).join('');
+  const r = parseInt(hex.slice(0,2),16)/255;
+  const g = parseInt(hex.slice(2,4),16)/255;
+  const b = parseInt(hex.slice(4,6),16)/255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h, s, l = (max+min)/2;
+  if(max === min){ h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2-max-min) : d / (max+min);
+    switch(max){
+      case r: h = ((g-b)/d + (g<b?6:0)); break;
+      case g: h = ((b-r)/d + 2); break;
+      case b: h = ((r-g)/d + 4); break;
+    }
+    h /= 6;
+  }
+  return {h:h*360, s:s*100, l:l*100};
+}
+function _hslToHex(h, s, l){
+  s /= 100; l /= 100;
+  const k = n => (n + h/30) % 12;
+  const a = s * Math.min(l, 1-l);
+  const f = n => {
+    const v = l - a * Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n), 1)));
+    return Math.round(v * 255).toString(16).padStart(2,'0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+function _hslShift(hex, dl){
+  const {h,s,l} = _hexToHsl(hex);
+  return _hslToHex(h, s, Math.max(0, Math.min(100, l+dl)));
+}
+function _hslSet(hex, lTarget){
+  const {h,s} = _hexToHsl(hex);
+  return _hslToHex(h, s, lTarget);
+}
+
+// ── Apply a full theme object to :root via setProperty. Idempotent.
+function _themeApply(t){
+  const root = document.documentElement;
+  const accent = t.accent || _THEME_DEFAULTS.accent;
+  const bg     = t.bg     || _THEME_DEFAULTS.bg;
+  const txt    = t.txt    || _THEME_DEFAULTS.txt;
+  const isDark = _hexToHsl(bg).l < 50;
+
+  // Accent — derive 2/bg/t variants automatically
+  root.style.setProperty('--blue',    accent);
+  root.style.setProperty('--blue2',   _hslShift(accent, -8));
+  root.style.setProperty('--blue-bg', isDark ? _hslShift(accent, -38) : _hslSet(accent, 95));
+  root.style.setProperty('--blue-t',  isDark ? _hslSet(accent, 75)    : _hslSet(accent, 30));
+
+  // Background variants
+  root.style.setProperty('--bg',  bg);
+  root.style.setProperty('--bg2', _hslShift(bg, isDark ? +5 : +3));
+  root.style.setProperty('--bg3', _hslShift(bg, isDark ? +9 : -4));
+  root.style.setProperty('--bg4', _hslShift(bg, isDark ? +13: -8));
+
+  // Text variants
+  root.style.setProperty('--txt',  txt);
+  root.style.setProperty('--txt2', _hslShift(txt, isDark ? -25 : +30));
+  root.style.setProperty('--txt3', _hslShift(txt, isDark ? -42 : +50));
+
+  // Borders track background lightness so they stay visible against bg
+  root.style.setProperty('--bdr',  _hslShift(bg, isDark ? +12 : -8));
+  root.style.setProperty('--bdr2', _hslShift(bg, isDark ? +18 : -14));
+
+  // Radius + font scale + density
+  const r = Math.max(0, Math.min(20, +t.radius || 6));
+  root.style.setProperty('--r',   r + 'px');
+  root.style.setProperty('--rl',  Math.round(r*1.6) + 'px');
+  root.style.setProperty('--rxl', Math.round(r*2.3) + 'px');
+  _applyFontScale(t.fontScale || 1);
+  // Density tweaks line-height / spacing via a CSS variable consumed by the
+  // body rule we add below. 1.0 = normal, <1 compact, >1 spacious.
+  root.style.setProperty('--user-density', String(t.density || 1));
+
+  // Color-scheme hint so form controls / scrollbars adapt to dark backgrounds
+  root.style.colorScheme = isDark ? 'dark' : 'light';
+}
+
+function _themeLoad(){
+  try{
+    const raw = localStorage.getItem(_THEME_STORAGE_KEY);
+    if(!raw) return null;
+    return Object.assign({}, _THEME_DEFAULTS, JSON.parse(raw));
+  }catch(_){ return null; }
+}
+function _themeSave(t){
+  try{ localStorage.setItem(_THEME_STORAGE_KEY, JSON.stringify(t)); }catch(_){}
+}
+
+// Restore on page load — called once outside any function so it runs ASAP
+// (before DOM paint where possible) to avoid a default-theme flash.
+(function _themeRestoreOnLoad(){
+  const t = _themeLoad();
+  if(t) _themeApply(t);
+})();
+
+// Snapshot of the current theme — read from inputs if Settings is open,
+// otherwise fall back to localStorage / defaults.
+function _themeCurrent(){
+  const get = (id, fallback) => {
+    const el = document.getElementById(id);
+    return el ? el.value : fallback;
+  };
+  const stored = _themeLoad() || _THEME_DEFAULTS;
+  return {
+    accent:    get('theme-accent',  stored.accent),
+    bg:        get('theme-bg',      stored.bg),
+    txt:       get('theme-txt',     stored.txt),
+    radius:    +get('theme-radius', stored.radius),
+    fontScale: +get('theme-fs',     stored.fontScale),
+    density:   +get('theme-density',stored.density),
+    preset:    'custom',
+  };
+}
+
+// Live-applied while user drags a slider / picks a color.
+function _themeOnInput(field, value){
+  const t = _themeCurrent();
+  if(field === 'radius'){ t.radius = +value; _setText('theme-radius-val', value+' px'); }
+  else if(field === 'fontScale'){ t.fontScale = +value; _setText('theme-fs-val', (+value).toFixed(2)+'×'); }
+  else if(field === 'density'){
+    t.density = +value;
+    const lbl = +value < 0.95 ? 'Compact' : +value > 1.05 ? 'Spacious' : 'Normal';
+    _setText('theme-density-val', lbl);
+  }
+  else if(field === 'accent'){ t.accent = value; _setText('theme-accent-val', value); }
+  else if(field === 'bg'){     t.bg     = value; _setText('theme-bg-val',     value); }
+  else if(field === 'txt'){    t.txt    = value; _setText('theme-txt-val',    value); }
+  _themeApply(t); _themeSave(t);
+  _setText('theme-status', '✓ Saved');
+  clearTimeout(_themeOnInput._t);
+  _themeOnInput._t = setTimeout(() => _setText('theme-status',''), 1200);
+}
+function _setText(id, txt){ const e = document.getElementById(id); if(e) e.textContent = txt; }
+
+function applyThemePreset(name){
+  const p = _THEME_PRESETS[name]; if(!p) return;
+  const t = Object.assign({}, p, { preset: name });
+  _themeApply(t); _themeSave(t); _themeRefreshControls();
+  _setText('theme-status', `✓ Applied ${name} preset`);
+  setTimeout(() => _setText('theme-status',''), 1500);
+}
+
+function resetTheme(){
+  if(!confirm('Reset all appearance settings to the original defaults?')) return;
+  try{ localStorage.removeItem(_THEME_STORAGE_KEY); }catch(_){}
+  _themeApply(_THEME_DEFAULTS); _themeRefreshControls();
+  _setText('theme-status', '✓ Reset to defaults');
+  setTimeout(() => _setText('theme-status',''), 1500);
+}
+
+// Sync the form controls in the Settings panel with the currently-applied
+// theme. Called when the Settings page renders, after preset-apply, and
+// after reset. No-op if the controls aren't in the DOM yet.
+function _themeRefreshControls(){
+  const t = _themeLoad() || _THEME_DEFAULTS;
+  const set = (id, val) => { const e = document.getElementById(id); if(e) e.value = val; };
+  set('theme-accent',  t.accent);
+  set('theme-bg',      t.bg);
+  set('theme-txt',     t.txt);
+  set('theme-radius',  t.radius);
+  set('theme-fs',      t.fontScale);
+  set('theme-density', t.density);
+  _setText('theme-accent-val', t.accent);
+  _setText('theme-bg-val',     t.bg);
+  _setText('theme-txt-val',    t.txt);
+  _setText('theme-radius-val', t.radius+' px');
+  _setText('theme-fs-val',     (+t.fontScale).toFixed(2)+'×');
+  _setText('theme-density-val',
+    +t.density < 0.95 ? 'Compact' : +t.density > 1.05 ? 'Spacious' : 'Normal');
 }
 
 // User picked a new scale — apply immediately, save to their user record.
