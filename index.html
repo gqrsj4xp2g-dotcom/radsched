@@ -1663,7 +1663,8 @@ tbody tr:hover{background:var(--bg3)}
       <div id="irs-info" style="margin-bottom:8px"></div>
       <button class="bp" onclick="addIRShift()">Assign IR Shift</button>
       <button class="bt bsm" onclick="fillIRHomeShifts()" style="margin-left:6px">Fill Unscheduled → IR Home</button>
-      <button class="bt bsm admin-only" onclick="fillDRHomeForIR()" style="margin-left:6px" title="Assign diagnostic read-from-home DR shifts to IR physicians who have no IR shift scheduled">Fill Unscheduled → DR Home</button>
+      <button class="bt bsm admin-only" onclick="fillCrossGroupIR()" style="margin-left:6px" title="STEP 1 — For each unscheduled IR physician day, fill an open slot in the OTHER IR group's sites (if site rules allow). Run AFTER building the IR shift schedule, BEFORE building the DR schedule. Anyone not placed stays in the pool for the DR builder.">① Cross-fill IR Shortages</button>
+      <button class="bt bsm admin-only" onclick="fillDRHomeRemainingIR()" style="margin-left:6px" title="STEP 2 — Mop up: any IR physician still without a shift gets a DR read-from-home shift. Run this LAST, after the DR shift schedule is built, so IR physicians who were picked for in-person DR shifts aren't double-assigned.">② Fill Remaining → DR Home</button>
     </div>
 
   <!-- Shared table + filters -->
@@ -13519,11 +13520,16 @@ const _AI_TOOLS = [
   },
   {
     name: 'fill_dr_home_for_ir',
-    description: 'Automatically fill DR read-from-home shifts for all IR physicians who have no IR shift scheduled on a given month. Respects vacations, existing shifts, and blackouts.',
+    description: `Two-tier auto-fill for IR physicians who have no IR shift on a weekday in a given month. Workflow:
+  • mode='cross-group' (recommended FIRST step, after the IR shift schedule is built): pulls each unscheduled IR physician into an open IR slot at the OTHER IR group's sites if their site rules allow it. Anyone not placed stays in the pool — the DR shift builder can then pick them for in-person DR shifts.
+  • mode='dr-home' (recommended LAST step, after the DR shift schedule is built): mops up anyone STILL unscheduled with a read-from-home DR shift. Skip running this until DR scheduling is done, otherwise IR physicians who would have gotten in-person DR shifts get auto-assigned to Home instead.
+  • mode='both' (default, legacy one-shot): runs cross-group then DR Home in a single pass. Only use when you're sure no in-person DR assignments are pending for IR physicians.
+Respects vacations, existing shifts, blackouts, site rules, sequence rules, and conference participation.`,
     input_schema: {
       type: 'object',
       properties: {
-        month: { type: 'string', description: 'Month to fill in YYYY-MM format' }
+        month: { type: 'string', description: 'Month to fill in YYYY-MM format' },
+        mode:  { type: 'string', enum: ['cross-group','dr-home','both'], description: 'Which tier(s) to run. Default "both" matches the old behavior; prefer the two-step workflow ("cross-group" first, then "dr-home" later).' }
       },
       required: ['month']
     }
@@ -13945,27 +13951,14 @@ function _aiExecuteTool(name, input) {
 
   if(name === 'fill_dr_home_for_ir'){
     if(!adminOk) return { ok:false, error:'Admin access required.' };
-    const {month} = input;
-    const irPhys = S.physicians.filter(p=>p.irFte>0);
-    const cells = buildCal(month).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
-    let added=0;
-    irPhys.forEach(p=>{
-      const vd=vacDays(p.id);
-      cells.forEach(c=>{
-        const date=c.date;
-        if(vd.has(date))return;
-        if((S.irShifts||[]).find(s=>s.physId===p.id&&s.date===date))return;
-        if(_has2ndOr3rdShift(p.id,date))return;
-        if((S.drShifts||[]).find(s=>s.physId===p.id&&s.date===date))return;
-        S.drShifts.push({id:S.nextId++,physId:p.id,date,shift:'Home',
-          site:'At Home / Remote',sub:(p.drSubs||[])[0]||'General Procedures',
-          notes:'Auto: IR unscheduled (AI)',autoHome:true});
-        added++;
-      });
-    });
-    triggerSave();
-    if(document.getElementById('drb-tbody')) renderDRBuilder();
-    return {ok:true, message:`Added ${added} DR Home shift(s) for unscheduled IR physicians in ${month}.`};
+    const { month, mode } = input || {};
+    if(!month || !/^\d{4}-\d{2}$/.test(month)){
+      return { ok:false, error:'month required in YYYY-MM format.' };
+    }
+    // Delegates to the same two-tier function the UI buttons use, with
+    // silent:true so no alert pops up mid-conversation. Returned object's
+    // `message` field carries the same human-readable summary the UI shows.
+    return fillDRHomeForIR({ mode: mode || 'both', ym: month, silent: true });
   }
 
   if(name === 'assign_ir_shift'){
@@ -20578,71 +20571,210 @@ function _hasAdjacentWeekend(physId, satDate){
 }
 
 
-function fillDRHomeForIR(){
-  if(!_adminOnly('fill DR home shifts for IR physicians')) return;
+// ── Two-tier fill for unscheduled IR physicians ─────────────────────────
+// Previously: any IR physician without an IR shift on a weekday immediately
+// got a DR read-from-home shift. That over-assigned DR coverage even when
+// other IR groups had open slots that the same physician was eligible for.
+//
+// New behavior, per physician per weekday in the selected month:
+//   TIER 1 — CROSS-GROUP IR FILL: scan other-group IR sites with unfilled
+//            capacity for that day-of-week. If site rules + day-of-week +
+//            existing assignments allow, assign the physician to that IR
+//            shift. Notes: 'Auto: cross-group IR fill (X→Y)'.
+//   TIER 2 — DR HOME FALLBACK: if tier 1 didn't place them, fall back to
+//            the read-from-home DR shift exactly as before.
+//
+// Returns a per-day-per-phys decision so the summary alert breaks down
+// what happened (cross-group fills vs DR fallbacks vs skips).
 
-  // Use the current month filter (same selector as IR shift table)
-  const moEl = document.getElementById('irsf-mo');
-  const ym   = moEl?.value || new Date().toISOString().slice(0,7);
-  if(!ym){ alert('Set the Filter Month above first.'); return; }
+// Returns the count of *unfilled* IR-shift slots at a given site on a given
+// date. Reads S.irShiftSlots[`${siteName}|${dow}|1st`] for the configured
+// capacity and S.irShifts for current assignments. Returns 0 when the site
+// is fully staffed or has no slots configured.
+function _unfilledIRShiftSlots(siteName, date){
+  const dow = parseDateLocal(date).getDay();
+  const capacity = +(S.irShiftSlots?.[`${siteName}|${dow}|1st`] || 0);
+  if(capacity <= 0) return 0;
+  const assigned = (S.irShifts||[]).filter(
+    s => s.site === siteName && s.date === date && s.shift === '1st'
+  ).length;
+  return Math.max(0, capacity - assigned);
+}
+
+// Find IR sites NOT in the physician's own group that have unfilled slots
+// for `date` AND that the physician is rule-allowed to work at. Sorted by
+// shortage size descending so the most-needy site fills first.
+function _findCrossGroupIRShortages(p, date){
+  const ownGroup = p.irGroup || '';
+  const out = [];
+  (S.sites||[]).forEach(s => {
+    if(!s.irGroup) return;                    // not an IR site
+    if(s.name === 'At Home / Remote') return; // pseudo-site
+    if(s.irGroup === ownGroup) return;        // same group — not "cross"
+    const shortage = _unfilledIRShiftSlots(s.name, date);
+    if(shortage <= 0) return;
+    if(!irSiteRuleOk(p, s.name, date)) return; // physician's site rules block this site
+    out.push({site: s.name, group: s.irGroup, shortage});
+  });
+  out.sort((a, b) => b.shortage - a.shortage);
+  return out;
+}
+
+// Run the cross-group IR fill / DR-Home fallback. Mode controls which tier(s)
+// run so admins can sequence the workflow:
+//   1. Run mode='cross-group' AFTER building the IR shift schedule. Pulls
+//      unscheduled IR physicians into open IR slots at the OTHER group's
+//      sites where their site rules allow it.
+//   2. Build the DR shift schedule normally — IR physicians not picked up
+//      by tier 1 are still available for in-person DR shifts as the DR
+//      builder picks from them.
+//   3. Run mode='dr-home' to mop up anyone still unscheduled with a
+//      read-from-home DR shift.
+//   The legacy mode='both' (default) does steps 1 and 3 in one shot.
+function fillDRHomeForIR(modeOrOpts){
+  // Accept either a string (legacy: just the mode) or an options object
+  // {mode, ym, silent}. Silent skips the alert — used by the AI tool which
+  // returns the summary in its result instead of popping an alert mid-chat.
+  const opts = (typeof modeOrOpts === 'object' && modeOrOpts !== null) ? modeOrOpts
+              : { mode: modeOrOpts };
+  const mode = opts.mode || 'both';
+  if(!['cross-group','dr-home','both'].includes(mode)){
+    return { ok:false, error:`Invalid mode "${mode}". Use cross-group | dr-home | both.` };
+  }
+  const silent = !!opts.silent;
+  const adminMsg = mode === 'cross-group' ? 'cross-fill IR shortages'
+                : mode === 'dr-home'      ? 'fill remaining unscheduled IR physicians with DR Home'
+                                          : 'fill unscheduled IR physicians';
+  if(!_adminOnly(adminMsg)) return { ok:false, error:'Admin access required.' };
+
+  const ym = opts.ym || document.getElementById('irsf-mo')?.value || new Date().toISOString().slice(0,7);
+  if(!ym){
+    const m = 'Set the Filter Month above first.';
+    if(!silent) alert(m);
+    return { ok:false, error: m };
+  }
 
   const irPhys = S.physicians.filter(p => p.irFte > 0);
-  if(!irPhys.length){ alert('No IR physicians found.'); return; }
+  if(!irPhys.length){
+    const m = 'No IR physicians found.';
+    if(!silent) alert(m);
+    return { ok:false, error: m };
+  }
 
   const cells = buildCal(ym).filter(c =>
     c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date)
   );
 
-  let added = 0, skippedVac = 0, skippedShift = 0, skippedDR = 0;
+  let crossFilled = 0;     // tier-1 successes
+  let drFilled    = 0;     // tier-2 fallbacks
+  let leftInPool  = 0;     // unscheduled days left for DR builder (cross-group mode only)
+  let skippedVac  = 0;
+  let skippedShift= 0;     // already had IR shift OR a 2nd/3rd
+  let skippedDR   = 0;     // already had a DR shift
+  const crossBySite = {};
 
   irPhys.forEach(p => {
     const vd = vacDays(p.id);
     cells.forEach(c => {
       const date = c.date;
-
-      // Skip if on vacation
       if(vd.has(date)){ skippedVac++; return; }
-
-      // Skip if already has any IR shift on this date (including IR Home)
       if((S.irShifts||[]).find(s => s.physId === p.id && s.date === date)){
         skippedShift++; return;
       }
-
-      // Skip if on a 2nd or 3rd shift (hospital obligation that day)
       if(_has2ndOr3rdShift(p.id, date)){ skippedShift++; return; }
-
-      // Skip if already has any DR shift on this date
       if((S.drShifts||[]).find(s => s.physId === p.id && s.date === date)){
         skippedDR++; return;
       }
 
-      // Assign DR read-from-home shift
-      S.drShifts.push({
-        id: S.nextId++,
-        physId: p.id,
-        date,
-        shift: 'Home',
-        site: 'At Home / Remote',
-        sub: (p.drSubs||[])[0] || 'General Procedures',
-        notes: 'Auto: IR unscheduled',
-        autoHome: true,
-      });
-      added++;
+      // ── TIER 1: cross-group IR fill ───────────────────────────────────
+      let placedAtCrossSite = null;
+      if(mode === 'cross-group' || mode === 'both'){
+        const shortages = _findCrossGroupIRShortages(p, date);
+        for(const sh of shortages){
+          const _ctx = {
+            physId: p.id, date, site: sh.site, shift: '1st',
+            kind: 'ir-shift', shiftKey: '', ym: date.slice(0,7), irGroup: sh.group,
+          };
+          const violations = _gatherManualRuleViolations(p, _ctx);
+          if(violations.length) continue;
+          if(_unfilledIRShiftSlots(sh.site, date) <= 0) continue;
+          S.irShifts.push({
+            id: S.nextId++, physId: p.id, date, shift: '1st',
+            site: sh.site,
+            sub: (p.irSubs||[])[0] || '',
+            notes: `Auto: cross-group IR fill (${p.irGroup||'?'}→${sh.group})`,
+            irGroup: sh.group,
+          });
+          crossFilled++;
+          crossBySite[sh.site] = (crossBySite[sh.site]||0) + 1;
+          placedAtCrossSite = sh.site;
+          break;
+        }
+        if(placedAtCrossSite) return;
+      }
+
+      // ── TIER 2: DR Home fallback ──────────────────────────────────────
+      // Skipped entirely in 'cross-group' mode — those physicians stay in
+      // the unscheduled pool so the DR shift builder can still pick them
+      // for in-person DR shifts at a later step.
+      if(mode === 'dr-home' || mode === 'both'){
+        S.drShifts.push({
+          id: S.nextId++, physId: p.id, date,
+          shift: 'Home', site: 'At Home / Remote',
+          sub: (p.drSubs||[])[0] || 'General Procedures',
+          notes: 'Auto: IR unscheduled',
+          autoHome: true,
+        });
+        drFilled++;
+      } else {
+        leftInPool++;
+      }
     });
   });
 
   triggerSave();
   renderIRShiftTable();
-  // Refresh DR calendar if visible
   if(document.getElementById('drc-mo')) renderDRCal();
   if(document.getElementById('drb-tbody')) renderDRBuilder();
+  if(document.getElementById('irc-mo'))  renderIRCal();
 
-  alert(
-    `Added ${added} DR Home shift(s) for unscheduled IR physician days in ${ym}.
-` +
-    `Skipped: ${skippedVac} vacation day(s), ${skippedShift} already-scheduled day(s), ${skippedDR} existing DR shift(s).`
-  );
+  const crossBreakdown = Object.entries(crossBySite)
+    .sort((a,b) => b[1] - a[1])
+    .map(([site, n]) => `  • ${site}: ${n}`)
+    .join('\n');
+
+  let summary;
+  if(mode === 'cross-group'){
+    summary =
+      `Cross-group IR fill complete for ${ym}.\n\n` +
+      `Filled: ${crossFilled} shift(s)` +
+      (crossBreakdown ? `\n${crossBreakdown}` : '') + `\n\n` +
+      `Left in pool for DR builder: ${leftInPool} day(s).\n` +
+      `Build the DR schedule next — those days are available for in-person DR shifts.\n` +
+      `Run "Fill Remaining → DR Home" afterward to mop up anyone still unscheduled.\n\n` +
+      `Skipped: ${skippedVac} vacation, ${skippedShift} already on shift, ${skippedDR} already had DR shift.`;
+  } else if(mode === 'dr-home'){
+    summary =
+      `DR Home fill complete for ${ym}.\n\n` +
+      `Assigned: ${drFilled} DR Home shift(s)\n\n` +
+      `Skipped: ${skippedVac} vacation, ${skippedShift} already on shift, ${skippedDR} already had DR shift.`;
+  } else { // both
+    summary =
+      `Fill complete for ${ym}.\n\n` +
+      `TIER 1 — Cross-group IR fill: ${crossFilled} shift(s)` +
+      (crossBreakdown ? `\n${crossBreakdown}` : '') + `\n\n` +
+      `TIER 2 — DR Home fallback: ${drFilled} shift(s)\n\n` +
+      `Skipped: ${skippedVac} vacation, ${skippedShift} already on shift, ${skippedDR} already had DR shift.`;
+  }
+
+  if(!silent) alert(summary);
+  return { ok:true, mode, ym, crossFilled, drFilled, leftInPool, crossBySite, message: summary };
 }
+
+// Convenience wrappers wired to dedicated buttons. Calling fillDRHomeForIR
+// directly is still supported (legacy mode='both' default).
+function fillCrossGroupIR(){ return fillDRHomeForIR('cross-group'); }
+function fillDRHomeRemainingIR(){ return fillDRHomeForIR('dr-home'); }
 
 
 function addIRCallFromGrid(sel,date,callType,group){
