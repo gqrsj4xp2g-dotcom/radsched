@@ -3006,6 +3006,15 @@ let _dataRestored=false;
 let _hasUnsavedChanges=false;
 let _SRC=''; // kept for offline/export fallback
 let _supabase=null;
+// Hoisted: declared here (NOT at the bottom of the script) so the early
+// _checkSession IIFE at the top of the script can read it without hitting
+// the Temporal Dead Zone. _loadSupabaseConfig (further down) writes to this
+// object's properties; _getUrl/_getKey read from them. Previously this was
+// declared near _initSupabase at the bottom — the IIFE ran before its
+// declaration line, so every read of _SB_CFG threw a TDZ ReferenceError
+// (caught silently in _getUrl), causing auto-login to fail for any user
+// whose URL/key were saved in localStorage rather than baked into the HTML.
+const _SB_CFG={url:'',key:''};
 
 // ─── TEMPORARY AUTH DIAGNOSTIC ─────────────────────────────────────────────
 // Visible banner that logs each step of the session-restore flow so we can
@@ -23570,34 +23579,27 @@ const _SB_CONFIG_KEY='radscheduler_sb_config';
 
 function _loadSupabaseConfig(){
   try{
-    // Use the string literal directly, not the _SB_CONFIG_KEY const, because this
-    // function is called early (from the _checkSession IIFE) before const
-    // declarations at the bottom of the script have initialized. Referencing
-    // _SB_CONFIG_KEY from TDZ would throw ReferenceError.
+    // Use the string literal directly (not _SB_CONFIG_KEY const, which is
+    // declared at the bottom of the script and would still be TDZ-prone if
+    // this is invoked from the early IIFE before its declaration line.)
     const raw=localStorage.getItem('radscheduler_sb_config');
     if(!raw)return;
     const c=JSON.parse(raw);
     if(c.url&&c.key){
-      // _SB_CFG is also TDZ-prone early on. Wrap the assignment in a try so
-      // TDZ reference errors don't prevent the pending-config fallback below.
-      // `typeof` of a TDZ const throws in strict mode, so we have to use try.
-      let assigned=false;
-      try{ _SB_CFG.url=c.url; _SB_CFG.key=c.key; assigned=true; }catch(e){}
-      if(!assigned) window.__pendingSBConfig={url:c.url,key:c.key};
+      // _SB_CFG is hoisted to the top of the script now, so direct assignment
+      // is safe whether we're called from the early IIFE or anywhere later.
+      _SB_CFG.url=c.url;
+      _SB_CFG.key=c.key;
       console.log('[RS] Supabase config loaded from localStorage');
     }
   }catch(e){console.warn('[RS] Config load failed:',e);}
 }
 
-// Because _SUPABASE_URL/KEY are const, we use a mutable config object
-// and update the references used by _initSupabase.
-// If _loadSupabaseConfig ran before this declaration, flush the pending config now.
-const _SB_CFG={url:'',key:''};
-if(typeof window!=='undefined' && window.__pendingSBConfig){
-  _SB_CFG.url=window.__pendingSBConfig.url;
-  _SB_CFG.key=window.__pendingSBConfig.key;
-  delete window.__pendingSBConfig;
-}
+// _SB_CFG is declared at the top of the script (near `let _supabase`) so the
+// early _checkSession IIFE can populate it without hitting the Temporal Dead
+// Zone. The legacy `window.__pendingSBConfig` flush that lived here is no
+// longer needed — _loadSupabaseConfig assigns directly. Kept this comment
+// as a marker for anyone tracing the old code path.
 
 function _getUrl(){
   try{ return _SB_CFG.url||_SUPABASE_URL; }catch(e){ return _SUPABASE_URL; }
