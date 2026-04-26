@@ -2685,7 +2685,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
             <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format · used for daily traffic queries</span>
           </div>
           <div class="note ni" style="font-size:11px;margin-bottom:8px">
-            Drive times are only computed for <strong>DR 1st Shift</strong> and <strong>IR 1st Shift</strong>. Other shifts (2nd, 3rd, IR Call, Weekend, Holiday) are call or overnight assignments and don't use traffic-based drive times.
+            Drive-time queries use these shift-specific departure / return times so traffic is computed at the actual commute hour, not a generic snapshot. Only in-person commuting shifts are listed — DR 2nd, DR 3rd, and DR Home are read-from-home and have no commute.
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;font-size:11px;align-items:center">
             <span style="font-weight:700;color:var(--txt3)">Shift</span>
@@ -4437,6 +4437,14 @@ function vacDays(pid){
   S.vacations.filter(v=>v.physId===pid).forEach(v=>{let c=parseDateLocal(v.start),e=parseDateLocal(v.end);while(c<=e){d.add(fmtDate(c));c.setDate(c.getDate()+1);}});
   return d;
 }
+// Per practice policy, 2nd and 3rd DR shifts are read-from-home only — they
+// have no commute and aren't assignable to a hospital site. The shift-add
+// paths use this to auto-redirect site=At Home / Remote, the traffic pipeline
+// uses it to skip them, and the badge uses it to render nothing.
+function _isHomeOnlyShift(shift){
+  return shift === 'Home' || shift === '2nd' || shift === '3rd';
+}
+
 function vacMap(){
   const m={};
   S.vacations.forEach(v=>{let c=parseDateLocal(v.start),e=parseDateLocal(v.end);while(c<=e){const ds=fmtDate(c);if(!m[ds])m[ds]=[];m[ds].push(v.physId);c.setDate(c.getDate()+1);}});
@@ -6769,22 +6777,26 @@ function _trafficForShift(shiftEntry, qtrSel){
 }
 
 /* ─── SHIFT TIME SETTINGS ─── */
+// Single source of truth for which shift types are wired to the drive-time
+// pipeline. Only commuting in-person shifts belong here — DR 2nd / 3rd / Home
+// are read-from-home (no commute) and call shifts are ad-hoc. Used by both
+// saveShiftTimes (writer) and _loadShiftTimesUI (reader).
+const _SHIFT_TIME_MAP = [
+  {key:'1st',    dep:'st-1st-dep',    ret:'st-1st-ret',    defDep:'06:30', defRet:'15:00'},
+  {key:'IR 1st', dep:'st-ir-1st-dep', ret:'st-ir-1st-ret', defDep:'06:30', defRet:'15:00'},
+];
+
 function saveShiftTimes(){
   if(!_adminOnly('change shift times')) return;
   if(!S.cfg) S.cfg={};
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
-  // Only DR 1st and IR 1st are eligible for drive-time calculations.
-  // Other shift types don't have inputs here and aren't saved.
-  const map = [
-    {key:'1st',    dep:'st-1st-dep',    ret:'st-1st-ret',    defDep:'06:30', defRet:'15:00'},
-    {key:'IR 1st', dep:'st-ir-1st-dep', ret:'st-ir-1st-ret', defDep:'06:30', defRet:'15:00'},
-  ];
-  map.forEach(m=>{
+  _SHIFT_TIME_MAP.forEach(m=>{
     const dep = document.getElementById(m.dep)?.value || m.defDep;
     const ret = document.getElementById(m.ret)?.value || m.defRet;
     S.cfg.shiftTimes[m.key] = {dep, ret};
   });
-  // Clean up any legacy keys from earlier builds that expanded coverage
+  // Clean up legacy keys (incl. the recently-added 2nd/3rd that were
+  // reverted when 2nd/3rd became home-only and stopped having a commute).
   ['2nd','3rd','IR Call','Weekend Call','Holiday Call'].forEach(k=>{
     if(S.cfg.shiftTimes[k]) delete S.cfg.shiftTimes[k];
   });
@@ -6800,11 +6812,7 @@ function saveShiftTimes(){
 
 function _loadShiftTimesUI(){
   const st = S.cfg?.shiftTimes||{};
-  const map = [
-    {key:'1st',    dep:'st-1st-dep',    ret:'st-1st-ret',    defDep:'06:30', defRet:'15:00'},
-    {key:'IR 1st', dep:'st-ir-1st-dep', ret:'st-ir-1st-ret', defDep:'06:30', defRet:'15:00'},
-  ];
-  map.forEach(m=>{
+  _SHIFT_TIME_MAP.forEach(m=>{
     const saved = st[m.key] || {};
     const depEl = document.getElementById(m.dep);
     const retEl = document.getElementById(m.ret);
@@ -6931,19 +6939,19 @@ async function updateTrafficTimes(){
   const BATCH=10;
 
   // Read shift times from S.cfg — user-configurable in Settings → Drive Times.
-  // We run TWO passes: one for DR 1st using DR 1st's dep/ret, one for IR 1st
-  // using IR 1st's dep/ret. This way IR physicians show traffic computed at
-  // their actual departure time (which may differ from DR 1st).
+  // Only DR 1st and IR 1st are commuting shifts (2nd/3rd/Home are read-from-
+  // home per _isHomeOnlyShift). The IR-mirror shortcut below skips the second
+  // pass when the times match DR 1st.
   const _st = S.cfg?.shiftTimes || {};
   const SHIFTS = [
     {
-      type: '1st', // storage key used by DR shift lookups
+      type: '1st',
       depTime: _st['1st']?.dep || '06:30',
       retTime: _st['1st']?.ret || '15:00',
       label: `DR 1st Shift (out ${_st['1st']?.dep || '06:30'} → back ${_st['1st']?.ret || '15:00'})`,
     },
     {
-      type: 'IR 1st', // storage key used by IR shift lookups
+      type: 'IR 1st',
       depTime: _st['IR 1st']?.dep || '06:30',
       retTime: _st['IR 1st']?.ret || '15:00',
       label: `IR 1st Shift (out ${_st['IR 1st']?.dep || '06:30'} → back ${_st['IR 1st']?.ret || '15:00'})`,
@@ -7054,11 +7062,11 @@ async function _mapsProxyCallRT(origins, destinations, departureTime){
 ─────────────────────────────────────────────────────────────────────────── */
 
 // Build a list of (physId, site, date, shiftKind, depTime, retTime) tuples
-// from current schedule entries in a date range. Skips anything without a site.
-// POLICY: Drive times only apply to DR 1st Shift and IR 1st Shift. All other
-// shift types (2nd, 3rd, IR Call, Weekend Call, Holiday Call) are excluded —
-// those are overnight or evening shifts where the commute timing is either
-// outside traffic hours or handled differently (call coverage).
+// for current schedule entries in a date range. Only DR 1st and IR 1st are
+// in-person commuting shifts; 2nd / 3rd / Home are read-from-home (per
+// _isHomeOnlyShift) and call shifts are ad-hoc, so neither produce traffic
+// tasks. The depTime/retTime are pulled from S.cfg.shiftTimes so the daily
+// Maps query reflects the actual commute hour for that shift type.
 function _shiftsForDailyDriveTimes(startDate, endDate){
   const tasks = [];
   const inRange = d => d && d >= startDate && d <= endDate;
@@ -7067,16 +7075,17 @@ function _shiftsForDailyDriveTimes(startDate, endDate){
   const ir1 = st['IR 1st'] || {dep:'06:30', ret:'15:00'};
   (S.drShifts||[]).forEach(s => {
     if(!inRange(s.date) || !s.site) return;
-    if(s.shift !== '1st') return; // ONLY 1st shift qualifies
+    if(s.site === 'At Home / Remote') return;       // pseudo-site: no commute
+    if(_isHomeOnlyShift(s.shift)) return;            // Home/2nd/3rd: no commute
+    if(s.shift !== '1st') return;                    // only 1st is an in-person commuter
     tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:'DR 1st', depTime:dr1.dep, retTime:dr1.ret, shiftId:`dr-${s.id}`});
   });
   (S.irShifts||[]).forEach(s => {
     if(!inRange(s.date) || !s.site) return;
-    if((s.shift||'1st') !== '1st') return; // ONLY 1st shift qualifies
+    if(s.site === 'At Home / Remote' || s.shift === 'Home') return;
+    if((s.shift||'1st') !== '1st') return;
     tasks.push({physId:s.physId, site:s.site, date:s.date, shiftKind:'IR 1st', depTime:ir1.dep, retTime:ir1.ret, shiftId:`ir-${s.id}`});
   });
-  // Intentionally excluded: S.irCalls, S.weekendCalls, holidays — these are
-  // call/overnight shifts that aren't subject to morning commute traffic patterns.
   return tasks;
 }
 
@@ -7492,11 +7501,14 @@ function _checkTrafficStaleness(){
 // times in Settings → Drive Times).
 function _driveTimeBadge(physId,siteName,shiftType,date,role){
   if(!S.driveTimes) return '';
-  // POLICY: only 1st shifts show drive-time badges.
-  if(shiftType !== '1st') return '';
-  const dt=S.driveTimes[`${physId}|${siteName}`];
-  if(!dt||dt.mins===null) return '';
-  // Prefer daily traffic data if available for this specific date
+  // No commute on read-from-home shifts (Home, DR 2nd, DR 3rd) or the pseudo-site.
+  if(_isHomeOnlyShift(shiftType)) return '';
+  if(!siteName || siteName === 'At Home / Remote') return '';
+  const dt = S.driveTimes[`${physId}|${siteName}`];
+  if(!dt || dt.mins === null || dt.mins === undefined) return '';
+
+  // Prefer daily traffic for the EXACT shift date+time when present — that's
+  // the most accurate figure (a real Google Maps reading at the actual hour).
   const daily = date && dt.daily?.[date];
   if(daily){
     const col = daily.outMins<=20?'var(--green-t)':daily.outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
@@ -7504,23 +7516,35 @@ function _driveTimeBadge(physId,siteName,shiftType,date,role){
     const deltaTxt = deltaOut > 2 ? ` (+${deltaOut}m)` : '';
     return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
       onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}','${escHtml(date).replace(/'/g,"\\'")}')"
-      title="Daily traffic · Click for details">🚦${daily.outText}${deltaTxt}</span>`;
+      title="Daily traffic for ${escHtml(shiftType||'')} shift · Click for details">🚦${daily.outText}${deltaTxt}</span>`;
   }
-  // Fallback: byShift snapshot. Use role-specific key: IR → "IR 1st", DR → "1st".
-  // Fall back to the other if the role-specific one isn't populated yet.
-  const preferredKey = role==='IR' ? 'IR 1st' : '1st';
-  const fallbackKey  = role==='IR' ? '1st' : 'IR 1st';
-  const traffic = dt.byShift?.[preferredKey] || dt.byShift?.[fallbackKey];
+
+  // No daily entry yet: fall back to the byShift snapshot for THIS shift type.
+  // updateTrafficTimes computes one entry per shift type ('1st','2nd','3rd',
+  // 'IR 1st') so the timing reflects the actual commute window. If the
+  // specific shift type isn't populated, fall back to a related one, then
+  // base time. This way 2nd/3rd badges can show even before traffic data has
+  // been refreshed for those windows.
+  let preferredKey, fallbackKey;
+  if(role === 'IR'){
+    preferredKey = 'IR 1st'; fallbackKey = '1st';
+  } else {
+    // DR — use the shift type directly. 'Home' was bailed above so won't reach here.
+    preferredKey = shiftType || '1st';
+    fallbackKey  = '1st';
+  }
+  const bs = dt.byShift || {};
+  const traffic = bs[preferredKey] || bs[fallbackKey];
   const outMins = traffic ? traffic.outMins : dt.mins;
   const outText = traffic ? traffic.outText : dt.text;
   const rtMins  = traffic ? (traffic.outMins + traffic.retMins) : dt.mins*2;
-  const label   = traffic ? traffic.label : 'base';
+  const label   = traffic ? traffic.label : 'base (no traffic data)';
   const col = outMins<=20?'var(--green-t)':outMins<=40?'var(--txt3)':'var(--amber,#d97706)';
-  const icon = traffic?'🚦':'🚗';
+  const icon = traffic ? '🚦' : '🚗';
   const dateAttr = date ? `'${escHtml(date).replace(/'/g,"\\'")}'` : 'null';
   return `<span class="dt-badge" style="font-size:9px;color:${col};margin-left:2px;cursor:pointer;text-decoration:underline dotted"
     onclick="event.stopPropagation();showDriveTimeDetails(${physId},'${escHtml(siteName).replace(/'/g,"\\'")}',${dateAttr})"
-    title="${siteName} | Out: ${outText} | RT: ${rtMins}min (${label}) · Click for details">${icon}${outText}</span>`;
+    title="${escHtml(siteName)} ${escHtml(shiftType||'')} | Out: ${outText} | RT: ${rtMins}min (${label}) · Click for details">${icon}${outText}</span>`;
 }
 
 function renderCommuteMatrix(){
@@ -13925,7 +13949,12 @@ function _aiExecuteTool(name, input) {
     if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
     const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
     if(existing) return { ok:false, error:`${p.last} already has a DR shift on ${date} (shift: ${existing.shift}).` };
-    const siteName = site || (shift==='Home'?'At Home / Remote': (p.anchorSite||S.sites[0]?.name||''));
+    // Home / 2nd / 3rd are read-from-home shifts — always At Home / Remote.
+    // Force the site even if the caller passed something else, so the AI
+    // can't accidentally create "2nd @ CHN" type records.
+    const siteName = _isHomeOnlyShift(shift)
+      ? 'At Home / Remote'
+      : (site || (p.anchorSite||S.sites[0]?.name||''));
     // Physician-rule check. AI tools can't prompt for confirmation, so rule
     // violations are a hard error unless the caller passes force:true.
     // Returning the violation list lets the AI agent decide whether to
@@ -19468,15 +19497,14 @@ function addDRShift(){
   const date=document.getElementById('sb-date').value;
   const shift=document.getElementById('sb-shift').value;
   let site=document.getElementById('sb-site').value;
-  // "Home" is never a hospital assignment — it means the physician is NOT
-  // at a clinical site. Silently redirect to the At Home / Remote pseudo-
-  // site, which is the single source of truth for home shifts. Prevents
-  // confusing shift records like "Home @ CHN" that auto-assign can't reason
-  // about. If the pseudo-site was somehow deleted, alert rather than create
-  // a bad record.
-  if(shift==='Home' && site!=='At Home / Remote'){
+  // Home / 2nd / 3rd are read-from-home shifts per practice policy — they
+  // never have a hospital commute, so the site is silently redirected to
+  // the At Home / Remote pseudo-site. Prevents confusing records like
+  // "2nd @ CHN" that auto-assign and traffic data can't reason about.
+  // If the pseudo-site was somehow deleted, alert rather than create a bad record.
+  if(_isHomeOnlyShift(shift) && site!=='At Home / Remote'){
     if(!S.sites.find(s=>s.name==='At Home / Remote')){
-      alert('The "At Home / Remote" site is missing. Re-add it under Site Management before assigning Home shifts.');
+      alert('The "At Home / Remote" site is missing. Re-add it under Site Management before assigning Home / 2nd / 3rd shifts.');
       return;
     }
     site = 'At Home / Remote';
