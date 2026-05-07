@@ -476,7 +476,7 @@ tbody tr:hover{background:var(--bg3)}
            CSS sibling selector (.sidebar.open ~ .sidebar-overlay).
            Tapping the overlay closes the drawer. -->
       <div class="snav-sect">Overview</div>
-      <div class="snav-item on" onclick="nav('dashboard',this)">Dashboard</div>
+      <div class="snav-item" onclick="nav('dashboard',this)">Dashboard</div>
       <div class="snav-item" onclick="nav('my-schedule',this)">My Schedule</div>
       <div class="snav-item" onclick="nav('chat',this)">💬 Chat</div>
       <div class="snav-item admin-only" onclick="nav('ai-agent',this)" style="display: block;">🤖 AI Scheduler</div>
@@ -498,7 +498,7 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-item admin-only" onclick="nav('ir-builder',this)" style="display: block;">IR Call Builder</div>
       <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)" style="display: block;">IR Shift Auto-Assign</div>
       <div class="snav-item admin-only" onclick="nav('ir-auto',this)" style="display: block;">IR Call Auto-Assign</div>
-      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)" style="display: block;">⚖ IR Call Rebalancer</div>
+      <div class="snav-item admin-only on" onclick="nav('ir-rebalance',this)" style="display: block;">⚖ IR Call Rebalancer</div>
       <div class="snav-sect">Compliance &amp; Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)" style="display: block;">Anchor Compliance</div>
       <div class="snav-item admin-only" onclick="nav('holidays',this)" style="display: block;">Holiday Call</div>
@@ -526,7 +526,7 @@ tbody tr:hover{background:var(--bg3)}
     <main class="main" id="main-content">
 
 <!-- DASHBOARD -->
-<div id="page-dashboard" class="page on">
+<div id="page-dashboard" class="page">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
     <div class="pg-title" style="margin-bottom:0">Dashboard</div>
     <div class="flexe" style="gap:6px" id="dash-month-nav">
@@ -1175,7 +1175,7 @@ serve(async (req) =&gt; {
       <div class="fg" id="p-irfte-w" style="display:none"><label>IR FTE</label><input id="p-irfte" type="number" min="0" max="1" step=".05" value="0" style="width:75px"></div>
     </div>
     <div class="g2" id="p-ir-w" style="display:none">
-      <div class="fg"><label>IR Group</label><select id="p-irgrp"><option>North</option><option>South</option></select></div>
+      <div class="fg"><label>IR Group</label><select id="p-irgrp"><option value="North">North</option><option value="South">South</option><option value="Riverview">Riverview</option></select></div>
       <div class="fg"><label>Primary IR Site</label><select id="p-irsiteprim"></select></div>
     </div>
     <!-- ANCHOR SITE -->
@@ -1919,11 +1919,7 @@ serve(async (req) =&gt; {
       <div class="flexe" style="gap:10px;margin-bottom:8px">
         <div class="fg" style="margin:0"><label>Week Starting Monday</label><input id="irb-week" type="date" oninput="renderIRWeekBuilder()"></div>
         <div class="fg" style="margin:0"><label>IR Group</label>
-          <select id="irb-grp" onchange="renderIRWeekBuilder()">
-            <option value="North">North Group</option>
-            <option value="South">South Group</option>
-            <option value="both">Both Groups</option>
-          </select>
+          <select id="irb-grp" onchange="renderIRWeekBuilder()"><option value="both">Both Groups</option><option value="North">North Group</option><option value="South">South Group</option><option value="Riverview">Riverview Group</option></select>
         </div>
       </div>
       <div class="note ni" style="margin-bottom:0;font-size:11px">
@@ -1940,7 +1936,7 @@ serve(async (req) =&gt; {
       <div class="g3">
         <div class="fg"><label>Physician</label><select id="ird-phys"></select></div>
         <div class="fg"><label>Date</label><input id="ird-date" type="date"></div>
-        <div class="fg"><label>IR Group</label><select id="ird-grp"><option>North</option><option>South</option></select></div>
+        <div class="fg"><label>IR Group</label><select id="ird-grp"><option value="North">North</option><option value="South">South</option><option value="Riverview">Riverview</option></select></div>
       </div>
       <div class="g3">
         <div class="fg"><label>Call Type</label>
@@ -1960,7 +1956,7 @@ serve(async (req) =&gt; {
   <div id="irbt-list" style="display:none">
     <div class="flexe" style="margin-bottom:8px;gap:5px">
       <div class="fg" style="margin:0"><label>Month</label><input id="irl-mo" type="month" oninput="renderIRList()"></div>
-      <div class="fg" style="margin:0"><label>Group</label><select id="irl-grp" onchange="renderIRList()"><option value="">Both</option><option>North</option><option>South</option></select></div>
+      <div class="fg" style="margin:0"><label>Group</label><select id="irl-grp" onchange="renderIRList()"><option value="">Both</option><option value="North">North</option><option value="South">South</option><option value="Riverview">Riverview</option></select></div>
     </div>
     <div class="card" style="overflow-x:auto"><table>
       <thead><tr><th>Physician</th><th>Group</th><th>Call Type</th><th>Date(s)</th><th>Site</th><th>Notes</th><th></th></tr></thead>
@@ -1992,11 +1988,7 @@ serve(async (req) =&gt; {
         <input type="month" id="irsa-mo" style="width:140px">
       </div>
       <div class="fg"><label>IR Group</label>
-        <select id="irsa-grp">
-          <option value="both">Both Groups</option>
-          <option value="North">North Only</option>
-          <option value="South">South Only</option>
-        </select>
+        <select id="irsa-grp"><option value="both">Both Groups</option><option value="North">North Only</option><option value="South">South Only</option><option value="Riverview">Riverview Only</option></select>
       </div>
     </div>
     <div class="flexe" style="gap:8px;margin-top:10px">
@@ -2049,11 +2041,7 @@ serve(async (req) =&gt; {
         </select>
       </div>
       <div class="fg"><label>IR Group</label>
-        <select id="ira-grp">
-          <option value="both">Both Groups</option>
-          <option value="North">North Only</option>
-          <option value="South">South Only</option>
-        </select>
+        <select id="ira-grp"><option value="both">Both Groups</option><option value="North">North Only</option><option value="South">South Only</option><option value="Riverview">Riverview Only</option></select>
       </div>
     </div>
     <div class="flexe" style="gap:8px;margin-top:8px">
@@ -2213,26 +2201,22 @@ serve(async (req) =&gt; {
      The 2-pool (DR/IR) legacy model is no longer supported. -->
 
 <!-- IR CALL REBALANCER -->
-<div id="page-ir-rebalance" class="page admin-only">
+<div id="page-ir-rebalance" class="page admin-only on">
   <div class="pg-title">⚖ IR Call Rebalancer</div>
   <div class="pg-sub">Move assignments around to hit 100% FTE for every physician across a 6-month period. For calls: redistributes all Daily and Weekend IR calls. For shifts: redistributes existing procedure shifts or fills all available slots to FTE targets. Select a mode and click Preview.</div>
 
   <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
     <div class="fg" style="margin:0"><label>Year</label>
-      <select id="irr-yr" onchange="renderIRRebalancePrep()" style="width:90px"></select>
+      <select id="irr-yr" onchange="renderIRRebalancePrep()" style="width:90px"><option value="2025">2025</option><option value="2026" selected="">2026</option><option value="2027">2027</option><option value="2028">2028</option></select>
     </div>
     <div class="fg" style="margin:0"><label>Period</label>
-      <select id="irr-period" onchange="renderIRRebalancePrep()" style="width:175px">
+      <select id="irr-period" onchange="renderIRRebalancePrep()" style="width:175px" data-inited="1">
         <option value="H1">H1 (Jan – Jun)</option>
         <option value="H2">H2 (Jul – Dec)</option>
       </select>
     </div>
     <div class="fg" style="margin:0"><label>Group</label>
-      <select id="irr-grp" onchange="renderIRRebalancePrep()" style="width:130px">
-        <option value="both">Both Groups</option>
-        <option value="North">North Only</option>
-        <option value="South">South Only</option>
-      </select>
+      <select id="irr-grp" onchange="renderIRRebalancePrep()" style="width:130px"><option value="both">Both Groups</option><option value="North">North Only</option><option value="South">South Only</option><option value="Riverview">Riverview Only</option></select>
     </div>
     <div class="fg" style="margin:0"><label>What to Rebalance</label>
       <select id="irr-type" onchange="renderIRRebalancePrep()" style="width:210px">
@@ -2247,7 +2231,186 @@ serve(async (req) =&gt; {
     <button class="bt bsm" onclick="renderIRRebalancePrep()" style="margin-bottom:2px">↺ Refresh</button>
   </div>
 
-  <div id="irr-current"></div>
+  <div id="irr-current"><div class="card" style="margin-bottom:12px">
+    <div class="card-title">Current Distribution — Jan–Jun 2026
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">6-month period · fills gaps + redistributes · targets = actual slots ÷ group FTE × physician FTE</span>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Physician</th><th>Group</th><th>IR FTE</th>
+      <th>Daily Calls</th><th>Month Target</th><th>Daily %</th>
+      <th>Wknd Calls</th><th>Month Target</th><th>Wknd %</th>
+      
+    </tr></thead><tbody><tr>
+        <td style="font-weight:600">Boulous, Michael</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">0.75</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">11.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">3.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Riedinger, Brett</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">15.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">4.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Bakdash, Kenaz</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">0.75</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">11.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">3.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Healey, Travis</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">15.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">4.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Daily, Lucas</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">15.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">4.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Churchill, Dennis</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">15.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">4.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Reyes, Ben</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">0.5</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">7.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">2.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Locascio, Dan</td>
+        <td><span class="tag tg">South</span></td>
+        <td style="text-align:center">0.5</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">7.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">2.0</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Greene, Ryan</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">0.75</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">11.2</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">9%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">2.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Ehrman, Karen</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">0.75</td>
+        <td style="text-align:center;font-weight:700">2</td>
+          <td style="text-align:center;color:var(--txt3)">11.2</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">18%</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">2.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">35%</td>
+      </tr><tr>
+        <td style="font-weight:600">Yedlicka, Jospeh</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">2</td>
+          <td style="text-align:center;color:var(--txt3)">14.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">3.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
+      </tr><tr>
+        <td style="font-weight:600">Hankins, Bryan</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">4</td>
+          <td style="text-align:center;color:var(--txt3)">14.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">3.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
+      </tr><tr>
+        <td style="font-weight:600">Ramaswamy, Raja</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">2</td>
+          <td style="text-align:center;color:var(--txt3)">14.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">3.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Schahct, Michael</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">1</td>
+        <td style="text-align:center;font-weight:700">3</td>
+          <td style="text-align:center;color:var(--txt3)">14.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">20%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">3.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Gupta, Rajat</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">0.5</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">7.5</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">1.9</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr><tr>
+        <td style="font-weight:600">Savader, Scott</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">0.75</td>
+        <td style="text-align:center;font-weight:700">2</td>
+          <td style="text-align:center;color:var(--txt3)">11.2</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">18%</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">2.8</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">35%</td>
+      </tr><tr>
+        <td style="font-weight:600">Thompson, Jospeh</td>
+        <td><span class="tag tb">North</span></td>
+        <td style="text-align:center">0.15</td>
+        <td style="text-align:center;font-weight:700">1</td>
+          <td style="text-align:center;color:var(--txt3)">2.2</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">45%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+          <td style="text-align:center;color:var(--txt3)">0.6</td>
+          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+      </tr></tbody></table></div></div></div>
   <div id="irr-preview"></div>
 
   <div style="margin-top:12px">
@@ -2340,11 +2503,7 @@ serve(async (req) =&gt; {
         <div class="fg"><label>Year</label>
           <input id="hol-yr" type="number" value="2026" min="2020" max="2035" style="width:90px"></div>
         <div class="fg"><label>Group</label>
-          <select id="hol-grp">
-            <option value="DR">DR Call</option>
-            <option value="IR-North">IR North Call</option>
-            <option value="IR-South">IR South Call</option>
-          </select></div>
+          <select id="hol-grp"><option value="DR">DR Call</option><option value="IR-North">IR North Call</option><option value="IR-South">IR South Call</option><option value="IR-Riverview">IR Riverview Call</option></select></div>
         <div class="fg"><label>Notes</label>
           <input id="hol-notes" placeholder="Optional"></div>
       </div>
@@ -2376,12 +2535,7 @@ serve(async (req) =&gt; {
           <option>2024</option><option>2025</option><option>2026</option><option>2027</option>
         </select></div>
       <div class="fg" style="margin:0"><label>Filter Group</label>
-        <select id="holf-grp" onchange="renderHolTable()" style="width:110px">
-          <option value="">All</option>
-          <option value="DR">DR</option>
-          <option value="IR-North">IR North</option>
-          <option value="IR-South">IR South</option>
-        </select></div>
+        <select id="holf-grp" onchange="renderHolTable()" style="width:110px"><option value="">All</option><option value="DR">DR</option><option value="IR-North">IR North</option><option value="IR-South">IR South</option><option value="IR-Riverview">IR Riverview</option></select></div>
       <div class="fg" style="margin:0"><label>Filter Holiday</label>
         <select id="holf-name" onchange="renderHolTable()" style="width:160px">
           <option value="">All</option>
@@ -2408,12 +2562,7 @@ serve(async (req) =&gt; {
         <div class="fg" style="margin:0"><label>Year</label>
           <input id="haa-year" type="number" value="2026" min="2020" max="2035" style="width:90px" oninput="renderHolCareerTally()"></div>
         <div class="fg" style="margin:0"><label>Group</label>
-          <select id="haa-grp" onchange="renderHolCareerTally()" style="width:150px">
-            <option value="all">All pools</option>
-            <option value="DR">DR only</option>
-            <option value="IR-North">IR North only</option>
-            <option value="IR-South">IR South only</option>
-          </select></div>
+          <select id="haa-grp" onchange="renderHolCareerTally()" style="width:150px"><option value="all">All pools</option><option value="DR">DR only</option><option value="IR-North">IR North only</option><option value="IR-South">IR South only</option><option value="IR-Riverview">IR Riverview only</option></select></div>
         <div class="fg" style="margin:0"><label>Weighting</label>
           <select id="haa-mode" style="width:220px">
             <option value="weighted">Weighted (career balance)</option>
@@ -2444,12 +2593,7 @@ serve(async (req) =&gt; {
   <div id="holt-counter" style="display:none">
     <div class="flexe" style="margin-bottom:8px;gap:6px">
       <div class="fg" style="margin:0"><label>Group</label>
-        <select id="hcg" onchange="renderHolCounter()">
-          <option value="ALL">All</option>
-          <option value="DR">DR</option>
-          <option value="IR-North">IR North</option>
-          <option value="IR-South">IR South</option>
-        </select></div>
+        <select id="hcg" onchange="renderHolCounter()"><option value="ALL">All</option><option value="DR">DR</option><option value="IR-North">IR North</option><option value="IR-South">IR South</option><option value="IR-Riverview">IR Riverview</option></select></div>
       <div class="fg" style="margin:0"><label>Year</label>
         <select id="hcy" onchange="renderHolCounter()">
           <option value="all">All Years (Career)</option>
@@ -2801,11 +2945,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
   <div id="fte-career-ctrl" style="display:none;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px">
     <div class="fg" style="margin:0"><label>Group</label>
-      <select id="fte-career-grp" onchange="renderFTECareer()" style="width:110px">
-        <option value="both">Both</option>
-        <option value="North">North</option>
-        <option value="South">South</option>
-      </select>
+      <select id="fte-career-grp" onchange="renderFTECareer()" style="width:110px"><option value="both">Both</option><option value="North">North</option><option value="South">South</option><option value="Riverview">Riverview</option></select>
     </div>
     <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTECareer()">↺ Refresh</button>
     <div style="font-size:11px;color:var(--txt3);align-self:center;max-width:460px">
@@ -3128,7 +3268,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div class="card-title">Hospital Sites</div>
         <div class="flex" style="margin-bottom:4px;flex-wrap:wrap;gap:4px">
           <input id="new-site" placeholder="Site name..." style="flex:1;min-width:120px">
-          <select id="new-site-irg" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Both">IR Both</option></select>
+          <select id="new-site-irg" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Riverview">IR Riverview</option><option value="Both">IR Both</option></select>
           <button class="bp bsm" onclick="addSite()">Add</button>
         </div>
         <div class="flex" style="margin-bottom:6px;gap:4px">
@@ -3216,7 +3356,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
     </div>
     <div class="flex" style="margin-bottom:4px;flex-wrap:wrap;gap:4px">
       <input id="new-site-ssl" placeholder="Site name..." style="flex:1;min-width:120px">
-      <select id="new-site-irg-ssl" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Both">IR Both</option></select>
+      <select id="new-site-irg-ssl" style="width:auto"><option value="">DR/General</option><option value="North">IR North</option><option value="South">IR South</option><option value="Riverview">IR Riverview</option><option value="Both">IR Both</option></select>
       <button class="bp bsm" onclick="addSiteFromSlots()">Add</button>
     </div>
     <div class="flex" style="margin-bottom:6px;gap:4px">
