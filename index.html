@@ -396,6 +396,7 @@ tbody tr:hover{background:var(--bg3)}
     <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
     <button id="fs-toggle-btn" class="tb-btn" style="margin-right:4px;display:none" title="Auto-save updates to your local index.html (Chrome / Edge only)">📁 Auto-save to file…</button>
     <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
+    <span id="gh-toolbar-status" style="font-size:10px;color:var(--txt3);margin-right:6px;display:none" title="GitHub auto-deploy status"></span>
     <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
@@ -2646,6 +2647,49 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
     </details>
   </div>
 
+  <!-- ─── GITHUB AUTO-DEPLOY ───────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px;border:2px solid var(--purple)">
+    <div class="card-title">🐙 GitHub Auto-Deploy</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px">
+      Push every save to a GitHub repo via the Contents API. Useful when the app is hosted on GitHub Pages — your phone / other devices see updates within ~30 sec of each save (GH Pages re-publish time).
+      <br><br>
+      <strong>One-time setup:</strong> create a fine-grained Personal Access Token with <em>Contents: Read and Write</em> permission on this repo only. Generate at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a>. The token stays in this browser's localStorage — never synced to Supabase, never embedded in saved HTML files.
+    </div>
+    <div class="g2" style="margin-bottom:8px">
+      <div class="fg">
+        <label>Personal Access Token</label>
+        <input id="gh-token" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true" placeholder="github_pat_…" oninput="ghReadCfgFromForm()" style="font-size:11px;font-family:ui-monospace,monospace">
+      </div>
+      <div class="fg">
+        <label>Repo (owner/name)</label>
+        <div class="flex" style="gap:6px">
+          <input id="gh-owner" placeholder="owner" oninput="ghReadCfgFromForm()" style="flex:1;font-size:11px">
+          <span style="line-height:30px;color:var(--txt3)">/</span>
+          <input id="gh-repo" placeholder="repo-name" oninput="ghReadCfgFromForm()" style="flex:2;font-size:11px">
+        </div>
+      </div>
+    </div>
+    <div class="g2" style="margin-bottom:8px">
+      <div class="fg">
+        <label>Branch</label>
+        <input id="gh-branch" placeholder="main" oninput="ghReadCfgFromForm()" style="font-size:11px">
+      </div>
+      <div class="fg">
+        <label>Path (file in repo)</label>
+        <input id="gh-path" placeholder="index.html" oninput="ghReadCfgFromForm()" style="font-size:11px;font-family:ui-monospace,monospace">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+      <label class="chk" style="font-size:11px">
+        <input type="checkbox" id="gh-enabled" onchange="ghReadCfgFromForm()"> Auto-deploy on every save
+      </label>
+      <button class="bt bsm" onclick="ghTest()">🔌 Test connection</button>
+      <button class="bp bsm" onclick="ghDeployNow()">🚀 Deploy now</button>
+    </div>
+    <div id="gh-status-msg" style="font-size:12px;min-height:18px"></div>
+    <div id="gh-summary" style="font-size:11px;color:var(--txt3);margin-top:4px"></div>
+  </div>
+
   <!-- Shift Rules & Config -->
   <div class="g2">
     <div>
@@ -3236,8 +3280,8 @@ let _saveTimeout=null;
 // any device opening the published file is auto-configured. The anon key is
 // public-by-design — actual data access is gated by Supabase Row-Level
 // Security policies on each table. If RLS isn't configured, fix that first.
-const _SUPABASE_URL=/*CREDS_URL_START*/''/*CREDS_URL_END*/;
-const _SUPABASE_KEY=/*CREDS_KEY_START*/''/*CREDS_KEY_END*/;
+const _SUPABASE_URL=/*CREDS_URL_START*/'https://tpbgwvisikbuqhmlqtky.supabase.co'/*CREDS_URL_END*/;
+const _SUPABASE_KEY=/*CREDS_KEY_START*/'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwYmd3dmlzaWtidXFobWxxdGt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODg0MzUsImV4cCI6MjA5MTY2NDQzNX0.biu0OD-zk1cUl2CImDkkuOmIaat3vQKsgZ9riFn65Yk'/*CREDS_KEY_END*/;
 const _ALLOW_LEGACY_AUTH=false; // disable legacy plaintext local auth by default
 const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
@@ -3407,6 +3451,9 @@ function triggerSave(){
   // enabled). Independent debounce — keeps disk + remote in sync without
   // blocking either path on the other.
   if(typeof _fsScheduleWrite === 'function') _fsScheduleWrite();
+  // Schedule a GitHub deploy if configured + enabled. Heaviest of the three
+  // sinks (network round-trip to GitHub) so it's the longest-debounced.
+  if(typeof _ghScheduleDeploy === 'function') _ghScheduleDeploy();
 }
 
 function _buildSaveHTML(){
@@ -3650,6 +3697,258 @@ function _fsUpdateUI(){
       st.textContent = `Saved to file ${txt}`;
     } else {
       st.textContent = '';
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GITHUB AUTO-DEPLOY
+   Pushes the latest _buildSaveHTML() output to a configured GitHub repo
+   via the Contents API on every save. Keeps a hosted GH Pages copy of the
+   app in sync with desktop edits — phone / other devices see updates as
+   soon as GH Pages re-publishes (~30s after push).
+
+   Config (token + repo + branch + path) lives in localStorage per-browser.
+   The token is NEVER synced to Supabase or embedded in saved HTML — it
+   stays on the device that types it in.
+
+   Token: fine-grained Personal Access Token with `Contents: Read and Write`
+   on the target repo only. Generate at:
+     https://github.com/settings/tokens?type=beta
+═══════════════════════════════════════════════════════════════════════ */
+const _GH_LS_KEY = 'rs.github.deploy.v1';
+let _ghDeployTimer = null;
+let _ghDeployInFlight = false;
+let _ghLastDeploy = 0;
+let _ghLastSha = null;
+
+function _ghLoadCfg(){
+  try{
+    const raw = localStorage.getItem(_GH_LS_KEY);
+    if(!raw) return null;
+    const c = JSON.parse(raw);
+    return {
+      token: c.token || '',
+      owner: c.owner || '',
+      repo:  c.repo  || '',
+      branch:c.branch|| 'main',
+      path:  c.path  || 'index.html',
+      enabled: !!c.enabled,
+    };
+  }catch(_){ return null; }
+}
+function _ghSaveCfg(cfg){
+  try{ localStorage.setItem(_GH_LS_KEY, JSON.stringify(cfg)); }catch(_){}
+}
+
+// UTF-8-safe base64 encode (btoa() can't handle non-Latin1 characters which
+// our HTML — full of em-dashes and emoji — definitely contains).
+function _ghUtf8ToBase64(str){
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  // String.fromCharCode in 32k chunks to avoid stack-overflow on big strings.
+  for(let i=0; i<bytes.length; i+=32768){
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i+32768));
+  }
+  return btoa(bin);
+}
+
+// Lightweight error wrapper so callers can surface useful messages.
+async function _ghApi(cfg, method, urlPath, body){
+  if(!cfg?.token) throw new Error('No GitHub token configured.');
+  const res = await fetch(`https://api.github.com${urlPath}`, {
+    method,
+    headers: {
+      'Authorization': 'Bearer ' + cfg.token,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body ? {'Content-Type': 'application/json'} : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data; try{ data = JSON.parse(text); }catch(_){ data = {message: text}; }
+  if(!res.ok){
+    const msg = data?.message || `HTTP ${res.status}`;
+    const err = new Error(`GitHub API ${method} ${urlPath} → ${res.status}: ${msg}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// Fetch the current file's SHA from the configured branch. Needed for PUT
+// (GitHub uses optimistic-locking via SHA). Returns null if file doesn't
+// exist yet — first deploy will create it without a SHA.
+async function _ghFetchSha(cfg){
+  try{
+    const data = await _ghApi(cfg, 'GET',
+      `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${encodeURIComponent(cfg.path)}?ref=${encodeURIComponent(cfg.branch)}`);
+    return data?.sha || null;
+  }catch(e){
+    if(e.status === 404) return null; // file doesn't exist yet
+    throw e;
+  }
+}
+
+async function _ghDeploy(opts){
+  opts = opts || {};
+  if(_ghDeployInFlight) return { ok:false, error:'Deploy already in flight.' };
+  const cfg = _ghLoadCfg();
+  if(!cfg || !cfg.token || !cfg.owner || !cfg.repo){
+    return { ok:false, error:'GitHub deploy not configured.' };
+  }
+  _ghDeployInFlight = true;
+  try{
+    const html = _buildSaveHTML();
+    if(!html) throw new Error('Failed to build save HTML.');
+    let sha = _ghLastSha;
+    // Always re-fetch the SHA on first deploy of a session, after a 409,
+    // or when explicitly forced. Subsequent same-session deploys reuse the
+    // last-returned SHA from the PUT response to skip a round trip.
+    if(!sha || opts.refreshSha) sha = await _ghFetchSha(cfg);
+    const stamp = new Date().toISOString().replace(/T/,' ').replace(/\..+/,'');
+    const who = (CU?.first ? `${CU.first} ${CU.last||''}` : 'unknown').trim();
+    const message = opts.message || `rs: autosave ${stamp} (${who})`;
+    const putPath = `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${encodeURIComponent(cfg.path)}`;
+    const body = {
+      message,
+      content: _ghUtf8ToBase64(html),
+      branch:  cfg.branch || 'main',
+      ...(sha ? {sha} : {}),
+    };
+    let res;
+    try{
+      res = await _ghApi(cfg, 'PUT', putPath, body);
+    }catch(e){
+      // SHA stale (someone else committed since our last fetch) — refetch + retry once.
+      if((e.status === 409 || e.status === 422) && !opts.retried){
+        const freshSha = await _ghFetchSha(cfg);
+        return _ghDeploy({...opts, retried:true, _explicitSha: freshSha});
+      }
+      throw e;
+    }
+    _ghLastSha = res?.content?.sha || null;
+    _ghLastDeploy = Date.now();
+    _ghUpdateUI();
+    return { ok:true, sha: _ghLastSha, commit: res?.commit?.sha, url: res?.commit?.html_url };
+  }catch(e){
+    console.warn('[RS] _ghDeploy failed:', e);
+    return { ok:false, error: e.message || String(e) };
+  }finally{
+    _ghDeployInFlight = false;
+  }
+}
+
+// Debounced trigger called from triggerSave alongside Supabase + file autosave.
+function _ghScheduleDeploy(){
+  const cfg = _ghLoadCfg();
+  if(!cfg || !cfg.enabled || !cfg.token) return;
+  clearTimeout(_ghDeployTimer);
+  // Longer debounce than file/Supabase saves — GitHub commits should cluster
+  // edits into one push, not spam the commit history.
+  _ghDeployTimer = setTimeout(() => {
+    _ghDeploy().then(r => {
+      if(!r.ok) _updateSaveUI('⚠ GitHub: '+(r.error||'failed'), 'var(--red-t)');
+    });
+  }, 3000);
+}
+
+// Test that the token + repo + path are valid by GET-ing the file metadata.
+async function ghTest(){
+  if(!_adminOnly('test GitHub connection')) return;
+  ghReadCfgFromForm();
+  const cfg = _ghLoadCfg();
+  const status = document.getElementById('gh-status-msg');
+  const setStatus = (txt, color='var(--txt2)') => { if(status){ status.textContent = txt; status.style.color = color; } };
+  if(!cfg || !cfg.token || !cfg.owner || !cfg.repo){
+    setStatus('✕ Fill in token, owner, and repo first.', 'var(--red-t)'); return;
+  }
+  setStatus('Testing…');
+  try{
+    const sha = await _ghFetchSha(cfg);
+    _ghLastSha = sha;
+    if(sha){
+      setStatus(`✓ Reachable. Current ${cfg.path}@${cfg.branch} SHA: ${sha.slice(0,7)}.`, 'var(--green-t)');
+    } else {
+      setStatus(`✓ Token + repo OK. ${cfg.path} doesn't exist yet — first deploy will create it.`, 'var(--green-t)');
+    }
+  }catch(e){
+    setStatus('✕ '+(e.message||e), 'var(--red-t)');
+  }
+}
+
+// Force a deploy now, ignoring the debounce.
+async function ghDeployNow(){
+  if(!_adminOnly('deploy to GitHub')) return;
+  ghReadCfgFromForm();
+  const status = document.getElementById('gh-status-msg');
+  const setStatus = (txt, color='var(--txt2)') => { if(status){ status.textContent = txt; status.style.color = color; } };
+  setStatus('Deploying…');
+  const r = await _ghDeploy({refreshSha: true, message: `rs: manual deploy ${new Date().toISOString().replace(/T/,' ').replace(/\..+/,'')}`});
+  if(r.ok) setStatus(`✓ Deployed. Commit ${r.commit?.slice(0,7) || ''}. ${r.url ? '' : ''}`, 'var(--green-t)');
+  else     setStatus('✕ '+r.error, 'var(--red-t)');
+}
+
+// Save the form values to localStorage. Called from input onchange handlers
+// AND before ghTest/ghDeployNow so the latest form state is used.
+function ghReadCfgFromForm(){
+  const get = id => document.getElementById(id)?.value?.trim() || '';
+  const cfg = {
+    token:  get('gh-token'),
+    owner:  get('gh-owner'),
+    repo:   get('gh-repo'),
+    branch: get('gh-branch') || 'main',
+    path:   get('gh-path')   || 'index.html',
+    enabled: !!document.getElementById('gh-enabled')?.checked,
+  };
+  _ghSaveCfg(cfg);
+  _ghUpdateUI();
+}
+
+function ghLoadCfgIntoForm(){
+  const cfg = _ghLoadCfg() || {};
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v ?? ''; };
+  set('gh-token',  cfg.token  || '');
+  set('gh-owner',  cfg.owner  || '');
+  set('gh-repo',   cfg.repo   || '');
+  set('gh-branch', cfg.branch || 'main');
+  set('gh-path',   cfg.path   || 'index.html');
+  const en = document.getElementById('gh-enabled');
+  if(en) en.checked = !!cfg.enabled;
+  _ghUpdateUI();
+}
+
+function _ghUpdateUI(){
+  const cfg = _ghLoadCfg() || {};
+  const ind = document.getElementById('gh-toolbar-status');
+  if(ind){
+    if(!cfg.token || !cfg.owner || !cfg.repo){
+      ind.style.display = 'none';
+    } else if(!cfg.enabled){
+      ind.style.display = '';
+      ind.textContent = '🐙 paused';
+      ind.style.color = 'var(--txt3)';
+    } else {
+      ind.style.display = '';
+      if(_ghLastDeploy){
+        const ageS = Math.round((Date.now() - _ghLastDeploy)/1000);
+        const t = ageS < 5 ? 'just now' : ageS < 60 ? `${ageS}s` : ageS < 3600 ? `${Math.round(ageS/60)}m` : `${Math.round(ageS/3600)}h`;
+        ind.textContent = `🐙 ${cfg.repo} · ${t}`;
+      } else {
+        ind.textContent = `🐙 ${cfg.repo} · armed`;
+      }
+      ind.style.color = 'var(--txt3)';
+    }
+  }
+  const summary = document.getElementById('gh-summary');
+  if(summary){
+    if(_ghLastDeploy){
+      const date = new Date(_ghLastDeploy).toLocaleString();
+      summary.textContent = `Last deploy: ${date}` + (_ghLastSha ? ` · SHA ${_ghLastSha.slice(0,7)}` : '');
+    } else {
+      summary.textContent = 'Never deployed this session.';
     }
   }
 }
@@ -11409,6 +11708,7 @@ function renderSettings(){
   if(typeof _restoreGMapsKeyField==='function') _restoreGMapsKeyField();
   if(typeof _themeRefreshControls==='function') _themeRefreshControls();
   if(typeof _loadAutoTrafficCfgUI==='function') _loadAutoTrafficCfgUI();
+  if(typeof ghLoadCfgIntoForm==='function') ghLoadCfgIntoForm();
   const cfgFields={
     'cfg-wd':'wdMax','cfg-wk':'wkMax','cfg-ir-daily':'irDailyMax',
     'cfg-ir-wknd':'irWkndMax','cfg-rest':'rest','cfg-anc':'anchorPct'
