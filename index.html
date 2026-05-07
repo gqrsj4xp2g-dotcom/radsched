@@ -2610,7 +2610,8 @@ WHERE email = 'your-admin@example.com';</pre>
     <div class="note ni" style="font-size:11px;margin-bottom:10px">
       Connect to Supabase to share data across all users in real time. Every schedule change syncs automatically.
       Get your credentials from <strong>supabase.com → Project Settings → API</strong>.
-      <strong style="color:var(--amber,#d97706)">After saving credentials, click 💾 Save File in the toolbar and redistribute the downloaded file — credentials are embedded so all devices auto-connect.</strong>
+      <br><br>
+      <strong style="color:var(--amber,#d97706)">📲 Multi-device setup:</strong> After saving credentials here, click <strong>💾 Save File</strong> in the top toolbar and host/distribute the downloaded HTML. The saved file embeds both the URL <em>and</em> the anon key, so any device opening it is auto-configured and goes straight to the login form. The anon key is public by design — actual data access is gated by your Supabase Row-Level Security policies, so make sure those are set up before sharing the file widely.
     </div>
     <div id="sb-status" style="margin-bottom:10px;padding:7px 12px;border-radius:var(--r);background:var(--bg3);font-size:12px">
       Status: <span id="sb-status-text" style="font-weight:800">Not configured</span>
@@ -3229,8 +3230,12 @@ function saveAuthSupabaseConfig(){
 // snapshot. Entries auto-expire after 30s.
 let _recentlyAddedUsers=[];
 let _saveTimeout=null;
-const _SUPABASE_URL=/*CREDS_URL_START*/''/*CREDS_URL_END*/;  // no embedded URL credential in published HTML
-const _SUPABASE_KEY=/*CREDS_KEY_START*/''/*CREDS_KEY_END*/;  // no embedded anon key in published HTML
+// Both URL and anon key get baked into the saved file by _buildSaveHTML so
+// any device opening the published file is auto-configured. The anon key is
+// public-by-design — actual data access is gated by Supabase Row-Level
+// Security policies on each table. If RLS isn't configured, fix that first.
+const _SUPABASE_URL=/*CREDS_URL_START*/''/*CREDS_URL_END*/;
+const _SUPABASE_KEY=/*CREDS_KEY_START*/''/*CREDS_KEY_END*/;
 const _ALLOW_LEGACY_AUTH=false; // disable legacy plaintext local auth by default
 const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
@@ -3403,7 +3408,13 @@ function _buildSaveHTML(){
   if(!source){alert('Cannot generate save file.');return '';}
   // Embed live Supabase URL only; do not include anon keys in exported HTML files
   const liveUrl=_getUrl()||'';
-  const liveKey=''; // never embed anon key into exported HTML files
+  // Embed BOTH the project URL and the anon key into the exported HTML so
+  // any device opening this file is auto-configured and goes straight to
+  // the login form. The anon key is public-by-design — Supabase's Row-Level
+  // Security policies are what actually gate data access. Embedding it here
+  // doesn't grant additional permissions; it just removes the per-device
+  // "configure Supabase" friction.
+  const liveKey=_getKey()||'';
   const sData='let S=/*S_START*/'+JSON.stringify(Object.assign(
     _buildPersistedPayload('file'),
     {
@@ -15259,10 +15270,18 @@ const _EDGE_FN_SOURCES = {
     '    if (!email || !password) return json({ error: "email and password required" }, 400);',
     '    if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);',
     '',
+    '    // app_metadata is server-side-only (users cannot modify it via client SDK),',
+    '    // so RLS policies that gate by role/practiceId reference app_metadata, not',
+    '    // user_metadata. We write to both blocks: app_metadata for security gating,',
+    '    // user_metadata for app-level conveniences (display name, physId link, etc.).',
     '    const createRes = await admin.auth.admin.createUser({',
     '      email: email,',
     '      password: password,',
     '      email_confirm: true,',
+    '      app_metadata: {',
+    '        role: role || "user",',
+    '        practiceId: practiceId || "main",',
+    '      },',
     '      user_metadata: {',
     '        role: role || "user",',
     '        first: first || "",',
