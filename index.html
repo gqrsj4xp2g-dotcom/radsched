@@ -394,6 +394,8 @@ tbody tr:hover{background:var(--bg3)}
     </div>
     <span id="save-indicator" style="font-size:10px;color:var(--txt3);margin-right:4px"></span>
     <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
+    <button id="fs-toggle-btn" class="tb-btn" style="margin-right:4px;display:none" title="Auto-save updates to your local index.html (Chrome / Edge only)">📁 Auto-save to file…</button>
+    <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
     <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
@@ -3401,6 +3403,10 @@ function triggerSave(){
       _updateSaveUI('● Unsaved','var(--amber,#d97706)');
     }
   },500);
+  // Also schedule a write to the linked local file (no-op if autosave isn't
+  // enabled). Independent debounce — keeps disk + remote in sync without
+  // blocking either path on the other.
+  if(typeof _fsScheduleWrite === 'function') _fsScheduleWrite();
 }
 
 function _buildSaveHTML(){
@@ -3433,6 +3439,219 @@ function _buildSaveHTML(){
       "/*CREDS_URL_START*/'"+liveUrl.replace(/'/g,"\\'")+"'\n/*CREDS_URL_END*/")
     .replace(/\/\*CREDS_KEY_START\*\/[\s\S]*?\/\*CREDS_KEY_END\*\//,
       "/*CREDS_KEY_START*/'"+liveKey.replace(/'/g,"\\'")+"'\n/*CREDS_KEY_END*/");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTOSAVE-TO-LOCAL-FILE (File System Access API)
+   Lets the user pick their local index.html once. The browser stores a
+   FileSystemFileHandle which we persist in IndexedDB (handles ARE clonable
+   for IDB storage). On every successful Supabase push we also write the
+   latest _buildSaveHTML() output back to that file, keeping the on-disk
+   copy in sync without manual 💾 Save File clicks.
+
+   Browser support: Chrome/Edge/Opera desktop. Safari, iOS, and Firefox
+   don't expose showSaveFilePicker/handle-permission, so the toolbar
+   button hides itself on those — manual save still works.
+═══════════════════════════════════════════════════════════════════════ */
+const _FS_IDB_NAME  = 'rs_fs_handles';
+const _FS_IDB_STORE = 'handles';
+const _FS_HANDLE_KEY = 'autosave';
+let   _fsHandle = null;        // FileSystemFileHandle (in memory)
+let   _fsAutosaveOn = false;   // toggled by user; persisted by handle presence
+let   _fsLastWrite = 0;        // timestamp
+let   _fsWriteTimer = null;    // debounce token for clustering writes
+let   _fsWriteInFlight = false;
+
+function _fsSupported(){
+  return typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+}
+
+// Tiny IndexedDB wrapper. Keeps the API surface minimal — open, get, put.
+function _fsOpenDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_FS_IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(_FS_IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+async function _fsIDBPut(key, val){
+  const db = await _fsOpenDB();
+  await new Promise((r, j) => {
+    const tx = db.transaction(_FS_IDB_STORE, 'readwrite');
+    tx.objectStore(_FS_IDB_STORE).put(val, key);
+    tx.oncomplete = r; tx.onerror = () => j(tx.error);
+  });
+  db.close();
+}
+async function _fsIDBGet(key){
+  const db = await _fsOpenDB();
+  const v = await new Promise((r, j) => {
+    const tx = db.transaction(_FS_IDB_STORE, 'readonly');
+    const req = tx.objectStore(_FS_IDB_STORE).get(key);
+    req.onsuccess = () => r(req.result); req.onerror = () => j(req.error);
+  });
+  db.close();
+  return v;
+}
+async function _fsIDBDel(key){
+  const db = await _fsOpenDB();
+  await new Promise((r, j) => {
+    const tx = db.transaction(_FS_IDB_STORE, 'readwrite');
+    tx.objectStore(_FS_IDB_STORE).delete(key);
+    tx.oncomplete = r; tx.onerror = () => j(tx.error);
+  });
+  db.close();
+}
+
+// Verify (and re-request if needed) readwrite permission for the handle.
+// Browsers gate file-handle reuse across page loads behind explicit user-
+// gesture re-grants, but a same-session reuse usually keeps permission live.
+async function _fsEnsurePermission(handle, requestIfPrompt){
+  if(!handle || typeof handle.queryPermission !== 'function') return false;
+  let st = await handle.queryPermission({mode:'readwrite'});
+  if(st === 'granted') return true;
+  if(st === 'prompt' && requestIfPrompt){
+    st = await handle.requestPermission({mode:'readwrite'});
+    return st === 'granted';
+  }
+  return false;
+}
+
+// User clicks "Enable autosave to file" in the toolbar — picks the local
+// index.html (or any file path), we save the handle and start mirroring.
+async function fsEnableAutosave(){
+  if(!_fsSupported()){
+    alert('Auto-save to local file requires Chrome, Edge, or Opera on desktop. Use 💾 Save File on this browser instead.');
+    return;
+  }
+  if(!_adminOnly('enable autosave to file')) return;
+  try{
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'RadScheduler_Web.html',
+      types: [{description:'HTML', accept:{'text/html':['.html','.htm']}}],
+    });
+    const ok = await _fsEnsurePermission(handle, true);
+    if(!ok){ alert('Read/write permission denied.'); return; }
+    _fsHandle = handle;
+    _fsAutosaveOn = true;
+    try{ await _fsIDBPut(_FS_HANDLE_KEY, handle); }catch(_){}
+    _fsUpdateUI();
+    // Write once immediately so the picked file reflects current state.
+    await _fsWriteNow();
+    _updateSaveUI('✓ Auto-save linked', 'var(--green-t)');
+    setTimeout(()=>{ if(_hasUnsavedChanges===false) _updateSaveUI('',''); }, 2500);
+  }catch(e){
+    if(e?.name === 'AbortError') return; // user closed picker
+    console.warn('[RS] fsEnableAutosave failed:', e);
+    alert('Auto-save setup failed: ' + (e.message || e));
+  }
+}
+
+// Stop autosaving but DON'T delete the file — just unlink the handle.
+async function fsDisableAutosave(){
+  _fsHandle = null;
+  _fsAutosaveOn = false;
+  try{ await _fsIDBDel(_FS_HANDLE_KEY); }catch(_){}
+  _fsUpdateUI();
+}
+
+// On launchApp, try to recover a previously-picked handle. If permission is
+// in 'prompt' state (browser requires a user gesture to re-grant) we leave
+// the toolbar button in "Resume" mode — clicking it triggers the permission
+// dialog. When permission is already 'granted' (same session, same handle)
+// autosave just resumes silently.
+async function fsTryRestoreAutosave(){
+  if(!_fsSupported()) return;
+  let handle = null;
+  try{ handle = await _fsIDBGet(_FS_HANDLE_KEY); }catch(_){}
+  if(!handle) return;
+  _fsHandle = handle;
+  // Don't request permission here (no user gesture). Just check.
+  const granted = await _fsEnsurePermission(handle, false);
+  _fsAutosaveOn = !!granted;
+  _fsUpdateUI();
+}
+
+// User clicks "Resume" — uses the already-stored handle and prompts for
+// permission. This MUST be called from a user gesture for the browser to
+// allow the prompt.
+async function fsResumeAutosave(){
+  if(!_fsHandle){ return fsEnableAutosave(); }
+  const ok = await _fsEnsurePermission(_fsHandle, true);
+  if(!ok){ alert('Permission denied.'); return; }
+  _fsAutosaveOn = true;
+  _fsUpdateUI();
+  await _fsWriteNow();
+}
+
+// Write the current _buildSaveHTML() to the linked file. Coalesces rapid
+// successive calls into a single write 750ms after the last triggering
+// edit, so a flurry of mutations doesn't thrash the disk.
+function _fsScheduleWrite(){
+  if(!_fsAutosaveOn || !_fsHandle) return;
+  clearTimeout(_fsWriteTimer);
+  _fsWriteTimer = setTimeout(_fsWriteNow, 750);
+}
+
+async function _fsWriteNow(){
+  if(!_fsHandle || _fsWriteInFlight) return;
+  // Re-check permission — a tab restoration may have downgraded it.
+  const ok = await _fsEnsurePermission(_fsHandle, false);
+  if(!ok){ _fsAutosaveOn = false; _fsUpdateUI(); return; }
+  _fsWriteInFlight = true;
+  try{
+    const html = _buildSaveHTML();
+    if(!html) return;
+    const writable = await _fsHandle.createWritable();
+    await writable.write(html);
+    await writable.close();
+    _fsLastWrite = Date.now();
+    _fsUpdateUI();
+  }catch(e){
+    console.warn('[RS] _fsWriteNow failed:', e);
+    _updateSaveUI('⚠ Auto-save to file failed', 'var(--red-t)');
+  }finally{
+    _fsWriteInFlight = false;
+  }
+}
+
+// Toolbar button + status text live update.
+function _fsUpdateUI(){
+  const btn = document.getElementById('fs-toggle-btn');
+  const st  = document.getElementById('fs-status');
+  if(btn){
+    if(!_fsSupported()){
+      btn.style.display = 'none';
+    } else if(_fsAutosaveOn){
+      btn.textContent = '📁 ✓ Auto-save';
+      btn.title = 'Auto-saving to your local file. Click to disable.';
+      btn.onclick = fsDisableAutosave;
+      btn.style.background = 'var(--green)';
+      btn.style.color = '#fff';
+    } else if(_fsHandle){
+      btn.textContent = '📁 Resume Auto-save';
+      btn.title = 'A previously-picked file is on record. Click to re-grant browser permission and resume.';
+      btn.onclick = fsResumeAutosave;
+      btn.style.background = '';
+      btn.style.color = '';
+    } else {
+      btn.textContent = '📁 Auto-save to file…';
+      btn.title = 'Pick your local index.html — the browser will then write to it on every save.';
+      btn.onclick = fsEnableAutosave;
+      btn.style.background = '';
+      btn.style.color = '';
+    }
+  }
+  if(st){
+    if(_fsAutosaveOn && _fsLastWrite){
+      const ageS = Math.round((Date.now() - _fsLastWrite)/1000);
+      const txt = ageS < 5 ? 'just now' : ageS < 60 ? `${ageS}s ago` : `${Math.round(ageS/60)}m ago`;
+      st.textContent = `Saved to file ${txt}`;
+    } else {
+      st.textContent = '';
+    }
+  }
 }
 
 async function hardSave(){
@@ -3879,6 +4098,11 @@ async function launchApp(){
     // Kick off the periodic future-shift auto-refresh after the dashboard
     // is on screen. Idempotent — safe to call on every launchApp.
     if(typeof _startAutoRefreshTrafficLoop === 'function') _startAutoRefreshTrafficLoop();
+    // Try to restore a previously-picked autosave file handle. If browser
+    // permission is still 'granted' from this session we resume silently;
+    // otherwise the toolbar shows "Resume Auto-save" so the user can re-grant
+    // with one click. Idempotent — safe to call on every launchApp.
+    if(typeof fsTryRestoreAutosave === 'function') fsTryRestoreAutosave();
   }finally{
     launchApp._running=false;
   }
