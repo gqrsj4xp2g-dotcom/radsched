@@ -1,0 +1,61 @@
+name: Deploy to GitHub Pages
+
+# Auto-deploy index.html + sibling files to GitHub Pages on every push to main.
+# The repo's existing disk-watch autopush keeps index.html in sync from the
+# author's laptop; this workflow takes that committed state and serves it.
+#
+# To enable: in the repo's Settings → Pages, set the source to "GitHub Actions".
+# That swaps the legacy branch-based publish for this workflow's artifact upload.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages build at a time. A queued second run on a rapid push burst
+# is skipped — GitHub keeps the LATEST and discards in-flight ones.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sanity-check the inline JS parses before publishing. Catches typo-grade
+      # syntax errors that would brick the live site for everyone.
+      - name: Validate inline JS parses
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          html = open('index.html').read()
+          html = re.sub(r'<!--[\s\S]*?-->', '', html)
+          parts = re.findall(r'<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>', html)
+          combined = '\n;\n'.join(parts)
+          open('/tmp/inline.js', 'w').write(combined)
+          print(f'extracted {len(combined)} chars across {len(parts)} block(s)')
+          PY
+          node --check /tmp/inline.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
