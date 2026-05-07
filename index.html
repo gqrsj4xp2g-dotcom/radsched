@@ -464,7 +464,7 @@ tbody tr:hover{background:var(--bg3)}
     <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
     <span id="gh-toolbar-status" style="font-size: 10px; color: var(--txt3); margin-right: 6px;" title="GitHub auto-deploy status">🐙 radsched · just now</span>
     <span id="rs-error-badge" onclick="showErrorLog()" style="display:none;font-size:11px;font-weight:700;background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" title="Recent errors — click to view"></span>
-    <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" style="margin-right:2px;padding:6px 8px" title="Undo (29 steps)">↶</button>
+    <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" style="margin-right:2px;padding:6px 8px" title="Undo (30 steps)">↶</button>
     <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled="" style="margin-right:4px;padding:6px 8px" title="Nothing to redo">↷</button>
     <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
@@ -495,10 +495,10 @@ tbody tr:hover{background:var(--bg3)}
       <div class="snav-sect">Interventional Rad</div>
       <div class="snav-item" onclick="nav('ir-cal',this)">IR Calendar</div>
       <div class="snav-item admin-only" onclick="nav('ir-shifts',this)" style="display: block;">IR Shift Builder</div>
-      <div class="snav-item admin-only" onclick="nav('ir-builder',this)" style="display: block;">IR Call Builder</div>
+      <div class="snav-item admin-only on" onclick="nav('ir-builder',this)" style="display: block;">IR Call Builder</div>
       <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)" style="display: block;">IR Shift Auto-Assign</div>
       <div class="snav-item admin-only" onclick="nav('ir-auto',this)" style="display: block;">IR Call Auto-Assign</div>
-      <div class="snav-item admin-only on" onclick="nav('ir-rebalance',this)" style="display: block;">⚖ IR Call Rebalancer</div>
+      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)" style="display: block;">⚖ IR Call Rebalancer</div>
       <div class="snav-sect">Compliance &amp; Special</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)" style="display: block;">Anchor Compliance</div>
       <div class="snav-item admin-only" onclick="nav('holidays',this)" style="display: block;">Holiday Call</div>
@@ -2826,7 +2826,7 @@ serve(async (req) =&gt; {
 </div>
 
 <!-- IR SCHEDULE BUILDER (redesigned) -->
-<div id="page-ir-builder" class="page admin-only">
+<div id="page-ir-builder" class="page admin-only on">
   <div class="pg-title">IR Schedule Builder</div>
   <div class="pg-sub">IR call: 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning.</div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
@@ -2852,7 +2852,62 @@ serve(async (req) =&gt; {
         IR call = 1 physician per group covers Mon–Thu. Weekend call covers Fri evening → Mon morning. Physicians not on call have no automatic assignment.
       </div>
     </div>
-    <div id="irb-week-content"></div>
+    <div id="irb-week-content"><div class="card" style="margin-bottom:10px;overflow-x:auto">
+    <div class="card-title">Weekday IR Call Schedule
+      <span style="font-weight:400;font-size:11px;color:var(--txt3);margin-left:8px">1 physician per group covers all group hospitals (Mon–Fri)</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--navy)">
+        <th style="padding:6px 10px;color:#fff;text-align:left;min-width:110px">Group / Shift</th><th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">Mon<br><span style="font-weight:400;font-size:10px">05-04</span></th><th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">Tue<br><span style="font-weight:400;font-size:10px">05-05</span></th><th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">Wed<br><span style="font-weight:400;font-size:10px">05-06</span></th><th style="padding:6px 10px;color:#fff;text-align:center;min-width:110px">Thu<br><span style="font-weight:400;font-size:10px">05-07</span></th></tr></thead><tbody><tr style="border-top:2px solid var(--bdr)">
+        <td style="padding:5px 8px;background:#dbeafe;border-right:2px solid var(--bdr)">
+          <div style="font-weight:800;font-size:11px;color:var(--blue-t)">North Group</div>
+          <div style="font-size:10px;color:var(--txt2)">Daily Call</div>
+          <div style="font-size:9px;color:var(--txt3)">Covers: CHN, CHE, Riverview</div>
+        </td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-04','daily','North')">
+            <option value="">— unassigned —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-05','daily','North')">
+            <option value="">— unassigned —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-06','daily','North')">
+            <option value="">— unassigned —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-07','daily','North')">
+            <option value="">— unassigned —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-08','daily','North')">
+            <option value="">— unassigned —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></td></tr><tr style="border-top:2px solid var(--bdr)">
+        <td style="padding:5px 8px;background:#d1fae5;border-right:2px solid var(--bdr)">
+          <div style="font-weight:800;font-size:11px;color:var(--green-t)">South Group</div>
+          <div style="font-size:10px;color:var(--txt2)">Daily Call</div>
+          <div style="font-size:9px;color:var(--txt3)">Covers: CHS, STFS</div>
+        </td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-04','daily','South')">
+            <option value="">— unassigned —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-05','daily','South')">
+            <option value="">— unassigned —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-06','daily','South')">
+            <option value="">— unassigned —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-07','daily','South')">
+            <option value="">— unassigned —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-08','daily','South')">
+            <option value="">— unassigned —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></td></tr><tr style="border-top:2px solid var(--bdr)">
+        <td style="padding:5px 8px;background:#d1fae5;border-right:2px solid var(--bdr)">
+          <div style="font-weight:800;font-size:11px;color:var(--green-t)">Riverview Group</div>
+          <div style="font-size:10px;color:var(--txt2)">Daily Call</div>
+          <div style="font-size:9px;color:var(--txt3)">Covers: </div>
+        </td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-04','daily','Riverview')">
+            <option value="">— unassigned —</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-05','daily','Riverview')">
+            <option value="">— unassigned —</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-06','daily','Riverview')">
+            <option value="">— unassigned —</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-07','daily','Riverview')">
+            <option value="">— unassigned —</option></select></td><td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top"><select style="font-size:10px;padding:2px 3px;width:100%;margin-top:0" onchange="addIRCallFromGrid(this,'2026-05-08','daily','Riverview')">
+            <option value="">— unassigned —</option></select></td></tr></tbody></table></div><div class="card">
+    <div class="card-title">IR Weekend Call
+      <span style="font-weight:400;font-size:11px;color:var(--txt3);margin-left:8px">Fri 2026-05-08 → Mon 2026-05-11 &nbsp;(one physician per group covers entire weekend)</span>
+    </div>
+    <div class="g2"><div style="border:1px solid var(--bdr);border-radius:var(--rl);padding:12px;background:#eff6ff">
+      <div style="font-weight:800;font-size:13px;color:var(--blue-t);margin-bottom:6px">North Group — IR Weekend Call</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:8px">Covers: Fri 2026-05-08 evening → Mon 2026-05-11 morning</div><div class="fg"><label>Physician</label><select id="irwk-phys-North" style="font-size:12px"><option value="">— select physician —</option><option value="26386">Greene, Ryan</option><option value="26387">Ehrman, Karen</option><option value="26388">Yedlicka, Jospeh</option><option value="26389">Hankins, Bryan</option><option value="26390">Ramaswamy, Raja</option><option value="26391">Schahct, Michael</option><option value="26392">Gupta, Rajat</option><option value="26393">Savader, Scott</option><option value="26500">Thompson, Jospeh</option></select></div>
+      <div class="fg"><label>Site</label><select id="irwk-site-North" style="font-size:12px"><option value="CHN">CHN</option><option value="CHE">CHE</option><option value="Riverview">Riverview</option></select></div>
+      <button class="bt bsm" onclick="addIRWeekend('North','2026-05-08')">Assign Weekend Call</button></div><div style="border:1px solid var(--bdr);border-radius:var(--rl);padding:12px;background:#f0fdf4">
+      <div style="font-weight:800;font-size:13px;color:var(--green-t);margin-bottom:6px">South Group — IR Weekend Call</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:8px">Covers: Fri 2026-05-08 evening → Mon 2026-05-11 morning</div><div class="fg"><label>Physician</label><select id="irwk-phys-South" style="font-size:12px"><option value="">— select physician —</option><option value="200">Boulous, Michael</option><option value="201">Riedinger, Brett</option><option value="202">Bakdash, Kenaz</option><option value="203">Healey, Travis</option><option value="204">Daily, Lucas</option><option value="205">Churchill, Dennis</option><option value="206">Reyes, Ben</option><option value="207">Locascio, Dan</option></select></div>
+      <div class="fg"><label>Site</label><select id="irwk-site-South" style="font-size:12px"><option value="CHS">CHS</option><option value="STFS">STFS</option></select></div>
+      <button class="bt bsm" onclick="addIRWeekend('South','2026-05-08')">Assign Weekend Call</button></div><div style="border:1px solid var(--bdr);border-radius:var(--rl);padding:12px;background:#f0fdf4">
+      <div style="font-weight:800;font-size:13px;color:var(--green-t);margin-bottom:6px">Riverview Group — IR Weekend Call</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:8px">Covers: Fri 2026-05-08 evening → Mon 2026-05-11 morning</div><div class="fg"><label>Physician</label><select id="irwk-phys-Riverview" style="font-size:12px"><option value="">— select physician —</option></select></div>
+      <div class="fg"><label>Site</label><select id="irwk-site-Riverview" style="font-size:12px"></select></div>
+      <button class="bt bsm" onclick="addIRWeekend('Riverview','2026-05-08')">Assign Weekend Call</button></div></div></div><div class="note nw">
+      <strong>85 unscheduled IR physician-day(s)</strong> — these will receive a diagnostic at-home shift when "Fill Unscheduled IR → Home" is run or auto-assign completes.<br>
+      <span style="font-size:11px">Boulous (05-04) · Riedinger (05-04) · Bakdash (05-04) · Healey (05-04) · Daily (05-04) · Churchill (05-04) + 79 more</span>
+    </div></div>
   </div>
 
   <!-- MANUAL ENTRY TAB -->
@@ -2860,7 +2915,7 @@ serve(async (req) =&gt; {
     <div class="ibox">
       <div class="card-title">Add IR Call Entry</div>
       <div class="g3">
-        <div class="fg"><label>Physician</label><select id="ird-phys"></select></div>
+        <div class="fg"><label>Physician</label><select id="ird-phys"><option value="200">Boulous, Michael [South]</option><option value="201">Riedinger, Brett [South]</option><option value="202">Bakdash, Kenaz [South]</option><option value="203">Healey, Travis [South]</option><option value="204">Daily, Lucas [South]</option><option value="205">Churchill, Dennis [South]</option><option value="206">Reyes, Ben [South]</option><option value="207">Locascio, Dan [South]</option><option value="26386">Greene, Ryan [North]</option><option value="26387">Ehrman, Karen [North]</option><option value="26388">Yedlicka, Jospeh [North]</option><option value="26389">Hankins, Bryan [North]</option><option value="26390">Ramaswamy, Raja [North]</option><option value="26391">Schahct, Michael [North]</option><option value="26392">Gupta, Rajat [North]</option><option value="26393">Savader, Scott [North]</option><option value="26500">Thompson, Jospeh [North]</option></select></div>
         <div class="fg"><label>Date</label><input id="ird-date" type="date"></div>
         <div class="fg"><label>IR Group</label><select id="ird-grp"><option value="North">North</option><option value="South">South</option><option value="Riverview">Riverview</option></select></div>
       </div>
@@ -2871,7 +2926,7 @@ serve(async (req) =&gt; {
             <option value="weekend">Weekend Call (Fri→Mon)</option>
           </select>
         </div>
-        <div class="fg"><label>Site</label><select id="ird-site"></select></div>
+        <div class="fg"><label>Site</label><select id="ird-site"><option value="CHN">CHN</option><option value="CHE">CHE</option><option value="CHS">CHS</option><option value="STFS">STFS</option><option value="Riverview">Riverview</option></select></div>
         <div class="fg"><label>Notes</label><input id="ird-notes"></div>
       </div>
       <button class="bp" onclick="addIRCallManual()">Add IR Call</button>
@@ -2926,7 +2981,7 @@ serve(async (req) =&gt; {
   <div class="note ni" style="margin-bottom:8px">
     Distributes configured IR shift slots to available physicians by FTE quota and ~<span id="irsa-anc-target">70</span>% anchor compliance over a 6-month period. On-call physicians are prioritised for a shift on their call day.
   </div>
-  <div id="irsa-box"><div class="note ns">✓ 1 IR shift(s) assigned for H2 2026.</div></div>
+  <div id="irsa-box"><div class="note ns">✓ 994 IR shift(s) assigned for H2 2026.</div></div>
 </div>
 
 <!-- IR AUTO-ASSIGN -->
@@ -3127,7 +3182,7 @@ serve(async (req) =&gt; {
      The 2-pool (DR/IR) legacy model is no longer supported. -->
 
 <!-- IR CALL REBALANCER -->
-<div id="page-ir-rebalance" class="page admin-only on">
+<div id="page-ir-rebalance" class="page admin-only">
   <div class="pg-title">⚖ IR Call Rebalancer</div>
   <div class="pg-sub">Move assignments around to hit 100% FTE for every physician across a 6-month period. For calls: redistributes all Daily and Weekend IR calls. For shifts: redistributes existing procedure shifts or fills all available slots to FTE targets. Select a mode and click Preview.</div>
 
@@ -3158,184 +3213,133 @@ serve(async (req) =&gt; {
   </div>
 
   <div id="irr-current"><div class="card" style="margin-bottom:12px">
-    <div class="card-title">Current Distribution — Jan–Jun 2026
+    <div class="card-title">Current Distribution — Jul–Dec 2026
       <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">6-month period · fills gaps + redistributes · targets = actual slots ÷ group FTE × physician FTE</span>
     </div>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>Physician</th><th>Group</th><th>IR FTE</th>
-      <th>Daily Calls</th><th>Month Target</th><th>Daily %</th>
-      <th>Wknd Calls</th><th>Month Target</th><th>Wknd %</th>
       
+      
+      <th>Current Shifts</th><th>FTE Target</th><th>Current %</th>
     </tr></thead><tbody><tr>
         <td style="font-weight:600">Boulous, Michael</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">0.75</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">11.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">3.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;font-weight:700">1</td>
+        <td style="text-align:center;color:var(--txt3)">54.7</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">2%</td>
       </tr><tr>
         <td style="font-weight:600">Riedinger, Brett</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">1</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">15.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">4.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">72.9</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Bakdash, Kenaz</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">0.75</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">11.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">3.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">54.7</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Healey, Travis</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">1</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">15.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">4.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">72.9</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Daily, Lucas</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">1</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">15.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">4.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">72.9</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Churchill, Dennis</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">1</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">15.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">4.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">72.9</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Reyes, Ben</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">0.5</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">7.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">2.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">36.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Locascio, Dan</td>
         <td><span class="tag tg">South</span></td>
         <td style="text-align:center">0.5</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">7.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
-        <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">2.0</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">36.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Greene, Ryan</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">0.75</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">11.2</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">9%</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">2.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">57.4</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Ehrman, Karen</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">0.75</td>
-        <td style="text-align:center;font-weight:700">2</td>
-          <td style="text-align:center;color:var(--txt3)">11.2</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">18%</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">2.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">35%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+        <td style="text-align:center;color:var(--txt3)">57.4</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Yedlicka, Jospeh</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">1</td>
-        <td style="text-align:center;font-weight:700">2</td>
-          <td style="text-align:center;color:var(--txt3)">14.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">3.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+        <td style="text-align:center;color:var(--txt3)">76.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Hankins, Bryan</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">1</td>
-        <td style="text-align:center;font-weight:700">4</td>
-          <td style="text-align:center;color:var(--txt3)">14.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">3.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">27%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+        <td style="text-align:center;color:var(--txt3)">76.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Ramaswamy, Raja</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">1</td>
-        <td style="text-align:center;font-weight:700">2</td>
-          <td style="text-align:center;color:var(--txt3)">14.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">3.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">76.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Schahct, Michael</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">1</td>
-        <td style="text-align:center;font-weight:700">3</td>
-          <td style="text-align:center;color:var(--txt3)">14.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">20%</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">3.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">76.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Gupta, Rajat</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">0.5</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">7.5</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">13%</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">1.9</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">38.3</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Savader, Scott</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">0.75</td>
-        <td style="text-align:center;font-weight:700">2</td>
-          <td style="text-align:center;color:var(--txt3)">11.2</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">18%</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">2.8</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">35%</td>
+        <td style="text-align:center;font-weight:700">0</td>
+        <td style="text-align:center;color:var(--txt3)">57.4</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr><tr>
         <td style="font-weight:600">Thompson, Jospeh</td>
         <td><span class="tag tb">North</span></td>
         <td style="text-align:center">0.15</td>
-        <td style="text-align:center;font-weight:700">1</td>
-          <td style="text-align:center;color:var(--txt3)">2.2</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">45%</td>
         <td style="text-align:center;font-weight:700">0</td>
-          <td style="text-align:center;color:var(--txt3)">0.6</td>
-          <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
+        <td style="text-align:center;color:var(--txt3)">11.5</td>
+        <td style="text-align:center;font-weight:700;color:var(--amber,#d97706)">0%</td>
       </tr></tbody></table></div></div></div>
   <div id="irr-preview"></div>
 
@@ -4050,7 +4054,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
       <button class="bp bsm" onclick="ghDeployNow()">🚀 Deploy now</button>
     </div>
     <div id="gh-status-msg" style="font-size:12px;min-height:18px"></div>
-    <div id="gh-summary" style="font-size:11px;color:var(--txt3);margin-top:4px">Last deploy: 5/7/2026, 2:12:29 PM · SHA ba692a5</div>
+    <div id="gh-summary" style="font-size:11px;color:var(--txt3);margin-top:4px">Last deploy: 5/7/2026, 2:12:57 PM · SHA 96e723f</div>
   </div>
 
   <!-- Shift Rules & Config -->
