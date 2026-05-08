@@ -1609,6 +1609,7 @@ tbody tr:hover{background:var(--bg3)}
 
       <div class="snav-sect admin-only">Tools &amp; Reports</div>
       <div class="snav-item admin-only" onclick="nav('tools',this)" data-pg="tools">🛠 Tools</div>
+      <div class="snav-item admin-only" onclick="nav('tools',this,'ops')" data-pg="tools" data-tools-tab="ops" style="padding-left:24px;font-size:12px">📜 Audit &amp; logs</div>
       <div class="snav-item admin-only" onclick="nav('fte',this)" data-pg="fte">📊 FTE Monitor</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)" data-pg="anchor-report">📈 Anchor Compliance</div>
       <div class="snav-item admin-only" onclick="nav('publish',this)" data-pg="publish">📤 Publish</div>
@@ -3686,11 +3687,11 @@ WHERE email = 'your-admin@example.com';</pre>
   <!-- Sub-tabs split the 18 cards into focused groups. The active tab is
        persisted to localStorage so navigating away + back lands on the
        same group. CSS does the show/hide via the body's data-tools-tab. -->
-  <div class="tabs" id="tools-subnav" style="margin-bottom:14px;flex-wrap:wrap;gap:0">
-    <div class="tab on" data-tt="sim"     onclick="toolsTab('sim',this)">🔮 Simulators</div>
-    <div class="tab"    data-tt="rules"   onclick="toolsTab('rules',this)">⚙ Rules &amp; config</div>
-    <div class="tab"    data-tt="reports" onclick="toolsTab('reports',this)">📊 Analytics &amp; reports</div>
-    <div class="tab"    data-tt="ops"     onclick="toolsTab('ops',this)">📜 Logs &amp; ops</div>
+  <div class="tabs" id="tools-subnav" style="margin-bottom:14px;flex-wrap:wrap;gap:0;font-size:13px">
+    <div class="tab on" data-tt="sim"     onclick="toolsTab('sim',this)" style="padding:10px 18px">🔮 Simulators <span class="tt-count" style="opacity:.55">(4)</span></div>
+    <div class="tab"    data-tt="rules"   onclick="toolsTab('rules',this)" style="padding:10px 18px">⚙ Rules &amp; config <span class="tt-count" style="opacity:.55">(4)</span></div>
+    <div class="tab"    data-tt="reports" onclick="toolsTab('reports',this)" style="padding:10px 18px">📊 Analytics &amp; reports <span class="tt-count" style="opacity:.55">(5)</span></div>
+    <div class="tab"    data-tt="ops"     onclick="toolsTab('ops',this)" style="padding:10px 18px">📜 Logs &amp; ops <span class="tt-count" style="opacity:.55">(5)</span></div>
   </div>
 
   <!-- ── 1. What-If Simulator ─────────────────────────────────────────── -->
@@ -4085,7 +4086,7 @@ WHERE email = 'your-admin@example.com';</pre>
       detail JSON.
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-      <input id="al-filter" placeholder="Filter (e.g. drShift, swap, irRebalance)…" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--rs-line-strong);border-radius:var(--rs-r-md)" oninput="renderAuditLog()">
+      <input id="al-filter" placeholder="Filter (e.g. drShift, swap, irRebalance)…" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--rs-line-strong);border-radius:var(--rs-r-md)" oninput="_alFilterChanged(this);renderAuditLog()">
       <button class="bsm" onclick="renderAuditLog()">↻ Refresh</button>
       <button class="bsm" onclick="exportAuditLog()">⬇ Export CSV</button>
     </div>
@@ -10192,7 +10193,7 @@ function _toggleMobileNav(force){
   });
 })();
 
-function nav(pg,el){
+function nav(pg, el, subTab){
   // Tapping a nav item on mobile auto-closes the drawer. No-op on desktop.
   _toggleMobileNav(false);
   // Role gate: admin-only pages are inaccessible to non-admins (UI defense in depth; DB access
@@ -10207,6 +10208,12 @@ function nav(pg,el){
     alert('That page is restricted to superusers.');
     return;
   }
+  // Optional sub-tab argument lets a sidebar shortcut land on a specific
+  // section within a multi-tab page. Persist before the render so
+  // _initToolsTab picks it up on the way out.
+  if(subTab && pg === 'tools'){
+    try{ localStorage.setItem('rs.toolsTab', subTab); }catch(_){}
+  }
   // Save the outgoing page's scroll position so we can restore it when
   // the user navigates back. Long pages (Tools, Settings) otherwise jump
   // to the top and cards near the bottom appear "missing".
@@ -10215,23 +10222,14 @@ function nav(pg,el){
     if(prev){
       const id = prev.id.replace('page-', '');
       const sc = prev.parentElement?.scrollTop ?? window.scrollY ?? 0;
-      sessionStorage.setItem('rs.scroll.' + id, String(sc));
+      // Use localStorage so reload preserves position too.
+      localStorage.setItem('rs.scroll.' + id, String(sc));
     }
   }catch(_){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.snav-item').forEach(i=>i.classList.remove('on'));
   if(pageEl) pageEl.classList.add('on');
   if(el) el.classList.add('on');
-  // Restore scroll position for the incoming page (if we saved one).
-  // Defer past the render call below so the DOM has its real height.
-  setTimeout(() => {
-    try{
-      const saved = Number(sessionStorage.getItem('rs.scroll.' + pg) || 0);
-      const scroller = pageEl?.parentElement;
-      if(scroller && saved > 0){ scroller.scrollTop = saved; }
-      else if(saved === 0 && scroller){ scroller.scrollTop = 0; }
-    }catch(_){}
-  }, 60);
   // Ensure month inputs on this page have a value
   const now=new Date();
   const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
@@ -10256,6 +10254,21 @@ function nav(pg,el){
     'tools':renderTools,
   };
   if(fns[pg]) fns[pg]();
+  // Restore scroll AFTER the render — `requestAnimationFrame` waits for
+  // the browser to compute layout so scrollHeight is final. Two rAFs
+  // because some renders trigger an additional layout pass via image /
+  // font load that completes on the next frame.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    try{
+      const saved = Number(localStorage.getItem('rs.scroll.' + pg) || 0);
+      const scroller = pageEl?.parentElement;
+      if(!scroller) return;
+      // Clamp to the actual scrollable height so we don't ask the
+      // browser to scroll past the bottom (silently fails + looks dead).
+      const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = Math.min(saved, max);
+    }catch(_){}
+  }));
 }
 
 /* ─── DASHBOARD ─── */
@@ -26365,28 +26378,59 @@ function _wiToggleFields(){
 // ── Tools page sub-tab control ─────────────────────────────────────────
 // 18 cards split into 4 focused groups: Simulators, Rules, Reports, Ops.
 // The active group is persisted in localStorage so navigating away + back
-// lands on the same view. Default = 'sim'. Each card has data-tools-tab
-// matching one of these keys; CSS hides everything not in the active set.
-function toolsTab(name, el){
+// lands on the same view. Each card has data-tools-tab matching one of
+// these keys; CSS hides everything not in the active set.
+//
+// Per-tab scroll position is also tracked so jumping between sub-tabs
+// doesn't lose where you were within the previous one.
+//
+// `_skipScroll` is set when called from `_initToolsTab` (page mount path)
+// so nav()'s page-level scroll restore wins; only user-driven sub-tab
+// switches reposition the scroller.
+function toolsTab(name, el, _skipScroll){
   const VALID = ['sim', 'rules', 'reports', 'ops'];
   if(!VALID.includes(name)) name = 'sim';
   const page = document.getElementById('page-tools');
+  // Save scroll for the OUTGOING sub-tab before swapping. Only meaningful
+  // when the user clicks a chip — on mount, prev is the default 'sim' and
+  // scroller is at 0 anyway.
+  if(!_skipScroll){
+    try{
+      const prev = page?.getAttribute('data-active-tab');
+      if(prev){
+        const sc = page?.parentElement?.scrollTop ?? 0;
+        localStorage.setItem('rs.scroll.tools.' + prev, String(sc));
+      }
+    }catch(_){}
+  }
   if(page) page.setAttribute('data-active-tab', name);
   // Highlight the active chip in the strip.
   document.querySelectorAll('#tools-subnav .tab').forEach(t => {
     t.classList.toggle('on', t.getAttribute('data-tt') === name);
   });
   try{ localStorage.setItem('rs.toolsTab', name); }catch(_){}
-  // Scroll the page back to the top of the tools content so the new
-  // group's first card is fully visible (avoids the "looks empty"
-  // illusion if the previous group was scrolled to its bottom).
-  page?.parentElement?.scrollTo({ top: 0, behavior: 'smooth' });
+  if(_skipScroll) return; // mount path → nav() handles scroll
+  // Restore scroll for the incoming sub-tab (or 0 if first visit).
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    try{
+      const saved = Number(localStorage.getItem('rs.scroll.tools.' + name) || 0);
+      const scroller = page?.parentElement;
+      if(!scroller) return;
+      const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = Math.min(saved, max);
+    }catch(_){}
+  }));
 }
 function _initToolsTab(){
   let saved = '';
   try{ saved = localStorage.getItem('rs.toolsTab') || ''; }catch(_){}
   if(!saved) saved = 'sim';
-  toolsTab(saved);
+  toolsTab(saved, null, /* _skipScroll */ true);
+}
+// Persist the audit-log filter on every keystroke so reload + nav-away
+// don't lose the user's in-progress search.
+function _alFilterChanged(el){
+  try{ localStorage.setItem('rs.alFilter', el?.value || ''); }catch(_){}
 }
 
 // ── Tools: What-If simulator runner ──────────────────────────────────
@@ -26670,7 +26714,12 @@ function runCrossCoverage(){
 function renderAuditLog(){
   const el = document.getElementById('al-result');
   if(!el) return;
-  const filter = (document.getElementById('al-filter')?.value || '').toLowerCase().trim();
+  // Restore persisted filter (set on every keystroke via _alFilterChanged).
+  const filterInput = document.getElementById('al-filter');
+  if(filterInput && !filterInput.value){
+    try{ filterInput.value = localStorage.getItem('rs.alFilter') || ''; }catch(_){}
+  }
+  const filter = (filterInput?.value || '').toLowerCase().trim();
   let rows = (S.auditLog || []).slice().reverse();
   if(filter) rows = rows.filter(r => (r.action || '').toLowerCase().includes(filter));
   if(!rows.length){
