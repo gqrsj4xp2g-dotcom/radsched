@@ -4330,19 +4330,36 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         <div class="tab" onclick="vacImportTab('standard',this)">Standard Format</div>
       </div>
       <div id="vimt-picker">
-        <div class="note ni" style="font-size:11px;margin-bottom:8px">Import from the <strong>vacation pick calendar Excel file</strong> (e.g. 2026_Vacation_Pick-_Published.xlsx). Reads the <em>Calendar View</em> sheet and maps physician last names to your roster. Vacation picks become Vacation records. 2nd/3rd shift entries and Off entries are also imported.</div>
-        <div class="g2" style="margin-bottom:8px">
+        <div class="note ni" style="font-size:11.5px;margin-bottom:10px;line-height:1.55">
+          Import from the <strong>vacation pick calendar Excel file</strong>
+          (e.g. <code>2026 Vacation Pick - Published.xlsx</code>). The reader
+          finds the <em>Calendar View</em> tab automatically, walks each
+          week's two-column block, and categorizes every entry it sees.
+          Names are matched to your physician roster with a fuzzy search
+          (handles typos like "Mohtshemi" → "Mohtashemi" and hyphenated
+          surnames like "Mossa-Basha"). Anything we can't match cleanly is
+          surfaced for manual mapping before you commit.
+        </div>
+        <div class="g2" style="margin-bottom:10px">
           <div class="fg"><label>Vacation Type</label><select id="xl-pick-type"><option value="Vacation">Vacation</option><option value="Vacation Sold Back">Vacation Sold Back</option></select></div>
           <div class="fg"><label>Week length (days)</label><input id="xl-pick-days" type="number" value="5" min="1" max="7" style="width:80px"><span style="font-size:11px;color:var(--txt3);margin-left:6px">5 = Mon–Fri</span></div>
         </div>
+        <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Import categories</div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;font-size:12.5px">
+          <label class="chk"><input type="checkbox" id="xl-imp-vac" checked> Vacation picks ("Lastname - 1")</label>
+          <label class="chk"><input type="checkbox" id="xl-imp-off" checked> Off entries ("Off - Lastname")</label>
+          <label class="chk"><input type="checkbox" id="xl-imp-bb" checked> Backup picks ("Lastname- BB N")</label>
+          <label class="chk"><input type="checkbox" id="xl-imp-s2" checked> 2nd-shift assignments</label>
+          <label class="chk"><input type="checkbox" id="xl-imp-s3" checked> 3rd-shift assignments</label>
+        </div>
         <label style="display:inline-block;cursor:pointer;margin-bottom:8px">
-          <div class="bp" style="display:inline-block;padding:7px 14px">📂 Choose Vacation Pick Excel</div>
+          <div class="bp" style="display:inline-block;padding:8px 16px">📂 Choose Vacation Pick Excel</div>
           <input type="file" id="xl-pick-file" accept=".xlsx,.xls" style="display:none" onchange="previewPickImport(this)">
         </label>
         <div id="xl-pick-preview"></div>
-        <div id="xl-pick-actions" style="display:none;margin-top:8px">
-          <button class="bg" onclick="applyPickImport()">✓ Import Matched Vacations</button>
-          <span id="xl-pick-count" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+        <div id="xl-pick-actions" style="display:none;margin-top:10px">
+          <button class="bp" onclick="applyPickImport()">✓ Import vacations &amp; shifts</button>
+          <span id="xl-pick-count" style="font-size:11.5px;color:var(--txt3);margin-left:8px"></span>
         </div>
       </div>
       <div id="vimt-standard" style="display:none">
@@ -31137,205 +31154,536 @@ function vacImportTab(t,el){
   if(el)el.classList.add('on');
 }
 
-let _xlPickData=[];
+let _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], nameMap: {} };
 
 function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
-  const file=input.files[0];if(!file)return;
-  const prev=document.getElementById('xl-pick-preview');
-  prev.innerHTML='<div style="color:var(--txt2);font-size:12px">Reading file...</div>';
-  if(!window.XLSX){prev.innerHTML='<div class="note ne">SheetJS not loaded.</div>';return;}
-  const reader=new FileReader();
-  reader.onload=e=>{
+  const file = input.files[0]; if(!file) return;
+  const prev = document.getElementById('xl-pick-preview');
+  prev.innerHTML = '<div style="color:var(--txt2);font-size:12px">Reading file…</div>';
+  if(!window.XLSX){ prev.innerHTML = '<div class="note ne">SheetJS not loaded.</div>'; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
     try{
-      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
-      // Look for "Calendar View" sheet first, else use first sheet
-      const sheetName=wb.SheetNames.find(n=>n.toLowerCase().includes('calendar'))||wb.SheetNames[0];
-      const ws=wb.Sheets[sheetName];
-      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
-      _parsePickSheet(rows,prev);
+      // Read with raw cells AND cellDates:true so we can fall back to either
+      // a Date object OR the underlying serial number when the formatter
+      // doesn't apply (some cells have a number style instead of date).
+      const wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
+      const sheetName = wb.SheetNames.find(n => /calendar/i.test(n)) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      // raw:true preserves numbers / Dates; we do our own coercion. Empty cells become null,
+      // not undefined, so column indexes line up across rows.
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+      _parsePickWorkbook(rows, prev, sheetName);
     }catch(err){
-      prev.innerHTML=`<div class="note ne">Error reading file: ${escHtml(err.message||String(err))}</div>`;
+      prev.innerHTML = `<div class="note ne">Error reading file: ${escHtml(err.message || String(err))}</div>`;
     }
   };
   reader.readAsArrayBuffer(file);
 }
 
-function _parsePickSheet(rows,prev){
-  // Column layout: cols 1,3,5,7 (0-indexed) = week date headers / vacation names
-  //                cols 2,4,6,8 = 2nd shift / 3rd shift / Off entries
-  // Some months have a 5th week at col 9 (side entries at col 10)
-  const MAIN_COLS=[1,3,5,7,9];
-  const SIDE_COLS=[2,4,6,8,10];
-  const weeks=[];
-  let curDates=null,curRows=[];
-
-  function _isDateStr(v){return v&&/^\d{4}-\d{2}-\d{2}/.test(String(v));}
-  function _parseName(v){
-    if(!v||typeof v!=='string')return null;
-    const s=v.trim();
-    if(!s||s.match(/^\d+$/)|| s.toLowerCase().includes('picks max')||
-       s.toLowerCase().includes('closed')||s.toLowerCase().includes('indicates'))return null;
-    // Remove pick number suffix: "Fisher - 1", "Brown- BB 1", "Mossa-Basha- 9", "Dorantes- BB Extra"
-    // Strip trailing "- [optional BB] [number or Extra]" pattern
-    const cleaned=s.replace(/\s*-\s*(BB\s*)?(\d+|Extra)\b.*$/i,'').trim();
-    return cleaned||null;
+// ── Robust Excel value → ISO date converter ──────────────────────────────
+// Handles every form a "Date" cell might come back as:
+//   • Date object (cellDates:true succeeded)
+//   • Excel serial number (plain integer/float between ~10000 and ~80000)
+//   • ISO string "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS"
+//   • US-style string "MM/DD/YYYY" or "M/D/YYYY"
+// Returns the ISO local date string or null if the cell isn't date-like.
+// Used by every importer; preserves intent ("read what the human meant")
+// without depending on SheetJS's auto-formatting (which silently fails on
+// cells with non-date number styles).
+function _xlsxDateToISO(v){
+  if(v == null) return null;
+  // Already a Date
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return fmtDate(v);
   }
+  // Excel serial number — days since 1899-12-30 (Excel's bogus epoch).
+  // We bound to a reasonable range so we don't mis-classify e.g. a phone
+  // number as a date. 10000 ≈ 1927; 80000 ≈ 2119.
+  if(typeof v === 'number' && v >= 10000 && v <= 80000){
+    const utcMs = (v - 25569) * 86400000;
+    const d = new Date(utcMs);
+    return fmtDate(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  }
+  if(typeof v !== 'string') return null;
+  const s = v.trim();
+  // ISO
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // US-style M/D/YYYY (with optional 4-digit year)
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s);
+  if(m){
+    let yr = +m[3]; if(yr < 100) yr += 2000;
+    return `${yr}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  }
+  // String that's just an Excel serial (rare but seen with raw:false)
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n = parseFloat(s);
+    if(n >= 10000 && n <= 80000) return _xlsxDateToISO(n);
+  }
+  return null;
+}
 
-  for(const row of rows){
-    // Check if this row has date headers in main cols
-    const datesInRow=MAIN_COLS.map(c=>{
-      const v=row[c];
-      if(!v)return null;
-      if(v instanceof Date||_isDateStr(v)){
-        const d=_isDateStr(v)?v:new Date(v).toISOString().slice(0,10);
-        return d.slice(0,10);
+// ── Robust Vacation-Pick workbook parser ────────────────────────────────
+// The sheet uses a 2-column-per-week layout. The PRIMARY column carries
+// vacation picks ("Fisher - 1", "Brown- BB 1", "Dorantes- BB Extra") and
+// the SECONDARY column carries shift overlays ("2nd shift - X",
+// "3rd shift- X") plus additional vacation entries ("Off - X").
+//
+// The header row has a date in each PRIMARY column; the SECONDARY columns
+// in that same row are blank (or hold a label like "16 picks max"). The
+// parser:
+//   1. Auto-detects which columns are PRIMARY by finding any row with
+//      multiple date-like values; the columns immediately to the right
+//      become SECONDARY automatically.
+//   2. Reads top-to-bottom from each header row until it hits the next
+//      header row (or end of sheet); collects all entries per category.
+//   3. Categorizes every name-bearing string by prefix: "vac-pick" /
+//      "off" / "2nd-shift" / "3rd-shift" / "bb-pick".
+//   4. Matches name → physician via fuzzy last-name search (Levenshtein
+//      tolerant). Unmatched names are surfaced for manual mapping.
+//   5. Emits structured records: one vacation per pick / Off / BB-pick,
+//      one DR shift per weekday in the week for 2nd / 3rd shifts.
+function _parsePickWorkbook(rows, prev, sheetName){
+  // ── Step 1. Find the header rows ────────────────────────────────────
+  // A header row is any row with ≥ 2 cells that resolve to a date AND
+  // those date-cells are at LEAST 5 days apart (so we don't false-match
+  // a single date in the middle of a pickers list).
+  const headerRows = [];
+  for(let r = 0; r < rows.length; r++){
+    const row = rows[r] || [];
+    const datedCols = [];
+    for(let c = 0; c < row.length; c++){
+      const iso = _xlsxDateToISO(row[c]);
+      if(iso) datedCols.push({col: c, date: iso});
+    }
+    if(datedCols.length < 2) continue;
+    // Sort by column, verify 5+ day spacing between adjacent
+    datedCols.sort((a,b) => a.col - b.col);
+    let spaced = true;
+    for(let i = 1; i < datedCols.length; i++){
+      if(_daysBetween(datedCols[i-1].date, datedCols[i].date) < 5){ spaced = false; break; }
+    }
+    if(spaced) headerRows.push({row: r, weeks: datedCols});
+  }
+  if(!headerRows.length){
+    prev.innerHTML = '<div class="note ne">Could not find any week-header rows. Make sure the sheet name (currently <strong>'
+      + escHtml(sheetName) + '</strong>) is the calendar layout, not the pick-order tab.</div>';
+    return;
+  }
+  // ── Step 2. Walk each header → next header, collect cells per week ──
+  const weeks = [];
+  for(let h = 0; h < headerRows.length; h++){
+    const hdr = headerRows[h];
+    const startR = hdr.row + 1;
+    const endR = (h + 1 < headerRows.length) ? headerRows[h + 1].row : rows.length;
+    hdr.weeks.forEach(w => {
+      const mainCol = w.col;
+      // Secondary column = the next non-date-bearing column to the right.
+      // For most sheets that's mainCol+1; we walk forward to skip any
+      // accidental column gap.
+      const sideCol = mainCol + 1;
+      const week = {
+        weekStart: w.date,
+        vacation: [],   // pick numbers like "Fisher - 1"
+        bbPicks:  [],   // "Brown- BB 1", "Dorantes- BB Extra"
+        off:      [],   // "Off - X"
+        shift2:   [],   // "2nd shift - X"
+        shift3:   [],   // "3rd shift- X"
+      };
+      for(let r = startR; r < endR; r++){
+        const row = rows[r] || [];
+        _xlsxClassifyCell(row[mainCol], week, 'main');
+        _xlsxClassifyCell(row[sideCol], week, 'side');
       }
-      return null;
+      weeks.push(week);
     });
-
-    if(datesInRow.some(d=>d)){
-      // Save previous block
-      if(curDates&&curRows.length){
-        curDates.forEach((wd,ci)=>{
-          if(!wd)return;
-          const mc=MAIN_COLS[ci],sc=SIDE_COLS[ci];
-          const vac=[],shift2=[],shift3=[],off=[];
-          for(const r of curRows){
-            const mv=r[mc],sv=r[sc];
-            const name=_parseName(mv);
-            if(name)vac.push(name);
-            if(sv&&typeof sv==='string'){
-              const s=sv.trim();
-              if(s.match(/2nd\s*shift/i)){
-                const n=s.replace(/2nd\s*shift\s*[-–]\s*/i,'').trim();
-                if(n)shift2.push(n);
-              } else if(s.match(/3rd\s*shift/i)){
-                const n=s.replace(/3rd\s*shift\s*[-–]\s*/i,'').trim();
-                if(n)shift3.push(n);
-              } else if(s.match(/^off\s*[-–]/i)){
-                const n=s.replace(/^off\s*[-–]\s*/i,'').trim();
-                if(n)off.push(n);
-              }
-            }
-          }
-          weeks.push({weekStart:wd,vacation:vac,shift2,shift3,off});
+  }
+  // ── Step 3. Match every collected name to a physician ────────────────
+  // Build a master roster of unique names → all variants seen.
+  const allNames = new Set();
+  weeks.forEach(w => {
+    w.vacation.concat(w.bbPicks, w.off, w.shift2, w.shift3).forEach(e => allNames.add(e.name));
+  });
+  const nameMap = {}; // raw name → {physId, score, status: 'auto'|'unmatched'}
+  allNames.forEach(name => {
+    const match = _matchPhysicianFuzzy(name);
+    nameMap[name] = match
+      ? { physId: match.phys.id, score: match.score, status: match.score >= 0.9 ? 'auto' : 'low' }
+      : { physId: null, score: 0, status: 'unmatched' };
+  });
+  // ── Step 4. Build output records ─────────────────────────────────────
+  const days = Math.max(1, Math.min(7, parseInt(document.getElementById('xl-pick-days')?.value) || 5));
+  const vacType = document.getElementById('xl-pick-type')?.value || 'Vacation';
+  const wantVac    = document.getElementById('xl-imp-vac')?.checked    !== false;
+  const wantOff    = document.getElementById('xl-imp-off')?.checked    !== false;
+  const wantBB     = document.getElementById('xl-imp-bb')?.checked     !== false;
+  const wantS2     = document.getElementById('xl-imp-s2')?.checked     !== false;
+  const wantS3     = document.getElementById('xl-imp-s3')?.checked     !== false;
+  const vacRecs = []; // {physId, start, end, type, notes}
+  const shiftRecs = []; // {physId, date, shift:'2nd'|'3rd', site, notes}
+  weeks.forEach(w => {
+    const start = w.weekStart;
+    const end = addDays(start, days - 1);
+    const mkVac = (entries, label) => entries.forEach(e => {
+      const m = nameMap[e.name];
+      if(!m || !m.physId) return;
+      vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
+    });
+    if(wantVac) mkVac(w.vacation, 'pick');
+    if(wantOff) mkVac(w.off,      'Off');
+    if(wantBB)  mkVac(w.bbPicks,  'BB');
+    // Shifts: each 2nd/3rd shift listed in the SECONDARY column applies to
+    // ALL weekdays of that week. The app's policy treats 2nd/3rd as
+    // home-only, so site is forced to "At Home / Remote".
+    const mkShift = (entries, shiftKind) => entries.forEach(e => {
+      const m = nameMap[e.name];
+      if(!m || !m.physId) return;
+      // Generate one entry per weekday Mon-Fri (5 days from start). If
+      // the user picked a longer week length, follow that.
+      for(let i = 0; i < days; i++){
+        const ds = addDays(start, i);
+        const dow = parseDateLocal(ds).getDay();
+        if(dow === 0 || dow === 6) continue; // skip weekends
+        shiftRecs.push({
+          physId: m.physId,
+          date: ds,
+          shift: shiftKind,
+          site: 'At Home / Remote',
+          sub: '',
+          notes: `Imported: ${e.raw}`,
         });
       }
-      curDates=datesInRow;
-      curRows=[];
-    } else if(curDates){
-      curRows.push(row);
+    });
+    if(wantS2) mkShift(w.shift2, '2nd');
+    if(wantS3) mkShift(w.shift3, '3rd');
+  });
+  // De-duplicate against existing data (don't propose duplicates).
+  const dedupVac = vacRecs.filter(v =>
+    !(S.vacations || []).some(ex => ex.physId === v.physId && ex.start === v.start)
+  );
+  const dedupShifts = shiftRecs.filter(s =>
+    !(S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)
+  );
+  const unmatched = Object.entries(nameMap).filter(([_, m]) => m.status === 'unmatched').map(([n]) => n);
+  const lowConf = Object.entries(nameMap).filter(([_, m]) => m.status === 'low').map(([n,m]) => ({name: n, suggested: _physById(m.physId)?.last, score: m.score}));
+  _xlPickData = { vacations: dedupVac, shifts: dedupShifts, unmatched, allWeeks: weeks, nameMap, lowConf };
+  _renderPickPreview(prev);
+}
+
+// ── Cell classifier ───────────────────────────────────────────────────
+// Categorize a single cell's string content. The PRIMARY column normally
+// holds vacation picks ("Lastname - Number" or "Lastname- BB Number");
+// the SECONDARY column holds shift overlays and Off entries. But
+// we accept either form in either column because some pick sheets blur
+// the convention. Returns nothing — mutates the `week` accumulator.
+function _xlsxClassifyCell(v, week, side){
+  if(v == null) return;
+  if(typeof v !== 'string'){
+    // Numbers in a name column are leftover row labels (1, 2, 3 in column A).
+    // Skip silently.
+    return;
+  }
+  const s = v.trim();
+  if(!s) return;
+  const lower = s.toLowerCase();
+  // Junk strings to ignore outright
+  if(/^\d+$/.test(s)) return; // bare number
+  if(lower.includes('picks max')) return;
+  if(lower.includes('vacation pick')) return;
+  if(lower === 'closed' || lower.includes('indicates')) return;
+  // Section-closure markers ("Mammo Closed", "IR Closed", "Body Closed",
+  // "Neuro Closed", etc.) are legitimate calendar entries but they don't
+  // refer to a specific physician — they mean the section/modality is
+  // unstaffed that week. Skip them silently rather than fail to match.
+  if(/\bclosed\b/i.test(lower)) return;
+  // Common header / annotation strings that aren't physician entries.
+  if(/^(week|day|date|holiday|note[s]?|comment[s]?)\s*[:\-]/i.test(lower)) return;
+  // 2nd shift — separator can be hyphen, en-dash, em-dash, or hyphen-space
+  let m = /^2(?:nd)?\s*shift\s*[-–—]\s*(.*)$/i.exec(s);
+  if(m){ const name = m[1].trim(); if(name) week.shift2.push({raw:s, name}); return; }
+  m = /^3(?:rd)?\s*shift\s*[-–—]\s*(.*)$/i.exec(s);
+  if(m){ const name = m[1].trim(); if(name) week.shift3.push({raw:s, name}); return; }
+  // Off - Lastname (vacation overflow / non-pick absence)
+  m = /^off\s*[-–—]\s*(.*)$/i.exec(s);
+  if(m){ const name = m[1].trim(); if(name) week.off.push({raw:s, name}); return; }
+  // Backup pick: "Lastname- BB N" / "Lastname - BB Extra"
+  m = /^(.+?)\s*[-–—]\s*BB\s*(?:\d+|Extra)\b/i.exec(s);
+  if(m){ const name = m[1].trim(); if(name) week.bbPicks.push({raw:s, name}); return; }
+  // Plain vacation pick: "Lastname - Number" / "Mossa-Basha- 9" (note the
+  // hyphen INSIDE the last name). We require the SUFFIX to be a number,
+  // and we strip from the LAST hyphen-followed-by-number, not the first.
+  m = /^(.+?)\s*[-–—]\s*\d+\s*$/.exec(s);
+  if(m){ const name = m[1].trim(); if(name) week.vacation.push({raw:s, name}); return; }
+  // Last-resort: a bare last-name token. Some calendar cells have just
+  // "Fisher" with no pick number. Treat as a vacation pick.
+  if(/^[A-Za-z][A-Za-z\-\s']{1,40}$/.test(s)){
+    week.vacation.push({raw:s, name:s});
+  }
+}
+
+// ── Fuzzy physician matcher ──────────────────────────────────────────
+// Returns {phys, score} where score is in [0,1]. Uses:
+//   1. Exact (case-insensitive) last-name match → 1.0
+//   2. Punctuation-stripped match → 0.95
+//   3. Substring containment → 0.85
+//   4. Levenshtein within 2 edits on a name ≥ 4 chars → 0.7..0.9 by distance
+function _matchPhysicianFuzzy(rawName){
+  if(!rawName) return null;
+  const target = String(rawName).trim().toLowerCase();
+  if(!target) return null;
+  const targetClean = target.replace(/[-\s'.]/g, '');
+  const phys = (S.physicians || []);
+  if(!phys.length) return null;
+  // Pass 1: exact last-name
+  for(const p of phys){
+    const last = (p.last || '').toLowerCase();
+    if(last === target) return { phys: p, score: 1.0 };
+  }
+  // Pass 2: punctuation-stripped
+  for(const p of phys){
+    const last = (p.last || '').toLowerCase().replace(/[-\s'.]/g, '');
+    if(last && last === targetClean) return { phys: p, score: 0.95 };
+  }
+  // Pass 3: substring (handles "Mossa" matching "Mossa-Basha", or
+  // "Kim Dorantes" matching either "Kim" or "Dorantes")
+  for(const p of phys){
+    const last = (p.last || '').toLowerCase();
+    if(!last) continue;
+    if(last.startsWith(target) || target.startsWith(last)) return { phys: p, score: 0.85 };
+    if(last.includes(target) || target.includes(last)) return { phys: p, score: 0.80 };
+  }
+  // Pass 4: Levenshtein on long-enough names (catches typos: Mohtshemi vs Mohtashemi)
+  if(target.length >= 4){
+    let bestD = Infinity, bestP = null;
+    for(const p of phys){
+      const last = (p.last || '').toLowerCase();
+      if(Math.abs(last.length - target.length) > 2) continue;
+      const d = _levenshtein(last, target);
+      if(d < bestD){ bestD = d; bestP = p; }
+    }
+    if(bestP && bestD <= 2){
+      const score = bestD === 0 ? 1.0 : bestD === 1 ? 0.85 : 0.7;
+      return { phys: bestP, score };
     }
   }
-  // Save last block
-  if(curDates&&curRows.length){
-    curDates.forEach((wd,ci)=>{
-      if(!wd)return;
-      const mc=MAIN_COLS[ci],sc=SIDE_COLS[ci];
-      const vac=[],shift2=[],shift3=[],off=[];
-      for(const r of curRows){
-        const mv=r[mc],sv=r[sc];
-        const name=_parseName(mv);
-        if(name)vac.push(name);
-        if(sv&&typeof sv==='string'){
-          const s=sv.trim();
-          if(s.match(/2nd\s*shift/i)){const n=s.replace(/2nd\s*shift\s*[-–]\s*/i,'').trim();if(n)shift2.push(n);}
-          else if(s.match(/3rd\s*shift/i)){const n=s.replace(/3rd\s*shift\s*[-–]\s*/i,'').trim();if(n)shift3.push(n);}
-          else if(s.match(/^off\s*[-–]/i)){const n=s.replace(/^off\s*[-–]\s*/i,'').trim();if(n)off.push(n);}
-        }
+  return null;
+}
+
+// Iterative Levenshtein — O(n*m) time, O(min(n,m)) space.
+function _levenshtein(a, b){
+  if(a === b) return 0;
+  if(!a.length) return b.length;
+  if(!b.length) return a.length;
+  if(a.length > b.length){ const t = a; a = b; b = t; }
+  const prev = new Array(a.length + 1);
+  for(let i = 0; i <= a.length; i++) prev[i] = i;
+  for(let j = 1; j <= b.length; j++){
+    let curr = j;
+    for(let i = 1; i <= a.length; i++){
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      const newVal = Math.min(curr + 1, prev[i] + 1, prev[i-1] + cost);
+      prev[i-1] = curr;
+      curr = newVal;
+    }
+    prev[a.length] = curr;
+  }
+  return prev[a.length];
+}
+
+// ── Render preview with categorized counts + manual mapping panel ────
+function _renderPickPreview(prev){
+  const d = _xlPickData || {};
+  const vac = d.vacations || [];
+  const sh = d.shifts || [];
+  const um = d.unmatched || [];
+  const low = d.lowConf || [];
+  const totalWeeks = (d.allWeeks || []).length;
+  let html = `
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-bottom:10px;align-items:center">
+      <strong>${totalWeeks} week${totalWeeks===1?'':'s'} parsed</strong>
+      <span><span class="tag ta">${vac.length}</span> vacations to import</span>
+      <span><span class="tag tb">${sh.filter(s=>s.shift==='2nd').length}</span> 2nd-shift entries</span>
+      <span><span class="tag tt">${sh.filter(s=>s.shift==='3rd').length}</span> 3rd-shift entries</span>
+      ${um.length ? `<span style="color:var(--amber,#d97706)"><strong>${um.length}</strong> unmatched name${um.length===1?'':'s'}</span>` : ''}
+      ${low.length ? `<span style="color:var(--amber,#d97706)"><strong>${low.length}</strong> low-confidence match${low.length===1?'':'es'}</span>` : ''}
+    </div>`;
+  if(vac.length){
+    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Vacations preview (${vac.length})</summary>
+      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Start</th><th>End</th><th>Type</th></tr></thead><tbody>
+      ${vac.slice(0,80).map(m => `<tr>
+        <td>${pnameHtml(m.physId)}</td>
+        <td>${escHtml(m.start)}</td>
+        <td>${escHtml(m.end)}</td>
+        <td><span class="tag ta">${escHtml(m.type)}</span></td>
+      </tr>`).join('')}
+      ${vac.length > 80 ? `<tr><td colspan="4" style="color:var(--rs-ink-3)">… and ${vac.length - 80} more</td></tr>` : ''}
+      </tbody></table></div></details>`;
+  }
+  if(sh.length){
+    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ 2nd / 3rd shift preview (${sh.length})</summary>
+      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th></tr></thead><tbody>
+      ${sh.slice(0,80).map(s => `<tr>
+        <td>${pnameHtml(s.physId)}</td>
+        <td>${escHtml(s.date)}</td>
+        <td><span class="tag ${s.shift==='2nd'?'tb':'tt'}">${escHtml(s.shift)}</span></td>
+        <td style="color:var(--rs-ink-2)">${escHtml(s.site)}</td>
+      </tr>`).join('')}
+      ${sh.length > 80 ? `<tr><td colspan="4" style="color:var(--rs-ink-3)">… and ${sh.length - 80} more</td></tr>` : ''}
+      </tbody></table></div></details>`;
+  }
+  if(low.length){
+    html += `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--amber,#d97706)">⚠ Low-confidence matches (${low.length}) — verify before importing</summary>
+      <div style="overflow-x:auto;max-height:200px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>From file</th><th>Matched to</th><th>Confidence</th><th>Override</th></tr></thead><tbody>
+      ${low.map(l => `<tr>
+        <td>${escHtml(l.name)}</td>
+        <td>${escHtml(l.suggested || '—')}</td>
+        <td>${Math.round(l.score * 100)}%</td>
+        <td>${_pickMappingSelect(l.name, _xlPickData.nameMap[l.name]?.physId)}</td>
+      </tr>`).join('')}
+      </tbody></table></div></details>`;
+  }
+  if(um.length){
+    html += `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--red-t)">⚠ Unmatched names (${um.length}) — pick a physician for each you want included</summary>
+      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>From file</th><th>Map to physician</th></tr></thead><tbody>
+      ${um.map(n => `<tr>
+        <td>${escHtml(n)}</td>
+        <td>${_pickMappingSelect(n)}</td>
+      </tr>`).join('')}
+      </tbody></table></div>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin-top:6px">
+        Pick a physician then click <strong>Re-match</strong> to fold the manual mappings into the import preview.
+      </div>
+      <button class="bsm" style="margin-top:6px" onclick="rematchPickImport()">↻ Re-match with manual mappings</button>
+      </details>`;
+  }
+  prev.innerHTML = html;
+  const actions = document.getElementById('xl-pick-actions');
+  const cnt = document.getElementById('xl-pick-count');
+  const total = vac.length + sh.length;
+  if(actions) actions.style.display = total ? 'block' : 'none';
+  if(cnt) cnt.textContent = `${vac.length} vacation entries · ${sh.length} shift entries ready`;
+  logImport(`Pick sheet parsed: ${totalWeeks} weeks, ${vac.length} vacations, ${sh.length} shifts, ${um.length} unmatched`);
+}
+
+function _pickMappingSelect(rawName, currentId){
+  const opts = (S.physicians || []).slice().sort((a,b) => (a.last||'').localeCompare(b.last||''))
+    .map(p => `<option value="${p.id}"${p.id === currentId ? ' selected' : ''}>${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  return `<select onchange="_pickSetMapping(${JSON.stringify(rawName).replace(/"/g,'&quot;')}, this.value)" style="font-size:11.5px;padding:3px 6px;max-width:200px">
+    <option value="">— skip —</option>
+    ${opts}
+  </select>`;
+}
+
+function _pickSetMapping(rawName, physIdStr){
+  if(!_xlPickData.nameMap) return;
+  const physId = parseInt(physIdStr, 10) || null;
+  _xlPickData.nameMap[rawName] = { physId, score: physId ? 1.0 : 0, status: physId ? 'manual' : 'unmatched' };
+}
+
+function rematchPickImport(){
+  // Rebuild output records from the cached weeks + updated nameMap.
+  if(!_xlPickData.allWeeks) return;
+  const fakeRows = []; // not used — but the public entry point reads form state
+  // Simpler path: re-run the latter half of _parsePickWorkbook over the
+  // existing weeks. We just rebuild vacRecs / shiftRecs without re-parsing.
+  const days = Math.max(1, Math.min(7, parseInt(document.getElementById('xl-pick-days')?.value) || 5));
+  const vacType = document.getElementById('xl-pick-type')?.value || 'Vacation';
+  const wantVac = document.getElementById('xl-imp-vac')?.checked !== false;
+  const wantOff = document.getElementById('xl-imp-off')?.checked !== false;
+  const wantBB  = document.getElementById('xl-imp-bb')?.checked !== false;
+  const wantS2  = document.getElementById('xl-imp-s2')?.checked !== false;
+  const wantS3  = document.getElementById('xl-imp-s3')?.checked !== false;
+  const nameMap = _xlPickData.nameMap || {};
+  const vacRecs = [], shiftRecs = [];
+  (_xlPickData.allWeeks || []).forEach(w => {
+    const start = w.weekStart, end = addDays(start, days - 1);
+    const mk = (entries, label) => entries.forEach(e => {
+      const m = nameMap[e.name]; if(!m || !m.physId) return;
+      vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
+    });
+    if(wantVac) mk(w.vacation, 'pick');
+    if(wantOff) mk(w.off,      'Off');
+    if(wantBB)  mk(w.bbPicks,  'BB');
+    const mkS = (entries, sk) => entries.forEach(e => {
+      const m = nameMap[e.name]; if(!m || !m.physId) return;
+      for(let i = 0; i < days; i++){
+        const ds = addDays(start, i), dow = parseDateLocal(ds).getDay();
+        if(dow === 0 || dow === 6) continue;
+        shiftRecs.push({ physId: m.physId, date: ds, shift: sk, site: 'At Home / Remote', sub: '', notes: `Imported: ${e.raw}` });
       }
-      weeks.push({weekStart:wd,vacation:vac,shift2,shift3,off});
     });
-  }
-
-  // Match names to physicians
-  const vacType=document.getElementById('xl-pick-type')?.value||'Vacation';
-  const days=parseInt(document.getElementById('xl-pick-days')?.value)||5;
-  const matched=[],unmatched=new Set();
-
-  function findPhysLastName(lastName){
-    if(!lastName)return null;
-    const l=lastName.trim().toLowerCase();
-    // Exact match first
-    let p=S.physicians.find(p=>p.last.toLowerCase()===l);
-    if(p)return p;
-    // Hyphenated: "Mossa-Basha" matches physician "Mossa-Basha"
-    p=S.physicians.find(p=>p.last.toLowerCase().replace(/[-\s]/g,'')===l.replace(/[-\s]/g,''));
-    if(p)return p;
-    // Last name is first word (handles "Mossa" matching "Mossa-Basha")
-    p=S.physicians.find(p=>p.last.toLowerCase().startsWith(l)||l.startsWith(p.last.toLowerCase()));
-    return p||null;
-  }
-
-  weeks.forEach(w=>{
-    const startD=w.weekStart;
-    const endD=addDays(startD,days-1);
-    w.vacation.forEach(name=>{
-      const p=findPhysLastName(name);
-      if(p){
-        if(!S.vacations.find(v=>v.physId===p.id&&v.start===startD))
-          matched.push({physId:p.id,start:startD,end:endD,type:vacType,notes:`Imported: ${name}`});
-      } else { unmatched.add(name); }
-    });
+    if(wantS2) mkS(w.shift2, '2nd');
+    if(wantS3) mkS(w.shift3, '3rd');
   });
-
-  _xlPickData=matched;
-
-  // Build preview
-  const totalWeeks=weeks.length;
-  const matchedCount=matched.length;
-  const unmatchedArr=[...unmatched];
-
-  let html=`<div style="font-size:12px;font-weight:700;margin-bottom:6px">
-    ${totalWeeks} weeks found · <span style="color:var(--green-t)">${matchedCount} vacation entries matched</span>
-    ${unmatchedArr.length?`· <span style="color:var(--amber,#d97706)">${unmatchedArr.length} names unmatched</span>`:''}
-  </div>`;
-
-  if(matched.length){
-    html+='<div style="overflow-x:auto;max-height:220px;overflow-y:auto"><table><thead><tr><th>Physician</th><th>Week Start</th><th>Week End</th><th>Type</th></tr></thead><tbody>';
-    html+=matched.slice(0,30).map(m=>`<tr><td>${pnameHtml(m.physId)}</td><td>${m.start}</td><td>${m.end}</td><td><span class="tag ta">${m.type}</span></td></tr>`).join('');
-    if(matched.length>30)html+=`<tr><td colspan="4" style="color:var(--txt3)">...and ${matched.length-30} more</td></tr>`;
-    html+='</tbody></table></div>';
-  }
-  if(unmatchedArr.length){
-    html+=`<div class="note nw" style="margin-top:6px"><strong>Could not match to physicians:</strong> ${unmatchedArr.slice(0,20).join(', ')}${unmatchedArr.length>20?'...':''}<br>
-    <span style="font-size:10px">Check that these last names match exactly in your physician roster.</span></div>`;
-  }
-  prev.innerHTML=html;
-
-  const actions=document.getElementById('xl-pick-actions');
-  const cnt=document.getElementById('xl-pick-count');
-  if(actions)actions.style.display=matched.length?'block':'none';
-  if(cnt)cnt.textContent=`${matched.length} vacation entries ready`;
-  logImport(`Pick sheet parsed: ${totalWeeks} weeks, ${matchedCount} matched, ${unmatchedArr.length} unmatched`);
+  _xlPickData.vacations = vacRecs.filter(v => !(S.vacations||[]).some(ex => ex.physId === v.physId && ex.start === v.start));
+  _xlPickData.shifts    = shiftRecs.filter(s => !(S.drShifts ||[]).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift));
+  _xlPickData.unmatched = Object.entries(nameMap).filter(([_, m]) => m.status === 'unmatched').map(([n]) => n);
+  _xlPickData.lowConf   = Object.entries(nameMap).filter(([_, m]) => m.status === 'low').map(([n,m]) => ({ name: n, suggested: _physById(m.physId)?.last, score: m.score }));
+  _renderPickPreview(document.getElementById('xl-pick-preview'));
+  if(typeof _toast === 'function') _toast('Re-matched with manual mappings.', 'ok');
 }
 
 function applyPickImport(){
   if(!_adminOnly('apply vacation picks import')) return;
-  if(!_xlPickData.length)return;
-  let added=0,skipped=0;
-  _xlPickData.forEach(r=>{
-    const dup=S.vacations.find(v=>v.physId===r.physId&&v.start===r.start);
-    if(dup){skipped++;return;}
-    S.vacations.push({id:S.nextId++,physId:r.physId,start:r.start,end:r.end,type:r.type,notes:r.notes});
-    // If sold back, auto-fill weekday home shifts
-    if(r.type==='Vacation Sold Back'){
-      let cur=parseDateLocal(r.start),endD=parseDateLocal(r.end);
-      while(cur<=endD){
-        const ds=fmtDate(cur),dow=cur.getDay();
-        if(dow>=1&&dow<=5&&!S.drShifts.find(s=>s.physId===r.physId&&s.date===ds))
-          S.drShifts.push({id:S.nextId++,physId:r.physId,date:ds,shift:'Home',site:'At Home / Remote',sub:'General Procedures',notes:'Vacation Sold Back',autoHome:false,soldBack:true});
-        cur.setDate(cur.getDate()+1);
+  const data = _xlPickData || {};
+  const vac = data.vacations || [];
+  const sh = data.shifts || [];
+  if(!vac.length && !sh.length) return;
+  let vacAdded = 0, vacSkipped = 0, shAdded = 0, shSkipped = 0;
+  // Vacations
+  vac.forEach(r => {
+    const dup = (S.vacations || []).find(v => v.physId === r.physId && v.start === r.start);
+    if(dup){ vacSkipped++; return; }
+    S.vacations.push({ id: S.nextId++, physId: r.physId, start: r.start, end: r.end, type: r.type, notes: r.notes });
+    // Vacation Sold Back: auto-fill weekday home shifts (legacy behavior).
+    if(r.type === 'Vacation Sold Back'){
+      let cur = parseDateLocal(r.start), endD = parseDateLocal(r.end);
+      while(cur <= endD){
+        const ds = fmtDate(cur), dow = cur.getDay();
+        if(dow >= 1 && dow <= 5 && !(S.drShifts || []).find(s => s.physId === r.physId && s.date === ds)){
+          S.drShifts.push({
+            id: S.nextId++, physId: r.physId, date: ds, shift: 'Home',
+            site: 'At Home / Remote', sub: 'General Procedures',
+            notes: 'Vacation Sold Back', autoHome: false, soldBack: true,
+          });
+        }
+        cur.setDate(cur.getDate() + 1);
       }
     }
-    added++;
+    vacAdded++;
   });
-  logImport(`Vacation pick import: ${added} added, ${skipped} skipped`,'success');
-  document.getElementById('xl-pick-preview').innerHTML=`<div class="note ns">✓ Imported ${added} vacation record(s). ${skipped} duplicates skipped.</div>`;
-  document.getElementById('xl-pick-actions').style.display='none';
+  // 2nd / 3rd shifts — site is forced to "At Home / Remote" (matches the
+  // app's home-only policy for these shift types). De-duplicated upstream.
+  sh.forEach(r => {
+    const dup = (S.drShifts || []).find(s => s.physId === r.physId && s.date === r.date && s.shift === r.shift);
+    if(dup){ shSkipped++; return; }
+    S.drShifts.push({
+      id: S.nextId++, physId: r.physId, date: r.date, shift: r.shift,
+      site: r.site || 'At Home / Remote', sub: r.sub || '',
+      notes: r.notes || '', autoHome: false,
+    });
+    shAdded++;
+  });
+  if(typeof _audit === 'function') _audit('import.pickSheet', {
+    vacAdded, vacSkipped, shAdded, shSkipped,
+  });
+  logImport(`Pick sheet import: vacations ${vacAdded} added / ${vacSkipped} skipped, shifts ${shAdded} added / ${shSkipped} skipped`, 'success');
+  document.getElementById('xl-pick-preview').innerHTML = `
+    <div class="note ns">
+      ✓ Imported <strong>${vacAdded}</strong> vacation record${vacAdded===1?'':'s'}
+      and <strong>${shAdded}</strong> shift entry / entries.
+      ${(vacSkipped + shSkipped) ? `${vacSkipped + shSkipped} duplicates skipped.` : ''}
+    </div>`;
+  const actions = document.getElementById('xl-pick-actions');
+  if(actions) actions.style.display = 'none';
   triggerSave();
-  _xlPickData=[];
+  _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], nameMap: {} };
 }
 
 /* ═══════════════════════════════════════════════════
