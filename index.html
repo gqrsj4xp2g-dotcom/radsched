@@ -380,6 +380,13 @@ tbody tr:hover{background:var(--bg3)}
 .tabs{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:14px}
 .tab{padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;color:var(--txt2);margin-bottom:-1px}
 .tab.on{border-bottom-color:var(--blue);color:var(--blue)}
+/* Tools page sub-tabs: hide cards whose data-tools-tab doesn't match the
+   active tab on #page-tools. Uses :not() so all 4 tabs share one rule. */
+#page-tools[data-active-tab="sim"]     [data-tools-tab]:not([data-tools-tab="sim"]),
+#page-tools[data-active-tab="rules"]   [data-tools-tab]:not([data-tools-tab="rules"]),
+#page-tools[data-active-tab="reports"] [data-tools-tab]:not([data-tools-tab="reports"]),
+#page-tools[data-active-tab="ops"]     [data-tools-tab]:not([data-tools-tab="ops"]) { display:none !important; }
+#tools-subnav{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:6px}
 .wktab{padding:4px 10px;font-size:11px;font-weight:700;border:1px solid var(--bdr);border-radius:20px;cursor:pointer;background:var(--bg2);color:var(--txt2);margin:2px}
 .wktab.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 .prog{height:5px;border-radius:3px;background:var(--bg3);overflow:hidden;margin-top:3px}
@@ -1651,6 +1658,18 @@ tbody tr:hover{background:var(--bg3)}
   </div>
 
   <div class="g4" id="dash-metrics" style="margin-bottom:12px"></div>
+
+  <!-- Today's Coverage — at-a-glance "who's where right now" + sick-day
+       quick-coverage launcher. Renders nothing if there are no shifts
+       today (e.g. Sundays). -->
+  <div class="card" id="dash-today-card" style="margin-bottom:12px;display:none">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>📍 Today's Coverage <span id="dash-today-date" style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px"></span></span>
+      <button class="bsm admin-only" id="dash-sick-btn" onclick="openSickDayCoverage()" style="display:none" title="Mark a physician out sick today and auto-redistribute their work">🤒 Sick day…</button>
+    </div>
+    <div id="dash-today-body"></div>
+  </div>
+
   <div class="g2">
     <div class="card">
       <div class="card-title" style="display:flex;justify-content:space-between">
@@ -3664,8 +3683,18 @@ WHERE email = 'your-admin@example.com';</pre>
   <div class="pg-title">🛠 Tools</div>
   <div class="pg-sub">Admin workshop — what-if simulations, custom rules, advanced reports, system logs.</div>
 
+  <!-- Sub-tabs split the 18 cards into focused groups. The active tab is
+       persisted to localStorage so navigating away + back lands on the
+       same group. CSS does the show/hide via the body's data-tools-tab. -->
+  <div class="tabs" id="tools-subnav" style="margin-bottom:14px;flex-wrap:wrap;gap:0">
+    <div class="tab on" data-tt="sim"     onclick="toolsTab('sim',this)">🔮 Simulators</div>
+    <div class="tab"    data-tt="rules"   onclick="toolsTab('rules',this)">⚙ Rules &amp; config</div>
+    <div class="tab"    data-tt="reports" onclick="toolsTab('reports',this)">📊 Analytics &amp; reports</div>
+    <div class="tab"    data-tt="ops"     onclick="toolsTab('ops',this)">📜 Logs &amp; ops</div>
+  </div>
+
   <!-- ── 1. What-If Simulator ─────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="sim" style="margin-bottom:14px">
     <div class="card-title">🔮 What-if simulator</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Project a hypothetical change without committing it. Useful for
@@ -3700,7 +3729,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 2. Vacation Priority Lottery ─────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="sim" style="margin-bottom:14px">
     <div class="card-title">🎟 Vacation lottery</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Rank pending vacation requests for an in-demand week (Christmas,
@@ -3717,7 +3746,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 3. Pair-conflict rules ───────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
     <div class="card-title">🚫 Pair-conflict rules</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Don't schedule physicians A and B together on the same day or
@@ -3754,7 +3783,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 4. Site capacity caps ────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
     <div class="card-title">🚧 Site capacity caps</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Maximum physicians simultaneously assigned to a given site/shift
@@ -3779,7 +3808,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 5. Sub-specialty needs ───────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
     <div class="card-title">🎯 Per-shift sub-specialty needs</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Coverage requirements: "1st shift at CHN needs at least 1 body
@@ -3804,7 +3833,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 6. Schedule-constraints config ───────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
     <div class="card-title">⚙️ Schedule constraint settings</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Practice-level tunables for the constraint engine. These apply to
@@ -3846,7 +3875,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7. Cross-coverage finder ─────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="sim" style="margin-bottom:14px">
     <div class="card-title">🤝 Cross-coverage finder</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Pick a date / site / shift; get a ranked list of cross-group
@@ -3863,7 +3892,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7f. Integrations ─────────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
     <div class="card-title">🔌 Integrations</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Outbound webhooks, SMS notifications, email digests, and a public
@@ -3925,7 +3954,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7e. Robustness panel ─────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="reports" style="margin-bottom:14px">
     <div class="card-title">🛡 Robustness checks</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Built-in regression suite (date math, schema validators, save/load
@@ -3945,7 +3974,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7g. Vacation overlap heatmap ─────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="reports" style="margin-bottom:14px">
     <div class="card-title">🔥 Vacation overlap heatmap</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       52-week strip showing the percentage of physicians off each week of
@@ -3961,7 +3990,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7d. Practice analytics ───────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="reports" style="margin-bottom:14px">
     <div class="card-title">📈 Practice analytics</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Monthly volume trends across DR / IR / weekend / call / holiday /
@@ -3982,7 +4011,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7c. Predictive suggestions ───────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="sim" style="margin-bottom:14px">
     <div class="card-title">🔮 Predictive suggestions</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Surfaces who's "due" for weekend call / holiday based on a 6-month
@@ -3995,7 +4024,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7a. Annual report ──────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="reports" style="margin-bottom:14px">
     <div class="card-title">📄 Annual report</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Per-physician year-end summary: total DR / IR shifts, weekend
@@ -4016,7 +4045,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 7b. Data integrity scanner ──────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="reports" style="margin-bottom:14px">
     <div class="card-title">🔬 Data integrity scan</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Detects orphaned references — assignments pointing to a physician
@@ -4047,7 +4076,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 8. Audit log viewer ──────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
     <div class="card-title">📜 Audit log</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Last 500 admin mutations — physician add/remove, shift add/delete,
@@ -4064,7 +4093,7 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 9. Error log viewer ──────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
     <div class="card-title">🐛 Error log</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Unhandled errors and runtime warnings captured by the global
@@ -4079,23 +4108,25 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 10. Bulk operations ──────────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
     <div class="card-title">📥 Bulk operations</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       One-shot administrative operations that don't fit elsewhere.
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="bsm" onclick="nav('import',document.querySelector('.snav-item[data-pg=&quot;import&quot;]'))">📥 Import Excel schedule…</button>
-      <button class="bsm" onclick="nav('publish',document.querySelector('.snav-item[data-pg=&quot;publish&quot;]'))">📤 Publish snapshot to phys…</button>
-      <button class="bsm" onclick="nav('broadcast',document.querySelector('.snav-item[data-pg=&quot;broadcast&quot;]'))">📢 Broadcast email…</button>
-      <button class="bsm" onclick="nav('ai-agent',document.querySelector('.snav-item[data-pg=&quot;ai-agent&quot;]'))">🤖 AI scheduler…</button>
-      <button class="bsm" onclick="if(typeof exportScheduleCSV==='function')exportScheduleCSV()">⬇ Export schedule CSV</button>
-      <button class="bsm" onclick="if(typeof scanScheduleRuleViolations==='function')scanScheduleRuleViolations('all')">🔍 Scan rule violations</button>
+      <button class="bsm" onclick="if(typeof exportScheduleCSV==='function')exportScheduleCSV()" title="Export every assignment in the current month range as CSV">⬇ Export schedule CSV</button>
+      <button class="bsm" onclick="if(typeof scanScheduleRuleViolations==='function')scanScheduleRuleViolations('all')" title="Scan every assignment for physician-rule violations and report them">🔍 Scan rule violations</button>
+      <button class="bsm" onclick="if(typeof openSickDayCoverage==='function')openSickDayCoverage()" title="Mark a physician out sick today and redistribute affected shifts">🤒 Sick-day coverage</button>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--rs-ink-3)">
+      Need to import Excel, publish, broadcast, or use the AI scheduler?
+      Use the sidebar navigation — those pages have their own dedicated
+      workspaces.
     </div>
   </div>
 
   <!-- ── 11. Power tools (E5/G5/H2/H4/H5/H6/I3/I5) ────────────────────── -->
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
     <div class="card-title">⚡ Power tools</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
       Advanced one-click utilities. These wrap the lower-level helpers
@@ -10176,10 +10207,31 @@ function nav(pg,el){
     alert('That page is restricted to superusers.');
     return;
   }
+  // Save the outgoing page's scroll position so we can restore it when
+  // the user navigates back. Long pages (Tools, Settings) otherwise jump
+  // to the top and cards near the bottom appear "missing".
+  try{
+    const prev = document.querySelector('.page.on');
+    if(prev){
+      const id = prev.id.replace('page-', '');
+      const sc = prev.parentElement?.scrollTop ?? window.scrollY ?? 0;
+      sessionStorage.setItem('rs.scroll.' + id, String(sc));
+    }
+  }catch(_){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.snav-item').forEach(i=>i.classList.remove('on'));
   if(pageEl) pageEl.classList.add('on');
   if(el) el.classList.add('on');
+  // Restore scroll position for the incoming page (if we saved one).
+  // Defer past the render call below so the DOM has its real height.
+  setTimeout(() => {
+    try{
+      const saved = Number(sessionStorage.getItem('rs.scroll.' + pg) || 0);
+      const scroller = pageEl?.parentElement;
+      if(scroller && saved > 0){ scroller.scrollTop = saved; }
+      else if(saved === 0 && scroller){ scroller.scrollTop = 0; }
+    }catch(_){}
+  }, 60);
   // Ensure month inputs on this page have a value
   const now=new Date();
   const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
@@ -10217,6 +10269,8 @@ function renderDash(){
   document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
   ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
+  // Today's-coverage widget (rendered before per-month metrics).
+  try{ _renderTodayCoverage(isAdm); }catch(e){ if(typeof _logError === 'function') _logError('_renderTodayCoverage', e.message, e); }
 
   // First-run wizard — refined design. Persistent until every required
   // setup step is complete; disappears the moment the last check turns
@@ -26300,11 +26354,39 @@ function renderTools(){
   renderAuditLog();
   renderErrorLog();
   _wiToggleFields();
+  _initToolsTab();
 }
 function _wiToggleFields(){
   const kind = document.getElementById('wi-kind')?.value || 'vacation';
   const wrap = document.getElementById('wi-window-wrap');
   if(wrap) wrap.style.display = (kind === 'vacation') ? 'flex' : 'none';
+}
+
+// ── Tools page sub-tab control ─────────────────────────────────────────
+// 18 cards split into 4 focused groups: Simulators, Rules, Reports, Ops.
+// The active group is persisted in localStorage so navigating away + back
+// lands on the same view. Default = 'sim'. Each card has data-tools-tab
+// matching one of these keys; CSS hides everything not in the active set.
+function toolsTab(name, el){
+  const VALID = ['sim', 'rules', 'reports', 'ops'];
+  if(!VALID.includes(name)) name = 'sim';
+  const page = document.getElementById('page-tools');
+  if(page) page.setAttribute('data-active-tab', name);
+  // Highlight the active chip in the strip.
+  document.querySelectorAll('#tools-subnav .tab').forEach(t => {
+    t.classList.toggle('on', t.getAttribute('data-tt') === name);
+  });
+  try{ localStorage.setItem('rs.toolsTab', name); }catch(_){}
+  // Scroll the page back to the top of the tools content so the new
+  // group's first card is fully visible (avoids the "looks empty"
+  // illusion if the previous group was scrolled to its bottom).
+  page?.parentElement?.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function _initToolsTab(){
+  let saved = '';
+  try{ saved = localStorage.getItem('rs.toolsTab') || ''; }catch(_){}
+  if(!saved) saved = 'sim';
+  toolsTab(saved);
 }
 
 // ── Tools: What-If simulator runner ──────────────────────────────────
@@ -26592,7 +26674,9 @@ function renderAuditLog(){
   let rows = (S.auditLog || []).slice().reverse();
   if(filter) rows = rows.filter(r => (r.action || '').toLowerCase().includes(filter));
   if(!rows.length){
-    el.innerHTML = '<div class="note ni" style="font-size:12px">No audit entries matching filter.</div>';
+    el.innerHTML = (typeof _emptyStateSVG === 'function')
+      ? _emptyStateSVG('audit', filter ? `No audit entries match “${filter}”.` : 'Nothing to show — admin actions will appear here as they happen.')
+      : '<div class="note ni" style="font-size:12px">No audit entries matching filter.</div>';
     return;
   }
   el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries (most recent first)</div>
@@ -26629,7 +26713,9 @@ function renderErrorLog(){
   if(!el) return;
   const rows = (typeof _errorLog !== 'undefined' && _errorLog) ? _errorLog.slice().reverse() : [];
   if(!rows.length){
-    el.innerHTML = '<div class="note ni" style="font-size:12px">No errors logged.</div>';
+    el.innerHTML = (typeof _emptyStateSVG === 'function')
+      ? _emptyStateSVG('audit', 'No errors logged. The error handler captures runtime issues here when they happen.')
+      : '<div class="note ni" style="font-size:12px">No errors logged.</div>';
     return;
   }
   el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} error${rows.length>1?'s':''} (most recent first)</div>
@@ -27284,6 +27370,16 @@ function scanScheduleRuleViolations(scope){
   }
 
   filtered.sort((a,b) => (a.when||'').localeCompare(b.when||'') || a.who.localeCompare(b.who));
+
+  // Stash the latest top violation so the H6 explainer can fetch a
+  // plain-language reason from the AI tool. Power Tools → Explain last
+  // violation reads from this.
+  if(filtered.length){
+    window._lastRuleViolation = {
+      rule: filtered[0].reasons[0] || 'Schedule rule',
+      data: { when: filtered[0].when, who: filtered[0].who, kind: filtered[0].kind, reasons: filtered[0].reasons },
+    };
+  }
 
   const lines = filtered.map(v =>
     `${v.when} · ${v.who} · ${v.kind}\n     → ${v.reasons.join('\n     → ')}`
@@ -32943,6 +33039,226 @@ function findNextAvailable(physId, fromDate, kind){
     return ds;
   }
   return null;
+}
+
+// ── Today's Coverage widget ────────────────────────────────────────────
+// Renders a glanceable "who's where right now" panel on the dashboard:
+// every shift assigned to today, the on-call rotation, and who's out.
+// Hidden if the day has no scheduled work (e.g. a Sunday at a
+// weekday-only practice). Admins also see a "🤒 Sick day" launcher
+// next to the title for one-click coverage redistribution.
+function _renderTodayCoverage(isAdmin){
+  const card = document.getElementById('dash-today-card');
+  const body = document.getElementById('dash-today-body');
+  const dateLbl = document.getElementById('dash-today-date');
+  const sickBtn = document.getElementById('dash-sick-btn');
+  if(!card || !body) return;
+  const ds = fmtDate(new Date());
+  const d = parseDateLocal(ds);
+  if(dateLbl){
+    dateLbl.textContent = d.toLocaleDateString('default', { weekday:'long', month:'short', day:'numeric' });
+  }
+  // Collect today's events from every relevant array.
+  const drToday = (S.drShifts || []).filter(s => s.date === ds && s.shift !== 'Home');
+  const irToday = (S.irShifts || []).filter(s => s.date === ds && s.shift !== 'Home');
+  const callToday = (S.irCalls || []).filter(c => c.date === ds || (c.callType === 'weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds)));
+  const wkndToday = (S.weekendCalls || []).filter(w => (w.satDate || w.date) === ds || w.sunDate === ds);
+  const holToday = (S.holidays || []).filter(h => h.date === ds);
+  const vacToday = (S.vacations || []).filter(v => v.start <= ds && v.end >= ds);
+  const total = drToday.length + irToday.length + callToday.length + wkndToday.length + holToday.length;
+  if(total === 0 && vacToday.length === 0){
+    // Nothing scheduled — hide the card entirely. Avoids the empty-state
+    // taking valuable screen real estate on quiet days.
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  if(sickBtn) sickBtn.style.display = isAdmin ? '' : 'none';
+  const groupBy = (arr, fn) => {
+    const m = new Map();
+    arr.forEach(x => { const k = fn(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); });
+    return [...m.entries()];
+  };
+  const cellByShift = groupBy(drToday, s => s.shift + ' • ' + (s.site || '?'));
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:6px">';
+  cellByShift.forEach(([key, items]) => {
+    const names = items.map(s => pname(s.physId)).join(', ');
+    html += `<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--bdr)">
+      <div style="font-size:10.5px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.5px">${escHtml(key)}</div>
+      <div style="font-size:13px;margin-top:2px">${escHtml(names)}</div>
+    </div>`;
+  });
+  irToday.forEach(s => {
+    html += `<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--bdr)">
+      <div style="font-size:10.5px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.5px">IR ${escHtml(s.shift)} • ${escHtml(s.site || '?')}</div>
+      <div style="font-size:13px;margin-top:2px">${escHtml(pname(s.physId))}</div>
+    </div>`;
+  });
+  callToday.forEach(c => {
+    html += `<div style="padding:8px 10px;background:#fef9c3;border-radius:6px;border:1px solid #fde047">
+      <div style="font-size:10.5px;font-weight:700;color:#713f12;text-transform:uppercase;letter-spacing:0.5px">📞 IR ${c.callType === 'weekend' ? 'Weekend Call' : 'Call'}</div>
+      <div style="font-size:13px;margin-top:2px;color:#713f12">${escHtml(pname(c.physId))}</div>
+    </div>`;
+  });
+  wkndToday.forEach(w => {
+    html += `<div style="padding:8px 10px;background:#fef9c3;border-radius:6px;border:1px solid #fde047">
+      <div style="font-size:10.5px;font-weight:700;color:#713f12;text-transform:uppercase;letter-spacing:0.5px">📞 Weekend Call</div>
+      <div style="font-size:13px;margin-top:2px;color:#713f12">${escHtml(pname(w.physId))}</div>
+    </div>`;
+  });
+  holToday.forEach(h => {
+    html += `<div style="padding:8px 10px;background:#fee2e2;border-radius:6px;border:1px solid #fca5a5">
+      <div style="font-size:10.5px;font-weight:700;color:#7f1d1d;text-transform:uppercase;letter-spacing:0.5px">🎉 ${escHtml(h.name || 'Holiday')}</div>
+      <div style="font-size:13px;margin-top:2px;color:#7f1d1d">${escHtml(pname(h.physId))}</div>
+    </div>`;
+  });
+  if(vacToday.length){
+    const offNames = vacToday.map(v => pname(v.physId)).join(', ');
+    html += `<div style="padding:8px 10px;background:#dbeafe;border-radius:6px;border:1px solid #93c5fd;grid-column:1/-1">
+      <div style="font-size:10.5px;font-weight:700;color:#1e3a8a;text-transform:uppercase;letter-spacing:0.5px">🏖 Off (${vacToday.length})</div>
+      <div style="font-size:13px;margin-top:2px;color:#1e3a8a">${escHtml(offNames)}</div>
+    </div>`;
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+// ── Sick-day quick coverage flow ───────────────────────────────────────
+// Admin marks a physician out sick for the day. The app pulls up the
+// physician's shifts for today + the next two days, lets the admin pick
+// one to redistribute, and uses the cross-coverage finder to suggest a
+// replacement. No magic: the admin makes every assignment decision.
+function openSickDayCoverage(){
+  if(typeof _adminOnly === 'function' && !_adminOnly('sick day')) return;
+  const today = fmtDate(new Date());
+  const physOpts = (S.physicians || []).slice()
+    .sort((a,b) => (a.last||'').localeCompare(b.last||''))
+    .map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  const html = `<div style="padding:6px 0">
+    <p style="margin:0 0 14px 0;font-size:13px;color:var(--txt2)">
+      Pick the physician who's out today. The next dialog lists their
+      affected shifts so you can redistribute one at a time.
+    </p>
+    <div class="fg" style="margin-bottom:0">
+      <label>Physician out sick</label>
+      <select id="sick-phys" style="width:100%">${physOpts}</select>
+    </div>
+  </div>`;
+  if(typeof _modalConfirm !== 'function'){
+    const id = prompt('Physician ID out sick today?');
+    if(id) _processSickDay(Number(id), today);
+    return;
+  }
+  _modalConfirm({
+    title: '🤒 Sick day — redistribute coverage',
+    body: html,
+    confirmLabel: 'Find affected shifts',
+    cancelLabel: 'Cancel',
+  }).then(ok => {
+    if(!ok) return;
+    const physId = Number(document.getElementById('sick-phys')?.value);
+    if(physId) _processSickDay(physId, today);
+  });
+}
+
+function _processSickDay(physId, fromDate){
+  const dates = [fromDate, addDays(fromDate, 1), addDays(fromDate, 2)];
+  // Collect the physician's affected shifts in the next 3 days.
+  const affected = [];
+  dates.forEach(ds => {
+    (S.drShifts || []).filter(s => s.physId === physId && s.date === ds && s.shift !== 'Home').forEach(s =>
+      affected.push({ kind:'dr', id:s.id, date:ds, label:`${s.shift} ${s.site || ''}`, shift:s.shift, site:s.site }));
+    (S.irShifts || []).filter(s => s.physId === physId && s.date === ds && s.shift !== 'Home').forEach(s =>
+      affected.push({ kind:'ir', id:s.id, date:ds, label:`IR ${s.shift} ${s.site || ''}`, shift:s.shift, site:s.site }));
+    (S.irCalls || []).filter(c => c.physId === physId && c.date === ds).forEach(c =>
+      affected.push({ kind:'irCall', id:c.id, date:ds, label:`IR Call (${c.callType || 'weekday'})` }));
+  });
+  if(!affected.length){
+    if(typeof _toast === 'function') _toast(`${pname(physId)} has no affected shifts in the next 3 days.`, 'info');
+    return;
+  }
+  if(typeof _audit === 'function') _audit('sickDay.opened', { physId, dates, affected: affected.length });
+  // Render the affected shifts as a chooser. Each row → "Suggest cover"
+  // button that runs a quick scan and inserts the picked physician.
+  const rows = affected.map((a, i) => {
+    return `<tr id="sick-row-${i}">
+      <td style="padding:6px 8px">${escHtml(a.date)}</td>
+      <td style="padding:6px 8px">${escHtml(a.label)}</td>
+      <td style="padding:6px 8px;text-align:right">
+        <button class="bsm" onclick="_suggestSickCover(${physId},${i},${JSON.stringify(a).replace(/"/g,'&quot;')})">🔍 Suggest cover</button>
+      </td>
+    </tr>`;
+  }).join('');
+  window._sickDayContext = { physId, fromDate, affected };
+  if(typeof _modalAlert === 'function'){
+    _modalAlert(`Coverage for ${pname(physId)}`, `
+      <p style="font-size:12.5px;color:var(--txt2);margin:0 0 12px 0">
+        ${affected.length} shift${affected.length===1?'':'s'} in the next 3 days. Pick one to find a replacement.
+      </p>
+      <table class="tbl" style="font-size:12px;width:100%"><thead>
+        <tr><th>Date</th><th>Shift</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
+  } else {
+    alert(`Affected shifts for ${pname(physId)}:\n` + affected.map(a => `${a.date}: ${a.label}`).join('\n'));
+  }
+}
+
+function _suggestSickCover(physId, rowIdx, shiftInfo){
+  const ctx = window._sickDayContext;
+  if(!ctx) return;
+  const a = shiftInfo;
+  // Eligible candidates: same site / not on vacation / not already busy that shift / different person.
+  const cands = (S.physicians || []).filter(p => p.id !== physId)
+    .filter(p => !(S.vacations || []).some(v => v.physId === p.id && v.start <= a.date && v.end >= a.date))
+    .filter(p => !(S.drShifts || []).some(s => s.physId === p.id && s.date === a.date && s.shift === a.shift && s.shift !== 'Home'))
+    .filter(p => !(S.irShifts || []).some(s => s.physId === p.id && s.date === a.date && s.shift === a.shift && s.shift !== 'Home'))
+    .slice(0, 8);
+  const opts = cands.map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  if(!cands.length){
+    if(typeof _toast === 'function') _toast('No eligible cover for that shift today.', 'warn');
+    return;
+  }
+  // Replace the row with a select + apply button.
+  const row = document.getElementById('sick-row-' + rowIdx);
+  if(!row) return;
+  row.innerHTML = `
+    <td style="padding:6px 8px">${escHtml(a.date)}</td>
+    <td style="padding:6px 8px">${escHtml(a.label)}</td>
+    <td style="padding:6px 8px;text-align:right">
+      <select id="sick-cover-${rowIdx}" style="font-size:12px">${opts}</select>
+      <button class="bp bsm" onclick="_applySickCover(${physId},${rowIdx},${JSON.stringify(a).replace(/"/g,'&quot;')})">✓ Apply</button>
+    </td>`;
+}
+
+function _applySickCover(physId, rowIdx, a){
+  const newPhysId = Number(document.getElementById('sick-cover-' + rowIdx)?.value);
+  if(!newPhysId) return;
+  // Mutate the right collection.
+  const origNote = ` (sick cover for ${pname(physId)})`;
+  if(a.kind === 'dr'){
+    const s = (S.drShifts || []).find(x => x.id === a.id);
+    if(s){ s.physId = newPhysId; s.notes = (s.notes || '') + origNote; }
+  } else if(a.kind === 'ir'){
+    const s = (S.irShifts || []).find(x => x.id === a.id);
+    if(s){ s.physId = newPhysId; s.notes = (s.notes || '') + origNote; }
+  } else if(a.kind === 'irCall'){
+    const c = (S.irCalls || []).find(x => x.id === a.id);
+    if(c){ c.physId = newPhysId; c.notes = (c.notes || '') + origNote; }
+  }
+  if(typeof _audit === 'function') _audit('sickDay.applied', { physId, newPhysId, kind:a.kind, id:a.id, date:a.date });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  // Update the row to show what was done.
+  const row = document.getElementById('sick-row-' + rowIdx);
+  if(row){
+    row.innerHTML = `
+      <td style="padding:6px 8px">${escHtml(a.date)}</td>
+      <td style="padding:6px 8px">${escHtml(a.label)}</td>
+      <td style="padding:6px 8px;text-align:right;color:var(--green)">✓ ${escHtml(pname(newPhysId))}</td>`;
+  }
+  if(typeof _toast === 'function') _toast(`Coverage assigned: ${pname(newPhysId)} on ${a.date}.`, 'ok');
 }
 
 // ── Recently viewed physicians widget (E4) ────────────────────────────
