@@ -4344,6 +4344,9 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <div class="fg"><label>Vacation Type</label><select id="xl-pick-type"><option value="Vacation">Vacation</option><option value="Vacation Sold Back">Vacation Sold Back</option></select></div>
           <div class="fg"><label>Week length (days)</label><input id="xl-pick-days" type="number" value="5" min="1" max="7" style="width:80px"><span style="font-size:11px;color:var(--txt3);margin-left:6px">5 = Mon–Fri</span></div>
         </div>
+        <div style="margin-bottom:10px">
+          <label class="chk" style="font-size:12.5px"><input type="checkbox" id="xl-imp-mon" checked> Align to Monday — shift each week's start to the next Monday so vacations land on the workweek (recommended for files where the column header is a Saturday or Sunday)</label>
+        </div>
         <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Import categories</div>
         <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;font-size:12.5px">
           <label class="chk"><input type="checkbox" id="xl-imp-vac" checked> Vacation picks ("Lastname - 1")</label>
@@ -31321,10 +31324,26 @@ function _parsePickWorkbook(rows, prev, sheetName){
   const wantBB     = document.getElementById('xl-imp-bb')?.checked     !== false;
   const wantS2     = document.getElementById('xl-imp-s2')?.checked     !== false;
   const wantS3     = document.getElementById('xl-imp-s3')?.checked     !== false;
+  const alignMonday = document.getElementById('xl-imp-mon')?.checked !== false;
+  // ── Auto-align to Monday ─────────────────────────────────────────────
+  // Real-world pick sheets often label each week with the SUNDAY (or
+  // SATURDAY) at the top of a calendar column. Most US practices treat
+  // a "vacation week" as Mon–Fri though, so a Sun-anchored column
+  // produces vacations like Sun→Thu — visually incorrect on the
+  // calendar grid which highlights Mon-Fri. Auto-shift the start
+  // forward to the nearest Monday unless the admin disables this via
+  // the toggle below. End is then start + (days-1).
+  const _toMonday = (ds) => {
+    if(!alignMonday) return ds;
+    const dow = parseDateLocal(ds).getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    if(dow === 1) return ds;                  // already Monday
+    const offset = dow === 0 ? 1 : (8 - dow); // 0(Sun)→+1, 2(Tue)→+6, …
+    return addDays(ds, offset > 6 ? offset - 7 : offset);
+  };
   const vacRecs = []; // {physId, start, end, type, notes}
   const shiftRecs = []; // {physId, date, shift:'2nd'|'3rd', site, notes}
   weeks.forEach(w => {
-    const start = w.weekStart;
+    const start = _toMonday(w.weekStart);
     const end = addDays(start, days - 1);
     const mkVac = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name];
@@ -31599,10 +31618,18 @@ function rematchPickImport(){
   const wantBB  = document.getElementById('xl-imp-bb')?.checked !== false;
   const wantS2  = document.getElementById('xl-imp-s2')?.checked !== false;
   const wantS3  = document.getElementById('xl-imp-s3')?.checked !== false;
+  const alignMonday = document.getElementById('xl-imp-mon')?.checked !== false;
+  const _toMondayR = (ds) => {
+    if(!alignMonday) return ds;
+    const dow = parseDateLocal(ds).getDay();
+    if(dow === 1) return ds;
+    const offset = dow === 0 ? 1 : (8 - dow);
+    return addDays(ds, offset > 6 ? offset - 7 : offset);
+  };
   const nameMap = _xlPickData.nameMap || {};
   const vacRecs = [], shiftRecs = [];
   (_xlPickData.allWeeks || []).forEach(w => {
-    const start = w.weekStart, end = addDays(start, days - 1);
+    const start = _toMondayR(w.weekStart), end = addDays(start, days - 1);
     const mk = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
       vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
@@ -31674,16 +31701,56 @@ function applyPickImport(){
     vacAdded, vacSkipped, shAdded, shSkipped,
   });
   logImport(`Pick sheet import: vacations ${vacAdded} added / ${vacSkipped} skipped, shifts ${shAdded} added / ${shSkipped} skipped`, 'success');
+  // Determine the imported month range so we can offer a one-click jump
+  // to the calendar at the right time. Use the EARLIEST imported date.
+  const allDates = [
+    ...vac.map(v => v.start),
+    ...sh.map(s => s.date),
+  ].filter(Boolean).sort();
+  const firstYM = (allDates[0] || '').slice(0, 7);
   document.getElementById('xl-pick-preview').innerHTML = `
-    <div class="note ns">
+    <div class="note ns" style="line-height:1.55">
       ✓ Imported <strong>${vacAdded}</strong> vacation record${vacAdded===1?'':'s'}
       and <strong>${shAdded}</strong> shift entry / entries.
-      ${(vacSkipped + shSkipped) ? `${vacSkipped + shSkipped} duplicates skipped.` : ''}
+      ${(vacSkipped + shSkipped) ? `<br><span style="color:var(--rs-ink-3);font-size:11.5px">${vacSkipped + shSkipped} duplicate${(vacSkipped + shSkipped)===1?'':'s'} skipped.</span>` : ''}
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        ${firstYM ? `
+          <button class="bp" onclick="_jumpToCalendar('dr-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">📅 View in DR Calendar</button>
+          <button class="bsm" onclick="_jumpToCalendar('ir-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">⚕️ View in IR Calendar</button>
+          <button class="bsm" onclick="_jumpToCalendar('vacations', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">🏖 View Vacations</button>
+        ` : ''}
+      </div>
     </div>`;
   const actions = document.getElementById('xl-pick-actions');
   if(actions) actions.style.display = 'none';
   triggerSave();
+  // Force every cached view to rebuild from the new data — without this,
+  // the calendar pages render stale because their date-keyed shift index
+  // wasn't aware of the import's new entries.
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function'){
+    _toast(`Imported ${vacAdded} vacation${vacAdded===1?'':'s'} + ${shAdded} shift entries`, 'ok');
+  }
   _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], nameMap: {} };
+}
+
+// Helper: navigate to a calendar page and pre-select the given month so the
+// imported data is visible immediately. Used by the post-import "View in
+// Calendar" buttons; safe to call from anywhere that knows a target page +
+// month string ('YYYY-MM').
+function _jumpToCalendar(pageId, ym){
+  const navItem = document.querySelector(`.snav-item[data-pg="${pageId}"]`);
+  if(typeof nav === 'function') nav(pageId, navItem);
+  // The calendar render reads its month from a <input type="month">. Set
+  // it after a tick so the page swap has had time to lay out.
+  setTimeout(() => {
+    const moEl = document.querySelector(`#page-${pageId} input[type="month"]`);
+    if(moEl){
+      moEl.value = ym;
+      // Trigger change so any onchange handlers fire (renderDRCal etc.).
+      try{ moEl.dispatchEvent(new Event('change', {bubbles: true})); }catch(_){}
+    }
+  }, 80);
 }
 
 /* ═══════════════════════════════════════════════════
