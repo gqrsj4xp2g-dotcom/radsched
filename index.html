@@ -1226,6 +1226,36 @@ tbody tr:hover{background:var(--bg3)}
     .rs-quickstart-name { flex: 1; }
     .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
 
+    /* ── Sticky calendar toolbar ──────────────────────────────────────
+       Keeps the month picker / filter chips visible as the calendar
+       scrolls. Applied to anything tagged .rs-sticky-bar by the
+       runtime watcher. */
+    .rs-sticky-bar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--bg, var(--bg1));
+      padding: 8px 0;
+      margin: -8px -2px 8px;
+      border-bottom: 1px solid transparent;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .rs-sticky-bar:has(input:focus),
+    .rs-sticky-bar.rs-stuck {
+      border-bottom-color: var(--rs-line);
+    }
+
+    /* ── Searchable combobox panel options ─────────────────────────── */
+    .rs-cb-opt {
+      transition: background var(--rs-fast) var(--rs-ease),
+                  color var(--rs-fast) var(--rs-ease);
+    }
+    .rs-cb-opt:hover {
+      background: var(--rs-accent-soft);
+      color: var(--rs-accent);
+    }
+
     /* ── iOS safe-area + mobile native polish ──────────────────────────
        Modern phones have notches and home indicators. The viewport-fit
        meta + env() variables let CSS pad away from those zones so
@@ -1520,7 +1550,7 @@ tbody tr:hover{background:var(--bg3)}
     <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled style="margin-right:4px;padding:6px 8px" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
     <button id="rs-calmode-btn" class="tb-btn" onclick="toggleCalendarMode()" style="margin-right:4px;padding:6px 10px" title="Switch between grid and list view">📅</button>
     <button class="tb-btn" onclick="printSchedule()" style="margin-right:4px;padding:6px 10px" title="Print the active schedule view (Cmd/Ctrl+P)">🖨 Print</button>
-    <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
+    <button class="tb-btn" data-rs-hold="clearAllData" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Hold to reset to original default data (1.5s)">🗑 Hold to reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
 
@@ -3912,6 +3942,22 @@ WHERE email = 'your-admin@example.com';</pre>
       </label>
     </div>
     <div id="rs-test-result"></div>
+  </div>
+
+  <!-- ── 7g. Vacation overlap heatmap ─────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔥 Vacation overlap heatmap</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      52-week strip showing the percentage of physicians off each week of
+      the year. Spot Christmas / July-4 / spring-break problem weeks
+      before the auto-assigner has to compensate.
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Year</label><input id="vh-year" type="number" value="" style="width:90px"></div>
+      <div></div><div></div>
+    </div>
+    <button class="bp bsm" onclick="renderVacationHeatmap()">🔥 Show heatmap</button>
+    <div id="vac-heatmap" style="margin-top:14px"></div>
   </div>
 
   <!-- ── 7d. Practice analytics ───────────────────────────────────────── -->
@@ -16516,7 +16562,7 @@ function renderOpenShifts(){
           ${selP&&!subMatch&&o.sub?'<span class="tag ta" style="margin-left:4px">Outside subspecialty</span>':''}
         </div>
         <div style="font-size:11px;color:var(--txt2);margin-top:2px">${o.sub||'—'} | ${o.site||'TBD'}</div>
-        ${isClaimed?`<div style="font-size:11px;color:var(--green-t);margin-top:2px">Claimed by ${pnameHtml(o.claimedBy)}</div>`:''}
+        ${isClaimed?`<div style="font-size:11px;color:var(--green-t);margin-top:2px">Claimed by ${pnameHtml(o.claimedBy)}${o.claimedAt?` · <span style="color:var(--rs-ink-3)">${escHtml(_timeAgo(o.claimedAt))}</span>`:''}</div>`:''}
       </div>
       ${selP&&!isClaimed?`<button class="bg bsm" onclick="claimShift(${o.id},${selP.id})">Claim</button>`:''}
       ${selP&&isClaimed&&o.claimedBy===selP.id?`<button class="br bsm" onclick="unclaimShift(${o.id})">Unclaim</button>`:''}
@@ -16599,6 +16645,7 @@ function claimShift(oid,pid){
     return;
   }
   o.claimedBy=pid;
+  o.claimedAt = new Date().toISOString();
   if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'',site:o.site,notes:'Claimed'});
   else if(_isWeekend)S.weekendCalls.push({id:S.nextId++,physId:pid,satDate:o.date,sunDate:addDays(o.date,1),sub:o.sub,site:o.site,ctype:'Primary',notes:'Claimed'});
   else S.drShifts.push({id:S.nextId++,physId:pid,date:o.date,shift:'1st',site:o.site,sub:o.sub,notes:'Claimed',autoHome:false});
@@ -25303,6 +25350,9 @@ const _SHORTCUTS = [
   ['⌘ P', 'Print active schedule view'],
   ['⌘ Z', 'Undo last edit'],
   ['⌘ ⇧ Z', 'Redo'],
+  ['J',   'Previous month on active calendar'],
+  ['K',   'Next month on active calendar'],
+  ['T',   'Jump to today'],
   ['?',   'Show this help'],
   ['Esc', 'Close drawer / modal / palette'],
 ];
@@ -25346,16 +25396,43 @@ function closeShortcutsHelp(){
 }
 
 // Bare `?` (without modifier, outside inputs) opens the shortcut help.
+// J/K navigate calendar months. T jumps to today.
 // Registered as a separate listener because the main keydown handler
 // gates on `e.metaKey || e.ctrlKey` and would skip unmodified keys.
 (function _wireBareShortcuts(){
   document.addEventListener('keydown', (e) => {
     if(e.metaKey || e.ctrlKey || e.altKey) return;
-    if(e.key !== '?') return;
     const tag = (document.activeElement?.tagName || '').toUpperCase();
-    if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-    e.preventDefault();
-    if(typeof openShortcutsHelp === 'function') openShortcutsHelp();
+    const inEditable = (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable);
+    if(inEditable) return;
+    // ? — keyboard cheat sheet
+    if(e.key === '?'){
+      e.preventDefault();
+      if(typeof openShortcutsHelp === 'function') openShortcutsHelp();
+      return;
+    }
+    // J — previous month on the active calendar
+    // K — next month
+    if(e.key === 'j' || e.key === 'k' || e.key === 'J' || e.key === 'K'){
+      const dir = (e.key.toLowerCase() === 'j') ? -1 : 1;
+      const activePage = document.querySelector('.page.on');
+      const monthInp = activePage?.querySelector('input[type="month"]');
+      if(!monthInp || !monthInp.value) return;
+      e.preventDefault();
+      const [y, m] = monthInp.value.split('-').map(Number);
+      const next = new Date(y, m - 1 + dir, 1);
+      monthInp.value = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+      monthInp.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    // T — jump to today
+    if(e.key === 't' || e.key === 'T'){
+      const activePage = document.querySelector('.page.on');
+      if(!activePage?.querySelector('input[type="month"]')) return;
+      e.preventDefault();
+      jumpToToday();
+      return;
+    }
   });
 })();
 
@@ -26027,6 +26104,8 @@ function renderTools(){
   if(arYr && !arYr.value) arYr.value = String(new Date().getFullYear() - 1);
   const anYr = document.getElementById('an-year');
   if(anYr && !anYr.value) anYr.value = String(new Date().getFullYear());
+  const vhYr = document.getElementById('vh-year');
+  if(vhYr && !vhYr.value) vhYr.value = String(new Date().getFullYear());
   // Site selects
   const siteOptions = (S.sites||[])
     .filter(s => s.name !== 'At Home / Remote')
@@ -32213,6 +32292,656 @@ function _hideProgress(targetElId){
   if(el) el.innerHTML = '';
 }
 
+// ── Hold-to-confirm destructive button ────────────────────────────────
+// Wraps any button with `data-rs-hold` so a destructive action requires
+// holding the button for ~1.5 seconds before firing. Visible progress
+// bar inside the button fills as you hold; release before full = cancel.
+// Prevents single mis-clicks on Reset / Delete-all-shifts / etc.
+function _wireHoldToConfirm(){
+  if(typeof document === 'undefined') return;
+  document.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('[data-rs-hold]');
+    if(!btn) return;
+    e.preventDefault();
+    _startHold(btn);
+  });
+  document.addEventListener('touchstart', (e) => {
+    const btn = e.target.closest('[data-rs-hold]');
+    if(!btn) return;
+    _startHold(btn);
+  }, { passive: true });
+  document.addEventListener('mouseup', _cancelHold);
+  document.addEventListener('mouseleave', _cancelHold);
+  document.addEventListener('touchend', _cancelHold);
+  document.addEventListener('touchcancel', _cancelHold);
+}
+let _holdTimer = null, _holdTarget = null, _holdStartTs = 0;
+function _startHold(btn){
+  _cancelHold();
+  _holdTarget = btn;
+  _holdStartTs = Date.now();
+  btn.classList.add('rs-holding');
+  // Inject a progress overlay if not already present
+  if(!btn.querySelector('.rs-hold-bar')){
+    const bar = document.createElement('span');
+    bar.className = 'rs-hold-bar';
+    bar.style.cssText = 'position:absolute;left:0;bottom:0;height:3px;width:0;background:rgba(255,255,255,0.6);transition:width 1500ms linear';
+    btn.style.position = btn.style.position || 'relative';
+    btn.style.overflow = 'hidden';
+    btn.appendChild(bar);
+    // Trigger the transition next tick
+    setTimeout(() => { bar.style.width = '100%'; }, 10);
+  }
+  _holdTimer = setTimeout(() => {
+    if(_holdTarget !== btn) return;
+    // Fire the original action
+    const handlerName = btn.dataset.rsHold;
+    btn.classList.add('rs-hold-done');
+    if(typeof window[handlerName] === 'function'){
+      try{ window[handlerName].call(btn); }catch(e){ console.warn('[RS] hold handler failed', e); }
+    }
+    _cancelHold();
+  }, 1500);
+}
+function _cancelHold(){
+  if(_holdTimer){ clearTimeout(_holdTimer); _holdTimer = null; }
+  if(_holdTarget){
+    _holdTarget.classList.remove('rs-holding', 'rs-hold-done');
+    const bar = _holdTarget.querySelector('.rs-hold-bar');
+    if(bar) bar.remove();
+    _holdTarget = null;
+  }
+}
+if(typeof document !== 'undefined'){
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wireHoldToConfirm);
+  else _wireHoldToConfirm();
+}
+
+// ── Builder real-time conflict warning ─────────────────────────────────
+// As the user picks (physician + date + shift) in the Add form, surface
+// inline status: ✓ Available · ⚠ Already assigned · ✗ On vacation. Bound
+// to change events on the relevant inputs.
+function _wireBuilderConflictWatch(){
+  if(typeof document === 'undefined') return;
+  // DR builder: phys+date+shift+site
+  const drForm = ['sb-phys','sb-date','sb-shift','sb-site'];
+  // IR shift builder: irs-phys+irs-date+irs-shift+irs-site
+  const irForm = ['irs-phys','irs-date','irs-shift','irs-site'];
+  // Weekend call builder: wk-phys+wk-date
+  const wkForm = ['wk-phys','wk-date'];
+  const wireSet = (ids, kind) => {
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if(!el || el._rsConflictWatched) return;
+      el._rsConflictWatched = true;
+      el.addEventListener('change', () => _updateBuilderConflictStatus(kind));
+    });
+  };
+  setInterval(() => {
+    wireSet(drForm, 'dr');
+    wireSet(irForm, 'ir');
+    wireSet(wkForm, 'wk');
+  }, 2000);
+}
+function _updateBuilderConflictStatus(kind){
+  let physId, date, shift;
+  if(kind === 'dr'){
+    physId = +document.getElementById('sb-phys')?.value || 0;
+    date = document.getElementById('sb-date')?.value;
+    shift = document.getElementById('sb-shift')?.value;
+  } else if(kind === 'ir'){
+    physId = +document.getElementById('irs-phys')?.value || 0;
+    date = document.getElementById('irs-date')?.value;
+    shift = document.getElementById('irs-shift')?.value || '1st';
+  } else if(kind === 'wk'){
+    physId = +document.getElementById('wk-phys')?.value || 0;
+    date = document.getElementById('wk-date')?.value;
+    shift = 'wknd';
+  }
+  let target = document.getElementById('rs-conflict-' + kind);
+  if(!target){
+    // Create target near the form
+    const formAnchor = ({ dr: 'sb-shift', ir: 'irs-shift', wk: 'wk-phys' })[kind];
+    const anchor = document.getElementById(formAnchor);
+    if(!anchor) return;
+    target = document.createElement('div');
+    target.id = 'rs-conflict-' + kind;
+    target.style.cssText = 'font-size:11.5px;letter-spacing:-0.005em;margin-top:6px;min-height:18px;padding:4px 0';
+    // Place after the form's parent fg
+    const placement = anchor.closest('.fg, .flexe, div');
+    placement?.parentNode?.insertBefore(target, placement.nextSibling);
+  }
+  if(!physId || !date){ target.innerHTML = ''; return; }
+  const phys = _physById(physId);
+  if(!phys){ target.innerHTML = ''; return; }
+  // Vacation
+  if((S.vacations || []).some(v => v.physId === physId && v.start <= date && v.end >= date)){
+    target.innerHTML = `<span style="color:var(--red,#dc2626);font-weight:600">✗ ${escHtml(pname(physId))} is on vacation ${escHtml(date)}</span>`;
+    return;
+  }
+  // Existing assignment same day
+  const dups = [];
+  (S.drShifts || []).filter(s => s.physId === physId && s.date === date).forEach(s => dups.push(`${s.shift} @ ${s.site||'—'}`));
+  (S.irShifts || []).filter(s => s.physId === physId && s.date === date).forEach(s => dups.push(`IR ${s.shift} @ ${s.site||'—'}`));
+  (S.irCalls || []).filter(c => c.physId === physId && c.date === date).forEach(c => dups.push(`IR ${c.callType} call`));
+  if(kind === 'wk'){
+    (S.weekendCalls || []).filter(w => (w.satDate||w.date) === date).forEach(_ => dups.push('Weekend call already assigned'));
+  }
+  if(dups.length){
+    target.innerHTML = `<span style="color:var(--amber,#d97706);font-weight:600">⚠ Also: ${escHtml(dups.join(' · '))}</span>`;
+    return;
+  }
+  target.innerHTML = `<span style="color:var(--green-t,#16a34a);font-weight:600">✓ ${escHtml(pname(physId))} is available ${escHtml(date)}</span>`;
+}
+if(typeof document !== 'undefined'){
+  setTimeout(_wireBuilderConflictWatch, 1000);
+}
+
+// ── Open-shift claim timeline + swap-request read receipts ─────────────
+// Open shifts now record claimedAt timestamp on claim. Swap requests
+// record viewedBy timestamps when the recipient opens the swaps page.
+// Both are surfaced inline in their respective tables.
+function _markSwapsViewed(){
+  if(!CU?.physId) return;
+  const myId = CU.physId;
+  let any = false;
+  (S.swapRequests || []).forEach(s => {
+    if(s.toPhysId === myId && s.status === 'pending' && !s.viewedAt){
+      s.viewedAt = new Date().toISOString();
+      s.viewedBy = CU.id;
+      any = true;
+    }
+  });
+  if(any) triggerSave();
+}
+// Call when the swaps page is rendered. _refreshCurrentPage already
+// invokes renderSwaps; we hook in there.
+(function _wireSwapViewed(){
+  if(typeof document === 'undefined') return;
+  document.addEventListener('click', (e) => {
+    // Crude — when the user clicks anywhere inside #page-swaps, mark viewed.
+    if(e.target.closest('#page-swaps')) _markSwapsViewed();
+  });
+})();
+
+// ── Cross-page month persistence ────────────────────────────────────────
+// Today every calendar / builder / report page resets its month input to
+// the current month on first render. Replace with a global "current-
+// viewed-month" that any page can read or write. Calendars sync on render;
+// any user-driven month change updates the global. Persisted in
+// localStorage so a page reload keeps you where you were.
+let _rsCurrentYM = null;
+(function _initSharedYM(){
+  let saved = null;
+  try{ saved = localStorage.getItem('rs.currentYM'); }catch(_){}
+  _rsCurrentYM = saved || fmtDate(new Date()).slice(0, 7);
+})();
+function _setSharedYM(ym){
+  if(!ym || !/^\d{4}-\d{2}$/.test(ym)) return;
+  if(_rsCurrentYM === ym) return;
+  _rsCurrentYM = ym;
+  try{ localStorage.setItem('rs.currentYM', ym); }catch(_){}
+  // Sync every visible month input on the active page to the new value.
+  document.querySelectorAll('input[type="month"]').forEach(inp => {
+    if(inp.value !== ym){ inp.value = ym; }
+  });
+  // Update browser tab title with the month context.
+  if(typeof _updateBrowserTitle === 'function') _updateBrowserTitle();
+}
+// Wrap month-input change events globally so any change propagates.
+(function _watchMonthInputs(){
+  if(typeof document === 'undefined') return;
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if(t && t.tagName === 'INPUT' && t.type === 'month' && t.value){
+      _setSharedYM(t.value);
+    }
+  }, true);
+})();
+
+// ── Today button + jump-to-current ─────────────────────────────────────
+// Snaps the active calendar's month input to the current month and fires
+// a change event. Bound to a small button injected into every calendar
+// page header at runtime.
+function jumpToToday(){
+  const today = fmtDate(new Date()).slice(0, 7);
+  _setSharedYM(today);
+  // Fire change events so renderers that listen pick it up.
+  document.querySelectorAll('input[type="month"]').forEach(inp => {
+    try{ inp.dispatchEvent(new Event('change', { bubbles: true })); }catch(_){}
+  });
+  if(typeof _toast === 'function') _toast(`Jumped to ${new Date().toLocaleString('default',{month:'long',year:'numeric'})}.`, 'info');
+}
+
+// Inject a "Today" button into each calendar page header. Idempotent —
+// only adds once per page. Runs on page navigation via _refreshCurrentPage.
+function _injectTodayButton(){
+  document.querySelectorAll('.page').forEach(page => {
+    if(page._rsTodayBtn) return;
+    const monthInp = page.querySelector('input[type="month"]');
+    if(!monthInp) return;
+    // Only add to calendar/builder pages — gate on having a typical
+    // calendar id. (Settings has a month input too but doesn't need
+    // a Today button.)
+    const id = page.id;
+    if(!/^page-(dr-cal|ir-cal|my-schedule|dr-builder|ir-builder|ir-shifts|holidays|publish|dr-weekends|fte|anchor-report)$/.test(id)) return;
+    const btn = document.createElement('button');
+    btn.className = 'bsm';
+    btn.style.cssText = 'margin-left:6px;padding:5px 11px;font-size:11.5px';
+    btn.textContent = '⊙ Today';
+    btn.title = 'Jump to current month (T)';
+    btn.onclick = jumpToToday;
+    monthInp.parentNode?.appendChild(btn);
+    page._rsTodayBtn = btn;
+  });
+}
+
+// ── Sticky calendar toolbar (so month picker stays visible on scroll) ──
+// CSS handles positioning. A top-level `position: sticky` on the .pg-title
+// + month controls wrapper makes it ride the scroll. The CSS lives in the
+// refined design layer above; this just adds the marker class.
+(function _markStickyHeaders(){
+  if(typeof document === 'undefined') return;
+  const apply = () => {
+    document.querySelectorAll('.page').forEach(page => {
+      const monthInp = page.querySelector('input[type="month"]');
+      if(!monthInp) return;
+      const ctrlBox = monthInp.closest('.flexe, .filter-bar, [class*="ctrl"], [id*="ctrl"]');
+      if(ctrlBox && !ctrlBox.classList.contains('rs-sticky-bar')){
+        ctrlBox.classList.add('rs-sticky-bar');
+      }
+    });
+    if(typeof _injectTodayButton === 'function') _injectTodayButton();
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
+  // Re-apply on each page change too — _refreshCurrentPage triggers re-render
+  // which adds new DOM elements that need the sticky class.
+  setInterval(apply, 5000);
+})();
+
+// ── Browser tab title context ───────────────────────────────────────────
+// Document title shows: <month> · <page> — RadScheduler
+// Helps when admins have multiple practice tabs open or are scanning
+// browser history.
+function _updateBrowserTitle(){
+  const activePage = document.querySelector('.page.on');
+  const pageName = activePage?.querySelector('.pg-title')?.textContent?.trim() || '';
+  const monthLabel = _rsCurrentYM
+    ? new Date(_rsCurrentYM + '-01').toLocaleString('default', { month: 'short', year: 'numeric' })
+    : '';
+  const practice = (typeof _PRACTICES !== 'undefined' && _ROW_ID)
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  const parts = [];
+  if(monthLabel) parts.push(monthLabel);
+  if(pageName) parts.push(pageName);
+  parts.push(practice);
+  document.title = parts.join(' · ');
+}
+// Update on page nav + on month change (already wired via _setSharedYM).
+(function _watchPageNavTitle(){
+  if(typeof MutationObserver === 'undefined') return;
+  const obs = new MutationObserver(() => { _updateBrowserTitle(); });
+  const start = () => {
+    obs.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
+    _updateBrowserTitle();
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
+// ── Per-physician deterministic color ──────────────────────────────────
+// Same physician → same color across every view (DR cal, IR cal, my-
+// schedule, builders). Hash physId → HSL hue. Saturation/lightness
+// tuned for both light and dark mode contrast. Returns a CSS color
+// string. Toggle on body[data-rs-phys-color="1"]; off by default so
+// admins who prefer the existing shift-type coloring keep it.
+function _physColor(physId){
+  if(physId == null) return '';
+  // Simple deterministic hash → 360° hue. Different ids land far apart
+  // because we use the golden-ratio increment (137.508°) which gives
+  // good color separation for any sequential set of ids.
+  let h = 0; const s = String(physId);
+  for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  const hue = Math.abs(h * 137.508) % 360;
+  // Light mode: 35% saturation / 88% lightness (pastel background w/
+  // dark text). Dark mode: 38% sat / 22% lightness (rich background
+  // with bright text). Theme detected via the data-theme on body.
+  const dark = document.body?.dataset?.theme === 'dark';
+  if(dark){
+    return `hsl(${hue},38%,22%)`;
+  }
+  return `hsl(${hue},42%,86%)`;
+}
+function _physColorText(physId){
+  if(physId == null) return '';
+  let h = 0; const s = String(physId);
+  for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  const hue = Math.abs(h * 137.508) % 360;
+  const dark = document.body?.dataset?.theme === 'dark';
+  return dark ? `hsl(${hue},80%,82%)` : `hsl(${hue},65%,30%)`;
+}
+function togglePhysColors(){
+  const cur = document.body.getAttribute('data-rs-phys-color') === '1';
+  document.body.setAttribute('data-rs-phys-color', cur ? '0' : '1');
+  try{ localStorage.setItem('rs.physColors', cur ? '0' : '1'); }catch(_){}
+  if(typeof _afterMutation === 'function') _afterMutation();
+}
+// Restore on load
+(function _initPhysColors(){
+  let v = '0';
+  try{ v = localStorage.getItem('rs.physColors') || '0'; }catch(_){}
+  if(v === '1') document.body.setAttribute('data-rs-phys-color', '1');
+})();
+
+// ── Vacation overlap heat map ──────────────────────────────────────────
+// 52-week strip showing % of physicians off each week. Spots Christmas
+// and July-4 problem weeks at a glance. Renders into #vac-heatmap when
+// it exists (added to the Vacations page below).
+function renderVacationHeatmap(){
+  if(!_adminOnly('view vacation heatmap')) return;
+  const out = document.getElementById('vac-heatmap');
+  if(!out) return;
+  const yr = +document.getElementById('vh-year')?.value || new Date().getFullYear();
+  const yrStr = String(yr);
+  const physCount = (S.physicians || []).filter(p => p.drFte > 0 || p.irFte > 0).length || 1;
+  // Walk every week and count distinct physicians on vacation any day of that week.
+  const weeks = [];
+  let cur = new Date(yr, 0, 1);
+  // Snap to first Monday
+  while(cur.getDay() !== 1){ cur.setDate(cur.getDate() + 1); if(cur.getFullYear() !== yr) break; }
+  for(let i = 0; i < 52; i++){
+    const start = fmtDate(cur);
+    const end = fmtDate(new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 6));
+    const offSet = new Set();
+    (S.vacations || []).forEach(v => {
+      if(!v.start) return;
+      // Vacation overlaps this week if start <= weekEnd AND end >= weekStart
+      const vStart = v.start, vEnd = v.end || v.start;
+      if(vStart <= end && vEnd >= start) offSet.add(v.physId);
+    });
+    weeks.push({ start, count: offSet.size, pct: offSet.size / physCount });
+    cur.setDate(cur.getDate() + 7);
+  }
+  // Render an inline SVG strip
+  const w = 800, h = 56, pad = 4;
+  const bw = (w - pad * 2) / 52;
+  // Heat scale: green (0%) → amber (25%) → red (50%+). Linear interpolation.
+  const colorFor = (p) => {
+    if(p === 0) return '#e7eef0';
+    if(p < 0.10) return '#a7e3a1'; // light green
+    if(p < 0.20) return '#fbbf24'; // amber
+    if(p < 0.35) return '#f97316'; // orange
+    return '#dc2626'; // red — too many off
+  };
+  const bars = weeks.map((w_, i) => {
+    const x = pad + i * bw;
+    const wkLabel = (i + 1).toString();
+    return `<g>
+      <rect x="${x}" y="6" width="${Math.max(0, bw - 1)}" height="${h - 14}" fill="${colorFor(w_.pct)}" rx="2"><title>Week of ${w_.start} — ${w_.count} of ${physCount} physicians off (${Math.round(w_.pct*100)}%)</title></rect>
+      ${i % 4 === 0 ? `<text x="${x + bw/2}" y="${h - 1}" font-size="8" fill="var(--rs-ink-3)" text-anchor="middle">${wkLabel}</text>` : ''}
+    </g>`;
+  }).join('');
+  // Quick stats
+  const peak = weeks.reduce((m, w_) => w_.count > m.count ? w_ : m, { count: 0, start: '' });
+  const overThreshold = weeks.filter(w_ => w_.pct >= 0.20).length;
+  out.innerHTML = `
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:800px;height:auto">${bars}</svg>
+    <div style="font-size:11.5px;color:var(--rs-ink-3);margin-top:6px;display:flex;gap:14px;flex-wrap:wrap">
+      <span><strong>Peak:</strong> week of ${escHtml(peak.start)} — ${peak.count} off</span>
+      <span><strong>${overThreshold}</strong> week(s) above 20% off</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <span style="display:inline-block;width:14px;height:10px;background:#a7e3a1;border-radius:2px"></span>&lt;10%
+        <span style="display:inline-block;width:14px;height:10px;background:#fbbf24;border-radius:2px"></span>10-20%
+        <span style="display:inline-block;width:14px;height:10px;background:#f97316;border-radius:2px"></span>20-35%
+        <span style="display:inline-block;width:14px;height:10px;background:#dc2626;border-radius:2px"></span>&gt;35%
+      </span>
+    </div>`;
+}
+
+// ── Conflict-highlight predicate ──────────────────────────────────────
+// Used by calendar renderers to flag cells with rule violations. Quick
+// scan — only checks the most common violations (over-quota, vacation
+// conflict, post-call recovery, sequence). Returns array of issue
+// strings, or empty if clean.
+function _cellConflicts(date){
+  const issues = [];
+  // Vacation conflict: physician is on vacation but also has shifts
+  const vacByDate = {};
+  (S.vacations || []).forEach(v => {
+    if(!v.start) return;
+    let cur = parseDateLocal(v.start);
+    const end = parseDateLocal(v.end || v.start);
+    while(cur <= end){
+      const ds = fmtDate(cur);
+      if(ds === date){
+        if(!vacByDate[v.physId]) vacByDate[v.physId] = [];
+        vacByDate[v.physId].push(v);
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+  Object.keys(vacByDate).forEach(pid => {
+    const onShift = (S.drShifts || []).some(s => s.physId === +pid && s.date === date && s.shift !== 'Home') ||
+                    (S.irShifts || []).some(s => s.physId === +pid && s.date === date && s.shift !== 'Home') ||
+                    (S.irCalls || []).some(c => c.physId === +pid && c.date === date);
+    if(onShift) issues.push(`vacation+shift: ${pname(+pid)}`);
+  });
+  return issues;
+}
+
+// ── Persistent last-saved indicator ──────────────────────────────────
+// Replaces the 3-second flash with always-visible "Last synced 12s ago"
+// — refreshed every 30s. Doesn't suppress the existing transient state
+// messages (⏳ Saving…, ✓ Synced, ⚠ Failed); those still flash, then
+// the relative-time string takes over.
+function _renderLastSavedAge(){
+  const si = document.getElementById('save-indicator');
+  if(!si) return;
+  // If a transient state message is showing, leave it alone
+  if(si.dataset.transient === '1') return;
+  if(typeof S === 'undefined' || !S._lastSaved){
+    si.textContent = '';
+    return;
+  }
+  const ms = Date.now() - S._lastSaved.getTime();
+  const s = Math.round(ms / 1000);
+  let label;
+  if(s < 30) label = 'Saved just now';
+  else if(s < 60) label = `Saved ${s}s ago`;
+  else if(s < 3600) label = `Saved ${Math.round(s/60)}m ago`;
+  else if(s < 86400) label = `Saved ${Math.round(s/3600)}h ago`;
+  else label = `Saved ${Math.round(s/86400)}d ago`;
+  si.textContent = label;
+  si.style.color = 'var(--rs-ink-3)';
+  si.style.fontWeight = '500';
+}
+setInterval(() => { try{ _renderLastSavedAge(); }catch(_){} }, 30000);
+
+// ── Recently-used physicians/sites/subs (LRU on dropdowns) ─────────────
+// Admins assign the same handful of people repeatedly. Tracking the last
+// N selections per dropdown kind and surfacing them at the TOP of the
+// option list converts a "scroll-and-scan-50-names" interaction into
+// "click first item." Persisted per browser; cap at 10 entries per kind.
+const _LRU_KEY = 'rs.lruSelections.v1';
+const _LRU_MAX = 10;
+function _loadLRU(){
+  try{ return JSON.parse(localStorage.getItem(_LRU_KEY) || '{}'); }
+  catch(_){ return {}; }
+}
+function _persistLRU(lru){
+  try{ localStorage.setItem(_LRU_KEY, JSON.stringify(lru)); }catch(_){}
+}
+function _bumpLRU(kind, value){
+  if(value == null || value === '') return;
+  const lru = _loadLRU();
+  if(!lru[kind]) lru[kind] = [];
+  lru[kind] = [String(value), ...lru[kind].filter(v => v !== String(value))].slice(0, _LRU_MAX);
+  _persistLRU(lru);
+}
+function _getLRU(kind){
+  return _loadLRU()[kind] || [];
+}
+
+// ── Searchable combobox (typeahead replacement for <select>) ───────────
+// Wraps an existing native <select> to make it filterable. Native select
+// retains form-value semantics; the combobox is purely a visual layer
+// that drives the underlying select on selection. Activates on any select
+// with the data-rs-search attribute or one of the well-known IDs below.
+//
+// Why not replace the <select> outright? Forms throughout the app read
+// values via getElementById(...).value — preserving the underlying
+// select keeps every existing read-path working unchanged.
+function _wireSearchableSelect(sel){
+  if(!sel || sel._rsWired) return;
+  if(sel.options.length < 8) return; // not worth the chrome on short lists
+  sel._rsWired = true;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:relative;display:block';
+  sel.parentNode.insertBefore(wrapper, sel);
+  wrapper.appendChild(sel);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Type to filter…';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-autocomplete', 'list');
+  input.style.cssText = 'width:100%;padding:8px 12px;border:1px solid var(--rs-line-strong);border-radius:8px;font:inherit;font-size:13px;letter-spacing:-0.005em;background:var(--bg2);color:var(--rs-ink-1)';
+  // Show current select's text in the input
+  const setInputFromSel = () => {
+    const opt = sel.options[sel.selectedIndex];
+    input.value = opt ? opt.text : '';
+  };
+  setInputFromSel();
+  // Hide the native select; the combobox shows the input + dropdown panel.
+  sel.style.cssText = 'position:absolute;left:-99999px;width:1px;height:1px';
+  sel.tabIndex = -1;
+  wrapper.appendChild(input);
+  // Dropdown panel
+  const panel = document.createElement('div');
+  panel.style.cssText = 'position:absolute;top:100%;left:0;right:0;margin-top:4px;background:var(--bg2);border:1px solid var(--rs-line);border-radius:10px;box-shadow:var(--rs-elev-2);max-height:280px;overflow-y:auto;z-index:50;display:none';
+  panel.setAttribute('role', 'listbox');
+  wrapper.appendChild(panel);
+  let filteredIdx = []; // indexes into sel.options that are currently visible
+  let cursor = 0;
+  function rebuild(){
+    const q = input.value.trim().toLowerCase();
+    const opts = [...sel.options];
+    // Surface LRU matches first if applicable
+    const kind = sel.dataset.lruKind || '';
+    const lruIds = kind ? _getLRU(kind) : [];
+    const lruSet = new Set(lruIds);
+    const matches = (o) => !q || (o.text||'').toLowerCase().includes(q) || (o.value||'').toLowerCase().includes(q);
+    const head = [];
+    const tail = [];
+    opts.forEach((o, i) => {
+      if(!matches(o)) return;
+      if(lruSet.has(o.value)) head.push(i);
+      else tail.push(i);
+    });
+    // Sort head by LRU order
+    head.sort((a, b) => lruIds.indexOf(opts[a].value) - lruIds.indexOf(opts[b].value));
+    filteredIdx = head.concat(tail);
+    cursor = 0;
+    if(!filteredIdx.length){
+      panel.innerHTML = '<div style="padding:12px 14px;font-size:12.5px;color:var(--rs-ink-3)">No matches.</div>';
+      return;
+    }
+    panel.innerHTML = filteredIdx.map((i, j) => {
+      const o = opts[i];
+      const isLru = j < head.length;
+      const isCursor = j === cursor;
+      return `<div data-idx="${i}" role="option" class="rs-cb-opt${isCursor ? ' on' : ''}" style="padding:8px 12px;cursor:pointer;font-size:13px;${isCursor ? 'background:var(--rs-accent-soft);color:var(--rs-accent)' : ''}">${escHtml(o.text)}${isLru ? ' <span style="font-size:10px;color:var(--rs-ink-3);margin-left:6px">recent</span>' : ''}</div>`;
+    }).join('');
+    panel.querySelectorAll('[data-idx]').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = +el.dataset.idx;
+        sel.selectedIndex = idx;
+        setInputFromSel();
+        panel.style.display = 'none';
+        if(sel.dataset.lruKind) _bumpLRU(sel.dataset.lruKind, sel.value);
+        try{ sel.dispatchEvent(new Event('change', { bubbles: true })); }catch(_){}
+      });
+    });
+  }
+  input.addEventListener('focus', () => {
+    rebuild();
+    panel.style.display = 'block';
+    input.select();
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => { panel.style.display = 'none'; setInputFromSel(); }, 200);
+  });
+  input.addEventListener('input', rebuild);
+  input.addEventListener('keydown', (e) => {
+    if(e.key === 'ArrowDown'){ e.preventDefault(); cursor = Math.min(cursor + 1, filteredIdx.length - 1); rebuild(); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); cursor = Math.max(cursor - 1, 0); rebuild(); }
+    else if(e.key === 'Enter'){
+      e.preventDefault();
+      const idx = filteredIdx[cursor];
+      if(idx != null){
+        sel.selectedIndex = idx;
+        setInputFromSel();
+        panel.style.display = 'none';
+        if(sel.dataset.lruKind) _bumpLRU(sel.dataset.lruKind, sel.value);
+        try{ sel.dispatchEvent(new Event('change', { bubbles: true })); }catch(_){}
+      }
+    } else if(e.key === 'Escape'){
+      panel.style.display = 'none'; input.blur();
+    }
+  });
+}
+
+// Auto-wire on every render — finds new <select>s and upgrades them.
+// Targets: physician selectors (id contains -phys), site selectors,
+// sub-specialty selectors. data-rs-search forces wiring on others.
+(function _autoWireSearchableSelects(){
+  if(typeof MutationObserver === 'undefined') return;
+  const wireAll = () => {
+    document.querySelectorAll('select').forEach(sel => {
+      const id = sel.id || '';
+      // Conservative: physician selects only. They're universally
+      // long (30+ options) so typeahead is the clear win. Sites and
+      // sub-specialties are typically <10, so the wrapper would add
+      // chrome without much speed-up. Force-wire others by setting
+      // data-rs-search="" on the element.
+      const wantWire =
+        sel.dataset.rsSearch !== undefined ||
+        /(-phys$|phys-|wi-phys|ar-phys|pcr-a|pcr-b|sb-phys|drb-1st-phys|drb-2nd-phys|drb-3rd-phys|drb-home-phys|wk-phys|ird-phys|irs-phys)/i.test(id);
+      if(wantWire) _wireSearchableSelect(sel);
+    });
+  };
+  const start = () => {
+    wireAll();
+    const obs = new MutationObserver(() => { wireAll(); });
+    obs.observe(document.body, { childList: true, subtree: true });
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
+// Tag known dropdowns with their LRU "kind" so the searchable wrapper
+// can surface recent picks first. We identify by id pattern; adding new
+// dropdowns automatically inherits the search behavior, you just need
+// to set data-lru-kind on the <select> if you want recency.
+(function _tagLRUKinds(){
+  const map = [
+    { match: /-phys|phys-|wi-phys|ar-phys|pcr-a|pcr-b/, kind: 'physician' },
+    { match: /-site|site-|ssn-site|sc-site|ccf-site/, kind: 'site' },
+    { match: /-sub|sub-|ssn-sub/, kind: 'subspec' },
+  ];
+  const tag = () => {
+    document.querySelectorAll('select').forEach(sel => {
+      if(sel.dataset.lruKind) return;
+      const id = sel.id || '';
+      for(const m of map){
+        if(m.match.test(id)){ sel.dataset.lruKind = m.kind; break; }
+      }
+    });
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tag);
+  else setTimeout(tag, 100);
+})();
+
 // ── Outbound webhooks ──────────────────────────────────────────────────
 // S.cfg.webhooks = [{id, name, url, events:[...], active}]. When a key
 // event fires (shift-assign, swap-resolve, etc.), we POST a JSON payload
@@ -33557,16 +34286,23 @@ function _updateSaveUI(text,color){
   si.textContent=text;
   si.style.color=color;
   si.style.fontWeight='700';
-  if(!text){ si.style.fontWeight=''; return; }
+  // Mark as transient so the periodic _renderLastSavedAge poller doesn't
+  // overwrite this message during its TTL.
+  si.dataset.transient = text ? '1' : '0';
+  if(!text){ si.style.fontWeight=''; if(typeof _renderLastSavedAge === 'function') _renderLastSavedAge(); return; }
   // Color-based persistence: errors stay 8s, success/info stays 3s.
   const ttl = (typeof color === 'string' &&
               (color.includes('red') || color.includes('amber') || color.includes('--red') || color.includes('--amber')))
     ? 8000 : 3000;
   setTimeout(()=>{
-    // Only clear if WE were the most recent caller. Prevents an old timer
-    // wiping a fresher message that arrived during our TTL.
     if(myToken !== _saveUiToken) return;
-    if(si){ si.textContent=''; si.style.fontWeight=''; }
+    if(si){
+      si.textContent='';
+      si.style.fontWeight='';
+      si.dataset.transient = '0';
+      // Drop into the persistent "Saved Xs ago" state.
+      if(typeof _renderLastSavedAge === 'function') _renderLastSavedAge();
+    }
   }, ttl);
 }
 
