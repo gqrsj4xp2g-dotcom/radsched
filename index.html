@@ -4342,10 +4342,14 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
         </div>
         <div class="g2" style="margin-bottom:10px">
           <div class="fg"><label>Vacation Type</label><select id="xl-pick-type"><option value="Vacation">Vacation</option><option value="Vacation Sold Back">Vacation Sold Back</option></select></div>
-          <div class="fg"><label>Week length (days)</label><input id="xl-pick-days" type="number" value="5" min="1" max="7" style="width:80px"><span style="font-size:11px;color:var(--txt3);margin-left:6px">5 = Mon–Fri</span></div>
         </div>
-        <div style="margin-bottom:10px">
-          <label class="chk" style="font-size:12.5px"><input type="checkbox" id="xl-imp-mon" checked> Align to Monday — shift each week's start to the next Monday so vacations land on the workweek (recommended for files where the column header is a Saturday or Sunday)</label>
+        <div class="note ni" style="font-size:11.5px;line-height:1.55;margin-bottom:12px">
+          <strong>Block convention:</strong> each pick column represents a 9-day block running
+          <strong>Saturday through the following Sunday</strong>. Vacations span the full
+          9 days so the surrounding weekends are blocked from call assignment leading
+          into and out of the vacation. 2nd / 3rd shift assignments span the same 9-day
+          block as continuous coverage. Site is forced to <em>At Home / Remote</em> for
+          imported shifts (matches the practice's home-only policy for 2nd / 3rd).
         </div>
         <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Import categories</div>
         <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;font-size:12.5px">
@@ -31317,54 +31321,63 @@ function _parsePickWorkbook(rows, prev, sheetName){
       : { physId: null, score: 0, status: 'unmatched' };
   });
   // ── Step 4. Build output records ─────────────────────────────────────
-  const days = Math.max(1, Math.min(7, parseInt(document.getElementById('xl-pick-days')?.value) || 5));
   const vacType = document.getElementById('xl-pick-type')?.value || 'Vacation';
   const wantVac    = document.getElementById('xl-imp-vac')?.checked    !== false;
   const wantOff    = document.getElementById('xl-imp-off')?.checked    !== false;
   const wantBB     = document.getElementById('xl-imp-bb')?.checked     !== false;
   const wantS2     = document.getElementById('xl-imp-s2')?.checked     !== false;
   const wantS3     = document.getElementById('xl-imp-s3')?.checked     !== false;
-  const alignMonday = document.getElementById('xl-imp-mon')?.checked !== false;
-  // ── Auto-align to Monday ─────────────────────────────────────────────
-  // Real-world pick sheets often label each week with the SUNDAY (or
-  // SATURDAY) at the top of a calendar column. Most US practices treat
-  // a "vacation week" as Mon–Fri though, so a Sun-anchored column
-  // produces vacations like Sun→Thu — visually incorrect on the
-  // calendar grid which highlights Mon-Fri. Auto-shift the start
-  // forward to the nearest Monday unless the admin disables this via
-  // the toggle below. End is then start + (days-1).
-  const _toMonday = (ds) => {
-    if(!alignMonday) return ds;
-    const dow = parseDateLocal(ds).getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    if(dow === 1) return ds;                  // already Monday
-    const offset = dow === 0 ? 1 : (8 - dow); // 0(Sun)→+1, 2(Tue)→+6, …
-    return addDays(ds, offset > 6 ? offset - 7 : offset);
+  // ── Block convention: Sat → next Sun (9 days) ─────────────────────────
+  // Real-world pick sheets at this practice define each "week" as a 9-day
+  // block running Saturday through the FOLLOWING Sunday (Sat, Sun, Mon,
+  // Tue, Wed, Thu, Fri, Sat, Sun — both weekends bracketed around the
+  // workweek). The pick sheet column header is typically the Sunday in
+  // the middle of that block.
+  //
+  // Vacations: a single 9-day record per pick. This automatically blocks
+  // weekend call assignment leading INTO and OUT OF the vacation, since
+  // the surrounding weekends are part of the vacation span.
+  //
+  // 2nd/3rd shifts: one record per day across the 9-day block (Sat → Sun)
+  // because the shift assignment is a continuous coverage commitment.
+  // Sites are forced to "At Home / Remote" per the app's home-only policy.
+  const _blockStart = (ds) => {
+    const d = parseDateLocal(ds);
+    const dow = d.getDay();        // 0=Sun, 1=Mon, ..., 6=Sat
+    if(dow === 6) return ds;        // already Saturday
+    if(dow === 0) return addDays(ds, -1);  // Sunday → previous Saturday
+    // Mon-Fri header: walk back to the previous Saturday so the 9-day
+    // block contains the same calendar week as the column header.
+    return addDays(ds, -1 - dow);
   };
+  const BLOCK_DAYS = 9; // Sat through next Sun, inclusive
   const vacRecs = []; // {physId, start, end, type, notes}
-  const shiftRecs = []; // {physId, date, shift:'2nd'|'3rd', site, notes}
+  const shiftRecs = []; // {physId, date, shift, site, notes}
   weeks.forEach(w => {
-    const start = _toMonday(w.weekStart);
-    const end = addDays(start, days - 1);
+    const blockStart = _blockStart(w.weekStart);
+    const blockEnd = addDays(blockStart, BLOCK_DAYS - 1);
     const mkVac = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name];
       if(!m || !m.physId) return;
-      vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
+      vacRecs.push({
+        physId: m.physId,
+        start: blockStart,
+        end: blockEnd,
+        type: vacType,
+        notes: `Imported: ${label} ${e.raw}`,
+      });
     });
     if(wantVac) mkVac(w.vacation, 'pick');
     if(wantOff) mkVac(w.off,      'Off');
     if(wantBB)  mkVac(w.bbPicks,  'BB');
-    // Shifts: each 2nd/3rd shift listed in the SECONDARY column applies to
-    // ALL weekdays of that week. The app's policy treats 2nd/3rd as
-    // home-only, so site is forced to "At Home / Remote".
+    // 2nd/3rd shifts span the same 9-day block. Generate one DR shift
+    // record per day so the calendar shows the assignment continuously
+    // and the rule engine sees the physician as committed every day.
     const mkShift = (entries, shiftKind) => entries.forEach(e => {
       const m = nameMap[e.name];
       if(!m || !m.physId) return;
-      // Generate one entry per weekday Mon-Fri (5 days from start). If
-      // the user picked a longer week length, follow that.
-      for(let i = 0; i < days; i++){
-        const ds = addDays(start, i);
-        const dow = parseDateLocal(ds).getDay();
-        if(dow === 0 || dow === 6) continue; // skip weekends
+      for(let i = 0; i < BLOCK_DAYS; i++){
+        const ds = addDays(blockStart, i);
         shiftRecs.push({
           physId: m.physId,
           date: ds,
@@ -31611,25 +31624,26 @@ function rematchPickImport(){
   const fakeRows = []; // not used — but the public entry point reads form state
   // Simpler path: re-run the latter half of _parsePickWorkbook over the
   // existing weeks. We just rebuild vacRecs / shiftRecs without re-parsing.
-  const days = Math.max(1, Math.min(7, parseInt(document.getElementById('xl-pick-days')?.value) || 5));
   const vacType = document.getElementById('xl-pick-type')?.value || 'Vacation';
   const wantVac = document.getElementById('xl-imp-vac')?.checked !== false;
   const wantOff = document.getElementById('xl-imp-off')?.checked !== false;
   const wantBB  = document.getElementById('xl-imp-bb')?.checked !== false;
   const wantS2  = document.getElementById('xl-imp-s2')?.checked !== false;
   const wantS3  = document.getElementById('xl-imp-s3')?.checked !== false;
-  const alignMonday = document.getElementById('xl-imp-mon')?.checked !== false;
-  const _toMondayR = (ds) => {
-    if(!alignMonday) return ds;
-    const dow = parseDateLocal(ds).getDay();
-    if(dow === 1) return ds;
-    const offset = dow === 0 ? 1 : (8 - dow);
-    return addDays(ds, offset > 6 ? offset - 7 : offset);
+  // Same Sat → next-Sun 9-day block convention as _parsePickWorkbook.
+  const _blockStartR = (ds) => {
+    const d = parseDateLocal(ds);
+    const dow = d.getDay();
+    if(dow === 6) return ds;
+    if(dow === 0) return addDays(ds, -1);
+    return addDays(ds, -1 - dow);
   };
+  const BLOCK = 9;
   const nameMap = _xlPickData.nameMap || {};
   const vacRecs = [], shiftRecs = [];
   (_xlPickData.allWeeks || []).forEach(w => {
-    const start = _toMondayR(w.weekStart), end = addDays(start, days - 1);
+    const start = _blockStartR(w.weekStart);
+    const end = addDays(start, BLOCK - 1);
     const mk = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
       vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
@@ -31639,9 +31653,8 @@ function rematchPickImport(){
     if(wantBB)  mk(w.bbPicks,  'BB');
     const mkS = (entries, sk) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
-      for(let i = 0; i < days; i++){
-        const ds = addDays(start, i), dow = parseDateLocal(ds).getDay();
-        if(dow === 0 || dow === 6) continue;
+      for(let i = 0; i < BLOCK; i++){
+        const ds = addDays(start, i);
         shiftRecs.push({ physId: m.physId, date: ds, shift: sk, site: 'At Home / Remote', sub: '', notes: `Imported: ${e.raw}` });
       }
     });
