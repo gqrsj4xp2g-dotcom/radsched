@@ -563,15 +563,30 @@ tbody tr:hover{background:var(--bg3)}
     /* ── Sidebar polish ──────────────────────────────────────────────── */
     .snav-item {
       border-radius: var(--rs-r-md);
+      padding: 7px 12px;
+      margin: 1px 6px;
+      font-size: 13px;
+      letter-spacing: -0.005em;
       transition:
         background var(--rs-base-d) var(--rs-ease),
         color var(--rs-base-d) var(--rs-ease);
     }
+    .snav-item:hover { background: var(--bg3, var(--rs-line)); }
     .snav-item.on {
       background: var(--rs-accent-soft);
       color: var(--rs-accent);
       font-weight: 600;
     }
+    .snav-sect {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--rs-ink-3);
+      padding: 16px 18px 6px;
+      margin-top: 2px;
+    }
+    .snav-sect:first-child { margin-top: 0; padding-top: 12px; }
 
     /* ── Tags ─────────────────────────────────────────────────────────── */
     /* Keep the tag color system but hush saturation slightly + give them
@@ -1357,6 +1372,7 @@ tbody tr:hover{background:var(--bg3)}
     <span id="rs-error-badge" onclick="showErrorLog()" style="display:none;font-size:11px;font-weight:700;background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" title="Recent errors — click to view"></span>
     <button id="rs-notif-toggle" class="tb-btn" onclick="toggleNotificationsPanel()" title="Notifications" aria-label="Notifications" style="margin-right:4px;font-size:14px"><span aria-hidden="true">🔔</span><span id="rs-notif-dot"></span></button>
     <button class="tb-btn" onclick="openCommandPalette()" title="Command palette (Cmd/Ctrl+K)" aria-label="Search" style="margin-right:4px;padding:6px 10px">⌕</button>
+    <button class="tb-btn" onclick="openShortcutsHelp()" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" style="margin-right:4px;padding:6px 10px;font-size:13px">?</button>
     <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" disabled style="margin-right:2px;padding:6px 8px" title="Undo (Cmd/Ctrl+Z)">↶</button>
     <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled style="margin-right:4px;padding:6px 8px" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
     <button class="tb-btn" onclick="printSchedule()" style="margin-right:4px;padding:6px 10px" title="Print the active schedule view (Cmd/Ctrl+P)">🖨 Print</button>
@@ -1369,47 +1385,56 @@ tbody tr:hover{background:var(--bg3)}
       <!-- Overlay sits adjacent to the sidebar so it can be hidden/shown via
            CSS sibling selector (.sidebar.open ~ .sidebar-overlay).
            Tapping the overlay closes the drawer. -->
+      <!-- ─── Refined sidebar — fewer top-level items, intentional grouping.
+           Sections appear progressively: everyone sees Overview + Schedule;
+           admins additionally see Build, Practice, and Tools/Admin. Items
+           that historically lived as siblings now live under their parent
+           workflow's section header. The separators are hairlines, not
+           heavy bars. ──────────────────────────────────────────────────── -->
       <div class="snav-sect">Overview</div>
-      <div class="snav-item on" onclick="nav('dashboard',this)">Dashboard</div>
-      <div class="snav-item" onclick="nav('my-schedule',this)">My Schedule</div>
-      <div class="snav-item" onclick="nav('chat',this)">💬 Chat</div>
-      <div class="snav-item admin-only" onclick="nav('ai-agent',this)">🤖 AI Scheduler</div>
-      <div class="snav-item admin-only" onclick="nav('practices',this)">🏥 Practices</div>
-      <div class="snav-item" onclick="nav('swaps',this)">🔄 Shift Swaps</div>
-      <div class="snav-sect">People</div>
-      <div class="snav-item admin-only" onclick="nav('physicians',this)">Physician Roster</div>
-      <div class="snav-item admin-only" onclick="nav('vacations',this)">Vacations & Time Off</div>
-      <div class="snav-item admin-only" onclick="nav('vac-pick',this)">📅 Vacation Picking</div>
-      <div class="snav-item" onclick="nav('profiles',this)">User Profiles</div>
-      <div class="snav-sect">Diagnostic Rad</div>
-      <div class="snav-item" onclick="nav('dr-cal',this)">DR Calendar</div>
-      <div class="snav-item admin-only" onclick="nav('dr-builder',this)">Schedule Builder</div>
-      <div class="snav-item admin-only" onclick="nav('dr-weekends',this)">Weekend Call</div>
-      <div class="snav-item admin-only" onclick="nav('auto-assign',this)">Auto-Assign DR</div>
-      <div class="snav-sect">Interventional Rad</div>
-      <div class="snav-item" onclick="nav('ir-cal',this)">IR Calendar</div>
-      <div class="snav-item admin-only" onclick="nav('ir-shifts',this)">IR Shift Builder</div>
-      <div class="snav-item admin-only" onclick="nav('ir-builder',this)">IR Call Builder</div>
-      <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)">IR Shift Auto-Assign</div>
-      <div class="snav-item admin-only" onclick="nav('ir-auto',this)">IR Call Auto-Assign</div>
-      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)">⚖ IR Call Rebalancer</div>
-      <div class="snav-sect">Compliance & Special</div>
-      <div class="snav-item admin-only" onclick="nav('anchor-report',this)">Anchor Compliance</div>
-      <div class="snav-item admin-only" onclick="nav('holidays',this)">Holiday Call</div>
-      <div class="snav-item admin-only" onclick="nav('tumor-boards',this)">🔬 Tumor Boards</div>
-      <div class="snav-item admin-only" onclick="nav('clinics',this)">🏥 Clinics</div>
-      <div class="snav-item" onclick="nav('open-shifts',this)">Open Shift Board</div>
-      <div class="snav-sect">System</div>
-      <div class="snav-item admin-only" onclick="nav('fte',document.querySelector('[onclick*=fte]'))">📊 FTE Monitor</div>
-      <div class="snav-item" onclick="nav('comm-prefs',this)">🔔 Notifications</div>
-      <div class="snav-sect admin-only">Admin</div>
-      <div class="snav-item admin-only" onclick="nav('user-mgmt',this)">User Management</div>
-      <div class="snav-item admin-only" onclick="nav('publish',this)">📤 Publish Schedule</div>
-      <div class="snav-item admin-only" onclick="nav('broadcast',this)">📢 Broadcast Email</div>
-      <div class="snav-item admin-only" onclick="nav('settings',this)">⚙ Settings</div>
-      <div class="snav-item admin-only" onclick="nav('import',this)">📥 Import Excel</div>
-      <div class="snav-item admin-only" onclick="nav('site-slots',this)">DR Site Slots</div>
-      <div class="snav-item admin-only" onclick="nav('ir-slots',this)">IR Slots &amp; Groups</div>
+      <div class="snav-item on" onclick="nav('dashboard',this)" data-pg="dashboard">Dashboard</div>
+      <div class="snav-item" onclick="nav('my-schedule',this)" data-pg="my-schedule">My Schedule</div>
+      <div class="snav-item" onclick="nav('open-shifts',this)" data-pg="open-shifts">Open Shifts</div>
+      <div class="snav-item" onclick="nav('swaps',this)" data-pg="swaps">Shift Swaps</div>
+      <div class="snav-item" onclick="nav('chat',this)" data-pg="chat">💬 Chat</div>
+      <div class="snav-item" onclick="nav('comm-prefs',this)" data-pg="comm-prefs">🔔 Notifications</div>
+      <div class="snav-item" onclick="nav('profiles',this)" data-pg="profiles">User Profiles</div>
+
+      <div class="snav-sect">Schedule</div>
+      <div class="snav-item" onclick="nav('dr-cal',this)" data-pg="dr-cal">DR Calendar</div>
+      <div class="snav-item" onclick="nav('ir-cal',this)" data-pg="ir-cal">IR Calendar</div>
+      <div class="snav-item admin-only" onclick="nav('holidays',this)" data-pg="holidays">Holiday Call</div>
+      <div class="snav-item admin-only" onclick="nav('vacations',this)" data-pg="vacations">Vacations &amp; Time Off</div>
+      <div class="snav-item" onclick="nav('vac-pick',this)" data-pg="vac-pick">Vacation Picking</div>
+
+      <div class="snav-sect admin-only">Build</div>
+      <div class="snav-item admin-only" onclick="nav('dr-builder',this)" data-pg="dr-builder">DR Schedule Builder</div>
+      <div class="snav-item admin-only" onclick="nav('dr-weekends',this)" data-pg="dr-weekends">DR Weekend Call</div>
+      <div class="snav-item admin-only" onclick="nav('auto-assign',this)" data-pg="auto-assign">DR Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-shifts',this)" data-pg="ir-shifts">IR Shift Builder</div>
+      <div class="snav-item admin-only" onclick="nav('ir-builder',this)" data-pg="ir-builder">IR Call Builder</div>
+      <div class="snav-item admin-only" onclick="nav('ir-shift-auto',this)" data-pg="ir-shift-auto">IR Shift Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-auto',this)" data-pg="ir-auto">IR Call Auto-Assign</div>
+      <div class="snav-item admin-only" onclick="nav('ir-rebalance',this)" data-pg="ir-rebalance">IR Call Rebalancer</div>
+
+      <div class="snav-sect admin-only">People &amp; Practice</div>
+      <div class="snav-item admin-only" onclick="nav('physicians',this)" data-pg="physicians">Physicians</div>
+      <div class="snav-item admin-only" onclick="nav('user-mgmt',this)" data-pg="user-mgmt">User Management</div>
+      <div class="snav-item admin-only" onclick="nav('site-slots',this)" data-pg="site-slots">Sites &amp; DR Slots</div>
+      <div class="snav-item admin-only" onclick="nav('ir-slots',this)" data-pg="ir-slots">IR Groups &amp; Slots</div>
+      <div class="snav-item admin-only" onclick="nav('tumor-boards',this)" data-pg="tumor-boards">🔬 Tumor Boards</div>
+      <div class="snav-item admin-only" onclick="nav('clinics',this)" data-pg="clinics">🏥 Clinics</div>
+      <div class="snav-item admin-only" onclick="nav('practices',this)" data-pg="practices">🏢 Practices</div>
+
+      <div class="snav-sect admin-only">Tools &amp; Reports</div>
+      <div class="snav-item admin-only" onclick="nav('tools',this)" data-pg="tools">🛠 Tools</div>
+      <div class="snav-item admin-only" onclick="nav('fte',this)" data-pg="fte">📊 FTE Monitor</div>
+      <div class="snav-item admin-only" onclick="nav('anchor-report',this)" data-pg="anchor-report">📈 Anchor Compliance</div>
+      <div class="snav-item admin-only" onclick="nav('publish',this)" data-pg="publish">📤 Publish</div>
+      <div class="snav-item admin-only" onclick="nav('broadcast',this)" data-pg="broadcast">📢 Broadcast</div>
+      <div class="snav-item admin-only" onclick="nav('ai-agent',this)" data-pg="ai-agent">🤖 AI Scheduler</div>
+      <div class="snav-item admin-only" onclick="nav('import',this)" data-pg="import">📥 Import Excel</div>
+      <div class="snav-item admin-only" onclick="nav('settings',this)" data-pg="settings">⚙ Settings</div>
       <div class="snav-sect su-only" style="color:#a855f7">⚡ Superuser</div>
       <div class="snav-item su-only" onclick="nav('su-dashboard',this)" style="color:#a855f7">Cross-Practice Dashboard</div>
       <div class="snav-item su-only" onclick="nav('su-practices',this)" style="color:#a855f7">All Practices</div>
@@ -3423,6 +3448,264 @@ WHERE email = 'your-admin@example.com';</pre>
       </div>
     </div>
   </details>
+</div>
+
+<!-- ─── TOOLS ────────────────────────────────────────────────────────────
+     Admin workshop. Each card is one focused operation; cards stay
+     loosely-coupled so the page degrades nicely if one helper is
+     unavailable. The page is a single scroll — no inner tabs — because
+     each tool is short enough to fit in a card and admins typically
+     come here knowing which tool they need.
+─────────────────────────────────────────────────────────────────────── -->
+<div id="page-tools" class="page admin-only">
+  <div class="pg-title">🛠 Tools</div>
+  <div class="pg-sub">Admin workshop — what-if simulations, custom rules, advanced reports, system logs.</div>
+
+  <!-- ── 1. What-If Simulator ─────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔮 What-if simulator</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Project a hypothetical change without committing it. Useful for
+      "if Dr. X took the week of Christmas off, who absorbs the work?"
+      and "what would removing this physician break?" The simulation
+      runs against the current state, reports who would absorb each
+      affected slot, and identifies anything that would become
+      unfillable. Nothing is saved — close the result to discard.
+    </div>
+    <div class="g3" style="gap:10px;margin-bottom:10px">
+      <div class="fg" style="margin:0">
+        <label>Scenario</label>
+        <select id="wi-kind" onchange="_wiToggleFields()">
+          <option value="vacation">Take vacation</option>
+          <option value="remove-physician">Remove physician</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Physician</label>
+        <select id="wi-phys"></select>
+      </div>
+      <div class="fg" id="wi-window-wrap" style="margin:0;display:flex;gap:6px">
+        <div style="flex:1"><label style="font-size:10px">From</label><input id="wi-start" type="date"></div>
+        <div style="flex:1"><label style="font-size:10px">To</label><input id="wi-end" type="date"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bp" onclick="runWhatIf()">Run simulation</button>
+      <button class="bsm" onclick="document.getElementById('wi-result').innerHTML=''">Clear</button>
+    </div>
+    <div id="wi-result" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 2. Vacation Priority Lottery ─────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🎟 Vacation lottery</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Rank pending vacation requests for an in-demand week (Christmas,
+      July 4) by seniority + recency-weighted past-popular-week balance.
+      Higher rank = more deserving. The result is a recommendation, not
+      a commit; admins still approve each request individually.
+    </div>
+    <div class="g2" style="gap:10px;margin-bottom:10px">
+      <div class="fg" style="margin:0"><label>Week start</label><input id="lot-start" type="date"></div>
+      <div class="fg" style="margin:0"><label>Week end</label><input id="lot-end" type="date"></div>
+    </div>
+    <button class="bp" onclick="runLottery()">Run lottery</button>
+    <div id="lot-result" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 3. Pair-conflict rules ───────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🚫 Pair-conflict rules</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Don't schedule physicians A and B together on the same day or
+      same shift. Useful for training overlap, sub-specialty pairing,
+      or interpersonal conflicts. Severity controls whether the
+      manual-add path warns or blocks.
+    </div>
+    <div class="g2" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Physician A</label><select id="pcr-a"></select></div>
+      <div class="fg" style="margin:0"><label>Physician B</label><select id="pcr-b"></select></div>
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0">
+        <label>Scope</label>
+        <select id="pcr-scope">
+          <option value="same-day">Same day</option>
+          <option value="same-shift">Same shift &amp; site</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Site (optional)</label>
+        <select id="pcr-site"><option value="">Any site</option></select>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Severity</label>
+        <select id="pcr-sev">
+          <option value="warn">Warn (admin can override)</option>
+          <option value="block">Block (no override)</option>
+        </select>
+      </div>
+    </div>
+    <button class="bp" onclick="addPairConflict()">+ Add rule</button>
+    <div id="pcr-list" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 4. Site capacity caps ────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🚧 Site capacity caps</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Maximum physicians simultaneously assigned to a given site/shift
+      on the same day. Enforced at manual-add time and used by the
+      auto-assigner as a hard exclusion. 0 means uncapped.
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Site</label><select id="sc-site"></select></div>
+      <div class="fg" style="margin:0">
+        <label>Shift</label>
+        <select id="sc-shift">
+          <option value="1st">1st</option>
+          <option value="2nd">2nd</option>
+          <option value="3rd">3rd</option>
+          <option value="Home">Home</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0"><label>Max physicians</label><input id="sc-cap" type="number" min="0" value="0"></div>
+    </div>
+    <button class="bp" onclick="addSiteCap()">Set cap</button>
+    <div id="sc-list" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 5. Sub-specialty needs ───────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🎯 Per-shift sub-specialty needs</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Coverage requirements: "1st shift at CHN needs at least 1 body
+      imager." The auto-assigner awards a small cost bonus to candidates
+      who fill unmet needs. Manual scans flag missing coverage.
+    </div>
+    <div class="g4" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Site</label><select id="ssn-site"></select></div>
+      <div class="fg" style="margin:0">
+        <label>Shift</label>
+        <select id="ssn-shift">
+          <option value="1st">1st</option>
+          <option value="2nd">2nd</option>
+          <option value="3rd">3rd</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0"><label>Sub-specialty</label><select id="ssn-sub"></select></div>
+      <div class="fg" style="margin:0"><label>Min count</label><input id="ssn-min" type="number" min="1" value="1"></div>
+    </div>
+    <button class="bp" onclick="addSubNeed()">Set requirement</button>
+    <div id="ssn-list" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 6. Schedule-constraints config ───────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">⚙️ Schedule constraint settings</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Practice-level tunables for the constraint engine. These apply to
+      auto-assign AND manual rule violations.
+    </div>
+    <div class="g3" style="gap:14px;margin-bottom:14px">
+      <div class="fg" style="margin:0">
+        <label>Post-call recovery (days)</label>
+        <input id="cs-recovery" type="number" min="0" max="14">
+        <div style="font-size:10.5px;color:var(--rs-ink-3);margin-top:3px">No day shifts within N days after a weekend call. 0 disables.</div>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Holiday adjacent-block gap (days)</label>
+        <input id="cs-holgap" type="number" min="0" max="14">
+        <div style="font-size:10.5px;color:var(--rs-ink-3);margin-top:3px">Can't draft same person for two holiday blocks within N days. Default 3.</div>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Anchor hard-floor (%)</label>
+        <input id="cs-anchorhard" type="number" min="0" max="100">
+        <div style="font-size:10.5px;color:var(--rs-ink-3);margin-top:3px">Hard reject below this; soft penalty between this and the soft target. Default = soft - 15.</div>
+      </div>
+    </div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Burnout thresholds</div>
+    <div class="g3" style="gap:14px;margin-bottom:14px">
+      <div class="fg" style="margin:0">
+        <label>Max consecutive days</label>
+        <input id="cs-bo-days" type="number" min="1" max="14">
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Weekends per quarter</label>
+        <input id="cs-bo-wknd" type="number" min="0" max="13">
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Holidays per year</label>
+        <input id="cs-bo-hol" type="number" min="0" max="12">
+      </div>
+    </div>
+    <button class="bp" onclick="saveConstraintSettings()">Save settings</button>
+  </div>
+
+  <!-- ── 7. Cross-coverage finder ─────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🤝 Cross-coverage finder</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Pick a date / site / shift; get a ranked list of cross-group
+      physicians who could cover, ordered by least-disruption (own-group
+      target gap + drive time + day availability).
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Date</label><input id="ccf-date" type="date"></div>
+      <div class="fg" style="margin:0"><label>Site</label><select id="ccf-site"></select></div>
+      <div class="fg" style="margin:0"><label>IR group of slot</label><select id="ccf-group"></select></div>
+    </div>
+    <button class="bp" onclick="runCrossCoverage()">Find candidates</button>
+    <div id="ccf-result" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 8. Audit log viewer ──────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📜 Audit log</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Last 500 admin mutations — physician add/remove, shift add/delete,
+      auto-assign apply, holiday assign, swaps resolved, backups
+      restored. Filter by action prefix; click a row to expand the
+      detail JSON.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <input id="al-filter" placeholder="Filter (e.g. drShift, swap, irRebalance)…" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--rs-line-strong);border-radius:var(--rs-r-md)" oninput="renderAuditLog()">
+      <button class="bsm" onclick="renderAuditLog()">↻ Refresh</button>
+      <button class="bsm" onclick="exportAuditLog()">⬇ Export CSV</button>
+    </div>
+    <div id="al-result"></div>
+  </div>
+
+  <!-- ── 9. Error log viewer ──────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🐛 Error log</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Unhandled errors and runtime warnings captured by the global
+      error handler and the various render paths. Sharing this output
+      with support is the fastest way to diagnose a problem.
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="bsm" onclick="renderErrorLog()">↻ Refresh</button>
+      <button class="br bsm" onclick="if(confirm('Clear the error log?')){_errorLog.length=0;_updateErrorBadge?.();renderErrorLog();}">🗑 Clear</button>
+    </div>
+    <div id="el-result"></div>
+  </div>
+
+  <!-- ── 10. Bulk operations ──────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📥 Bulk operations</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      One-shot administrative operations that don't fit elsewhere.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bsm" onclick="nav('import',document.querySelector('.snav-item[data-pg=&quot;import&quot;]'))">📥 Import Excel schedule…</button>
+      <button class="bsm" onclick="nav('publish',document.querySelector('.snav-item[data-pg=&quot;publish&quot;]'))">📤 Publish snapshot to phys…</button>
+      <button class="bsm" onclick="nav('broadcast',document.querySelector('.snav-item[data-pg=&quot;broadcast&quot;]'))">📢 Broadcast email…</button>
+      <button class="bsm" onclick="nav('ai-agent',document.querySelector('.snav-item[data-pg=&quot;ai-agent&quot;]'))">🤖 AI scheduler…</button>
+      <button class="bsm" onclick="if(typeof exportScheduleCSV==='function')exportScheduleCSV()">⬇ Export schedule CSV</button>
+      <button class="bsm" onclick="if(typeof scanScheduleRuleViolations==='function')scanScheduleRuleViolations('all')">🔍 Scan rule violations</button>
+    </div>
+  </div>
 </div>
 
 <!-- FTE MONITOR -->
@@ -5776,6 +6059,12 @@ document.addEventListener('keydown', (e) => {
     if(typeof openCommandPalette === 'function') openCommandPalette();
     return;
   }
+  // Cmd/Ctrl+/ → keyboard shortcut cheat sheet.
+  if(e.key === '/' || e.key === '?'){
+    e.preventDefault();
+    if(typeof openShortcutsHelp === 'function') openShortcutsHelp();
+    return;
+  }
   // Cmd/Ctrl+P → print the active schedule view via our title-injecting
   // wrapper so the printed page has a meaningful header.
   if(e.key === 'p' || e.key === 'P'){
@@ -8086,6 +8375,7 @@ function _refreshCurrentPage(){
     'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
     'tumor-boards':renderTumorBoards,'publish':renderPublish,
     'clinics':renderClinics,
+    'tools':renderTools,
   };
   try{if(fns[pg]) fns[pg]();}catch(e){
     // Surface render failures via the error log so they aren't truly silent.
@@ -8852,6 +9142,7 @@ function nav(pg,el){
     'comm-prefs':renderCommPrefs,'broadcast':renderBroadcast,
     'tumor-boards':renderTumorBoards,'publish':renderPublish,
     'clinics':renderClinics,
+    'tools':renderTools,
   };
   if(fns[pg]) fns[pg]();
 }
@@ -14763,13 +15054,40 @@ function reassignIRShift(id, newPhysId){
   renderIRShiftTable();
 }
 
+// ── Undo-for-delete helper ──────────────────────────────────────────────
+// Show an action toast immediately after a delete — clicking "Undo" within
+// the toast's TTL restores the deleted record. After dismissal the delete
+// is final. Prevents the gut-punch of mis-clicking the ✕ on a row and
+// having no recourse short of Cmd-Z (which not everyone discovers).
+function _toastUndoDelete(label, undoFn){
+  if(typeof _toastAction !== 'function'){
+    // Fallback: legacy toast or no-op. Without an undo path the delete
+    // still happened — the toast is informational only.
+    if(typeof _toast === 'function') _toast(label, 'ok');
+    return;
+  }
+  _toastAction(label, 'Undo', undoFn, 'info');
+}
+
 function deleteIRShift(id){
   if(!_adminOnly('delete IR shift')) return;
   const s = (S.irShifts||[]).find(x => x.id === id);
+  if(!s) return;
+  // Snapshot for undo BEFORE we remove
+  const snapshot = {...s};
   S.irShifts = (S.irShifts||[]).filter(s => s.id !== id);
-  if(typeof _audit === 'function' && s) _audit('irShift.delete', {id, physId:s.physId, date:s.date, site:s.site, shift:s.shift});
+  if(typeof _audit === 'function') _audit('irShift.delete', {id, physId:s.physId, date:s.date, site:s.site, shift:s.shift});
   triggerSave();
   _afterMutation();
+  _toastUndoDelete(
+    `IR shift removed — ${pname(s.physId)} · ${s.date}`,
+    () => {
+      S.irShifts = [...(S.irShifts||[]), snapshot];
+      if(typeof _audit === 'function') _audit('irShift.undelete', {id});
+      triggerSave();
+      _afterMutation();
+    }
+  );
 }
 
 // Named deletion helpers for the remaining shift/call/vacation tables so that
@@ -14782,29 +15100,58 @@ function deleteDRShift(id){
   if(!_adminOnly('delete DR shift')) return;
   const s = S.drShifts.find(x => x.id === id);
   if(!s) return;
+  const snapshot = {...s};
   S.drShifts = S.drShifts.filter(x => x.id !== id);
   if(typeof _audit === 'function') _audit('drShift.delete', {id, physId:s.physId, date:s.date, site:s.site, shift:s.shift});
-  // Auto-home shifts sometimes have a mirrored entry from holiday sync — if
-  // this shift was auto-created by holiday sync (notes include 'Holiday'),
-  // the holiday itself remains; user must delete via Holiday tab to clean up.
   triggerSave();
   _afterMutation();
+  _toastUndoDelete(
+    `DR shift removed — ${pname(s.physId)} · ${s.date}`,
+    () => {
+      S.drShifts = [...S.drShifts, snapshot];
+      if(typeof _audit === 'function') _audit('drShift.undelete', {id});
+      triggerSave();
+      _afterMutation();
+    }
+  );
 }
 
 function deleteWkCall(id){
   if(!_adminOnly('delete weekend call')) return;
   const w = (S.weekendCalls||[]).find(x => x.id === id);
+  if(!w) return;
+  const snapshot = {...w};
   S.weekendCalls = S.weekendCalls.filter(x => x.id !== id);
-  if(typeof _audit === 'function' && w) _audit('weekendCall.delete', {id, physId:w.physId, date:w.satDate||w.date, site:w.site});
+  if(typeof _audit === 'function') _audit('weekendCall.delete', {id, physId:w.physId, date:w.satDate||w.date, site:w.site});
   triggerSave();
   _afterMutation();
+  _toastUndoDelete(
+    `Weekend call removed — ${pname(w.physId)} · ${w.satDate||w.date}`,
+    () => {
+      S.weekendCalls = [...S.weekendCalls, snapshot];
+      if(typeof _audit === 'function') _audit('weekendCall.undelete', {id});
+      triggerSave();
+      _afterMutation();
+    }
+  );
 }
 
 function deleteVacation(id){
   if(!_adminOnly('delete vacation')) return;
+  const v = (S.vacations||[]).find(x => x.id === id);
+  if(!v) return;
+  const snapshot = {...v};
   S.vacations = S.vacations.filter(x => x.id !== id);
   triggerSave();
   _afterMutation();
+  _toastUndoDelete(
+    `Vacation removed — ${pname(v.physId)} · ${v.start} → ${v.end}`,
+    () => {
+      S.vacations = [...S.vacations, snapshot];
+      triggerSave();
+      _afterMutation();
+    }
+  );
 }
 
 /* ─── HOLIDAY COUNTER — MULTI-YEAR EQUITY ─── */
@@ -24001,6 +24348,476 @@ function updateSbInfo(){
  *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
  *   shiftKey ∈ {'s1','s2','s3','home'} for DR shifts; '' / absent for IR
  */
+// ── Keyboard shortcut help modal ─────────────────────────────────────
+// Triggered by `?` (bare, outside inputs) or `Cmd/Ctrl+/`. Renders a
+// centered overlay listing every keybinding the app exposes with a
+// short description.
+const _SHORTCUTS = [
+  ['⌘ K', 'Open command palette (jump to anything)'],
+  ['⌘ S', 'Force-save now (skip the autosave debounce)'],
+  ['⌘ P', 'Print active schedule view'],
+  ['⌘ Z', 'Undo last edit'],
+  ['⌘ ⇧ Z', 'Redo'],
+  ['?',   'Show this help'],
+  ['Esc', 'Close drawer / modal / palette'],
+];
+
+function openShortcutsHelp(){
+  let host = document.getElementById('rs-help-host');
+  if(host && host.querySelector('.rs-help-modal')){ closeShortcutsHelp(); return; }
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'rs-help-host';
+    document.body.appendChild(host);
+  }
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const fmtKey = (k) => k.replace(/⌘/g, isMac ? '⌘' : 'Ctrl').replace(/⇧/g, isMac ? '⇧' : 'Shift');
+  host.innerHTML = `
+    <div class="rs-cp-backdrop" onclick="if(event.target===this)closeShortcutsHelp()">
+      <div class="rs-cp" style="max-width:440px">
+        <div style="padding:18px 22px;border-bottom:1px solid var(--rs-line);font-size:15px;font-weight:600;letter-spacing:-0.022em;display:flex;justify-content:space-between;align-items:center">
+          <span>Keyboard shortcuts</span>
+          <button class="bsm" style="padding:3px 10px;font-size:11px" onclick="closeShortcutsHelp()">Close</button>
+        </div>
+        <div style="padding:14px 22px">
+          <table style="width:100%;font-size:13px">
+            ${_SHORTCUTS.map(([k, desc]) => `
+              <tr>
+                <td style="padding:6px 14px 6px 0;width:100px">
+                  ${fmtKey(k).split(/\s+/).map(part =>
+                    `<kbd style="background:var(--bg3,var(--rs-line));padding:2px 7px;border-radius:5px;font-family:-apple-system,monospace;font-size:11.5px;border:1px solid var(--rs-line-strong);box-shadow:inset 0 -1px 0 var(--rs-line-strong)">${escHtml(part)}</kbd>`
+                  ).join(' ')}
+                </td>
+                <td style="color:var(--rs-ink-2);padding:6px 0;letter-spacing:-0.005em">${escHtml(desc)}</td>
+              </tr>`).join('')}
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+function closeShortcutsHelp(){
+  const host = document.getElementById('rs-help-host');
+  if(host) host.innerHTML = '';
+}
+
+// Bare `?` (without modifier, outside inputs) opens the shortcut help.
+// Registered as a separate listener because the main keydown handler
+// gates on `e.metaKey || e.ctrlKey` and would skip unmodified keys.
+(function _wireBareShortcuts(){
+  document.addEventListener('keydown', (e) => {
+    if(e.metaKey || e.ctrlKey || e.altKey) return;
+    if(e.key !== '?') return;
+    const tag = (document.activeElement?.tagName || '').toUpperCase();
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+    e.preventDefault();
+    if(typeof openShortcutsHelp === 'function') openShortcutsHelp();
+  });
+})();
+
+// ── Tools page renderer ──────────────────────────────────────────────
+// Repopulates every form on the Tools page from current state. Called
+// on tab open via _refreshCurrentPage's fns map.
+function renderTools(){
+  if(!_isAdminOrSU || !_isAdminOrSU()) return;
+  // Populate physician selects
+  const physOptions = (S.physicians||[]).slice().sort((a,b) =>
+    (a.last||'').localeCompare(b.last||'')
+  ).map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  ['wi-phys','pcr-a','pcr-b'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.innerHTML = (id === 'wi-phys' ? '<option value="">— pick physician —</option>' : '') + physOptions;
+  });
+  // Site selects
+  const siteOptions = (S.sites||[])
+    .filter(s => s.name !== 'At Home / Remote')
+    .map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+  ['pcr-site','sc-site','ssn-site','ccf-site'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){
+      const prefix = id === 'pcr-site' ? '<option value="">Any site</option>' : '<option value="">— pick site —</option>';
+      el.innerHTML = prefix + siteOptions;
+    }
+  });
+  // IR group select
+  const grpEl = document.getElementById('ccf-group');
+  if(grpEl){
+    const grps = (typeof getIRGroups === 'function' ? getIRGroups() : (S.irGroups||[]));
+    grpEl.innerHTML = grps.map(g => `<option value="${escHtml(g)}">${escHtml(g)}</option>`).join('');
+  }
+  // Sub-specialty select
+  const subEl = document.getElementById('ssn-sub');
+  if(subEl){
+    const subs = [...(S.drSubs||[]), ...(S.irSubs||[])];
+    const uniq = [...new Set(subs)].sort();
+    subEl.innerHTML = uniq.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+  }
+  // Default what-if dates: today through end of week
+  const todayStr = fmtDate(new Date());
+  const wks = document.getElementById('wi-start');
+  const wke = document.getElementById('wi-end');
+  if(wks && !wks.value) wks.value = todayStr;
+  if(wke && !wke.value) wke.value = addDays(todayStr, 6);
+  // Schedule constraint settings — mirror current S.cfg into the form
+  const cfg = S.cfg || {};
+  const setVal = (id, v, def) => { const el=document.getElementById(id); if(el) el.value = (v != null ? v : def); };
+  setVal('cs-recovery',  cfg.recoveryDays,      1);
+  setVal('cs-holgap',    cfg.holidayBlockGap,   3);
+  setVal('cs-anchorhard',cfg.anchorPctHard,     Math.max(0,(cfg.anchorPct||70)-15));
+  const bo = cfg.burnout || {};
+  setVal('cs-bo-days',  bo.consecMaxDays, 5);
+  setVal('cs-bo-wknd',  bo.weekendsPerQ,  3);
+  setVal('cs-bo-hol',   bo.holidaysPerY,  2);
+  // Render lists
+  _renderPairConflictList();
+  _renderSiteCapList();
+  _renderSubNeedList();
+  renderAuditLog();
+  renderErrorLog();
+  _wiToggleFields();
+}
+function _wiToggleFields(){
+  const kind = document.getElementById('wi-kind')?.value || 'vacation';
+  const wrap = document.getElementById('wi-window-wrap');
+  if(wrap) wrap.style.display = (kind === 'vacation') ? 'flex' : 'none';
+}
+
+// ── Tools: What-If simulator runner ──────────────────────────────────
+function runWhatIf(){
+  const kind = document.getElementById('wi-kind')?.value || 'vacation';
+  const physId = +document.getElementById('wi-phys')?.value || 0;
+  const start = document.getElementById('wi-start')?.value || '';
+  const end = document.getElementById('wi-end')?.value || '';
+  const out = document.getElementById('wi-result');
+  if(!physId){ out.innerHTML = '<div class="note nw">Pick a physician first.</div>'; return; }
+  if(kind === 'vacation' && (!start || !end)){
+    out.innerHTML = '<div class="note nw">Pick start and end dates.</div>'; return;
+  }
+  const result = whatIfSimulate({ kind, physId, start, end });
+  if(!result){ out.innerHTML = '<div class="note ne">Simulation returned no result.</div>'; return; }
+  if(!result.lost){
+    out.innerHTML = `<div class="note ns">No affected assignments in that window for ${escHtml(pname(physId))}.</div>`;
+    return;
+  }
+  const fillableHtml = result.fillable.length
+    ? `<div style="font-weight:600;margin:10px 0 6px;color:var(--green-t)">${result.fillable.length} fillable slot${result.fillable.length>1?'s':''}</div>
+       <table class="tbl"><thead><tr><th>Date</th><th>Kind</th><th>Site</th><th>Top candidates</th></tr></thead>
+       <tbody>${result.fillable.map(f => `
+         <tr>
+           <td>${escHtml(f.date)}</td>
+           <td>${escHtml(f.kind)}${f.shift?' '+escHtml(f.shift):''}</td>
+           <td>${escHtml(f.site||'—')}</td>
+           <td>${(f.candidates||[]).map(c => `<span class="tag tg" style="margin-right:4px">${escHtml(c.name)}</span>`).join('')}</td>
+         </tr>`).join('')}</tbody></table>`
+    : '';
+  const unfillableHtml = result.unfillable.length
+    ? `<div style="font-weight:600;margin:14px 0 6px;color:var(--red-t)">${result.unfillable.length} unfillable slot${result.unfillable.length>1?'s':''}</div>
+       <table class="tbl"><thead><tr><th>Date</th><th>Kind</th><th>Site</th><th>Why</th></tr></thead>
+       <tbody>${result.unfillable.map(f => `
+         <tr>
+           <td>${escHtml(f.date)}</td>
+           <td>${escHtml(f.kind)}${f.shift?' '+escHtml(f.shift):''}</td>
+           <td>${escHtml(f.site||'—')}</td>
+           <td style="font-size:11.5px;color:var(--rs-ink-2)">${(f.blockers||[]).map(escHtml).join('<br>')}</td>
+         </tr>`).join('')}</tbody></table>`
+    : '';
+  out.innerHTML = `
+    <div class="note ${result.unfillable.length?'nw':'ns'}">
+      <strong>${result.lost} affected assignment${result.lost>1?'s':''}</strong> in window — preview only, nothing committed.
+    </div>
+    ${fillableHtml}${unfillableHtml}`;
+}
+
+// ── Tools: Vacation lottery ──────────────────────────────────────────
+function runLottery(){
+  const start = document.getElementById('lot-start')?.value;
+  const end = document.getElementById('lot-end')?.value;
+  const out = document.getElementById('lot-result');
+  if(!start || !end){ out.innerHTML = '<div class="note nw">Pick start and end dates.</div>'; return; }
+  const ranked = runVacationLottery(start, end);
+  if(!ranked.length){
+    out.innerHTML = `<div class="note ni">No pending vacation requests overlap ${escHtml(start)}–${escHtml(end)}. Add some via Vacation Picking first.</div>`;
+    return;
+  }
+  out.innerHTML = `
+    <div class="note ni" style="margin-bottom:10px">${ranked.length} pending request${ranked.length>1?'s':''} — ranked by seniority + recency-weighted past-popular-week balance.</div>
+    <table class="tbl"><thead><tr>
+      <th>Rank</th><th>Physician</th><th>Window</th><th>Score</th><th>Years</th><th>Pop. weeks this year</th>
+    </tr></thead><tbody>
+    ${ranked.map((r,i) => `<tr>
+      <td style="font-weight:700">${i+1}</td>
+      <td>${escHtml(r.name)}</td>
+      <td>${escHtml(r.start)} → ${escHtml(r.end)}</td>
+      <td>${r.score}</td>
+      <td>${r.seniority}</td>
+      <td>${r.thisYearPopular}</td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+// ── Tools: Pair-conflict rules CRUD ──────────────────────────────────
+function addPairConflict(){
+  if(!_adminOnly('add pair-conflict rule')) return;
+  const a = +document.getElementById('pcr-a')?.value || 0;
+  const b = +document.getElementById('pcr-b')?.value || 0;
+  if(!a || !b){ alert('Pick both physicians.'); return; }
+  if(a === b){ alert('Pick two different physicians.'); return; }
+  const scope = document.getElementById('pcr-scope')?.value || 'same-day';
+  const site = document.getElementById('pcr-site')?.value || '';
+  const sev = document.getElementById('pcr-sev')?.value || 'warn';
+  S.physicianPairRules = S.physicianPairRules || [];
+  // Avoid duplicates (any direction)
+  const exists = S.physicianPairRules.some(r =>
+    ((r.a === a && r.b === b) || (r.a === b && r.b === a)) &&
+    r.scope === scope && (r.site || '') === site
+  );
+  if(exists){ alert('That rule already exists.'); return; }
+  const id = (S.nextId = (S.nextId || 1) + 1);
+  S.physicianPairRules.push({ id, a, b, scope, site, severity: sev });
+  if(typeof _audit === 'function') _audit('rule.pairConflict.add', {a, b, scope, site, sev});
+  triggerSave();
+  _renderPairConflictList();
+  if(typeof _toast === 'function') _toast('Pair-conflict rule added.', 'ok');
+}
+function removePairConflict(id){
+  if(!_adminOnly('remove pair-conflict rule')) return;
+  S.physicianPairRules = (S.physicianPairRules || []).filter(r => r.id !== id);
+  if(typeof _audit === 'function') _audit('rule.pairConflict.remove', {id});
+  triggerSave();
+  _renderPairConflictList();
+}
+function _renderPairConflictList(){
+  const el = document.getElementById('pcr-list');
+  if(!el) return;
+  const rules = S.physicianPairRules || [];
+  if(!rules.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No pair-conflict rules yet.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="tbl"><thead><tr>
+    <th>A</th><th>B</th><th>Scope</th><th>Site</th><th>Severity</th><th></th>
+  </tr></thead><tbody>${rules.map(r => `
+    <tr>
+      <td>${escHtml(pname(r.a))}</td>
+      <td>${escHtml(pname(r.b))}</td>
+      <td>${escHtml(r.scope || 'same-day')}</td>
+      <td>${escHtml(r.site || '—')}</td>
+      <td><span class="tag ${r.severity==='block'?'tr':'ta'}">${escHtml(r.severity || 'warn')}</span></td>
+      <td><button class="br bxs" onclick="removePairConflict(${r.id})">✕</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// ── Tools: Site capacity caps CRUD ───────────────────────────────────
+function addSiteCap(){
+  if(!_adminOnly('set site capacity cap')) return;
+  const site = document.getElementById('sc-site')?.value;
+  const shift = document.getElementById('sc-shift')?.value;
+  const cap = +document.getElementById('sc-cap')?.value || 0;
+  if(!site){ alert('Pick a site.'); return; }
+  S.siteCaps = S.siteCaps || {};
+  const key = `${site}|${shift}`;
+  if(cap <= 0){
+    delete S.siteCaps[key];
+    if(typeof _audit === 'function') _audit('rule.siteCap.remove', {site, shift});
+  } else {
+    S.siteCaps[key] = cap;
+    if(typeof _audit === 'function') _audit('rule.siteCap.set', {site, shift, cap});
+  }
+  triggerSave();
+  _renderSiteCapList();
+  if(typeof _toast === 'function') _toast(cap > 0 ? `Cap set: ${site}/${shift} max ${cap}` : `Cap removed: ${site}/${shift}`, 'ok');
+}
+function removeSiteCap(key){
+  if(!_adminOnly('remove site cap')) return;
+  if(!S.siteCaps) return;
+  delete S.siteCaps[key];
+  if(typeof _audit === 'function') _audit('rule.siteCap.remove', {key});
+  triggerSave();
+  _renderSiteCapList();
+}
+function _renderSiteCapList(){
+  const el = document.getElementById('sc-list');
+  if(!el) return;
+  const caps = S.siteCaps || {};
+  const entries = Object.entries(caps);
+  if(!entries.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No site caps set.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="tbl"><thead><tr>
+    <th>Site</th><th>Shift</th><th>Max physicians</th><th></th>
+  </tr></thead><tbody>${entries.map(([key, cap]) => {
+    const [site, shift] = key.split('|');
+    return `<tr>
+      <td>${escHtml(site)}</td>
+      <td>${escHtml(shift)}</td>
+      <td>${cap}</td>
+      <td><button class="br bxs" onclick="removeSiteCap(${JSON.stringify(key).replace(/"/g,'&quot;')})">✕</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+// ── Tools: Sub-specialty needs CRUD ───────────────────────────────────
+function addSubNeed(){
+  if(!_adminOnly('set sub-specialty need')) return;
+  const site = document.getElementById('ssn-site')?.value;
+  const shift = document.getElementById('ssn-shift')?.value;
+  const sub = document.getElementById('ssn-sub')?.value;
+  const min = +document.getElementById('ssn-min')?.value || 1;
+  if(!site || !sub){ alert('Pick a site and sub-specialty.'); return; }
+  S.shiftSubNeeds = S.shiftSubNeeds || {};
+  const key = `${site}|${shift}`;
+  if(!S.shiftSubNeeds[key]) S.shiftSubNeeds[key] = {};
+  if(min <= 0){
+    delete S.shiftSubNeeds[key][sub];
+    if(!Object.keys(S.shiftSubNeeds[key]).length) delete S.shiftSubNeeds[key];
+  } else {
+    S.shiftSubNeeds[key][sub] = min;
+  }
+  if(typeof _audit === 'function') _audit('rule.subNeed.set', {site, shift, sub, min});
+  triggerSave();
+  _renderSubNeedList();
+  if(typeof _toast === 'function') _toast(`Set: ${site}/${shift} needs ≥${min} ${sub}`, 'ok');
+}
+function removeSubNeed(key, sub){
+  if(!_adminOnly('remove sub need')) return;
+  if(!S.shiftSubNeeds || !S.shiftSubNeeds[key]) return;
+  delete S.shiftSubNeeds[key][sub];
+  if(!Object.keys(S.shiftSubNeeds[key]).length) delete S.shiftSubNeeds[key];
+  if(typeof _audit === 'function') _audit('rule.subNeed.remove', {key, sub});
+  triggerSave();
+  _renderSubNeedList();
+}
+function _renderSubNeedList(){
+  const el = document.getElementById('ssn-list');
+  if(!el) return;
+  const needs = S.shiftSubNeeds || {};
+  const rows = [];
+  for(const [key, m] of Object.entries(needs)){
+    for(const [sub, min] of Object.entries(m)) rows.push({key, sub, min});
+  }
+  if(!rows.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No sub-specialty requirements set.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="tbl"><thead><tr>
+    <th>Site</th><th>Shift</th><th>Sub-specialty</th><th>Min</th><th></th>
+  </tr></thead><tbody>${rows.map(r => {
+    const [site, shift] = r.key.split('|');
+    return `<tr>
+      <td>${escHtml(site)}</td>
+      <td>${escHtml(shift)}</td>
+      <td>${escHtml(r.sub)}</td>
+      <td>${r.min}</td>
+      <td><button class="br bxs" onclick="removeSubNeed(${JSON.stringify(r.key).replace(/"/g,'&quot;')}, ${JSON.stringify(r.sub).replace(/"/g,'&quot;')})">✕</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+// ── Tools: Constraint settings save ──────────────────────────────────
+function saveConstraintSettings(){
+  if(!_adminOnly('save constraint settings')) return;
+  const num = id => { const v = +document.getElementById(id)?.value; return Number.isFinite(v) ? v : null; };
+  if(!S.cfg) S.cfg = {};
+  const recovery = num('cs-recovery'); if(recovery != null) S.cfg.recoveryDays = recovery;
+  const gap = num('cs-holgap'); if(gap != null) S.cfg.holidayBlockGap = gap;
+  const hardAnc = num('cs-anchorhard'); if(hardAnc != null) S.cfg.anchorPctHard = hardAnc;
+  if(!S.cfg.burnout) S.cfg.burnout = {};
+  const consec = num('cs-bo-days'); if(consec != null) S.cfg.burnout.consecMaxDays = consec;
+  const wkndQ = num('cs-bo-wknd'); if(wkndQ != null) S.cfg.burnout.weekendsPerQ = wkndQ;
+  const holsY = num('cs-bo-hol'); if(holsY != null) S.cfg.burnout.holidaysPerY = holsY;
+  if(typeof _audit === 'function') _audit('cfg.constraints.save', {recovery, gap, hardAnc, consec, wkndQ, holsY});
+  triggerSave();
+  if(typeof _toast === 'function') _toast('Constraint settings saved.', 'ok');
+}
+
+// ── Tools: Cross-coverage finder ─────────────────────────────────────
+function runCrossCoverage(){
+  const date = document.getElementById('ccf-date')?.value;
+  const site = document.getElementById('ccf-site')?.value;
+  const group = document.getElementById('ccf-group')?.value;
+  const out = document.getElementById('ccf-result');
+  if(!date || !site || !group){
+    out.innerHTML = '<div class="note nw">Pick date, site, and IR group.</div>';
+    return;
+  }
+  const ranked = _crossGroupSuggestions({date, site, _group: group, shift: '1st'}, {});
+  if(!ranked.length){
+    out.innerHTML = '<div class="note ni">No cross-group physicians available for this slot.</div>';
+    return;
+  }
+  out.innerHTML = `<div class="note ni" style="margin-bottom:10px">${ranked.length} candidate${ranked.length>1?'s':''} — ranked by least disruption (own-group target gap + drive time + day availability).</div>
+    <table class="tbl"><thead><tr>
+      <th>Rank</th><th>Physician</th><th>Their group</th><th>Disruption</th><th>Drive (min)</th><th>Reasons</th>
+    </tr></thead><tbody>${ranked.map((r,i) => `<tr>
+      <td style="font-weight:700">${i+1}</td>
+      <td>${escHtml(r.phys.last)}, ${escHtml(r.phys.first)}</td>
+      <td><span class="tag tg">${escHtml(r.phys.irGroup||'')}</span></td>
+      <td>${r.score.toFixed(1)}</td>
+      <td>${r.drive}</td>
+      <td style="font-size:11.5px;color:var(--rs-ink-2)">${(r.reasons||[]).map(escHtml).join('<br>') || '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// ── Tools: Audit log viewer ──────────────────────────────────────────
+function renderAuditLog(){
+  const el = document.getElementById('al-result');
+  if(!el) return;
+  const filter = (document.getElementById('al-filter')?.value || '').toLowerCase().trim();
+  let rows = (S.auditLog || []).slice().reverse();
+  if(filter) rows = rows.filter(r => (r.action || '').toLowerCase().includes(filter));
+  if(!rows.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No audit entries matching filter.</div>';
+    return;
+  }
+  el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries (most recent first)</div>
+    <table class="tbl" style="font-size:11.5px"><thead><tr>
+      <th style="width:140px">When</th><th style="width:160px">Action</th><th>Detail</th>
+    </tr></thead><tbody>${rows.slice(0, 200).map(r => `
+      <tr>
+        <td style="font-family:ui-monospace,monospace;color:var(--rs-ink-2)">${escHtml((r.ts||'').replace('T',' ').slice(0,19))}</td>
+        <td><span class="tag" style="font-size:10px;background:var(--rs-accent-soft);color:var(--rs-accent)">${escHtml(r.action||'')}</span></td>
+        <td style="font-family:ui-monospace,monospace;font-size:10.5px;color:var(--rs-ink-2);word-break:break-all">${escHtml(JSON.stringify(r.detail||{}))}</td>
+      </tr>`).join('')}</tbody></table>`;
+}
+function exportAuditLog(){
+  const rows = (S.auditLog || []).slice().reverse();
+  const csv = ['Timestamp,Action,Detail']
+    .concat(rows.map(r => {
+      const d = JSON.stringify(r.detail || {}).replace(/"/g, '""');
+      return `"${(r.ts||'').replace(/"/g,'""')}","${(r.action||'').replace(/"/g,'""')}","${d}"`;
+    })).join('\n');
+  try{
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `audit-log-${fmtDate(new Date())}.csv`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _toast === 'function') _toast(`Exported ${rows.length} audit entries.`, 'ok');
+  }catch(e){ alert('Export failed: ' + (e.message||e)); }
+}
+
+// ── Tools: Error log viewer ──────────────────────────────────────────
+function renderErrorLog(){
+  const el = document.getElementById('el-result');
+  if(!el) return;
+  const rows = (typeof _errorLog !== 'undefined' && _errorLog) ? _errorLog.slice().reverse() : [];
+  if(!rows.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No errors logged.</div>';
+    return;
+  }
+  el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} error${rows.length>1?'s':''} (most recent first)</div>
+    <div style="display:flex;flex-direction:column;gap:6px">${rows.slice(0, 50).map(e => `
+      <details style="border:1px solid var(--rs-line);border-radius:var(--rs-r-md);padding:8px 12px;background:var(--bg2)">
+        <summary style="cursor:pointer;font-size:12px">
+          <span style="font-family:ui-monospace,monospace;color:var(--rs-ink-3)">${escHtml((e.ts||'').replace('T',' ').slice(0,19))}</span>
+          <span style="margin-left:8px;font-weight:600;color:var(--red-t)">${escHtml(e.where||'unknown')}</span>
+          <span style="margin-left:8px;color:var(--rs-ink-2)">${escHtml(e.what||'')}</span>
+        </summary>
+        <pre style="font-size:10.5px;color:var(--rs-ink-2);white-space:pre-wrap;margin-top:8px;font-family:ui-monospace,monospace">${escHtml(JSON.stringify(e.detail||{}, null, 2))}</pre>
+      </details>`).join('')}</div>`;
+}
+
 // ── What-if simulator ─────────────────────────────────────────────────
 // "What if Dr. X took next month off? Who absorbs the work? What's the
 // fairness impact?" Synthesizes a hypothetical change and reports the
@@ -29478,6 +30295,7 @@ const _CP_PAGES = [
   ['Physicians',          '👥', 'physicians', true],
   ['User Management',     '👤', 'user-mgmt', true],
   ['Site Management',     '🏥', 'site-slots', true],
+  ['Tools',               '🛠', 'tools', true],
   ['Settings',            '⚙️', 'settings', true],
   ['Profiles',            '🪪', 'profiles'],
   ['Chat',                '💬', 'chat'],
