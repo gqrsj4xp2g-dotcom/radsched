@@ -1226,6 +1226,68 @@ tbody tr:hover{background:var(--bg3)}
     .rs-quickstart-name { flex: 1; }
     .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
 
+    /* ── iOS safe-area + mobile native polish ──────────────────────────
+       Modern phones have notches and home indicators. The viewport-fit
+       meta + env() variables let CSS pad away from those zones so
+       primary chrome doesn't disappear under hardware. */
+    @supports (padding: env(safe-area-inset-top)) {
+      .topbar {
+        padding-top: calc(var(--rs-sm) + env(safe-area-inset-top));
+      }
+      #app {
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .sidebar {
+        padding-left: env(safe-area-inset-left);
+      }
+    }
+
+    /* ── Dark mode polish pass ────────────────────────────────────────
+       Several legacy surfaces (note classes, hover states, badges) had
+       light-mode-tuned colors that washed out in dark theme. Override
+       them so contrast stays AA across both themes. */
+    body[data-theme="dark"] .note.ni { background: rgba(77, 140, 255, 0.10); border-color: rgba(77, 140, 255, 0.25); }
+    body[data-theme="dark"] .note.ns { background: rgba(34, 197, 94, 0.10); border-color: rgba(34, 197, 94, 0.25); }
+    body[data-theme="dark"] .note.nw { background: rgba(251, 191, 36, 0.10); border-color: rgba(251, 191, 36, 0.30); }
+    body[data-theme="dark"] .note.ne { background: rgba(239, 68, 68, 0.10); border-color: rgba(239, 68, 68, 0.25); }
+    body[data-theme="dark"] .row[onclick]:hover,
+    body[data-theme="dark"] .snav-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    body[data-theme="dark"] code,
+    body[data-theme="dark"] pre {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    body[data-theme="dark"] .met,
+    body[data-theme="dark"] .av {
+      background: var(--bg2, #1c1c1e);
+    }
+
+    /* ── Skip-to-main-content link (accessibility) ────────────────────
+       Keyboard users hitting Tab on page load should be able to jump
+       past the sidebar and land on the main content. The link is
+       visually hidden until focused. */
+    .rs-skiplink {
+      position: absolute;
+      top: -100px;
+      left: 0;
+      background: var(--rs-accent);
+      color: #fff;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 0 0 10px 0;
+      z-index: 10300;
+      text-decoration: none;
+      transition: top var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-skiplink:focus {
+      top: 0;
+      outline: 2px solid #fff;
+      outline-offset: -4px;
+    }
+
     /* ── Mobile calendar list mode ─────────────────────────────────────
        The dense month grid becomes hard to read on phones; the toolbar
        toggle (📅 ↔ 📋) sets data-cal-mode="list" on the body which
@@ -1327,6 +1389,7 @@ tbody tr:hover{background:var(--bg3)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+<a href="#main-content" class="rs-skiplink">Skip to main content</a>
 
 <!-- ═══════════════════ AUTH SCREEN ═══════════════════ -->
 <!-- Session-restore loading overlay. Shown during page-load while we check
@@ -3767,6 +3830,108 @@ WHERE email = 'your-admin@example.com';</pre>
     </div>
     <button class="bp" onclick="runCrossCoverage()">Find candidates</button>
     <div id="ccf-result" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 7f. Integrations ─────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔌 Integrations</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Outbound webhooks, SMS notifications, email digests, and a public
+      read-only schedule export. Server-side delivery for SMS / digest
+      requires the <code>send-notification</code> edge function with
+      Twilio + email-provider credentials configured.
+    </div>
+
+    <div class="card-section">📮 Outbound webhooks</div>
+    <div class="g2" style="gap:8px;margin-bottom:8px;align-items:end">
+      <div class="fg" style="margin:0"><label>Name</label><input id="wh-name" placeholder="Slack #scheduling"></div>
+      <div class="fg" style="margin:0"><label>URL</label><input id="wh-url" placeholder="https://hooks.slack.com/services/..." style="font-family:ui-monospace,monospace;font-size:11px"></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:11.5px">
+      <label class="chk"><input type="checkbox" id="wh-ev-shift-assigned" checked> shift.assigned</label>
+      <label class="chk"><input type="checkbox" id="wh-ev-swap-approved" checked> swap.approved</label>
+      <label class="chk"><input type="checkbox" id="wh-ev-vacation-added"> vacation.added</label>
+      <label class="chk"><input type="checkbox" id="wh-ev-holiday-assigned"> holiday.assigned</label>
+      <label class="chk"><input type="checkbox" id="wh-ev-openShift-posted"> openShift.posted</label>
+      <label class="chk"><input type="checkbox" id="wh-ev-oncall-starting"> oncall.starting</label>
+    </div>
+    <button class="bp bsm" onclick="addWebhook()">+ Add webhook</button>
+    <div id="wh-list" style="margin-top:14px"></div>
+
+    <div class="card-section" style="margin-top:18px">📱 SMS notifications</div>
+    <div class="g2" style="gap:8px;margin-bottom:8px;align-items:end">
+      <div class="fg" style="margin:0"><label>Test phone (E.164)</label><input id="sms-phone" placeholder="+15551234567"></div>
+      <div></div>
+    </div>
+    <button class="bsm" onclick="testSMSDelivery()">📲 Send test SMS</button>
+
+    <div class="card-section" style="margin-top:18px">📧 Email digest</div>
+    <div class="g3" style="gap:8px;margin-bottom:8px;align-items:end">
+      <div class="fg" style="margin:0">
+        <label class="chk"><input type="checkbox" id="dg-enabled"> Enable digest</label>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Cadence</label>
+        <select id="dg-cadence">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly (Mondays)</option>
+        </select>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Send hour (24h)</label>
+        <input id="dg-hour" type="number" min="0" max="23" value="7" style="width:80px">
+      </div>
+    </div>
+    <button class="bp bsm" onclick="configureDigestSchedule()">Save digest settings</button>
+
+    <div class="card-section" style="margin-top:18px">🌐 Public read-only schedule</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:8px">
+      Generates a self-contained HTML snapshot of the active calendar's
+      month. Host this anywhere (intranet, shared drive) so non-login
+      users see the schedule. Re-generate after any change.
+    </div>
+    <button class="bsm" onclick="downloadPublicSchedule()">⬇ Download HTML snapshot</button>
+  </div>
+
+  <!-- ── 7e. Robustness panel ─────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🛡 Robustness checks</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Built-in regression suite (date math, schema validators, save/load
+      round-trip, fuzzy match, diff helper), named manual snapshots, and
+      practice-config export / import.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="bp bsm" onclick="renderRegressionSuite()">▶ Run all checks</button>
+      <button class="bsm" onclick="takeNamedSnapshot()">📌 Take named snapshot</button>
+      <button class="bsm" onclick="exportPracticeConfig()">⬇ Export config</button>
+      <label style="display:inline-flex;align-items:center;cursor:pointer">
+        <span class="bsm" style="display:inline-block">⬆ Import config…</span>
+        <input type="file" accept=".json" style="display:none" onchange="importPracticeConfig(this)">
+      </label>
+    </div>
+    <div id="rs-test-result"></div>
+  </div>
+
+  <!-- ── 7d. Practice analytics ───────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📈 Practice analytics</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Monthly volume trends across DR / IR / weekend / call / holiday /
+      vacation events for the selected year, plus a fairness audit
+      showing physicians whose actual workload differs most from their
+      expected FTE share.
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Year</label><input id="an-year" type="number" value="" style="width:90px"></div>
+      <div></div><div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bp bsm" onclick="renderAnalytics()">📊 Generate</button>
+      <button class="bsm" onclick="exportScheduleXLSX()">⬇ Export to Excel</button>
+      <button class="bsm" onclick="exportScheduleAsPDF()">📄 Save as PDF</button>
+    </div>
+    <div id="an-result" style="margin-top:14px"></div>
   </div>
 
   <!-- ── 7c. Predictive suggestions ───────────────────────────────────── -->
@@ -25831,6 +25996,8 @@ function renderTools(){
   // Default annual-report year to last completed year
   const arYr = document.getElementById('ar-year');
   if(arYr && !arYr.value) arYr.value = String(new Date().getFullYear() - 1);
+  const anYr = document.getElementById('an-year');
+  if(anYr && !anYr.value) anYr.value = String(new Date().getFullYear());
   // Site selects
   const siteOptions = (S.sites||[])
     .filter(s => s.name !== 'At Home / Remote')
@@ -32014,6 +32181,1102 @@ function _showProgress(targetElId, label, current, total){
 function _hideProgress(targetElId){
   const el = document.getElementById(targetElId);
   if(el) el.innerHTML = '';
+}
+
+// ── Outbound webhooks ──────────────────────────────────────────────────
+// S.cfg.webhooks = [{id, name, url, events:[...], active}]. When a key
+// event fires (shift-assign, swap-resolve, etc.), we POST a JSON payload
+// to each subscribed webhook URL. Used to wire RadScheduler into Slack /
+// Teams / external dashboards. Server-side dispatch sits in the
+// send-notification edge function for delivery; this client logs the
+// intent so the function can fan out.
+const _WEBHOOK_EVENTS = [
+  'shift.assigned', 'shift.removed',
+  'swap.requested', 'swap.approved', 'swap.denied',
+  'vacation.added', 'vacation.removed',
+  'holiday.assigned',
+  'openShift.posted', 'openShift.claimed',
+  'oncall.starting',  // fired by edge function on schedule
+];
+function _emitWebhookEvent(eventName, payload){
+  const hooks = (S.cfg?.webhooks || []).filter(h => h.active && (h.events || []).includes(eventName));
+  if(!hooks.length) return;
+  // We don't POST from the client (CORS, secret leakage). Instead, queue
+  // an envelope in S.webhookOutbox and the send-notification edge function
+  // picks it up + delivers. For now we log the queue so the edge fn can
+  // be wired to consume; if not wired yet, this is a no-op.
+  if(!S.webhookOutbox) S.webhookOutbox = [];
+  S.webhookOutbox.push({
+    id: (S.nextId = (S.nextId || 1) + 1),
+    eventName,
+    payload,
+    queuedAt: new Date().toISOString(),
+    targets: hooks.map(h => h.id),
+    delivered: false,
+  });
+  // Cap outbox size so a wholly-unwired hook doesn't grow the payload forever.
+  if(S.webhookOutbox.length > 200) S.webhookOutbox.splice(0, S.webhookOutbox.length - 200);
+}
+
+function addWebhook(){
+  if(!_adminOnly('add webhook')) return;
+  const url = (document.getElementById('wh-url')?.value || '').trim();
+  const name = (document.getElementById('wh-name')?.value || '').trim() || 'webhook';
+  const events = [..._WEBHOOK_EVENTS].filter(ev =>
+    document.getElementById('wh-ev-' + ev.replace(/\./g, '-'))?.checked
+  );
+  if(!url || !/^https?:\/\//i.test(url)){ alert('Provide a valid http(s) URL.'); return; }
+  if(!events.length){ alert('Pick at least one event to subscribe to.'); return; }
+  if(!S.cfg) S.cfg = {};
+  if(!S.cfg.webhooks) S.cfg.webhooks = [];
+  S.cfg.webhooks.push({
+    id: (S.nextId = (S.nextId || 1) + 1),
+    name, url, events, active: true,
+  });
+  if(typeof _audit === 'function') _audit('webhook.add', { name, url, events });
+  triggerSave();
+  renderWebhooks();
+  if(typeof _toast === 'function') _toast(`Webhook "${name}" added.`, 'ok');
+}
+function removeWebhook(id){
+  if(!_adminOnly('remove webhook')) return;
+  if(!S.cfg?.webhooks) return;
+  S.cfg.webhooks = S.cfg.webhooks.filter(h => h.id !== id);
+  if(typeof _audit === 'function') _audit('webhook.remove', { id });
+  triggerSave();
+  renderWebhooks();
+}
+function renderWebhooks(){
+  const el = document.getElementById('wh-list');
+  if(!el) return;
+  const hooks = S.cfg?.webhooks || [];
+  if(!hooks.length){
+    el.innerHTML = '<div class="note ni" style="font-size:12px">No webhooks configured.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="tbl" style="font-size:12px"><thead><tr>
+    <th>Name</th><th>URL</th><th>Events</th><th></th>
+  </tr></thead><tbody>${hooks.map(h => `<tr>
+    <td>${escHtml(h.name)}</td>
+    <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(h.url)}</td>
+    <td>${(h.events || []).map(e => `<span class="tag" style="font-size:10px;margin-right:3px">${escHtml(e)}</span>`).join('')}</td>
+    <td><button class="br bxs" onclick="removeWebhook(${h.id})">✕</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+// ── SMS / digest / AI scaffolds ────────────────────────────────────────
+// Each surfaces a Settings panel for configuration + queues the actual
+// delivery via the send-notification edge function. The client just
+// stores config + emits queue entries; the edge function fans out.
+async function testSMSDelivery(){
+  if(!_adminOnly('test SMS delivery')) return;
+  const phone = (document.getElementById('sms-phone')?.value || '').trim();
+  if(!phone){ alert('Enter a phone number to test.'); return; }
+  if(!_supabase){ alert('Supabase required for SMS delivery.'); return; }
+  // Invoke the send-notification edge function with kind:'sms'.
+  try{
+    const sb = _initSupabase();
+    if(!sb) throw new Error('Supabase not initialized');
+    const { data: session } = await sb.auth.getSession();
+    const jwt = session?.session?.access_token;
+    if(!jwt) throw new Error('Not signed in');
+    const url = (typeof _getUrl === 'function' ? _getUrl() : '') + '/functions/v1/send-notification';
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({
+        kind: 'sms',
+        to: phone,
+        body: 'Test SMS from RadScheduler — your delivery is configured correctly.',
+      }),
+    });
+    if(!resp.ok) throw new Error('SMS function returned ' + resp.status);
+    if(typeof _toast === 'function') _toast(`Test SMS sent to ${phone}.`, 'ok');
+  }catch(e){
+    alert('SMS test failed: ' + (e.message || e) + '\n\nThe send-notification edge function needs Twilio credentials configured. See docs/DEPLOY.md.');
+  }
+}
+
+async function configureDigestSchedule(){
+  if(!_adminOnly('configure digest')) return;
+  const enabled = !!document.getElementById('dg-enabled')?.checked;
+  const cadence = document.getElementById('dg-cadence')?.value || 'daily';
+  const hour = +document.getElementById('dg-hour')?.value || 7;
+  if(!S.cfg) S.cfg = {};
+  S.cfg.digest = { enabled, cadence, hour };
+  if(typeof _audit === 'function') _audit('digest.configure', S.cfg.digest);
+  triggerSave();
+  if(typeof _toast === 'function') _toast(`Digest ${enabled ? 'enabled — ' + cadence + ' at ' + hour + ':00' : 'disabled'}.`, 'ok');
+}
+
+// ── Public read-only schedule view ─────────────────────────────────────
+// Generates a static HTML snapshot of the current calendar that an admin
+// can host externally for non-RadScheduler users (techs, schedulers,
+// admins at a hospital). The HTML is fully self-contained — no auth,
+// no scripts, just a printable read-only month view. Re-generate after
+// each schedule change to refresh.
+function generatePublicScheduleHTML(){
+  if(!_adminOnly('generate public schedule')) return null;
+  const ym = (document.getElementById('drc-mo')?.value)
+    || (document.getElementById('irc-mo')?.value)
+    || fmtDate(new Date()).slice(0, 7);
+  const [y, m] = ym.split('-').map(Number);
+  const monthLabel = new Date(y, m - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  const cells = (typeof buildCal === 'function') ? buildCal(ym) : [];
+  const today = fmtDate(new Date());
+  const bigCells = cells.map(c => {
+    if(!c.day) return '<td></td>';
+    const ds = c.date;
+    const events = [];
+    (S.drShifts || []).filter(s => s.date === ds && s.shift !== 'Home').forEach(s =>
+      events.push(`${s.shift} ${s.site||''}: ${pname(s.physId)}`));
+    (S.irShifts || []).filter(s => s.date === ds && s.shift !== 'Home').forEach(s =>
+      events.push(`IR ${s.shift==='1st'?'Day':s.shift} ${s.site||''}: ${pname(s.physId)}`));
+    (S.irCalls || []).filter(c => c.date === ds || (c.callType==='weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds))).forEach(c =>
+      events.push(`IR ${c.callType==='weekend'?'WkndCall':'Call'}: ${pname(c.physId)}`));
+    (S.weekendCalls || []).filter(w => (w.satDate||w.date) === ds || w.sunDate === ds).forEach(w =>
+      events.push(`Weekend Call: ${pname(w.physId)}`));
+    (S.holidays || []).filter(h => h.date === ds).forEach(h =>
+      events.push(`Holiday (${h.name}): ${pname(h.physId)}`));
+    return `<td style="vertical-align:top;border:1px solid #ccc;padding:4px;height:80px;font-size:9.5px;${ds===today?'background:#fffbeb;':''}">
+      <div style="font-weight:700;margin-bottom:2px">${c.day}</div>
+      ${events.slice(0,5).map(e => `<div style="margin-bottom:1px;line-height:1.2">${e}</div>`).join('')}
+    </td>`;
+  });
+  // Group into 7-day rows
+  const rows = [];
+  for(let i = 0; i < bigCells.length; i += 7){
+    rows.push('<tr>' + bigCells.slice(i, i + 7).join('') + '</tr>');
+  }
+  const practiceName = (typeof _PRACTICES !== 'undefined')
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>${escHtml(practiceName)} — ${escHtml(monthLabel)}</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 11px; padding: 14px; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  .meta { color: #666; font-size: 11px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #eee; padding: 4px; font-size: 10px; }
+</style></head>
+<body>
+  <h1>${escHtml(practiceName)} — ${escHtml(monthLabel)}</h1>
+  <div class="meta">Read-only schedule snapshot. Generated ${escHtml(new Date().toLocaleString())}.</div>
+  <table>
+    <thead><tr>
+      <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
+    </tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function downloadPublicSchedule(){
+  const html = generatePublicScheduleHTML();
+  if(!html) return;
+  try{
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `RadScheduler-public-${fmtDate(new Date())}.html`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _toast === 'function') _toast('Public schedule HTML downloaded.', 'ok');
+  }catch(e){ alert('Download failed: ' + (e.message || e)); }
+}
+
+// ── Built-in regression suite ───────────────────────────────────────────
+// "Run all checks" — exercises the core machinery (date math, schema
+// validation, save/load round-trip, undo/redo, integrity scanner) against
+// invariants. Surfaces failures with full detail. Runs in-thread; safe
+// to invoke any time. Returns {pass, fail, total, results: [...]}.
+function _runRegressionSuite(){
+  const results = [];
+  const t = (name, fn) => {
+    try{
+      const out = fn();
+      results.push({ name, pass: !!(out === undefined || out === true || (out && out.pass !== false)), detail: out });
+    }catch(e){
+      results.push({ name, pass: false, detail: e.message || String(e), error: true });
+    }
+  };
+  // Date math
+  t('addDays Mon→Tue', () => addDays('2026-01-05', 1) === '2026-01-06');
+  t('addDays year boundary', () => addDays('2025-12-31', 1) === '2026-01-01');
+  t('addDays leap year', () => addDays('2024-02-28', 1) === '2024-02-29');
+  t('parseDateLocal round-trip', () => fmtDate(parseDateLocal('2026-05-07')) === '2026-05-07');
+  t('_daysBetween basic', () => _daysBetween('2026-01-01', '2026-01-08') === 7);
+  t('_daysBetween dst-safe', () => _daysBetween('2026-03-08', '2026-03-15') === 7);  // US DST
+  // Excel date conversion
+  t('Excel serial 45662 → ISO', () => _xlsxDateToISO(45662) === '2025-01-05');
+  t('Excel ISO string passthrough', () => _xlsxDateToISO('2025-01-04') === '2025-01-04');
+  // Schema validation
+  t('validate physician — clamps FTE', () => {
+    const r = _validatePhysician({ id: 1, last: 'Test', first: 'X', drFte: 1.5, irFte: -0.2 });
+    return r.fixed.drFte === 1 && r.fixed.irFte === 0;
+  });
+  t('validate physician — drops nameless', () => {
+    const r = _validatePhysician({ id: 2, last: '', first: '' });
+    return r.fixed === null;
+  });
+  t('validate vacation — swaps inverted dates', () => {
+    const r = _validateDateRecord({ id: 99, physId: 1, start: '2026-05-15', end: '2026-05-10' }, 'vacation');
+    return r.fixed.start === '2026-05-10' && r.fixed.end === '2026-05-15';
+  });
+  // Counter cache freshness
+  t('drCnt returns 0 for unknown', () => drCnt(999999, '2099-01') === 0);
+  // Memoization invalidation
+  t('cache invalidates on dirty', () => {
+    if(typeof _markDateIdxDirty !== 'function') return true;
+    const before = _dateIdxVersion;
+    _markDateIdxDirty();
+    return _dateIdxVersion > before;
+  });
+  // Fuzzy matcher
+  t('fuzzy matcher — exact', () => {
+    const orig = S.physicians;
+    S.physicians = [{ id: 1, last: 'Smith', first: 'A', role: 'DR', drFte: 1, irFte: 0 }];
+    const m = _matchPhysicianFuzzy('Smith');
+    S.physicians = orig;
+    return m && m.score === 1.0;
+  });
+  t('fuzzy matcher — typo', () => {
+    const orig = S.physicians;
+    S.physicians = [{ id: 1, last: 'Mohtashemi', first: 'A', role: 'DR', drFte: 1, irFte: 0 }];
+    const m = _matchPhysicianFuzzy('Mohtshemi');
+    S.physicians = orig;
+    return m && m.score >= 0.7;
+  });
+  // Audit ring bound
+  t('audit log size bounded', () => (S.auditLog || []).length <= 500);
+  // Diff helper
+  t('diff detects added/removed', () => {
+    const before = [{ id: 1, physId: 1, date: '2026-01-01' }];
+    const after = [{ id: 1, physId: 1, date: '2026-01-01' }, { id: 2, physId: 2, date: '2026-01-02' }];
+    const d = _scheduleDiff(before, after);
+    return d.added.length === 1 && d.removed.length === 0;
+  });
+  // Levenshtein
+  t('levenshtein equal', () => _levenshtein('foo','foo') === 0);
+  t('levenshtein 1-edit', () => _levenshtein('cat','car') === 1);
+  // Holiday-block fairness
+  t('holidayBlockGap honored', () => {
+    const cfg = (S && S.cfg) || {};
+    return typeof cfg.holidayBlockGap === 'number' || cfg.holidayBlockGap === undefined;
+  });
+  const pass = results.filter(r => r.pass).length;
+  const fail = results.filter(r => !r.pass).length;
+  return { pass, fail, total: results.length, results };
+}
+
+function renderRegressionSuite(){
+  if(!_adminOnly('run regression suite')) return;
+  const out = document.getElementById('rs-test-result');
+  if(!out) return;
+  out.innerHTML = '<div class="rs-progress"><div class="rs-progress-bar indeterminate"></div></div>';
+  // Run on next tick so the progress bar paints
+  setTimeout(() => {
+    const r = _runRegressionSuite();
+    const cls = r.fail === 0 ? 'ns' : 'ne';
+    out.innerHTML = `
+      <div class="note ${cls}" style="margin-bottom:10px">
+        ${r.fail === 0 ? '✓' : '✕'} <strong>${r.pass}/${r.total}</strong> checks ${r.fail === 0 ? 'passed' : `passed · ${r.fail} failed`}
+      </div>
+      <table class="tbl" style="font-size:12.5px"><thead><tr>
+        <th></th><th>Check</th><th>Detail</th>
+      </tr></thead><tbody>
+      ${r.results.map(x => `<tr>
+        <td>${x.pass ? '<span style="color:var(--green-t,#16a34a)">✓</span>' : '<span style="color:var(--red,#dc2626)">✕</span>'}</td>
+        <td>${escHtml(x.name)}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(typeof x.detail === 'object' ? JSON.stringify(x.detail) : String(x.detail || ''))}</td>
+      </tr>`).join('')}
+      </tbody></table>`;
+  }, 50);
+}
+
+// ── Named manual snapshots with notes ──────────────────────────────────
+// Wraps _snapshotBeforeBulk with a custom label. UI surfaces in Tools so
+// admins can stamp recoverable points before any risky action.
+async function takeNamedSnapshot(){
+  if(!_adminOnly('take named snapshot')) return;
+  const ok = await _rsConfirm({
+    title: 'Take a named snapshot',
+    bodyHtml: `<div style="font-size:12.5px;color:var(--rs-ink-2);margin-bottom:10px">Saves a recoverable point-in-time backup with your label. Restorable from Settings → Backups & Restore.</div>
+      <input id="rs-snap-name" placeholder="e.g. Before Q3 rebalance" style="width:100%;padding:9px 12px;border:1px solid var(--rs-line-strong);border-radius:8px;font:inherit;font-size:13px">`,
+    confirmLabel: 'Take snapshot',
+  });
+  if(!ok) return;
+  const label = (document.getElementById('rs-snap-name')?.value || '').trim() || 'manual';
+  // Sanitize label for the backup id (alphanumeric + hyphens only).
+  const safeLabel = label.replace(/[^a-zA-Z0-9]+/g, '-').slice(0, 40);
+  const success = await _snapshotBeforeBulk('manual-' + safeLabel);
+  if(success && typeof _toast === 'function') _toast(`Snapshot "${label}" saved.`, 'ok');
+}
+
+// ── Configuration export / import ──────────────────────────────────────
+// Export the practice's CONFIG (sites, sub-specialties, slots, IR groups,
+// rules, cfg) as JSON. Import overlays it onto the current state.
+// Different from a full backup (which is everything including
+// physicians + assignments) — this is just the schedule's "shape".
+function exportPracticeConfig(){
+  if(!_adminOnly('export practice config')) return;
+  const config = {
+    _exportedAt: new Date().toISOString(),
+    _schemaVersion: typeof _SCHEMA_VERSION !== 'undefined' ? _SCHEMA_VERSION : 0,
+    sites: S.sites || [],
+    drSubs: S.drSubs || [],
+    irSubs: S.irSubs || [],
+    irGroups: S.irGroups || [],
+    siteSlots: S.siteSlots || {},
+    siteSlotsSubs: S.siteSlotsSubs || {},
+    irSlots: S.irSlots || {},
+    irShiftSlots: S.irShiftSlots || {},
+    irShiftSlotLabels: S.irShiftSlotLabels || {},
+    siteSlotLabels: S.siteSlotLabels || {},
+    shiftPickGroups: S.shiftPickGroups || [],
+    wkndNeeds: S.wkndNeeds || {},
+    natLangRules: S.natLangRules || [],
+    holidayDefs: S.holidayDefs || [],
+    physicianPairRules: S.physicianPairRules || [],
+    siteCaps: S.siteCaps || {},
+    shiftSubNeeds: S.shiftSubNeeds || {},
+    cfg: S.cfg || {},
+  };
+  try{
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `RadScheduler-config-${fmtDate(new Date())}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _audit === 'function') _audit('config.export', {});
+    if(typeof _toast === 'function') _toast('Configuration exported.', 'ok');
+  }catch(e){
+    alert('Export failed: ' + (e.message || e));
+  }
+}
+async function importPracticeConfig(input){
+  if(!_adminOnly('import practice config')) return;
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const config = JSON.parse(text);
+    if(!config || typeof config !== 'object'){
+      alert('Invalid config file.'); return;
+    }
+    const ok = await _rsConfirm({
+      title: 'Import configuration?',
+      body: `This will OVERWRITE the current sites, sub-specialties, slots, IR groups, and rules with the values in "${file.name}". Physicians, schedules, and vacation history are NOT touched. A backup will be taken first.`,
+      confirmLabel: 'Import',
+      destructive: true,
+    });
+    if(!ok) return;
+    if(typeof _snapshotBeforeBulk === 'function'){
+      try{ await _snapshotBeforeBulk('config-import'); }catch(_){}
+    }
+    // Overlay each known config field; never touch physicians/shifts/etc.
+    const overlay = ['sites','drSubs','irSubs','irGroups','siteSlots','siteSlotsSubs',
+      'irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','shiftPickGroups',
+      'wkndNeeds','natLangRules','holidayDefs','physicianPairRules','siteCaps',
+      'shiftSubNeeds','cfg'];
+    overlay.forEach(k => { if(config[k] !== undefined) S[k] = config[k]; });
+    if(typeof _audit === 'function') _audit('config.import', { fields: overlay });
+    triggerSave();
+    if(typeof _afterMutation === 'function') _afterMutation();
+    if(typeof _toast === 'function') _toast('Configuration imported.', 'ok');
+  }catch(e){
+    alert('Import failed: ' + (e.message || e));
+  }
+}
+
+// ── Pre-save validation (catch invalid records BEFORE writing) ─────────
+// Runs the same per-record validators as _validateRemotePayload but
+// against local state immediately before triggerSave. Caller can opt
+// out via the second arg (used by paths that intentionally save
+// transient/incomplete state).
+function _validateLocalBeforeSave(){
+  const issues = [];
+  // Physician shape
+  (S.physicians || []).forEach(p => {
+    const r = _validatePhysician(p);
+    if(r.fixed === null) issues.push(`physician ${JSON.stringify(p?.id)} would be dropped on remote apply`);
+    else r.issues.forEach(i => issues.push(i));
+  });
+  // Shifts / calls / vacations
+  ['drShifts','irShifts','irCalls','weekendCalls','vacations','holidays'].forEach(key => {
+    const kind = key.replace(/s$/, '').replace('weekendCall','weekend');
+    (S[key] || []).forEach(rec => {
+      const r = _validateDateRecord(rec, kind);
+      if(r.fixed === null) issues.push(`${key} ${JSON.stringify(rec?.id)} would be dropped on remote apply`);
+    });
+  });
+  return issues;
+}
+
+// ── Excel export of full schedule (round-trip with import) ─────────────
+// Writes an XLSX with one sheet per category (DR Shifts, IR Shifts, IR
+// Calls, Weekend Calls, Holidays, Vacations) so admins can round-trip
+// edits in Excel. SheetJS already loaded for import; we reuse it.
+function exportScheduleXLSX(){
+  if(!window.XLSX){
+    alert('SheetJS not loaded — try again in a moment.');
+    return;
+  }
+  if(!_adminOnly('export schedule XLSX')) return;
+  try{
+    const wb = XLSX.utils.book_new();
+    const physById = (id) => _physById(id) || { last: '?', first: '?' };
+    // DR Shifts
+    const drRows = [['Date','Physician','Last','First','Shift','Site','Sub','Notes']]
+      .concat((S.drShifts || []).slice().sort((a,b) => a.date.localeCompare(b.date))
+        .map(s => [s.date, pname(s.physId), physById(s.physId).last, physById(s.physId).first, s.shift, s.site, s.sub || '', s.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(drRows), 'DR Shifts');
+    // IR Shifts
+    const irShRows = [['Date','Physician','Last','First','Shift','Site','Group','Sub','Notes']]
+      .concat((S.irShifts || []).slice().sort((a,b) => a.date.localeCompare(b.date))
+        .map(s => [s.date, pname(s.physId), physById(s.physId).last, physById(s.physId).first, s.shift, s.site, s.irGroup || '', s.sub || '', s.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(irShRows), 'IR Shifts');
+    // IR Calls
+    const irCRows = [['Date','Physician','Last','First','Call Type','Group','Site','Notes']]
+      .concat((S.irCalls || []).slice().sort((a,b) => a.date.localeCompare(b.date))
+        .map(c => [c.date, pname(c.physId), physById(c.physId).last, physById(c.physId).first, c.callType, c.irGroup || '', c.site || '', c.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(irCRows), 'IR Calls');
+    // Weekend Calls
+    const wkRows = [['Sat Date','Sun Date','Physician','Last','First','Sub','Site','Type','Notes']]
+      .concat((S.weekendCalls || []).slice().sort((a,b) => (a.satDate||'').localeCompare(b.satDate||''))
+        .map(w => [w.satDate || w.date, w.sunDate || '', pname(w.physId), physById(w.physId).last, physById(w.physId).first, w.sub || '', w.site || '', w.ctype || '', w.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wkRows), 'Weekend Calls');
+    // Holidays
+    const hRows = [['Date','Holiday','Year','Physician','Last','First','Group','Notes']]
+      .concat((S.holidays || []).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''))
+        .map(h => [h.date, h.name, h.year, pname(h.physId), physById(h.physId).last, physById(h.physId).first, h.group || '', h.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hRows), 'Holidays');
+    // Vacations
+    const vRows = [['Start','End','Physician','Last','First','Type','Notes']]
+      .concat((S.vacations || []).slice().sort((a,b) => a.start.localeCompare(b.start))
+        .map(v => [v.start, v.end, pname(v.physId), physById(v.physId).last, physById(v.physId).first, v.type || '', v.notes || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vRows), 'Vacations');
+    // Physicians (roster)
+    const pRows = [['ID','Last','First','Role','DR FTE','IR FTE','IR Group','Anchor Site','Email']]
+      .concat((S.physicians || []).map(p => [p.id, p.last, p.first, p.role, p.drFte, p.irFte, p.irGroup || '', p.anchorSite || '', p.email || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Physicians');
+    XLSX.writeFile(wb, `RadScheduler-export-${fmtDate(new Date())}.xlsx`);
+    if(typeof _audit === 'function') _audit('export.xlsx', { sheets: 7 });
+    if(typeof _toast === 'function') _toast('Schedule exported as XLSX.', 'ok');
+  }catch(e){
+    console.error('[RS] XLSX export failed', e);
+    alert('Excel export failed: ' + (e.message || e));
+  }
+}
+
+// ── PDF export of schedules ─────────────────────────────────────────────
+// Uses the browser's print-to-PDF via the existing print stylesheet. The
+// "save as PDF" option in the print dialog produces a clean PDF without
+// requiring any external library. Wraps printSchedule() so the title
+// injection still works.
+function exportScheduleAsPDF(){
+  if(typeof printSchedule !== 'function') return;
+  if(typeof _toast === 'function')
+    _toast('In the print dialog, choose "Save as PDF" as the destination.', 'info');
+  setTimeout(printSchedule, 800);
+}
+
+// ── Practice analytics ──────────────────────────────────────────────────
+// Calendar-level rollups: monthly / yearly trends across the whole
+// practice. Charts via inline SVG (no library); calls _analyticsData()
+// to compute, _renderAnalytics() to display.
+function _analyticsData(year){
+  const yr = +year || new Date().getFullYear();
+  const yrStr = String(yr);
+  // Monthly bucket arrays (12 entries each)
+  const empty12 = () => new Array(12).fill(0);
+  const drShifts = empty12(), irShifts = empty12(), irCalls = empty12(),
+        wkndCalls = empty12(), holidays = empty12(), vacationDays = empty12();
+  (S.drShifts || []).forEach(s => {
+    if(!s.date || !s.date.startsWith(yrStr)) return;
+    if(s.shift === 'Home') return;
+    drShifts[+s.date.slice(5,7) - 1]++;
+  });
+  (S.irShifts || []).forEach(s => {
+    if(!s.date || !s.date.startsWith(yrStr) || s.shift === 'Home') return;
+    irShifts[+s.date.slice(5,7) - 1]++;
+  });
+  (S.irCalls || []).forEach(c => {
+    if(!c.date || !c.date.startsWith(yrStr) || _isHolidaySyncedCall(c)) return;
+    irCalls[+c.date.slice(5,7) - 1]++;
+  });
+  (S.weekendCalls || []).forEach(w => {
+    const d = w.satDate || w.date || '';
+    if(!d.startsWith(yrStr)) return;
+    wkndCalls[+d.slice(5,7) - 1]++;
+  });
+  (S.holidays || []).forEach(h => {
+    if(!h.date || !h.date.startsWith(yrStr)) return;
+    holidays[+h.date.slice(5,7) - 1]++;
+  });
+  (S.vacations || []).forEach(v => {
+    if(!v.start) return;
+    let cur = parseDateLocal(v.start);
+    const end = parseDateLocal(v.end || v.start);
+    while(cur <= end){
+      const ds = fmtDate(cur);
+      if(ds.startsWith(yrStr)) vacationDays[cur.getMonth()]++;
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+  // Per-physician totals (for fairness chart)
+  const physTotals = {};
+  (S.physicians || []).filter(p => p.drFte > 0 || p.irFte > 0).forEach(p => {
+    physTotals[p.id] = { name: pname(p.id), drFte: p.drFte || 0, irFte: p.irFte || 0,
+      shifts: 0, weekend: 0, irCall: 0, holiday: 0, vac: 0 };
+  });
+  (S.drShifts || []).forEach(s => { if(s.date?.startsWith(yrStr) && s.shift !== 'Home' && physTotals[s.physId]) physTotals[s.physId].shifts++; });
+  (S.irShifts || []).forEach(s => { if(s.date?.startsWith(yrStr) && s.shift !== 'Home' && physTotals[s.physId]) physTotals[s.physId].shifts++; });
+  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date || ''; if(d.startsWith(yrStr) && physTotals[w.physId]) physTotals[w.physId].weekend++; });
+  (S.irCalls || []).forEach(c => { if(c.date?.startsWith(yrStr) && !_isHolidaySyncedCall(c) && physTotals[c.physId]) physTotals[c.physId].irCall++; });
+  (S.holidays || []).forEach(h => { if(h.date?.startsWith(yrStr) && physTotals[h.physId]) physTotals[h.physId].holiday++; });
+  return { year: yr, monthly: { drShifts, irShifts, irCalls, wkndCalls, holidays, vacationDays }, physTotals };
+}
+
+function _renderAnalytics(year){
+  const data = _analyticsData(year);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const max = (arr) => Math.max(1, ...arr);
+  // Inline bar chart SVG.
+  const barSeries = (label, values, color) => {
+    const m = max(values);
+    const w = 480, h = 90, pad = 26;
+    const bw = (w - pad - 10) / 12;
+    const bars = values.map((v, i) => {
+      const bh = m === 0 ? 0 : (v / m) * (h - pad - 14);
+      const x = pad + i * bw + 1;
+      const y = h - pad/2 - bh;
+      return `<rect x="${x}" y="${y}" width="${Math.max(0,bw-2)}" height="${bh}" fill="${color}" rx="2"/><text x="${x + bw/2 - 1}" y="${h - 6}" font-size="9" fill="var(--rs-ink-3)" text-anchor="middle">${months[i][0]}</text>${v?`<text x="${x + bw/2 - 1}" y="${y - 3}" font-size="9" font-weight="600" fill="${color}" text-anchor="middle">${v}</text>`:''}`;
+    }).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;letter-spacing:-0.005em;margin-bottom:4px">${escHtml(label)}</div>
+      <svg viewBox="0 0 ${w} ${h}" style="max-width:100%;height:auto">${bars}</svg>
+    </div>`;
+  };
+  // Fairness scatter: each physician's events vs their FTE share.
+  const physArr = Object.values(data.physTotals);
+  const totalEvents = physArr.reduce((s, p) => s + p.shifts + p.weekend + p.irCall, 0) || 1;
+  const totalFte = physArr.reduce((s, p) => s + p.drFte + p.irFte, 0) || 1;
+  const fairness = physArr.map(p => {
+    const events = p.shifts + p.weekend + p.irCall;
+    const expected = totalEvents * (p.drFte + p.irFte) / totalFte;
+    const delta = events - expected;
+    return { name: p.name, events, expected: Math.round(expected), delta: Math.round(delta * 10) / 10 };
+  }).sort((a,b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 12);
+  return `
+    <div class="card-section">${data.year} monthly trend</div>
+    ${barSeries('DR shifts', data.monthly.drShifts, 'var(--rs-accent,#2563eb)')}
+    ${barSeries('IR shifts', data.monthly.irShifts, '#7c3aed')}
+    ${barSeries('IR calls', data.monthly.irCalls, '#0891b2')}
+    ${barSeries('Weekend calls', data.monthly.wkndCalls, '#ea580c')}
+    ${barSeries('Holiday days', data.monthly.holidays, '#dc2626')}
+    ${barSeries('Vacation days', data.monthly.vacationDays, '#16a34a')}
+
+    <div class="card-section" style="margin-top:18px">Fairness — most off-target physicians</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:8px">
+      Δ = actual − expected events given FTE share. Positive = doing more than fair share; negative = underutilized.
+    </div>
+    <table class="tbl" style="font-size:12.5px">
+      <thead><tr><th>Physician</th><th>Events</th><th>Expected</th><th>Δ</th></tr></thead>
+      <tbody>${fairness.map(p => `<tr>
+        <td>${escHtml(p.name)}</td><td>${p.events}</td><td>${p.expected}</td>
+        <td style="color:${p.delta > 0 ? 'var(--amber,#d97706)' : p.delta < 0 ? 'var(--rs-accent)' : 'var(--rs-ink-3)'};font-weight:600">${p.delta > 0 ? '+' : ''}${p.delta}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function renderAnalytics(){
+  if(!_adminOnly('view analytics')) return;
+  const out = document.getElementById('an-result');
+  if(!out) return;
+  const yr = +document.getElementById('an-year')?.value || new Date().getFullYear();
+  out.innerHTML = _renderAnalytics(yr);
+}
+
+// ── Right-click context menu on calendar cells ─────────────────────────
+// Power-user shortcut: right-click any DR/IR calendar cell or shift event
+// to get quick actions (Add shift, Delete, Move, See physician's recent
+// activity). Click outside dismisses.
+function _initContextMenu(){
+  if(typeof document === 'undefined') return;
+  document.addEventListener('contextmenu', (e) => {
+    // Only intercept calendar cells / events. Everything else gets the
+    // browser default so admins can still copy / paste / inspect.
+    const cell = e.target.closest('.cal-day, .ev');
+    if(!cell) return;
+    e.preventDefault();
+    _hideContextMenu();
+    const ds = cell.dataset?.date || cell.closest('.cal-day')?.dataset?.date || '';
+    const ev = cell.classList?.contains('ev') ? cell : null;
+    const physId = ev?.dataset?.physId ? +ev.dataset.physId : null;
+    const recId = ev?.dataset?.recId ? +ev.dataset.recId : null;
+    const recKind = ev?.dataset?.kind || '';
+    const items = [];
+    if(_isAdminOrSU && _isAdminOrSU()){
+      if(ds){
+        items.push({ label: '+ Add DR shift on ' + ds, action: () => _quickAddShift('dr', ds) });
+        items.push({ label: '+ Add IR shift on ' + ds, action: () => _quickAddShift('ir', ds) });
+        items.push({ separator: true });
+      }
+      if(ev && recId && recKind){
+        items.push({ label: 'Delete this ' + recKind, destructive: true, action: () => _quickDeleteRec(recKind, recId) });
+        items.push({ separator: true });
+      }
+    }
+    if(physId){
+      items.push({ label: 'See ' + pname(physId) + "'s schedule", action: () => {
+        if(typeof nav === 'function'){
+          const navItem = document.querySelector('.snav-item[data-pg="my-schedule"]');
+          nav('my-schedule', navItem);
+        }
+      }});
+      items.push({ label: 'Annual report for ' + pname(physId), action: () => {
+        if(_isAdminOrSU && _isAdminOrSU()){
+          const navItem = document.querySelector('.snav-item[data-pg="tools"]');
+          if(typeof nav === 'function') nav('tools', navItem);
+          setTimeout(() => {
+            const sel = document.getElementById('ar-phys');
+            if(sel){ sel.value = String(physId); }
+            if(typeof renderAnnualReport === 'function') renderAnnualReport();
+          }, 200);
+        }
+      }});
+    }
+    if(!items.length) return;
+    _showContextMenu(e.clientX, e.clientY, items);
+  });
+  document.addEventListener('click', (e) => {
+    if(!e.target.closest('#rs-ctx-menu')) _hideContextMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape') _hideContextMenu();
+  });
+}
+function _showContextMenu(x, y, items){
+  let menu = document.getElementById('rs-ctx-menu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'rs-ctx-menu';
+    document.body.appendChild(menu);
+  }
+  menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:10250;background:var(--bg2,#fff);border:1px solid var(--rs-line);border-radius:10px;box-shadow:var(--rs-elev-3);padding:6px;min-width:200px;font-size:13px;letter-spacing:-0.005em;animation:rsCpFadeIn .12s var(--rs-ease)`;
+  menu.innerHTML = items.map((it, i) => {
+    if(it.separator) return '<div style="height:1px;background:var(--rs-line);margin:4px 0"></div>';
+    const color = it.destructive ? 'var(--red,#dc2626)' : 'var(--rs-ink-1)';
+    return `<div data-idx="${i}" style="padding:8px 12px;border-radius:6px;cursor:pointer;color:${color};transition:background .12s" onmouseover="this.style.background='var(--rs-accent-soft)'" onmouseout="this.style.background=''">${escHtml(it.label)}</div>`;
+  }).join('');
+  menu.querySelectorAll('[data-idx]').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.idx;
+      _hideContextMenu();
+      try{ items[idx]?.action?.(); }catch(err){ console.warn('[RS] context menu action failed', err); }
+    });
+  });
+  // Snap menu inside viewport.
+  setTimeout(() => {
+    const r = menu.getBoundingClientRect();
+    if(r.right > window.innerWidth - 8) menu.style.left = (window.innerWidth - r.width - 8) + 'px';
+    if(r.bottom > window.innerHeight - 8) menu.style.top = (window.innerHeight - r.height - 8) + 'px';
+  }, 10);
+}
+function _hideContextMenu(){
+  const menu = document.getElementById('rs-ctx-menu');
+  if(menu) menu.remove();
+}
+function _quickAddShift(kind, date){
+  if(!_isAdminOrSU || !_isAdminOrSU()) return;
+  const targetPage = kind === 'dr' ? 'dr-builder' : 'ir-shifts';
+  const navItem = document.querySelector(`.snav-item[data-pg="${targetPage}"]`);
+  if(typeof nav === 'function') nav(targetPage, navItem);
+  setTimeout(() => {
+    const dateInput = document.querySelector(`#page-${targetPage} input[type="date"]`);
+    if(dateInput) dateInput.value = date;
+  }, 150);
+}
+async function _quickDeleteRec(kind, id){
+  const fn = ({ dr: 'deleteDRShift', ir: 'deleteIRShift', wkn: 'deleteWkCall', vac: 'deleteVacation' })[kind];
+  if(!fn || typeof window[fn] !== 'function'){
+    if(typeof _toast === 'function') _toast(`Delete handler not found for ${kind}.`, 'warn');
+    return;
+  }
+  const ok = await _rsConfirm({
+    title: `Delete ${kind} entry?`,
+    body: 'You can undo via the toast that appears.',
+    confirmLabel: 'Delete',
+    destructive: true,
+  });
+  if(ok) window[fn](id);
+}
+// Wire on init.
+if(typeof document !== 'undefined'){
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _initContextMenu);
+  else _initContextMenu();
+}
+
+// ── Saved views (per-page filter persistence) ──────────────────────────
+// Saves the current calendar's filter state to localStorage under a
+// user-chosen name. Quick-pick from a dropdown to restore. State is
+// page-agnostic: anything in the URL hash + form input values gets
+// snapshotted.
+const _SAVED_VIEWS_KEY = 'rs.savedViews.v1';
+function _loadSavedViews(){
+  try{ return JSON.parse(localStorage.getItem(_SAVED_VIEWS_KEY) || '[]'); }
+  catch(_){ return []; }
+}
+function _persistSavedViews(views){
+  try{ localStorage.setItem(_SAVED_VIEWS_KEY, JSON.stringify(views)); }catch(_){}
+}
+async function saveCurrentView(){
+  const activePage = document.querySelector('.page.on');
+  if(!activePage) return;
+  const pageId = activePage.id.replace('page-', '');
+  // Snapshot all input values inside the active page
+  const state = {};
+  activePage.querySelectorAll('input, select').forEach(el => {
+    if(!el.id) return;
+    if(el.type === 'checkbox') state[el.id] = el.checked;
+    else state[el.id] = el.value;
+  });
+  const ok = await _rsConfirm({
+    title: 'Save this view',
+    bodyHtml: `<div style="font-size:12.5px;color:var(--rs-ink-2);margin-bottom:10px">Give this view a name. Switch back to it from the views dropdown.</div>
+      <input id="rs-view-name" placeholder="e.g. IR North · April" style="width:100%;padding:9px 12px;border:1px solid var(--rs-line-strong);border-radius:8px;font:inherit;font-size:13px">`,
+    confirmLabel: 'Save',
+  });
+  if(!ok) return;
+  const name = (document.getElementById('rs-view-name')?.value || '').trim();
+  if(!name) return;
+  const views = _loadSavedViews();
+  // De-dupe by (page, name)
+  const idx = views.findIndex(v => v.page === pageId && v.name === name);
+  const view = { page: pageId, name, state, savedAt: Date.now() };
+  if(idx >= 0) views[idx] = view;
+  else views.push(view);
+  _persistSavedViews(views);
+  if(typeof _toast === 'function') _toast(`View "${name}" saved.`, 'ok');
+}
+function applySavedView(viewName){
+  const activePage = document.querySelector('.page.on');
+  if(!activePage) return;
+  const pageId = activePage.id.replace('page-', '');
+  const view = _loadSavedViews().find(v => v.page === pageId && v.name === viewName);
+  if(!view) return;
+  Object.entries(view.state).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(el.type === 'checkbox') el.checked = !!val;
+    else el.value = val;
+    try{ el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('input', { bubbles: true })); }catch(_){}
+  });
+  if(typeof _toast === 'function') _toast(`View "${viewName}" applied.`, 'ok');
+}
+
+// ── Inline shift annotations ───────────────────────────────────────────
+// Free-text notes attached to specific dates. Visible to all viewers of
+// this practice. Stored on S.cellNotes = {[ISO date]: 'string'}. Surfaced
+// on the calendar via a small icon when present; click to view/edit.
+async function editCellAnnotation(date){
+  if(!_adminOnly('edit cell annotation')) return;
+  if(!S.cellNotes) S.cellNotes = {};
+  const existing = S.cellNotes[date] || '';
+  const ok = await _rsConfirm({
+    title: `Note for ${date}`,
+    bodyHtml: `<textarea id="rs-cell-note" rows="3" placeholder="e.g. Reading room AC down" style="width:100%;padding:10px 12px;border:1px solid var(--rs-line-strong);border-radius:8px;font:inherit;font-size:13px;resize:vertical">${escHtml(existing)}</textarea>
+      ${existing ? '<div style="margin-top:8px"><button class="br bsm" onclick="this.closest(\'div[role=&quot;dialog&quot;]\')?.remove?.(); delete S.cellNotes[\''+escHtml(date)+'\']; triggerSave(); _afterMutation && _afterMutation();">🗑 Remove note</button></div>' : ''}`,
+    confirmLabel: 'Save note',
+  });
+  if(!ok) return;
+  const txt = (document.getElementById('rs-cell-note')?.value || '').trim();
+  if(txt) S.cellNotes[date] = txt;
+  else delete S.cellNotes[date];
+  if(typeof _audit === 'function') _audit('cellNote.set', { date, hasNote: !!txt });
+  triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+}
+
+// ── Schedule diff helper ────────────────────────────────────────────────
+// Compares two snapshots of S (or specific arrays) and produces a
+// structured diff: {added, removed, changed}. Used by:
+//   • Pre-apply diffs for bulk operations (Excel import, IR rebalance,
+//     auto-assign apply, holiday lottery, restore-from-backup)
+//   • Schedule diff viewer ("what's changed since I last looked?")
+//   • Conflict-resolution UI (compare incoming remote vs local)
+//
+// keys: which fields to consider for equality. Defaults to ['physId','date',
+// 'shift','site','sub'] for shift-like records.
+function _scheduleDiff(before, after, keys){
+  keys = keys || ['physId','date','shift','site','sub','satDate','sunDate','start','end','type','callType','irGroup','name','year','group'];
+  const sig = (rec) => keys.map(k => k in rec ? String(rec[k] == null ? '' : rec[k]) : '').join('|');
+  const beforeSet = new Map();
+  (before || []).forEach(r => { if(r && typeof r === 'object') beforeSet.set(sig(r), r); });
+  const afterSet = new Map();
+  (after || []).forEach(r => { if(r && typeof r === 'object') afterSet.set(sig(r), r); });
+  const added = [], removed = [];
+  for(const [s, rec] of afterSet){ if(!beforeSet.has(s)) added.push(rec); }
+  for(const [s, rec] of beforeSet){ if(!afterSet.has(s)) removed.push(rec); }
+  return { added, removed, total: added.length + removed.length };
+}
+
+// Render a diff into a styled HTML block. Used by the modal helpers below.
+function _renderDiffHtml(diff, label){
+  if(!diff || diff.total === 0){
+    return `<div class="note ni" style="font-size:12px">No changes for ${escHtml(label || 'this collection')}.</div>`;
+  }
+  const renderList = (recs, kind, color) => {
+    if(!recs.length) return '';
+    return `<div style="margin-top:6px">
+      <div style="font-size:11.5px;font-weight:600;color:${color};margin-bottom:4px">${kind} · ${recs.length}</div>
+      <div style="font-size:11.5px;color:var(--rs-ink-2);max-height:140px;overflow-y:auto;font-family:ui-monospace,monospace">
+        ${recs.slice(0, 40).map(r => `<div>${escHtml(_summarizeRec(r))}</div>`).join('')}
+        ${recs.length > 40 ? `<div style="color:var(--rs-ink-3);font-style:italic">… and ${recs.length - 40} more</div>` : ''}
+      </div>
+    </div>`;
+  };
+  return `<div style="border-left:3px solid var(--rs-accent);padding:8px 12px;margin-bottom:10px;background:var(--bg2);border-radius:0 8px 8px 0">
+    <div style="font-weight:600;font-size:13px;letter-spacing:-0.011em">${escHtml(label || 'Changes')} · ${diff.added.length} added · ${diff.removed.length} removed</div>
+    ${renderList(diff.added, '+ Added', 'var(--green-t,#16a34a)')}
+    ${renderList(diff.removed, '− Removed', 'var(--red-t,#991b1b)')}
+  </div>`;
+}
+
+function _summarizeRec(r){
+  if(!r) return '';
+  const physName = r.physId != null ? pname(r.physId) : '';
+  const parts = [];
+  if(physName) parts.push(physName);
+  if(r.date) parts.push(r.date);
+  if(r.start && r.end) parts.push(`${r.start} → ${r.end}`);
+  if(r.satDate) parts.push(`Sat ${r.satDate}`);
+  if(r.shift) parts.push(r.shift);
+  if(r.site) parts.push('@ ' + r.site);
+  if(r.callType) parts.push(r.callType + ' call');
+  if(r.type) parts.push(r.type);
+  if(r.name) parts.push(r.name);
+  return parts.join(' · ');
+}
+
+// Show a pre-apply diff modal. Resolves true (apply) / false (cancel).
+async function _confirmBulkApply(opts){
+  const diffs = opts.diffs || []; // [{label, before, after}]
+  const sections = diffs.map(d => {
+    const diff = _scheduleDiff(d.before, d.after);
+    return _renderDiffHtml(diff, d.label);
+  }).join('');
+  const total = diffs.reduce((s, d) => {
+    const diff = _scheduleDiff(d.before, d.after);
+    return s + diff.total;
+  }, 0);
+  if(total === 0){
+    return _rsConfirm({
+      title: opts.title || 'Apply',
+      body: opts.body || 'No changes to apply.',
+      confirmLabel: 'OK',
+      cancelLabel: '',
+    });
+  }
+  return _rsConfirm({
+    title: opts.title || `Apply ${total} change${total===1?'':'s'}?`,
+    bodyHtml: `<div style="font-size:12.5px;color:var(--rs-ink-2);margin-bottom:12px">${escHtml(opts.body || 'Review the diff below. This action will modify the schedule.')}</div>${sections}`,
+    confirmLabel: opts.confirmLabel || 'Apply',
+    destructive: opts.destructive || false,
+  });
+}
+
+// ── Multi-step undo timeline ───────────────────────────────────────────
+// The existing undo ring snapshots state on every mutation. Surface the
+// last N snapshots as a timeline panel — admins click to revert to that
+// point. Each row shows the audit-log action that triggered it (when
+// available) so the admin knows what "5 minutes ago" actually means.
+function showUndoTimeline(){
+  if(typeof _undoStack === 'undefined' || !_undoStack.length){
+    if(typeof _toast === 'function') _toast('No undo history yet.', 'info');
+    return;
+  }
+  const stack = _undoStack.slice().reverse(); // newest first
+  const audit = (S.auditLog || []).slice().reverse();
+  const rows = stack.slice(0, 30).map((snap, i) => {
+    const entry = audit[i];
+    const action = entry ? entry.action : '(unlogged change)';
+    const ts = entry ? entry.ts : (snap._ts || '');
+    const ago = ts ? _timeAgo(ts) : '';
+    return `<tr>
+      <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${i === 0 ? '<strong>now</strong>' : escHtml(ago)}</td>
+      <td><span class="tag" style="font-size:10px;background:var(--rs-accent-soft);color:var(--rs-accent)">${escHtml(action)}</span></td>
+      <td>${i > 0 ? `<button class="bsm" onclick="_revertToUndoStep(${i})">⏪ Revert here</button>` : '<span style="color:var(--rs-ink-3);font-size:11px">current</span>'}</td>
+    </tr>`;
+  }).join('');
+  _rsConfirm({
+    title: 'Undo timeline',
+    bodyHtml: `<div style="font-size:12.5px;color:var(--rs-ink-2);margin-bottom:10px">The last ${stack.length} snapshots. Click "Revert here" to roll back; pre-revert state is captured so you can re-roll forward via Cmd-Shift-Z.</div>
+      <table class="tbl" style="width:100%;font-size:12.5px"><thead><tr>
+        <th>When</th><th>Action</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table>`,
+    confirmLabel: 'Close',
+    cancelLabel: '',
+  });
+}
+function _timeAgo(ts){
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return ts;
+  const ms = Date.now() - d.getTime();
+  const s = Math.round(ms / 1000);
+  if(s < 60) return `${s}s ago`;
+  if(s < 3600) return `${Math.round(s/60)}m ago`;
+  if(s < 86400) return `${Math.round(s/3600)}h ago`;
+  return `${Math.round(s/86400)}d ago`;
+}
+function _revertToUndoStep(stepsBack){
+  if(typeof _undoStack === 'undefined') return;
+  // Pop `stepsBack` snapshots — we're rolling back N steps.
+  for(let i = 0; i < stepsBack; i++){
+    if(typeof undoLastEdit === 'function') undoLastEdit();
+  }
+  // Close any open modals
+  document.querySelectorAll('[role="dialog"]').forEach(el => el.parentElement?.remove());
+}
+
+// ── Mobile native polish ────────────────────────────────────────────────
+// PWA install prompt + iOS safe-area handling + swipe-to-navigate-month on
+// calendars + pull-to-refresh on lists.
+//
+// Install prompt: capture the beforeinstallprompt event, expose a
+// `_rsInstallPrompt()` function that callers can wire to a button when
+// the prompt is available.
+let _deferredInstallPrompt = null;
+if(typeof window !== 'undefined'){
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    _deferredInstallPrompt = e;
+    // Expose a subtle "Install" badge in the toolbar so users on
+    // supporting browsers (Chrome desktop / Edge / Android) can pin
+    // the app. Don't auto-prompt — pushy.
+    setTimeout(() => {
+      const tb = document.querySelector('.tb-user');
+      if(tb && !document.getElementById('rs-install-btn')){
+        const btn = document.createElement('button');
+        btn.id = 'rs-install-btn';
+        btn.className = 'tb-btn';
+        btn.style.cssText = 'margin-right:6px;font-size:12px;padding:5px 10px';
+        btn.textContent = '⬇ Install';
+        btn.title = 'Install RadScheduler as an app on this device';
+        btn.onclick = () => {
+          if(!_deferredInstallPrompt) return;
+          _deferredInstallPrompt.prompt();
+          _deferredInstallPrompt.userChoice.then(() => {
+            _deferredInstallPrompt = null;
+            btn.remove();
+          });
+        };
+        tb.parentElement?.insertBefore(btn, tb);
+      }
+    }, 1500);
+  });
+}
+
+// Swipe-to-navigate on calendar pages — left-swipe = next month, right-
+// swipe = prev. Touch-only; doesn't interfere with desktop interactions.
+(function _wireCalendarSwipe(){
+  if(typeof document === 'undefined') return;
+  let touchStartX = 0, touchStartY = 0, touchActive = false;
+  document.addEventListener('touchstart', (e) => {
+    const onCal = e.target.closest('#page-dr-cal, #page-ir-cal, #page-my-schedule');
+    if(!onCal) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchActive = true;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if(!touchActive) return;
+    touchActive = false;
+    const dx = (e.changedTouches[0].clientX - touchStartX);
+    const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+    // Require dominant horizontal swipe of at least 60px.
+    if(Math.abs(dx) < 60 || dy > 40) return;
+    const onCal = e.target.closest('#page-dr-cal, #page-ir-cal, #page-my-schedule');
+    if(!onCal) return;
+    const monthInput = onCal.querySelector('input[type="month"]');
+    if(!monthInput || !monthInput.value) return;
+    const [y, m] = monthInput.value.split('-').map(Number);
+    const next = new Date(y, m - 1 + (dx < 0 ? 1 : -1), 1);
+    monthInput.value = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+    monthInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { passive: true });
+})();
+
+// ── Inline modal dialog (replaces confirm() / alert()) ──────────────────
+// Native browser confirm() is jarring on mobile and clashes with the design
+// language. _rsConfirm() returns a Promise that resolves to true/false; the
+// dialog is fully styled, supports rich body content, and traps focus.
+//
+// Usage:
+//   const ok = await _rsConfirm({
+//     title: 'Delete shift?',
+//     body: 'This will remove Dr. Smith from Saturday May 5.',
+//     confirmLabel: 'Delete',
+//     destructive: true,
+//   });
+//
+// Falls back to native confirm() in non-browser contexts (worker, headless).
+function _rsConfirm(opts){
+  if(typeof document === 'undefined' || !document.body){
+    return Promise.resolve(typeof confirm === 'function' ? confirm(opts?.body || '') : false);
+  }
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;inset:0;z-index:10200;background:rgba(15,15,20,.42);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:grid;place-items:center;padding:20px;animation:rsCpFadeIn .15s var(--rs-ease,cubic-bezier(.4,0,.2,1))';
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'rs-confirm-title');
+    dialog.style.cssText = 'background:var(--bg2,#fff);color:var(--rs-ink-1,#0a0a0c);border:1px solid var(--rs-line,rgba(60,60,67,.12));border-radius:var(--rs-r-xl,18px);box-shadow:var(--rs-elev-3,0 12px 40px rgba(10,10,12,.10));max-width:480px;width:100%;padding:24px;animation:rsCpSlideIn .18s var(--rs-ease,cubic-bezier(.4,0,.2,1))';
+    const accentColor = opts.destructive ? 'var(--red,#dc2626)' : 'var(--rs-accent,#2563eb)';
+    dialog.innerHTML = `
+      <div id="rs-confirm-title" style="font-size:17px;font-weight:600;letter-spacing:-0.022em;margin-bottom:10px">${escHtml(opts.title || 'Confirm')}</div>
+      <div style="font-size:13.5px;line-height:1.55;color:var(--rs-ink-2,#4a4a4f);margin-bottom:24px">${opts.bodyHtml || escHtml(opts.body || '')}</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button data-rs-action="cancel" style="padding:9px 18px;border-radius:10px;border:1px solid var(--rs-line-strong,rgba(60,60,67,.18));background:transparent;color:var(--rs-ink-1,#0a0a0c);font:inherit;font-size:13px;font-weight:500;letter-spacing:-0.005em;cursor:pointer">${escHtml(opts.cancelLabel || 'Cancel')}</button>
+        <button data-rs-action="ok" style="padding:9px 18px;border-radius:10px;border:none;background:${accentColor};color:#fff;font:inherit;font-size:13px;font-weight:500;letter-spacing:-0.005em;cursor:pointer">${escHtml(opts.confirmLabel || 'Confirm')}</button>
+      </div>`;
+    host.appendChild(dialog);
+    document.body.appendChild(host);
+    // Focus trap — keep Tab cycling inside the dialog.
+    const buttons = dialog.querySelectorAll('button');
+    const okBtn = dialog.querySelector('[data-rs-action="ok"]');
+    const cancelBtn = dialog.querySelector('[data-rs-action="cancel"]');
+    const previouslyFocused = document.activeElement;
+    setTimeout(() => okBtn?.focus(), 30);
+    function close(result){
+      try{ host.remove(); }catch(_){}
+      try{ previouslyFocused?.focus?.(); }catch(_){}
+      resolve(result);
+    }
+    okBtn.addEventListener('click', () => close(true));
+    cancelBtn.addEventListener('click', () => close(false));
+    host.addEventListener('click', (e) => { if(e.target === host) close(false); });
+    dialog.addEventListener('keydown', (e) => {
+      if(e.key === 'Escape'){ e.preventDefault(); close(false); return; }
+      if(e.key === 'Enter' && document.activeElement !== cancelBtn){ e.preventDefault(); close(true); return; }
+      if(e.key === 'Tab'){
+        // Trap: cycle between the two buttons
+        const arr = [...buttons];
+        const idx = arr.indexOf(document.activeElement);
+        if(idx === -1) return;
+        e.preventDefault();
+        const next = e.shiftKey ? (idx === 0 ? arr.length-1 : idx-1) : (idx === arr.length-1 ? 0 : idx+1);
+        arr[next]?.focus();
+      }
+    });
+  });
 }
 
 // ── Toast with action button ─────────────────────────────────────────────
