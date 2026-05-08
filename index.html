@@ -3883,6 +3883,7 @@ WHERE email = 'your-admin@example.com';</pre>
       </div>
     </div>
     <button class="bp bsm" onclick="configureDigestSchedule()">Save digest settings</button>
+    <button class="bsm" onclick="runDigestNow()" style="margin-left:6px">⚡ Send digest now</button>
 
     <div class="card-section" style="margin-top:18px">🌐 Public read-only schedule</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:8px">
@@ -10565,12 +10566,19 @@ function roleUI(){
 }
 function renderSubChk(elId,subs,nm){
   const el=document.getElementById(elId);if(!el)return;
-  el.innerHTML=subs.map(s=>`<label class="chk"><input type="checkbox" name="${nm}" value="${s}"> ${s}</label>`).join('');
+  // Escape every interpolation. Sub-specialty names are admin-managed but
+  // could contain HTML metacharacters; without escaping, a sub named
+  // "<img src=x onerror=...>" would XSS every render of this checkbox set.
+  el.innerHTML=subs.map(s=>`<label class="chk"><input type="checkbox" name="${escHtml(nm)}" value="${escHtml(s)}"> ${escHtml(s)}</label>`).join('');
 }
 function populateSel(id,opts,blank){
   const el=document.getElementById(id);if(!el)return;
   const cur=el.value;
-  el.innerHTML=(blank?`<option value="">${blank}</option>`:'')+opts.map(o=>typeof o==='string'?`<option value="${o}">${o}</option>`:`<option value="${o.v}">${o.t}</option>`).join('');
+  // Both option-value and option-text are escaped. Both string and
+  // {v,t} forms route through escHtml.
+  el.innerHTML=(blank?`<option value="">${escHtml(blank)}</option>`:'')+opts.map(o=>typeof o==='string'
+    ? `<option value="${escHtml(o)}">${escHtml(o)}</option>`
+    : `<option value="${escHtml(o.v)}">${escHtml(o.t)}</option>`).join('');
   if(cur) el.value=cur;
 }
 function renderPhysicians(){
@@ -10579,7 +10587,8 @@ function renderPhysicians(){
   populateSel('p-anchor',siteNames,'No anchor site');
   populateSel('p-irsiteprim',siteNames,'');
   const sc=document.getElementById('p-sites-chk');
-  if(sc) sc.innerHTML=siteNames.map(n=>`<label class="chk"><input type="checkbox" name="asite" value="${n}"> ${n}</label>`).join('');
+  // Escape site names — admin-managed but defense-in-depth.
+  if(sc) sc.innerHTML=siteNames.map(n=>`<label class="chk"><input type="checkbox" name="asite" value="${escHtml(n)}"> ${escHtml(n)}</label>`).join('');
   let html='';
   ['DR','MIXED','IR'].forEach(role=>{
     const list=S.physicians.filter(p=>p.role===role);if(!list.length)return;
@@ -11070,18 +11079,21 @@ function _populateBulkDropdowns(shift){
     .sort((a,b) => (a.last||'').localeCompare(b.last||'') || (a.first||'').localeCompare(b.first||''));
   const physSel = document.getElementById(`drb-${shift}-phys`);
   if(physSel){
+    // Full escHtml — partial `replace(/</g,'&lt;')` left quotes/apostrophes
+    // unescaped, so a physician named  O'Malley">  could break out of the
+    // attribute and inject. escHtml covers &, <, >, ", '.
     physSel.innerHTML = drs.length
       ? drs.map(p => {
           const role = p.role || (p.irFte>0&&p.drFte>0?'MIXED':p.irFte>0?'IR':'DR');
-          return `<option value="${p.id}">${(p.last||'').replace(/</g,'&lt;')}, ${(p.first||'').replace(/</g,'&lt;')} (${role})</option>`;
+          return `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)} (${escHtml(role)})</option>`;
         }).join('')
-      : `<option value="">— No eligible physicians for ${shift} shift —</option>`;
+      : `<option value="">— No eligible physicians for ${escHtml(shift)} shift —</option>`;
   }
   const siteNames = (S.sites||[]).filter(s => s.name !== 'At Home / Remote').map(s => s.name);
   const siteSel = document.getElementById(`drb-${shift}-site`);
-  if(siteSel) siteSel.innerHTML = siteNames.map(n => `<option>${(n||'').replace(/</g,'&lt;')}</option>`).join('');
+  if(siteSel) siteSel.innerHTML = siteNames.map(n => `<option>${escHtml(n)}</option>`).join('');
   const subSel = document.getElementById(`drb-${shift}-sub`);
-  if(subSel) subSel.innerHTML = (S.drSubs||[]).map(s => `<option>${(s||'').replace(/</g,'&lt;')}</option>`).join('');
+  if(subSel) subSel.innerHTML = (S.drSubs||[]).map(s => `<option>${escHtml(s)}</option>`).join('');
 }
 
 function updateMultiWeekPreview(shift){
@@ -15742,6 +15754,7 @@ function addIRShift(){
   const _newId = S.nextId++;
   S.irShifts.push({id:_newId, physId, date, shift, site, sub, notes, irGroup:p.irGroup||''});
   if(typeof _audit==='function') _audit('irShift.add', {id:_newId, physId, date, shift, site, sub});
+  if(typeof _emitWebhookEvent==='function') _emitWebhookEvent('shift.assigned', {kind:'ir', physId, physName:pname(physId), date, shift, site, sub});
   triggerSave();
   _afterMutation();
   // Clear date and notes
@@ -16613,6 +16626,8 @@ function addOpenShift(){
   const _newId = S.nextId++;
   S.openShifts.push({id:_newId,date,shiftType:type,sub:'',site,group:grp,claimedBy:null,notes:''});
   if(typeof _audit==='function') _audit('openShift.add', {id:_newId, date, shiftType:type, group:grp, site});
+  if(typeof _emitWebhookEvent==='function')
+    _emitWebhookEvent('openShift.posted', { id: _newId, date, shiftType: type, group: grp, site });
   triggerSave();renderManageShifts();
 }
 
@@ -16978,6 +16993,9 @@ function resolveSwap(id,status){
   }
   s.status=status;
   if(typeof _audit==='function') _audit('swap.resolve', {id, status, fromPhysId:s.fromPhysId, toPhysId:s.toPhysId, date:s.date});
+  if(typeof _emitWebhookEvent==='function')
+    _emitWebhookEvent(status === 'approved' ? 'swap.approved' : 'swap.denied',
+      { swapId: id, fromPhys: pname(s.fromPhysId), toPhys: pname(s.toPhysId), date: s.date });
   triggerSave();
   renderSwaps();
   // Also refresh any calendar views that might be showing the swapped shift
@@ -24959,6 +24977,17 @@ function renderDRCal(){
           <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
           <div style="font-size:9px;opacity:.8">${s.autoHome?'Auto-Home':'Home'}</div>
         </div>`;
+      } else if(s.shift==='2nd' || s.shift==='3rd'){
+        // 2nd / 3rd shifts are home-only by practice convention. Show
+        // them with a clear "evening/night" badge instead of the
+        // truncated site label which always resolves to "At" (from
+        // "At Home / Remote") and confuses admins into thinking the
+        // record didn't import.
+        const badge = s.shift==='2nd' ? 'Evening' : 'Overnight';
+        evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift (Home)${s.notes?' · '+s.notes:''}">
+          <div style="font-weight:700;font-size:11px">🌙 ${pshort(s.physId)}</div>
+          <div style="font-size:9px;opacity:.85">${s.shift} ${badge}</div>
+        </div>`;
       } else {
         evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
           <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
@@ -27260,6 +27289,7 @@ function addDRShift(){
   const _newId = S.nextId++;
   S.drShifts.push({id:_newId,physId:pid,date,shift,site,sub:document.getElementById('sb-sub').value,notes:document.getElementById('sb-notes').value,autoHome:false});
   if(typeof _audit==='function') _audit('drShift.add', {id:_newId, physId:pid, date, shift, site});
+  if(typeof _emitWebhookEvent==='function') _emitWebhookEvent('shift.assigned', {kind:'dr', physId:pid, physName:pname(pid), date, shift, site});
   triggerSave();updateSbInfo();
   _afterMutation();
 }
@@ -32201,21 +32231,48 @@ const _WEBHOOK_EVENTS = [
 function _emitWebhookEvent(eventName, payload){
   const hooks = (S.cfg?.webhooks || []).filter(h => h.active && (h.events || []).includes(eventName));
   if(!hooks.length) return;
-  // We don't POST from the client (CORS, secret leakage). Instead, queue
-  // an envelope in S.webhookOutbox and the send-notification edge function
-  // picks it up + delivers. For now we log the queue so the edge fn can
-  // be wired to consume; if not wired yet, this is a no-op.
-  if(!S.webhookOutbox) S.webhookOutbox = [];
-  S.webhookOutbox.push({
-    id: (S.nextId = (S.nextId || 1) + 1),
-    eventName,
-    payload,
-    queuedAt: new Date().toISOString(),
-    targets: hooks.map(h => h.id),
-    delivered: false,
+  // Fire each subscribed webhook through the send-notification edge
+  // function (which has the right CORS posture + service-role key for
+  // logging). Async-fire-and-forget; errors logged to console + audit
+  // but don't block the originating mutation.
+  hooks.forEach(h => {
+    _invokeEdgeFn('send-notification', {
+      kind: 'webhook',
+      url: h.url,
+      payload: { eventName, ...payload, deliveredAt: new Date().toISOString() },
+    }).then(r => {
+      if(r && r.ok && typeof _audit === 'function')
+        _audit('webhook.delivered', { hookId: h.id, eventName });
+    }).catch(err => {
+      console.warn('[RS] webhook delivery failed:', h.url, err);
+      if(typeof _audit === 'function')
+        _audit('webhook.failed', { hookId: h.id, eventName, error: String(err) });
+    });
   });
-  // Cap outbox size so a wholly-unwired hook doesn't grow the payload forever.
-  if(S.webhookOutbox.length > 200) S.webhookOutbox.splice(0, S.webhookOutbox.length - 200);
+}
+
+// ── Edge-function invocation helper ────────────────────────────────────
+// Wraps the boilerplate around hitting our /functions/v1/<name> routes:
+//   • Pulls the current JWT from the auth session
+//   • Adds the standard headers
+//   • Returns parsed JSON response or throws on non-2xx
+async function _invokeEdgeFn(name, body){
+  if(!_supabase) throw new Error('Supabase not configured');
+  const { data: session } = await _supabase.auth.getSession();
+  const jwt = session?.session?.access_token;
+  if(!jwt) throw new Error('Not authenticated');
+  const url = (typeof _getUrl === 'function' ? _getUrl() : '') + '/functions/v1/' + name;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify(body || {}),
+  });
+  let result = null;
+  try{ result = await resp.json(); }catch(_){}
+  if(!resp.ok){
+    throw new Error(`${name} returned ${resp.status}: ${result?.error || 'unknown'}`);
+  }
+  return result;
 }
 
 function addWebhook(){
@@ -32273,27 +32330,32 @@ async function testSMSDelivery(){
   const phone = (document.getElementById('sms-phone')?.value || '').trim();
   if(!phone){ alert('Enter a phone number to test.'); return; }
   if(!_supabase){ alert('Supabase required for SMS delivery.'); return; }
-  // Invoke the send-notification edge function with kind:'sms'.
+  if(!/^\+\d{10,15}$/.test(phone)){
+    alert('Phone must be in E.164 format (e.g. +15551234567).');
+    return;
+  }
   try{
-    const sb = _initSupabase();
-    if(!sb) throw new Error('Supabase not initialized');
-    const { data: session } = await sb.auth.getSession();
-    const jwt = session?.session?.access_token;
-    if(!jwt) throw new Error('Not signed in');
-    const url = (typeof _getUrl === 'function' ? _getUrl() : '') + '/functions/v1/send-notification';
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-      body: JSON.stringify({
-        kind: 'sms',
-        to: phone,
-        body: 'Test SMS from RadScheduler — your delivery is configured correctly.',
-      }),
+    await _invokeEdgeFn('send-notification', {
+      kind: 'sms', to: phone,
+      body: 'Test SMS from RadScheduler — your delivery is configured correctly.',
     });
-    if(!resp.ok) throw new Error('SMS function returned ' + resp.status);
     if(typeof _toast === 'function') _toast(`Test SMS sent to ${phone}.`, 'ok');
   }catch(e){
-    alert('SMS test failed: ' + (e.message || e) + '\n\nThe send-notification edge function needs Twilio credentials configured. See docs/DEPLOY.md.');
+    alert(`SMS test failed: ${e.message || e}\n\nMake sure the send-notification edge function is deployed and TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER secrets are set. See edge-functions/README.md.`);
+  }
+}
+
+// ── Manually trigger a digest run ────────────────────────────────────
+// Useful for testing — bypasses the pg_cron schedule.
+async function runDigestNow(){
+  if(!_adminOnly('run digest')) return;
+  try{
+    const r = await _invokeEdgeFn('send-notification', { kind: 'digest-run' });
+    const detail = r?.detail || {};
+    if(typeof _toast === 'function')
+      _toast(`Digest sent to ${detail.sent || 0} user(s); skipped ${detail.skipped || 0}.`, 'ok');
+  }catch(e){
+    alert(`Digest run failed: ${e.message || e}`);
   }
 }
 
@@ -34464,9 +34526,73 @@ function rematchPickImport(){
 async function applyPickImport(){
   if(!_adminOnly('apply vacation picks import')) return;
   const data = _xlPickData || {};
+  // The parser already de-duplicated against current state when building
+  // the preview, so `data.vacations` and `data.shifts` should NOT include
+  // anything already in S. If they ARE empty here, it means a previous
+  // import already populated those exact records — we surface a clear
+  // message to that effect (vs. a silent "0 added" that looks broken).
   const vac = data.vacations || [];
   const sh = data.shifts || [];
-  if(!vac.length && !sh.length) return;
+  // Diagnostic: gather everything the parser saw so we can report what's
+  // happening if numbers look off.
+  const totalSeenVac = (data.allWeeks || []).reduce((n, w) => n + w.vacation.length + w.bbPicks.length + w.off.length, 0);
+  const totalSeenSh = (data.allWeeks || []).reduce((n, w) => n + (w.shift2.length + w.shift3.length) * 9, 0);
+  console.log('[RS import] applyPickImport — parsed:', {
+    weeks: (data.allWeeks||[]).length,
+    vacRowsSeen: totalSeenVac,
+    shiftEntriesSeen: totalSeenSh,
+    afterDedupVac: vac.length,
+    afterDedupShifts: sh.length,
+    unmatchedNames: (data.unmatched||[]).length,
+  });
+  if(!vac.length && !sh.length){
+    // Don't fail silently. Tell the user WHY nothing's being applied.
+    const replacePrompt = await _rsConfirm({
+      title: 'All records already imported',
+      bodyHtml: `<div style="font-size:12.5px;line-height:1.55;color:var(--rs-ink-2)">
+        The parser found <strong>${(data.allWeeks||[]).length} weeks</strong> with
+        <strong>${totalSeenVac}</strong> vacation entries and
+        <strong>${totalSeenSh / 9 | 0}</strong> shift assignments in this file —
+        but every one of them appears to already exist in your schedule
+        (matched on physician + date). Nothing was added.
+        <br><br>
+        Click <strong>Replace</strong> to delete every existing record that
+        was imported via this pipeline (any record whose notes start with
+        "Imported:") and re-add fresh from the file. Useful when the file
+        has been edited and you want to overwrite.
+      </div>`,
+      confirmLabel: 'Replace existing imports',
+      cancelLabel: 'Close',
+      destructive: true,
+    });
+    if(replacePrompt){
+      // Snapshot first
+      if(typeof _snapshotBeforeBulk === 'function'){
+        try{ await _snapshotBeforeBulk('excel-replace'); }catch(_){}
+      }
+      // Remove every previously-imported record
+      const beforeVac = (S.vacations || []).length;
+      const beforeSh = (S.drShifts || []).length;
+      S.vacations = (S.vacations || []).filter(v => !/^Imported:/i.test(v.notes || ''));
+      S.drShifts = (S.drShifts || []).filter(s => !/^Imported:/i.test(s.notes || ''));
+      const removedVac = beforeVac - S.vacations.length;
+      const removedSh = beforeSh - S.drShifts.length;
+      if(typeof _audit === 'function') _audit('import.replace.purgePrev', { removedVac, removedSh });
+      // Re-run parse against fresh state to re-populate _xlPickData with everything
+      // (since dedup was preventing it). Easiest: just call the parser again.
+      const fileInput = document.getElementById('xl-pick-file');
+      if(fileInput?.files?.[0]){
+        if(typeof _toast === 'function') _toast(`Removed ${removedVac} prior vacations + ${removedSh} prior shifts. Re-parsing file…`, 'info');
+        // Re-trigger the file pick; the change handler will re-parse + re-render.
+        previewPickImport(fileInput);
+      } else {
+        if(typeof _toast === 'function') _toast(`Removed ${removedVac} prior records. Re-pick the Excel file to re-import.`, 'info');
+      }
+      triggerSave();
+      if(typeof _afterMutation === 'function') _afterMutation();
+    }
+    return;
+  }
   // Take an out-of-band backup before applying so the operation is
   // reversible via Settings → Backups → Restore. Don't block on failure;
   // worst case the user has the daily backup as fallback.
@@ -34508,6 +34634,22 @@ async function applyPickImport(){
     });
     shAdded++;
   });
+  // Post-apply diagnostic — confirm the records actually landed.
+  console.log('[RS import] applyPickImport — applied:', { vacAdded, vacSkipped, shAdded, shSkipped });
+  // Spot-check: is the first imported record actually findable in S now?
+  if(vac.length){
+    const sample = (S.vacations || []).find(v =>
+      v.physId === vac[0].physId && v.start === vac[0].start &&
+      /^Imported:/i.test(v.notes || '')
+    );
+    console.log('[RS import] First vacation record post-apply:', sample || '(NOT FOUND — write may have failed)');
+  }
+  if(sh.length){
+    const sample = (S.drShifts || []).find(s =>
+      s.physId === sh[0].physId && s.date === sh[0].date && s.shift === sh[0].shift
+    );
+    console.log('[RS import] First shift record post-apply:', sample || '(NOT FOUND)');
+  }
   if(typeof _audit === 'function') _audit('import.pickSheet', {
     vacAdded, vacSkipped, shAdded, shSkipped,
   });
