@@ -738,6 +738,497 @@ tbody tr:hover{background:var(--bg3)}
     .rs-hairline { border-color: var(--rs-line) !important; }
     .rs-hairline-strong { border-color: var(--rs-line-strong) !important; }
 
+    /* ── Accessibility — color audit pass ─────────────────────────────
+       Tag colors and small text need AA contrast (4.5:1) against their
+       backgrounds. The originals were designed for the lighter theme
+       and dipped below 3:1 on dark surfaces. The overrides below tighten
+       contrast in dark mode and add a colorblind-friendly variant
+       triggered by body[data-cb="1"]. */
+    body[data-theme="dark"] .tag.tb { background: #1e3a8a; color: #cfe0ff; }
+    body[data-theme="dark"] .tag.tt { background: #4c1d95; color: #ddd6fe; }
+    body[data-theme="dark"] .tag.tg { background: #14532d; color: #bbf7d0; }
+    body[data-theme="dark"] .tag.tr { background: #7f1d1d; color: #fecaca; }
+    body[data-theme="dark"] .tag.tp { background: #831843; color: #fbcfe8; }
+    body[data-theme="dark"] .tag.ta { background: #713f12; color: #fde68a; }
+    body[data-cb="1"] .tag { border: 1px solid currentColor !important; }
+    body[data-cb="1"] .tag.tb { background: #cce5ff; color: #003366; }
+    body[data-cb="1"] .tag.tt { background: #ddd6e8; color: #4b2566; }
+    body[data-cb="1"] .tag.tg { background: #c8e6c9; color: #1b5e20; }
+    body[data-cb="1"] .tag.tr { background: #ffd6cc; color: #8b1a00; }
+    body[data-cb="1"] .tag.ta { background: #fff0b3; color: #6b4900; }
+
+    /* ── Print stylesheet ─────────────────────────────────────────────
+       Practices print schedules to post in reading rooms. Strip every
+       chrome element, set hairline grid, expand cells, kill colors that
+       don't print well. Triggered by the browser's print dialog or the
+       in-app printSchedule() helper which scrolls the calendar into the
+       print region first. */
+    @media print {
+      .topbar, .sidebar, #rs-toast-host, #rs-error-badge,
+      #rs-stale-save-badge, #fs-status, #fs-toggle-btn, #gh-toolbar-status,
+      #save-indicator, #mobile-nav-toggle, .modal, .tabs, .tab-bar,
+      button, .bp, .bsm, .bt, .br, .bg, .bxs, .tb-btn, .abtn,
+      .pg-actions, .filter-bar, .note, .helptip,
+      .no-print, [data-no-print] {
+        display: none !important;
+      }
+      @page { margin: 0.5in; }
+      html, body {
+        background: #fff !important;
+        color: #000 !important;
+        font-size: 10pt;
+      }
+      .page, .page.on, #app {
+        display: block !important;
+        background: transparent !important;
+        padding: 0 !important; margin: 0 !important;
+      }
+      .pg-title {
+        font-size: 14pt !important;
+        font-weight: 700 !important;
+        margin-bottom: 6pt !important;
+        color: #000 !important;
+        border-bottom: 1pt solid #000;
+        padding-bottom: 4pt;
+      }
+      .calmo, .cal-grid, .cal-grid-ir, table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      .cal-day, td, th {
+        border: 0.5pt solid #888 !important;
+        padding: 3pt !important;
+        page-break-inside: avoid;
+      }
+      .cal-day { min-height: 0.7in !important; font-size: 8pt !important; }
+      .cal-num { font-weight: 700; font-size: 9pt; color: #000 !important; }
+      .cal-day.weekend, .cal-day.wknd {
+        background: #f0f0f0 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .ev {
+        font-size: 7pt !important;
+        padding: 1pt 3pt !important;
+        margin: 1pt 0 !important;
+        border-radius: 2pt !important;
+        page-break-inside: avoid;
+      }
+      .tag {
+        background: #fff !important;
+        color: #000 !important;
+        border: 0.5pt solid #444 !important;
+        padding: 0 3pt !important;
+      }
+      .card {
+        border: 0.5pt solid #888 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        padding: 6pt !important;
+        page-break-inside: avoid;
+      }
+      .card-title { font-size: 11pt !important; }
+      .rs-print-title {
+        display: block !important;
+        text-align: center;
+        font-size: 12pt;
+        font-weight: 600;
+        margin-bottom: 8pt;
+      }
+    }
+    .rs-print-title { display: none; }
+
+    /* ── Empty states ─────────────────────────────────────────────────
+       A composable component for "no data here yet" surfaces.
+       Replaces the gray "no entries" plaintext with an illustrated
+       panel + a primary action. */
+    .rs-empty {
+      text-align: center;
+      padding: 48px 24px;
+      max-width: 420px;
+      margin: 24px auto;
+    }
+    .rs-empty-icon {
+      width: 56px; height: 56px;
+      margin: 0 auto 18px;
+      border-radius: 14px;
+      background: var(--rs-accent-soft);
+      color: var(--rs-accent);
+      display: grid;
+      place-items: center;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+    }
+    .rs-empty-title {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      color: var(--rs-ink-1);
+      margin-bottom: 6px;
+    }
+    .rs-empty-body {
+      font-size: 13px;
+      color: var(--rs-ink-3);
+      line-height: 1.55;
+      margin-bottom: 22px;
+    }
+    .rs-empty .bp,
+    .rs-empty .bsm {
+      margin: 0 4px;
+    }
+
+    /* ── Loading skeleton ─────────────────────────────────────────────
+       A pulsing block that occupies the same footprint as the data
+       it's standing in for. Used while async ops (solver, drive-time
+       refresh, MCF solve) are running. The pulse has a single
+       low-amplitude opacity oscillation — calmer than typical
+       skeleton-loaders. */
+    @keyframes rsPulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 0.85; }
+    }
+    .rs-skel {
+      background: var(--rs-line);
+      border-radius: var(--rs-r-sm);
+      animation: rsPulse 1.4s var(--rs-ease) infinite;
+    }
+    .rs-skel-row {
+      display: flex; gap: 8px; align-items: center;
+      padding: 10px 12px;
+      border-radius: var(--rs-r-md);
+    }
+    .rs-skel-row .rs-skel { height: 12px; }
+    .rs-skel-stack {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+
+    /* Inline progress for long-running jobs (auto-assign, MCF solve).
+       Indeterminate bar that tracks a percentage when given. */
+    .rs-progress {
+      width: 100%;
+      height: 6px;
+      background: var(--rs-line);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .rs-progress-bar {
+      height: 100%;
+      background: var(--rs-accent);
+      border-radius: 999px;
+      transition: width var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-progress-bar.indeterminate {
+      width: 30% !important;
+      animation: rsIndeterminate 1.6s var(--rs-ease) infinite;
+    }
+    @keyframes rsIndeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(380%); }
+    }
+    .rs-progress-label {
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      margin-top: 6px;
+      letter-spacing: -0.005em;
+    }
+
+    /* ── Command palette ───────────────────────────────────────────────
+       Cmd/Ctrl+K opens a centered search overlay. Type to filter; up/down
+       to move; enter to select. Sources are pages, physicians, and
+       saved months. Renders into a portal node so it floats above
+       every other surface. */
+    .rs-cp-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(15, 15, 20, 0.40);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 10100;
+      display: grid;
+      place-items: start center;
+      padding-top: 12vh;
+      animation: rsCpFadeIn .15s var(--rs-ease);
+    }
+    @keyframes rsCpFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .rs-cp {
+      width: 92%;
+      max-width: 560px;
+      background: var(--bg2, #fff);
+      color: var(--rs-ink-1);
+      border-radius: var(--rs-r-xl);
+      box-shadow: var(--rs-elev-3);
+      border: 1px solid var(--rs-line);
+      overflow: hidden;
+      animation: rsCpSlideIn .18s var(--rs-ease);
+    }
+    @keyframes rsCpSlideIn {
+      from { transform: translateY(-8px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    .rs-cp-input {
+      width: 100%;
+      padding: 16px 20px;
+      font: 16px -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: -0.011em;
+      border: none;
+      background: transparent;
+      color: var(--rs-ink-1);
+      border-bottom: 1px solid var(--rs-line);
+      outline: none;
+    }
+    .rs-cp-input::placeholder { color: var(--rs-ink-3); }
+    .rs-cp-list {
+      max-height: 56vh;
+      overflow-y: auto;
+      padding: 6px;
+    }
+    .rs-cp-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: var(--rs-r-md);
+      cursor: pointer;
+      font-size: 13.5px;
+      letter-spacing: -0.005em;
+      transition: background var(--rs-fast) var(--rs-ease);
+    }
+    .rs-cp-item.on,
+    .rs-cp-item:hover {
+      background: var(--rs-accent-soft);
+    }
+    .rs-cp-icon {
+      width: 28px; height: 28px;
+      border-radius: var(--rs-r-sm);
+      background: var(--bg3, var(--rs-line));
+      display: grid; place-items: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .rs-cp-item.on .rs-cp-icon {
+      background: var(--rs-accent);
+      color: #fff;
+    }
+    .rs-cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rs-cp-cat {
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .rs-cp-empty {
+      padding: 28px 14px;
+      text-align: center;
+      color: var(--rs-ink-3);
+      font-size: 13px;
+    }
+    .rs-cp-hint {
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      border-top: 1px solid var(--rs-line);
+      display: flex;
+      gap: 16px;
+      letter-spacing: 0.01em;
+    }
+    .rs-cp-hint kbd {
+      background: var(--bg3, var(--rs-line));
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: -apple-system, monospace;
+      font-size: 10px;
+      letter-spacing: 0;
+    }
+
+    /* ── Notifications panel ───────────────────────────────────────────
+       A bell-icon trigger in the toolbar opens a right-aligned drawer
+       listing recent events (assignments, swaps, mentions). Reads from
+       the existing audit log + user notification stream. */
+    #rs-notif-toggle {
+      position: relative;
+      padding: 4px 8px;
+    }
+    #rs-notif-dot {
+      position: absolute;
+      top: 4px; right: 4px;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--rs-accent);
+      display: none;
+    }
+    .rs-notif-panel {
+      position: fixed;
+      top: 56px;
+      right: 12px;
+      width: 360px;
+      max-width: calc(100vw - 24px);
+      max-height: 70vh;
+      background: var(--bg2, #fff);
+      border-radius: var(--rs-r-lg);
+      box-shadow: var(--rs-elev-3);
+      border: 1px solid var(--rs-line);
+      display: none;
+      flex-direction: column;
+      z-index: 10050;
+      overflow: hidden;
+      animation: rsCpSlideIn .15s var(--rs-ease);
+    }
+    .rs-notif-panel.on { display: flex; }
+    .rs-notif-header {
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.011em;
+      border-bottom: 1px solid var(--rs-line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .rs-notif-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+    .rs-notif-item {
+      padding: 11px 16px;
+      font-size: 12.5px;
+      line-height: 1.45;
+      border-bottom: 1px solid var(--rs-line);
+      letter-spacing: -0.005em;
+    }
+    .rs-notif-item:last-child { border-bottom: none; }
+    .rs-notif-item .when {
+      display: block;
+      font-size: 10.5px;
+      color: var(--rs-ink-3);
+      margin-top: 2px;
+      letter-spacing: 0.01em;
+    }
+    .rs-notif-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--rs-ink-3);
+      font-size: 12.5px;
+    }
+
+    /* ── First-run wizard ─────────────────────────────────────────────
+       A persistent dashboard card while any of the must-have setup
+       items are missing: at least one site, at least one sub-specialty,
+       at least one physician, basic shift caps. Each step has a
+       checkmark when satisfied; clicking it deep-links to the right
+       page. The card disappears once everything is checked. */
+    .rs-quickstart {
+      border-radius: var(--rs-r-lg);
+      border: 1px solid var(--rs-line);
+      background:
+        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 100%),
+        var(--bg2, #fff);
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: var(--rs-elev-1);
+    }
+    .rs-quickstart-title {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      margin-bottom: 4px;
+    }
+    .rs-quickstart-sub {
+      font-size: 12.5px;
+      color: var(--rs-ink-3);
+      margin-bottom: 14px;
+    }
+    .rs-quickstart-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border-radius: var(--rs-r-md);
+      cursor: pointer;
+      transition: background var(--rs-fast) var(--rs-ease);
+      font-size: 13.5px;
+      letter-spacing: -0.005em;
+    }
+    .rs-quickstart-step:hover { background: var(--rs-accent-soft); }
+    .rs-quickstart-check {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid var(--rs-line-strong);
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      transition: background var(--rs-base-d) var(--rs-ease),
+                  border-color var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-quickstart-step.done .rs-quickstart-check {
+      background: var(--rs-accent);
+      border-color: var(--rs-accent);
+      color: #fff;
+    }
+    .rs-quickstart-step.done .rs-quickstart-name {
+      color: var(--rs-ink-3);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+    .rs-quickstart-name { flex: 1; }
+    .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
+
+    /* ── Mobile-first My Schedule ─────────────────────────────────────
+       Most-used view by far, almost always on a phone. Override the
+       desktop layout for the page when the viewport is narrow:
+       single-column, large legible type, today highlighted, weekly
+       cards with swipeable next-week navigation. */
+    @media (max-width: 720px) {
+      #page-my-schedule .pg-title {
+        font-size: 22px;
+        letter-spacing: -0.022em;
+        padding: 4px 0 12px;
+      }
+      #page-my-schedule .ms-day {
+        background: var(--bg2, #fff);
+        border: 1px solid var(--rs-line);
+        border-radius: var(--rs-r-lg);
+        padding: 14px 16px;
+        margin-bottom: 8px;
+      }
+      #page-my-schedule .ms-day .day-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--rs-ink-3);
+      }
+      #page-my-schedule .ms-day .day-num {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.022em;
+        margin-bottom: 6px;
+      }
+      #page-my-schedule .ms-day.today {
+        background: var(--rs-accent);
+        color: #fff;
+        border-color: var(--rs-accent);
+      }
+      #page-my-schedule .ms-day.today .day-label,
+      #page-my-schedule .ms-day.today .day-num {
+        color: #fff;
+      }
+      #page-my-schedule .ms-day .ms-shift {
+        display: block;
+        padding: 8px 10px;
+        margin-top: 6px;
+        background: var(--bg3);
+        border-radius: var(--rs-r-md);
+        font-size: 13px;
+      }
+      #page-my-schedule .ms-day.today .ms-shift {
+        background: rgba(255,255,255,0.18);
+      }
+    }
+
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -864,8 +1355,11 @@ tbody tr:hover{background:var(--bg3)}
     <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
     <span id="gh-toolbar-status" style="font-size:10px;color:var(--txt3);margin-right:6px;display:none" title="GitHub auto-deploy status"></span>
     <span id="rs-error-badge" onclick="showErrorLog()" style="display:none;font-size:11px;font-weight:700;background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" title="Recent errors — click to view"></span>
+    <button id="rs-notif-toggle" class="tb-btn" onclick="toggleNotificationsPanel()" title="Notifications" aria-label="Notifications" style="margin-right:4px;font-size:14px"><span aria-hidden="true">🔔</span><span id="rs-notif-dot"></span></button>
+    <button class="tb-btn" onclick="openCommandPalette()" title="Command palette (Cmd/Ctrl+K)" aria-label="Search" style="margin-right:4px;padding:6px 10px">⌕</button>
     <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" disabled style="margin-right:2px;padding:6px 8px" title="Undo (Cmd/Ctrl+Z)">↶</button>
     <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled style="margin-right:4px;padding:6px 8px" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
+    <button class="tb-btn" onclick="printSchedule()" style="margin-right:4px;padding:6px 10px" title="Print the active schedule view (Cmd/Ctrl+P)">🖨 Print</button>
     <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
@@ -4435,7 +4929,8 @@ function _irsaSolveMCF(opts){
       if(typeof tbRulesOk === 'function' && !tbRulesOk(p, ctx)){ edgeStats.blockedHard++; return; }
       if(typeof callDayRulesOk === 'function' && !callDayRulesOk(p, ctx)){ edgeStats.blockedHard++; return; }
       if(typeof natLangRulesOk === 'function' && !natLangRulesOk(ctx)){ edgeStats.blockedHard++; return; }
-      // Cost
+      // Cost — sum of soft penalties. Edges with a HARD reject from any
+      // rule above were already excluded via `return`.
       let cost = 0;
       if(p.anchorSite && p.anchorSite !== s.site) cost += 50;
       if(p.irGroup && s._group && p.irGroup !== s._group) cost += 200; // cross-group fill-in
@@ -4443,6 +4938,36 @@ function _irsaSolveMCF(opts){
       const confPref = (typeof _conferenceShiftPreferenceFor === 'function')
         ? _conferenceShiftPreferenceFor(p, ctx) : 0;
       if(isFinite(confPref)) cost += confPref * 5;
+      // Look-ahead adjustment — peek at next month's anchor commitments
+      // for this physician and bias the current month's choice so the
+      // next month doesn't over-commit them. Bounded ±5 so it doesn't
+      // dominate primary signals.
+      if(typeof _lookaheadAdjustment === 'function'){
+        cost += _lookaheadAdjustment(p, s.date.slice(0, 7));
+      }
+      // Burnout penalty — physicians showing burnout signals get pushed
+      // toward last-resort. Not a hard reject; gives the solver room to
+      // pick them only when no alternative is reasonable.
+      if(typeof _physicianBurnoutFlags === 'function'){
+        const flags = _physicianBurnoutFlags(p.id, s.date.slice(0, 7));
+        if(flags.length){
+          cost += flags.length * 25;
+        }
+      }
+      // Sub-specialty coverage incentive — prefer physicians who fill
+      // unmet sub-specialty needs at this slot. Negative cost = bonus.
+      if(typeof _missingShiftSubNeeds === 'function'){
+        const missing = _missingShiftSubNeeds(s.date, s.site, '1st');
+        if(missing.length && Array.isArray(p.drSubs)){
+          const fillsUnmet = missing.some(line => {
+            // line is "subname (have X, need Y)"
+            const m = /^([^()]+)\s*\(/.exec(line);
+            const sub = m ? m[1].trim() : line;
+            return p.drSubs.includes(sub) || p.irSubs?.includes(sub);
+          });
+          if(fillsUnmet) cost -= 30; // small reward for filling unmet need
+        }
+      }
       // Tiebreaker: scaled inverse of (quota - existing assigns) — under-utilized
       // physicians get a small bonus so they get picked first when costs tie.
       cost -= Math.min(5, (quotas[p.id] || 0));
@@ -5244,6 +5769,21 @@ document.addEventListener('keydown', (e) => {
   if(!e.metaKey && !e.ctrlKey) return;
   const tag = (document.activeElement?.tagName || '').toUpperCase();
   const inEditable = (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable);
+  // Cmd/Ctrl+K → command palette. Searches across pages, physicians,
+  // and months. Most-used jump-to control after this lands.
+  if(e.key === 'k' || e.key === 'K'){
+    e.preventDefault();
+    if(typeof openCommandPalette === 'function') openCommandPalette();
+    return;
+  }
+  // Cmd/Ctrl+P → print the active schedule view via our title-injecting
+  // wrapper so the printed page has a meaningful header.
+  if(e.key === 'p' || e.key === 'P'){
+    if(e.shiftKey || e.altKey) return; // leave Cmd-Shift-P / Cmd-Opt-P alone
+    e.preventDefault();
+    if(typeof printSchedule === 'function') printSchedule();
+    return;
+  }
   // Cmd/Ctrl+S → force a save now. Allow even in editable fields so the user
   // can save while typing — that's the universal save-keystroke contract.
   if(e.key === 's' || e.key === 'S'){
@@ -6070,12 +6610,22 @@ function _ghScheduleDeploy(){
       if(r.ok){
         // Quietly note no-op deploys (the disk-watch beat us); they aren't
         // failures and we don't want to show ⚠ for them.
-        if(r.noop && typeof _toast === 'function'){
-          // No toast — already-in-sync isn't worth notifying.
-        }
         return;
       }
-      _updateSaveUI('⚠ GitHub: '+(r.error||'failed'), 'var(--red-t)');
+      // Failed deploy: surface the issue with a Retry button so the user
+      // doesn't have to navigate to Settings to re-attempt.
+      _updateSaveUI('⚠ GitHub: ' + (r.error || 'failed'), 'var(--red-t)');
+      if(typeof _toastAction === 'function'){
+        _toastAction(
+          'GitHub deploy failed: ' + (r.error || 'unknown error'),
+          'Retry',
+          () => _ghDeploy({refreshSha: true}).then(r2 => {
+            if(r2.ok && typeof _toast === 'function') _toast('Deploy succeeded.', 'ok');
+            else if(typeof _toast === 'function') _toast('Still failing: ' + (r2.error || ''), 'warn');
+          }),
+          'err'
+        );
+      }
     });
   }, 3000);
 }
@@ -8318,35 +8868,38 @@ function renderDash(){
   const isAdm=CU.role==='admin';
   ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
 
-  // First-run setup banner — shown to admins of a brand-new practice. Walks
-  // through the minimum setup needed to make auto-assign work. Disappears
-  // automatically once there's at least one non-"At Home / Remote" site
-  // AND at least one physician.
+  // First-run wizard — refined design. Persistent until every required
+  // setup step is complete; disappears the moment the last check turns
+  // green. Now also tracks sub-specialties and basic shift caps so a
+  // brand-new practice doesn't try to auto-assign with caps of 0.
   const setupBanner = document.getElementById('dash-setup-banner');
   if(setupBanner){
-    const realSites = S.sites.filter(s => s.name !== 'At Home / Remote');
-    const hasPhys = S.physicians.length > 0;
-    if(isAdm && (!realSites.length || !hasPhys)){
+    const realSites = (S.sites||[]).filter(s => s.name !== 'At Home / Remote');
+    const hasPhys = (S.physicians||[]).length > 0;
+    const hasSubs = (S.drSubs||[]).length > 0 || (S.irSubs||[]).length > 0;
+    const cfg = S.cfg || {};
+    const hasCaps = (cfg.wdMax > 0 || cfg.irDailyMax > 0);
+    const allDone = realSites.length && hasPhys && hasSubs && hasCaps;
+    if(isAdm && !allDone){
       const steps = [
-        {done: realSites.length>0, label: 'Add your hospital sites', target:'site-slots'},
-        {done: (S.irGroups||[]).length>0, label: 'Configure IR groups (North/South by default)', target:'ir-slots'},
-        {done: hasPhys, label: 'Add your physicians', target:'physicians'},
+        {done: realSites.length>0,        label:'Add your hospital sites',       target:'site-slots'},
+        {done: (S.irGroups||[]).length>0, label:'Configure IR groups',           target:'ir-slots'},
+        {done: hasSubs,                   label:'Define your sub-specialties',   target:'settings'},
+        {done: hasPhys,                   label:'Add your physicians',           target:'physicians'},
+        {done: hasCaps,                   label:'Set monthly shift caps',        target:'settings'},
       ];
+      const completedCount = steps.filter(s => s.done).length;
       setupBanner.style.display = '';
       setupBanner.innerHTML = `
-        <div style="padding:16px;background:linear-gradient(135deg,var(--blue-bg),var(--teal-bg));border:1px solid var(--blue-t);border-radius:8px;margin-bottom:14px">
-          <div style="font-weight:800;font-size:15px;color:var(--blue-t);margin-bottom:6px">🚀 Welcome to RadScheduler</div>
-          <div style="font-size:12px;color:var(--txt2);margin-bottom:10px">
-            Get your practice running in a few minutes. Complete these steps in order — each one unlocks the next.
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            ${steps.map((s,i)=>`
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg2);border-radius:6px;${s.done?'opacity:.6':''}">
-                <span style="font-weight:800;color:${s.done?'var(--green)':'var(--txt3)'};min-width:18px">${s.done?'✓':(i+1)+'.'}</span>
-                <span style="flex:1;font-size:12px;font-weight:${s.done?'500':'700'};${s.done?'text-decoration:line-through':''}">${s.label}</span>
-                ${s.done ? '' : `<button class="bp bsm" onclick="nav('${s.target}',document.querySelector('[onclick*=\\'${s.target}\\']'))">Go →</button>`}
-              </div>`).join('')}
-          </div>
+        <div class="rs-quickstart">
+          <div class="rs-quickstart-title">Set up your practice</div>
+          <div class="rs-quickstart-sub">${completedCount} of ${steps.length} complete · <span style="color:var(--rs-accent);font-weight:500">Each step takes about a minute</span></div>
+          ${steps.map((s,i) => `
+            <div class="rs-quickstart-step ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
+              <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
+              <div class="rs-quickstart-name">${escHtml(s.label)}</div>
+              <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
+            </div>`).join('')}
         </div>`;
     } else {
       setupBanner.style.display = 'none';
@@ -8437,6 +8990,58 @@ function renderMySched(){
     ${c&&!c.noData?`<div class="met"><div class="met-lbl">⚓ Anchor</div><div class="met-val" style="color:${c.ok?'var(--green)':'var(--red)'}">${c.pct}%</div><div class="met-sub">≥${S.cfg.anchorPct}% target</div></div>`:''}
   </div>`;
   if(c&&c.ok===false) html+=`<div class="note nw" style="margin-bottom:10px">⚓ Anchor alert: ${c.pct}% at ${c.anchor} — need ≥${S.cfg.anchorPct}%.</div>`;
+
+  // ── Next 7 days (mobile-first) ────────────────────────────────────────
+  // The single most-asked question of this app is "what am I doing the
+  // next few days?" — so we surface that as a calm list above the full
+  // calendar grid. Renders as a vertical stack of day cards on phone via
+  // the rs-day media query; on desktop it's a horizontal flex.
+  const today2 = fmtDate(new Date());
+  const dayLabel = (ds) => {
+    if(ds === today2) return 'Today';
+    if(ds === addDays(today2, 1)) return 'Tomorrow';
+    return parseDateLocal(ds).toLocaleString('default',{weekday:'long', month:'short', day:'numeric'});
+  };
+  const next7 = [];
+  for(let i = 0; i < 7; i++){
+    const ds = addDays(today2, i);
+    const dShifts = (S.drShifts||[]).filter(s => s.physId === p.id && s.date === ds);
+    const dIRSh   = (S.irShifts||[]).filter(s => s.physId === p.id && s.date === ds);
+    const dIRC    = (S.irCalls||[]).filter(c => c.physId === p.id && (
+      (c.callType==='daily' && c.date === ds) ||
+      (c.callType==='weekend' && (ds === c.date || ds === addDays(c.date,1) || ds === addDays(c.date,2) || ds === addDays(c.date,3)))
+    ));
+    const dWk = (S.weekendCalls||[]).filter(w => w.physId === p.id && (w.satDate === ds || w.sunDate === ds));
+    const dHol = (S.holidays||[]).filter(h => h.physId === p.id && h.date === ds);
+    const dVac = vacSetHas(ds);
+    next7.push({ds, dShifts, dIRSh, dIRC, dWk, dHol, dVac});
+  }
+  function vacSetHas(ds){
+    return (S.vacations||[]).some(v => v.physId === p.id && v.start <= ds && v.end >= ds);
+  }
+  const next7Html = `
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Next 7 days</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${next7.map(d => {
+          const isToday = d.ds === today2;
+          const items = [];
+          d.dShifts.forEach(s => items.push(`${escHtml(s.shift)} · ${escHtml(s.site||'—')}${s.sub?' · '+escHtml(s.sub):''}`));
+          d.dIRSh.forEach(s => items.push(`IR ${escHtml(s.shift)} · ${escHtml(s.site||'—')}`));
+          d.dIRC.forEach(c => items.push(`IR ${c.callType==='weekend'?'Weekend':'Daily'} call`));
+          d.dWk.forEach(_ => items.push('DR Weekend call'));
+          d.dHol.forEach(h => items.push(`Holiday: ${escHtml(h.name||'')}`));
+          if(d.dVac) items.push('Vacation / Time off');
+          if(!items.length) items.push('Off');
+          return `<div class="ms-day ${isToday?'today':''}">
+            <div class="day-label">${escHtml(dayLabel(d.ds))}</div>
+            <div class="day-num">${parseDateLocal(d.ds).getDate()}</div>
+            ${items.map(it => `<div class="ms-shift">${it}</div>`).join('')}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  html += next7Html;
 
   const cells=buildCal(ym);
   const today=fmtDate(new Date());
@@ -8827,7 +9432,15 @@ function renderPhysicians(){
     list.forEach(p=>{
       const avc=role==='IR'?'background:var(--teal-bg);color:var(--teal)':role==='MIXED'?'background:var(--purple-bg);color:var(--purple)':'background:var(--blue-bg);color:var(--blue-t)';
       const c=ancComp(p.id,fmtDate(new Date()).slice(0,7));
-      const ftags=[p.drFte>0?`<span class="tag tb">DR ${p.drFte}</span>`:'',...[p.irFte>0?`<span class="tag tt">IR ${p.irFte}</span>`:''],...[p.irGroup?`<span class="tag tg">${escHtml(p.irGroup)}</span>`:'']].join('');
+      // Burnout flags surface as a red chip with a hover-title list. Quiet
+      // when the physician is comfortably under all thresholds.
+      const _bf = (typeof _physicianBurnoutFlags === 'function')
+        ? _physicianBurnoutFlags(p.id, fmtDate(new Date()).slice(0,7))
+        : [];
+      const burnoutChip = _bf.length
+        ? `<span class="tag tr" style="cursor:help" title="${escHtml(_bf.join(' · '))}">⚠ ${_bf.length} burnout signal${_bf.length>1?'s':''}</span>`
+        : '';
+      const ftags=[p.drFte>0?`<span class="tag tb">DR ${p.drFte}</span>`:'',...[p.irFte>0?`<span class="tag tt">IR ${p.irFte}</span>`:''],...[p.irGroup?`<span class="tag tg">${escHtml(p.irGroup)}</span>`:''],burnoutChip].filter(Boolean).join(' ');
       html+=`<div class="row"><div class="av" style="${avc}">${ini(p)}</div>
         <div style="flex:1">
           <div style="font-weight:700;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)} ${escHtml(p.degree||'')} ${ftags}</div>
@@ -8841,19 +9454,20 @@ function renderPhysicians(){
     });
   });
   // Empty-state: welcome a fresh practice with concrete next steps rather than
-  // a silent blank page. Shown only when there are no physicians yet; once any
-  // are added this block disappears naturally.
+  // a silent blank page. Uses the new rs-empty composable component.
   if(!html){
-    html = `<div style="padding:24px;text-align:center;color:var(--txt3)">
-      <div style="font-size:28px;margin-bottom:6px">👋</div>
-      <div style="font-size:14px;font-weight:700;color:var(--txt2);margin-bottom:4px">Welcome — let's add your first physician</div>
-      <div style="font-size:12px;max-width:480px;margin:0 auto 10px">
-        Use the form above to add each physician's name, role (DR, IR, or Mixed), and their FTE.
-        You can configure subspecialties and anchor sites once you've added your hospital sites in
-        <strong>Site Management</strong>.
-      </div>
-      <div style="font-size:11px;opacity:.7">Quick order: Site Management → IR Slots &amp; Groups → Physicians → Auto-Assign</div>
-    </div>`;
+    html = `
+      <div class="rs-empty">
+        <div class="rs-empty-icon">👤</div>
+        <div class="rs-empty-title">No physicians yet</div>
+        <div class="rs-empty-body">
+          Add each physician's name, role (DR, IR, or Mixed), and FTE using the form above.
+          The auto-assigner needs at least one physician to start filling shifts.
+        </div>
+        <button class="bp" onclick="document.getElementById('p-first')?.focus()" style="padding:10px 18px;font-size:13px">+ Add the first physician</button>
+        <button class="bsm" onclick="nav('site-slots',document.querySelector('.snav-item[data-pg=&quot;site-slots&quot;]'))" style="padding:10px 16px;font-size:12px;margin-left:8px">Or set up sites first</button>
+        <div style="font-size:11px;color:var(--rs-ink-3);margin-top:18px">Quick order: Site Management → IR Slots &amp; Groups → Physicians → Auto-Assign</div>
+      </div>`;
   }
   document.getElementById('phys-list').innerHTML=html;
 }
@@ -13067,14 +13681,60 @@ function _previewIRShiftAA_MCF(){
   var box      = document.getElementById('irsa-box');
   var applyBtn = document.getElementById('irsa-apply');
   if(!months || !months.length){ if(box) box.innerHTML='<div class="note nw">⚠ No months resolved for this period.</div>'; return; }
-  var run;
-  try{
-    run = _irsaSolveMCF({ months, groupFilter: grpSel });
-  }catch(e){
-    if(typeof _logError==='function') _logError('previewIRShiftAA_MCF', 'MCF solve threw', e);
-    if(box) box.innerHTML='<div class="note nw">⚠ MCF solver error: '+escHtml(e.message||String(e))+'</div>';
-    return;
+  // Show an indeterminate progress bar so the user knows the long
+  // synchronous solver run isn't a hung tab. The MCF solve happens on
+  // the main thread (no worker), so the bar paints once and the UI
+  // freezes until the solve returns — but that single paint is a clear
+  // signal something is happening, vs. a blank box.
+  if(box) box.innerHTML = '<div id="irsa-progress" style="padding:24px;max-width:420px;margin:8px auto"></div>';
+  if(typeof _showProgress === 'function'){
+    _showProgress('irsa-progress', `Solving ${months.length} month(s) for ${grpSel === 'both' ? 'both groups' : grpSel}…`);
   }
+  // Yield once so the progress bar actually paints before the heavy synchronous
+  // solver call starts. Without this yield, the browser batches both into one
+  // animation frame and the bar never appears.
+  var startSolve = function(){
+    var run;
+    try{
+      run = _irsaSolveMCF({ months, groupFilter: grpSel });
+    }catch(e){
+      if(typeof _logError==='function') _logError('previewIRShiftAA_MCF', 'MCF solve threw', e);
+      if(box) box.innerHTML='<div class="note nw">⚠ MCF solver error: '+escHtml(e.message||String(e))+'</div>';
+      return;
+    }
+    _previewIRShiftAA_MCF._render(run, {months, periodLbl, grpSel, ancTgt, box, applyBtn});
+  };
+  // requestAnimationFrame ensures the progress paint commits.
+  if(typeof requestAnimationFrame === 'function'){
+    requestAnimationFrame(() => requestAnimationFrame(startSolve));
+  } else {
+    setTimeout(startSolve, 16);
+  }
+  return;
+}
+// Render half of the MCF preview, separated so the entry-point above can
+// kick off the solve asynchronously (after the progress bar paints) and
+// still call back into the same render path.
+_previewIRShiftAA_MCF._render = function(run, ctx){
+  var box      = ctx.box;
+  var applyBtn = ctx.applyBtn;
+  var ancTgt   = ctx.ancTgt;
+  var periodLbl= ctx.periodLbl;
+  var months   = ctx.months;
+  var grpSel   = ctx.grpSel;
+  // The solve is done — replace progress with the actual preview.
+  _previewIRShiftAA_MCF._renderInline(run, ctx);
+};
+// Original render path (refactored out of the function body) — invoked by
+// _render. We extract this as a separate function so the original body can
+// call back without restructuring the entire 200-line preview renderer.
+_previewIRShiftAA_MCF._renderInline = function(run, ctx){
+  var box      = ctx.box;
+  var applyBtn = ctx.applyBtn;
+  var ancTgt   = ctx.ancTgt;
+  var periodLbl= ctx.periodLbl;
+  var months   = ctx.months;
+  var grpSel   = ctx.grpSel;
   // Reset and populate the canonical preview array used by applyIRShiftAA
   _irsaPreview.length = 0;
   Array.prototype.push.apply(_irsaPreview, run.preview);
@@ -13246,7 +13906,7 @@ function _previewIRShiftAA_MCF(){
   if(applyBtn) applyBtn.style.display = run.preview.length ? 'inline-block' : 'none';
   var note = document.getElementById('irsa-apply-note');
   if(note) note.textContent = run.preview.length ? ('Will replace existing IR shifts in '+months.join(', ')+' for selected groups.') : '';
-}
+};
 
 function previewIRShiftAA(){
   if(!_adminOnly('preview IR shift auto-assign'))return;
@@ -23341,6 +24001,433 @@ function updateSbInfo(){
  *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
  *   shiftKey ∈ {'s1','s2','s3','home'} for DR shifts; '' / absent for IR
  */
+// ── What-if simulator ─────────────────────────────────────────────────
+// "What if Dr. X took next month off? Who absorbs the work? What's the
+// fairness impact?" Synthesizes a hypothetical change and reports the
+// concrete deltas without applying anything.
+//
+// scenario shape:
+//   { kind: 'vacation', physId, start, end }       — add a vacation
+//   { kind: 'remove-physician', physId }           — temporary remove
+//   { kind: 'remove-shift', shiftKind, id }        — drop a single shift
+// returns: { fillable: [...], unfillable: [...], deltas: {...} }
+function whatIfSimulate(scenario){
+  if(!scenario || !scenario.kind) return null;
+  // Snapshot the bits of state we need to mutate, run the projection,
+  // restore. We never touch S permanently — but we DO need to mutate
+  // a clone of the relevant arrays to feed the existing eligibility
+  // helpers (vacDays etc.) which read from S directly.
+  const snapshot = {
+    vacations: (S.vacations||[]).map(v => ({...v})),
+    drShifts:  (S.drShifts||[]).map(s => ({...s})),
+    irShifts:  (S.irShifts||[]).map(s => ({...s})),
+    irCalls:   (S.irCalls||[]).map(c => ({...c})),
+    weekendCalls: (S.weekendCalls||[]).map(w => ({...w})),
+  };
+  let restore = () => {
+    S.vacations    = snapshot.vacations;
+    S.drShifts     = snapshot.drShifts;
+    S.irShifts     = snapshot.irShifts;
+    S.irCalls      = snapshot.irCalls;
+    S.weekendCalls = snapshot.weekendCalls;
+    if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+  };
+  try{
+    // Apply scenario to the live S so existing helpers see it.
+    if(scenario.kind === 'vacation'){
+      S.vacations = [...(S.vacations||[]), {
+        id: 'whatif-' + Date.now(),
+        physId: scenario.physId,
+        start: scenario.start,
+        end: scenario.end,
+        type: 'whatif',
+      }];
+      if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    } else if(scenario.kind === 'remove-physician'){
+      // Strip their existing assignments so we can see who'd absorb
+      S.drShifts     = (S.drShifts||[]).filter(s => s.physId !== scenario.physId);
+      S.irShifts     = (S.irShifts||[]).filter(s => s.physId !== scenario.physId);
+      S.irCalls      = (S.irCalls||[]).filter(c => c.physId !== scenario.physId);
+      S.weekendCalls = (S.weekendCalls||[]).filter(w => w.physId !== scenario.physId);
+      if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    }
+    // Identify "now-uncovered" slots: anything that was on the affected
+    // physician's schedule WITHIN the scenario window. We surface those
+    // as the impact list, with cross-group / over-quota suggestions
+    // attached so the admin can see who would absorb.
+    const startDate = scenario.start || (scenario.kind === 'remove-physician'
+      ? '0000-01-01' : null);
+    const endDate = scenario.end || (scenario.kind === 'remove-physician'
+      ? '9999-12-31' : null);
+    const inWindow = (d) => !startDate || (d >= startDate && d <= endDate);
+    const lostShifts = snapshot.drShifts
+      .filter(s => s.physId === scenario.physId && inWindow(s.date) && s.shift !== 'Home')
+      .map(s => ({kind:'dr', date:s.date, site:s.site, shift:s.shift, sub:s.sub}));
+    const lostIRShifts = snapshot.irShifts
+      .filter(s => s.physId === scenario.physId && inWindow(s.date) && s.shift !== 'Home')
+      .map(s => ({kind:'ir-shift', date:s.date, site:s.site, shift:s.shift, irGroup:s.irGroup}));
+    const lostCalls = snapshot.irCalls
+      .filter(c => c.physId === scenario.physId && inWindow(c.date))
+      .map(c => ({kind:'ir-call', date:c.date, callType:c.callType, irGroup:c.irGroup, site:c.site}));
+    const lostWk = snapshot.weekendCalls
+      .filter(w => w.physId === scenario.physId && inWindow(w.satDate || w.date))
+      .map(w => ({kind:'weekend', date:w.satDate || w.date, sub:w.sub, site:w.site}));
+    const allLost = [...lostShifts, ...lostIRShifts, ...lostCalls, ...lostWk];
+    // For each lost slot, compute candidate replacements via the same
+    // unfillable-diagnostic helper (after the scenario has been applied
+    // to S, the helper sees the right exclusion set).
+    const fillable = [], unfillable = [];
+    allLost.forEach(slot => {
+      // For IR shifts, use _diagnoseSlotUnfillable directly
+      if(slot.kind === 'ir-shift'){
+        const diag = (typeof _diagnoseSlotUnfillable === 'function')
+          ? _diagnoseSlotUnfillable({...slot, _group: slot.irGroup}, {})
+          : [];
+        const clean = diag.filter(d => !d.reasons.length);
+        if(clean.length){
+          fillable.push({...slot, candidates: clean.slice(0, 3)});
+        } else {
+          unfillable.push({...slot, blockers: diag.slice(0, 3).map(d => d.name + ': ' + d.reasons.join('; '))});
+        }
+      } else {
+        // For other kinds, do a quick eligibility scan
+        const candidates = (S.physicians||[])
+          .filter(p => p.id !== scenario.physId)
+          .filter(p => {
+            if(slot.kind === 'dr' && p.role === 'IR') return false;
+            if(slot.kind === 'ir-call' && !(p.irFte > 0)) return false;
+            try{
+              if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)) return false;
+            }catch(_){}
+            return true;
+          })
+          .map(p => ({physId: p.id, name: pname(p.id)}))
+          .slice(0, 3);
+        if(candidates.length) fillable.push({...slot, candidates});
+        else unfillable.push({...slot, blockers: ['no eligible covering physician']});
+      }
+    });
+    return { lost: allLost.length, fillable, unfillable };
+  } finally {
+    restore();
+  }
+}
+
+// ── Vacation priority lottery ─────────────────────────────────────────
+// For in-demand weeks (Christmas, July 4, etc.), draw vacation requests
+// in priority order: seniority + recency-weighted historical balance.
+// Stored on S.vacRequests = [{id, physId, start, end, priority, status}].
+// runVacationLottery(weekStart) returns a ranked list with explanations.
+function runVacationLottery(weekStart, weekEnd){
+  if(!weekStart || !weekEnd) return [];
+  // Pick all pending requests overlapping the target week
+  const overlaps = (req) => req.start <= weekEnd && req.end >= weekStart;
+  const requests = (S.vacRequests || []).filter(r => r.status === 'pending' && overlaps(r));
+  // Score each: higher = more deserving
+  return requests.map(req => {
+    const p = _physById(req.physId);
+    if(!p) return null;
+    // Seniority component — prefer joined-earlier (lower joinedYear).
+    const joinedYear = p.joinedYear || (p.joined ? new Date(p.joined).getFullYear() : new Date().getFullYear());
+    const yrsSrv = Math.max(0, new Date().getFullYear() - joinedYear);
+    // Historical-vacation-burden component — physicians who took LESS
+    // popular-week vacation in past years rank higher this year.
+    const popularThisYear = (S.vacations || []).filter(v => {
+      if(v.physId !== p.id) return false;
+      const yr = (v.start || '').slice(0,4);
+      return yr === String(new Date().getFullYear());
+    }).length;
+    const score = (yrsSrv * 10) - (popularThisYear * 8);
+    return {
+      reqId: req.id,
+      physId: req.physId,
+      name: pname(req.physId),
+      start: req.start,
+      end: req.end,
+      score,
+      seniority: yrsSrv,
+      thisYearPopular: popularThisYear,
+    };
+  })
+  .filter(Boolean)
+  .sort((a, b) => b.score - a.score);
+}
+
+// ── Anchor strictness curve ───────────────────────────────────────────
+// The legacy "≥ N% anchor" rule was a hard binary cut-off — any non-anchor
+// assignment after the threshold was rejected outright. Real practices
+// want a soft falloff: prefer the anchor strongly when below target,
+// prefer it less when comfortably above target, hard-reject only when
+// the alternative is far below target (e.g. 40%).
+//
+// cfg.anchorPct       — soft target (default 70)
+// cfg.anchorPctHard   — hard floor (default cfg.anchorPct - 15)
+// _anchorPenalty(ratio, ctx) returns:
+//   ratio < hard floor   → Infinity (hard reject)
+//   ratio < soft target  → (target - ratio) × 10 (penalty in solver-cost units)
+//   ratio ≥ soft target  → 0
+function _anchorPenalty(currentRatioPct, isAnchorSite){
+  const cfg = (S && S.cfg) ? S.cfg : {};
+  const soft = (typeof cfg.anchorPct === 'number') ? cfg.anchorPct : 70;
+  const hard = (typeof cfg.anchorPctHard === 'number') ? cfg.anchorPctHard : Math.max(0, soft - 15);
+  // Per-site rule applies only to physician's anchor site assignments;
+  // when the candidate IS the anchor site, no penalty is added (it improves
+  // the ratio). This helper returns penalty for the OPPOSITE case — when
+  // we're considering a non-anchor assignment.
+  if(isAnchorSite) return 0;
+  if(currentRatioPct < hard) return Infinity; // hard reject
+  if(currentRatioPct < soft) return (soft - currentRatioPct) * 10;
+  return 0;
+}
+
+// ── Cross-group coverage suggestions ──────────────────────────────────
+// Extends _diagnoseSlotUnfillable by ranking cross-group physicians who
+// COULD fill the slot, ordered by least-disruption. Disruption score =
+// group-balance impact + anchor-pct impact + drive-time penalty. The
+// caller can show this list with one-click "use this person" buttons.
+function _crossGroupSuggestions(slot, opts){
+  opts = opts || {};
+  const ym = (slot.date || '').slice(0, 7);
+  const slotGroup = slot._group;
+  if(!slotGroup) return [];
+  // Find physicians OUTSIDE slot's group who have IR FTE — ALL of them are
+  // technically possible (cross-coverage scenario), even if not normally
+  // an anchor or fill-in. We rank them; the caller decides cutoff.
+  const candidates = (S.physicians||[])
+    .filter(p => p.irFte > 0 && p.irGroup && p.irGroup !== slotGroup);
+  const ranked = candidates.map(p => {
+    let score = 0;
+    const reasons = [];
+    // Group-balance impact: pulling them away from their own group
+    const ownGroupShifts = (S.irShifts||[]).filter(s =>
+      s.physId === p.id && s.date.startsWith(ym) && s.shift !== 'Home').length;
+    const ownGroupTarget = (typeof irShiftTargetMonth === 'function')
+      ? irShiftTargetMonth(p, ym) : 0;
+    if(ownGroupShifts < ownGroupTarget){
+      score += (ownGroupTarget - ownGroupShifts) * 5;
+      reasons.push(`${ownGroupTarget - ownGroupShifts} shift(s) under target in own group`);
+    }
+    // Drive-time impact (longer commute = higher cost)
+    const dt = (S.driveTimes || {})[`${p.id}|${slot.site}`];
+    const drive = dt?.byShift?.[slot.shift || '1st']?.outMins || dt?.mins || 30;
+    score += drive * 0.3;
+    if(drive > 45) reasons.push(`${drive}-min commute to ${slot.site}`);
+    // Already on vacation / has shifts that day = exclude
+    try{
+      if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)){
+        return null;
+      }
+    }catch(_){}
+    if((S.irShifts||[]).some(s => s.physId === p.id && s.date === slot.date)) return null;
+    if((S.drShifts||[]).some(s => s.physId === p.id && s.date === slot.date && s.shift !== 'Home')) return null;
+    return { phys: p, score, reasons, drive };
+  }).filter(Boolean);
+  ranked.sort((a, b) => a.score - b.score);
+  return ranked.slice(0, 5); // top 5 cleanest options
+}
+
+// ── Look-ahead helper ─────────────────────────────────────────────────
+// During auto-assign of month M, peek at month M+1's anchor obligations
+// for each physician. If a physician is ALREADY going to be over-stretched
+// next month (high required anchor count), bump their priority for the
+// CURRENT month so their next-month load is lighter. Conversely, if
+// they're under-utilized next month, lower their current-month priority
+// slightly so the imbalance has room to resolve.
+function _lookaheadAdjustment(p, currentYM){
+  // Compute next month's anchor obligations from already-placed shifts +
+  // already-assigned-but-not-yet-this-iteration commitments.
+  const [y, m] = currentYM.split('-').map(Number);
+  const nextYM = (m === 12)
+    ? `${y + 1}-01`
+    : `${y}-${String(m + 1).padStart(2,'0')}`;
+  const ancSite = p.anchorSite;
+  if(!ancSite) return 0;
+  const nextMonthAnchor = (S.irShifts||[]).filter(s =>
+    s.physId === p.id && s.date.startsWith(nextYM) && s.shift !== 'Home' && s.site === ancSite
+  ).length;
+  // Heuristic adjustment: if they already have ≥3 anchor commitments
+  // in the next month, +5 cost units in CURRENT month so we prefer
+  // someone else; if they have 0 commitments next month, -3 units so
+  // we prefer them now.
+  if(nextMonthAnchor >= 3) return 5;
+  if(nextMonthAnchor === 0) return -3;
+  return 0;
+}
+
+// ── Pair-conflict rules ───────────────────────────────────────────────
+// "Don't schedule physicians A and B on the same day at the same site."
+// Stored on S.physicianPairRules = [{a, b, scope: 'same-day' | 'same-shift',
+//   site?, severity: 'block' | 'warn'}]. The schema allows either physician
+// listed first; checks are bidirectional.
+function _violatesPairConflict(physId, ctx){
+  const rules = S.physicianPairRules || [];
+  if(!rules.length) return null;
+  for(const r of rules){
+    if(r.a !== physId && r.b !== physId) continue;
+    const otherId = r.a === physId ? r.b : r.a;
+    if(r.site && r.site !== ctx.site) continue;
+    let conflict = false;
+    if(r.scope === 'same-shift'){
+      const sameShift = (S.drShifts||[]).some(s => s.physId === otherId && s.date === ctx.date && s.shift === ctx.shift && s.site === ctx.site)
+                     || (S.irShifts||[]).some(s => s.physId === otherId && s.date === ctx.date && s.shift === ctx.shift && s.site === ctx.site);
+      conflict = sameShift;
+    } else {
+      // 'same-day' (default): any assignment on this date for the other phys
+      const onSameDay = (S.drShifts||[]).some(s => s.physId === otherId && s.date === ctx.date)
+                     || (S.irShifts||[]).some(s => s.physId === otherId && s.date === ctx.date)
+                     || (S.irCalls||[]).some(c => c.physId === otherId && c.date === ctx.date);
+      conflict = onSameDay;
+    }
+    if(conflict){
+      const sev = r.severity || 'warn';
+      const tag = sev === 'block' ? 'BLOCK' : 'WARN';
+      return `pair conflict [${tag}]: ${pname(physId)} cannot share a ${r.scope || 'same-day'} with ${pname(otherId)}${r.site ? ' at ' + r.site : ''}`;
+    }
+  }
+  return null;
+}
+
+// ── Site capacity caps ───────────────────────────────────────────────
+// "Site X has at most N physicians on shift Y on any single day." Stored
+// on S.siteCaps = {[`${site}|${shift}`]: maxPhysicians}. Returns an
+// error string if adding the candidate would exceed the cap, else null.
+function _violatesSiteCap(physId, ctx){
+  const caps = S.siteCaps || {};
+  if(!ctx.site || !ctx.shift) return null;
+  const key = `${ctx.site}|${ctx.shift}`;
+  const cap = caps[key];
+  if(cap == null || cap <= 0) return null;
+  // Count physicians ALREADY on this site/shift/date
+  const present = new Set();
+  (S.drShifts||[]).forEach(s => {
+    if(s.date === ctx.date && s.site === ctx.site && s.shift === ctx.shift && s.physId !== physId){
+      present.add(s.physId);
+    }
+  });
+  (S.irShifts||[]).forEach(s => {
+    if(s.date === ctx.date && s.site === ctx.site && s.shift === ctx.shift && s.physId !== physId){
+      present.add(s.physId);
+    }
+  });
+  if(present.size >= cap){
+    return `site capacity [BLOCK]: ${ctx.site}/${ctx.shift} already has ${present.size}/${cap} physicians on ${ctx.date}`;
+  }
+  return null;
+}
+
+// ── Per-shift sub-specialty needs ─────────────────────────────────────
+// "1st shift at CHN needs at least 1 body imager." Stored on
+// S.shiftSubNeeds = {[`${site}|${shift}`]: {[sub]: minCount}}. This is a
+// COVERAGE requirement, not a per-physician constraint — it surfaces as
+// a violation on the SLOT (not a particular physician's assignment).
+// Used by the solver to prefer physicians that fill unmet needs and by
+// the manual rule-violation gather to flag a missing specialty.
+function _missingShiftSubNeeds(date, site, shift){
+  const needs = (S.shiftSubNeeds || {})[`${site}|${shift}`];
+  if(!needs || !Object.keys(needs).length) return [];
+  // Count present subs
+  const present = {};
+  (S.drShifts||[]).forEach(s => {
+    if(s.date === date && s.site === site && s.shift === shift){
+      const phys = _physById(s.physId);
+      (phys?.drSubs || []).forEach(sub => { present[sub] = (present[sub]||0)+1; });
+      // Also count the directly-assigned sub on the shift if present
+      if(s.sub) present[s.sub] = (present[s.sub]||0)+1;
+    }
+  });
+  const missing = [];
+  for(const [sub, minCount] of Object.entries(needs)){
+    if((present[sub] || 0) < minCount){
+      missing.push(`${sub} (have ${present[sub]||0}, need ${minCount})`);
+    }
+  }
+  return missing;
+}
+
+// ── Post-call recovery enforcement ────────────────────────────────────
+// Fri-Mon weekend on-call physicians need rest the day after the span
+// closes. Without this, an admin could place a 1st-shift Tuesday on a
+// physician who was on call Sun overnight — known burnout risk in
+// real practices. cfg.recoveryDays controls the window (default 1).
+function _violatesPostCallRecovery(physId, dateISO, kind){
+  const cfg = (S && S.cfg) ? S.cfg : {};
+  const window = (typeof cfg.recoveryDays === 'number' ? cfg.recoveryDays : 1);
+  if(window <= 0) return null;
+  // Look back `window` days from dateISO; if any of those was the LAST
+  // day of a weekend call (the Monday slot of a Fri-Mon span) for this
+  // physician, the candidate date violates recovery time.
+  for(let i = 1; i <= window; i++){
+    const lookback = addDays(dateISO, -i);
+    const wcEnd = (S.weekendCalls||[]).find(w =>
+      w.physId === physId && (w.sunDate === lookback || w.satDate === lookback)
+    );
+    if(wcEnd) return `post-weekend-call recovery: ${dateISO} is ${i} day(s) after a weekend call ending ${lookback}`;
+    // IR weekend call covers Fri-Mon; the day after the span (Tue) violates.
+    const irWk = (S.irCalls||[]).find(c =>
+      c.physId === physId && c.callType === 'weekend' &&
+      lookback === addDays(c.date, 3)  // Mon = Fri+3
+    );
+    if(irWk) return `post-IR-weekend recovery: ${dateISO} is ${i} day(s) after an IR weekend call`;
+  }
+  return null;
+}
+
+// ── Burnout signal ───────────────────────────────────────────────────
+// Returns an array of human-readable burnout flags for a physician at
+// the given month. Used by the physician card and by auto-assign as a
+// last-resort tiebreaker (a flagged physician is sorted to the bottom
+// of equal-score candidates, not excluded).
+const _BURNOUT_DEFAULTS = {
+  consecMaxDays: 5,    // ≥ N days in a row triggers
+  weekendsPerQ: 3,     // ≥ N weekend calls in a rolling quarter
+  holidaysPerY: 2,     // ≥ N holiday assignments in 12 months
+};
+function _physicianBurnoutFlags(physId, ym){
+  const cfg = (S && S.cfg && S.cfg.burnout) ? S.cfg.burnout : _BURNOUT_DEFAULTS;
+  const out = [];
+  // Consecutive days — walk backward from the LAST day of ym.
+  const [y,m] = (ym || fmtDate(new Date()).slice(0,7)).split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const dayHasShift = (ds) => {
+    return (S.drShifts||[]).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home') ||
+           (S.irShifts||[]).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home');
+  };
+  let streak = 0, maxStreak = 0;
+  for(let d = 1; d <= lastDay; d++){
+    const ds = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if(dayHasShift(ds)) streak++;
+    else { if(streak > maxStreak) maxStreak = streak; streak = 0; }
+  }
+  if(streak > maxStreak) maxStreak = streak;
+  if(maxStreak >= cfg.consecMaxDays){
+    out.push(`${maxStreak} consecutive days`);
+  }
+  // Weekends in rolling 3-month quarter ending at ym.
+  const qStart = new Date(y, m - 3, 1);
+  const qEnd = new Date(y, m, 0);
+  const wknds = (S.weekendCalls||[]).filter(w => {
+    const d = parseDateLocal(w.satDate || w.date || '');
+    return d >= qStart && d <= qEnd && w.physId === physId;
+  }).length;
+  if(wknds >= cfg.weekendsPerQ){
+    out.push(`${wknds} weekend calls in last 3 months`);
+  }
+  // Holidays in trailing 12 months.
+  const yStart = new Date(y, m - 12, 1);
+  const yEnd = new Date(y, m, 0);
+  const hols = new Set();  // unique holiday-block IDs
+  (S.holidays||[]).forEach(h => {
+    const d = parseDateLocal(h.date || '');
+    if(d >= yStart && d <= yEnd && h.physId === physId){
+      hols.add(`${h.name}|${h.year || (h.date||'').slice(0,4)}`);
+    }
+  });
+  if(hols.size >= cfg.holidaysPerY){
+    out.push(`${hols.size} holidays in last 12 months`);
+  }
+  return out;
+}
+
 function _gatherManualRuleViolations(p, ctx){
   const out = [];
   if(!p || !ctx) return out;
@@ -23417,6 +24504,27 @@ function _gatherManualRuleViolations(p, ctx){
     const tag = sev === 'block' ? 'BLOCK' : 'WARN';
     const txt = String(r.text||'').trim();
     if(txt) out.push(`custom rule [${tag}]: ${txt}`);
+  }
+
+  // Post-call recovery — only meaningful for day-shift candidates. Weekend
+  // call assignments themselves are checked separately by the back-to-back
+  // logic. cfg.recoveryDays = 0 disables this rule for practices that don't
+  // observe a post-call rest day.
+  if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
+    const rec = _violatesPostCallRecovery(p.id, ctx.date, ctx.kind);
+    if(rec) out.push(rec);
+  }
+
+  // Pair-conflict rule (e.g. don't schedule certain physicians together).
+  if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
+    const pc = _violatesPairConflict(p.id, ctx);
+    if(pc) out.push(pc);
+  }
+
+  // Site capacity cap for shift assignments.
+  if(ctx.kind === 'dr-shift' || ctx.kind === 'ir-shift'){
+    const sc = _violatesSiteCap(p.id, ctx);
+    if(sc) out.push(sc);
   }
 
   return out;
@@ -28147,6 +29255,34 @@ function previewHolRandom(){
       const physSlotsToFill = slotsNeeded - alreadyPhys.size - previewPhys.length;
       if(physSlotsToFill<=0) return;
 
+      // Adjacent-block protection: if this def's dates fall within ±N days
+      // of another holiday block already assigned to the same physician
+      // (current year), they're a poor candidate. cfg.holidayBlockGap
+      // controls the window (default 3 days — covers Christmas-Eve/Day,
+      // New-Year's-Eve/Day, Thanksgiving-week patterns). The adjacency
+      // is applied as a hard exclusion at the SAME group; cross-group
+      // is allowed because IR-North vs IR-South aren't sharing a person.
+      const blockGap = (S.cfg && typeof S.cfg.holidayBlockGap === 'number')
+        ? S.cfg.holidayBlockGap : 3;
+      const _isAdjacentToExistingBlock = (physId) => {
+        if(blockGap <= 0) return false;
+        const candDates = (def.dates || []);
+        if(!candDates.length) return false;
+        // Check the same physician's other holiday blocks this year (and the
+        // preview-pending ones), in the same group.
+        const otherBlocks = (S.holidays||[])
+          .filter(h => h.physId === physId && h.year === year && h.group === grp && h.name !== def.name)
+          .concat(preview.filter(a => a.physId === physId && a.year === year && a.group === grp && a.defName !== def.name)
+                         .map(a => ({ name: a.defName, dates: a.dates || [] })));
+        for(const ob of otherBlocks){
+          for(const cd of candDates){
+            for(const od of (ob.dates || [ob.date])){
+              if(od && _daysBetween(cd, od) <= blockGap) return true;
+            }
+          }
+        }
+        return false;
+      };
       for(let slot=0;slot<physSlotsToFill;slot++){
         const eligible=careerData.filter(d=>{
           const p=d.p;
@@ -28154,6 +29290,8 @@ function previewHolRandom(){
           if(preview.find(a=>a.defId===def.id&&a.group===grp&&a.physId===p.id)) return false;
           const vd=vacDays(p.id);
           if((def.dates||[]).some(dt=>vd.has(dt))) return false;
+          // Adjacent-block check
+          if(_isAdjacentToExistingBlock(p.id)) return false;
           return true;
         });
 
@@ -28313,6 +29451,430 @@ function clearClaimedShifts(){
 // confirmations of successful actions ("Added", "Saved", "Cleared 5 calls")
 // where blocking the UI with alert() is overkill. Errors should still use
 // alert/confirm so they don't get missed. Type: 'ok' | 'info' | 'warn'.
+// ── Command palette ──────────────────────────────────────────────────────
+// Cmd/Ctrl+K opens a centered search overlay. Type to filter; up/down to
+// move; enter to select. The source list is built fresh each open so it
+// reflects current physicians and pages. Pages are static; physicians
+// come from S.physicians (escaped via _pHtml at render). Selecting a page
+// item calls the page's nav() handler; selecting a physician opens the
+// edit modal.
+const _CP_PAGES = [
+  // Page name, icon, the nav() target, optional admin-only flag
+  ['Dashboard',           '📊', 'dashboard'],
+  ['My Schedule',         '📅', 'my-schedule'],
+  ['DR Calendar',         '🩺', 'dr-cal'],
+  ['DR Builder',          '✏️', 'dr-builder', true],
+  ['DR Weekend Calls',    '📞', 'dr-weekends', true],
+  ['IR Calendar',         '⚕️', 'ir-cal'],
+  ['IR Shifts',           '🔧', 'ir-shifts', true],
+  ['IR Auto-Assign',      '🤖', 'ir-shift-auto', true],
+  ['IR Rebalance',        '⚖️', 'ir-rebalance', true],
+  ['Holiday Call',        '🎄', 'holidays', true],
+  ['Holiday Counter',     '🗓', 'holidays'],
+  ['Vacations',           '🏖', 'vacations'],
+  ['Vacation Picks',      '🎯', 'vac-pick'],
+  ['Open Shifts',         '🆓', 'open-shifts'],
+  ['Shift Swaps',         '🔁', 'swaps'],
+  ['Physicians',          '👥', 'physicians', true],
+  ['User Management',     '👤', 'user-mgmt', true],
+  ['Site Management',     '🏥', 'site-slots', true],
+  ['Settings',            '⚙️', 'settings', true],
+  ['Profiles',            '🪪', 'profiles'],
+  ['Chat',                '💬', 'chat'],
+  ['Tumor Boards',        '📋', 'tumor-boards', true],
+  ['Anchor Report',       '📈', 'anchor-report', true],
+  ['FTE Tally',           '📊', 'fte', true],
+  ['Publish',             '📤', 'publish', true],
+];
+
+let _cpItems = [];
+let _cpFilter = '';
+let _cpCursor = 0;
+
+function openCommandPalette(){
+  // Build source list — pages first (admin-aware), then physicians.
+  const isAdm = (typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : false;
+  const items = [];
+  _CP_PAGES.forEach(([name, icon, pg, adminOnly]) => {
+    if(adminOnly && !isAdm) return;
+    items.push({ kind:'page', icon, name, sub:pg, run: () => {
+      const navItem = document.querySelector(`.snav-item[data-pg="${pg}"]`);
+      if(typeof nav === 'function') nav(pg, navItem);
+    }});
+  });
+  // Physicians — first/last + role badge.
+  (S.physicians||[]).forEach(p => {
+    const role = p.role==='IR' ? 'IR' : p.role==='MIXED' ? 'MIXED' : 'DR';
+    items.push({
+      kind:'phys',
+      icon:'·',
+      name:`${p.last||''}, ${p.first||''}`,
+      sub: role,
+      run: () => {
+        const navItem = document.querySelector('.snav-item[data-pg="physicians"]');
+        if(typeof nav === 'function') nav('physicians', navItem);
+        if(typeof editPhys === 'function') setTimeout(() => editPhys(p.id), 100);
+      }
+    });
+  });
+  // Months in current year — quick jump to a calendar.
+  const yr = new Date().getFullYear();
+  ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach((m, idx) => {
+    const ym = yr + '-' + String(idx+1).padStart(2,'0');
+    items.push({
+      kind:'month',
+      icon:'📅',
+      name: m + ' ' + yr,
+      sub: 'DR Cal',
+      run: () => {
+        const navItem = document.querySelector('.snav-item[data-pg="dr-cal"]');
+        if(typeof nav === 'function') nav('dr-cal', navItem);
+        setTimeout(() => {
+          const monthInput = document.querySelector('#page-dr-cal input[type="month"]');
+          if(monthInput){ monthInput.value = ym; monthInput.dispatchEvent(new Event('change',{bubbles:true})); }
+        }, 50);
+      }
+    });
+  });
+  _cpItems = items;
+  _cpFilter = '';
+  _cpCursor = 0;
+  _renderCommandPalette();
+  setTimeout(() => document.getElementById('rs-cp-input')?.focus(), 30);
+}
+
+function _renderCommandPalette(){
+  let host = document.getElementById('rs-cp-host');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'rs-cp-host';
+    document.body.appendChild(host);
+  }
+  const filter = _cpFilter.toLowerCase().trim();
+  const filtered = filter
+    ? _cpItems.filter(i => i.name.toLowerCase().includes(filter) || (i.sub||'').toLowerCase().includes(filter))
+    : _cpItems;
+  // Clamp cursor to filtered length
+  if(_cpCursor >= filtered.length) _cpCursor = Math.max(0, filtered.length - 1);
+  if(_cpCursor < 0) _cpCursor = 0;
+  const listHtml = filtered.length
+    ? filtered.map((it, i) =>
+        `<div class="rs-cp-item ${i===_cpCursor?'on':''}" data-idx="${i}">
+          <div class="rs-cp-icon">${it.icon}</div>
+          <div class="rs-cp-name">${escHtml(it.name)}</div>
+          <div class="rs-cp-cat">${escHtml(it.sub||it.kind)}</div>
+        </div>`
+      ).join('')
+    : '<div class="rs-cp-empty">No matches.</div>';
+  host.innerHTML = `
+    <div class="rs-cp-backdrop" onclick="if(event.target===this)closeCommandPalette()">
+      <div class="rs-cp">
+        <input id="rs-cp-input" class="rs-cp-input"
+               placeholder="Jump to a page or physician…"
+               oninput="_cpOnInput(this.value)"
+               onkeydown="_cpOnKey(event)"
+               value="${escHtml(_cpFilter)}">
+        <div class="rs-cp-list" id="rs-cp-list">${listHtml}</div>
+        <div class="rs-cp-hint">
+          <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+          <span><kbd>↵</kbd> Open</span>
+          <span><kbd>Esc</kbd> Close</span>
+        </div>
+      </div>
+    </div>`;
+  // Bind click on items
+  host.querySelectorAll('.rs-cp-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.idx;
+      const item = filtered[idx];
+      if(item){ closeCommandPalette(); item.run(); }
+    });
+  });
+}
+
+function _cpOnInput(v){
+  _cpFilter = v;
+  _cpCursor = 0;
+  _renderCommandPalette();
+  setTimeout(() => document.getElementById('rs-cp-input')?.focus(), 0);
+}
+
+function _cpOnKey(e){
+  const filtered = _cpFilter.trim()
+    ? _cpItems.filter(i => i.name.toLowerCase().includes(_cpFilter.toLowerCase()) || (i.sub||'').toLowerCase().includes(_cpFilter.toLowerCase()))
+    : _cpItems;
+  if(e.key === 'ArrowDown'){ e.preventDefault(); _cpCursor = Math.min(_cpCursor+1, filtered.length-1); _renderCommandPalette(); setTimeout(()=>document.getElementById('rs-cp-input')?.focus(),0); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); _cpCursor = Math.max(_cpCursor-1, 0); _renderCommandPalette(); setTimeout(()=>document.getElementById('rs-cp-input')?.focus(),0); }
+  else if(e.key === 'Enter'){
+    e.preventDefault();
+    const item = filtered[_cpCursor];
+    if(item){ closeCommandPalette(); item.run(); }
+  }
+  else if(e.key === 'Escape'){ e.preventDefault(); closeCommandPalette(); }
+}
+
+function closeCommandPalette(){
+  const host = document.getElementById('rs-cp-host');
+  if(host) host.innerHTML = '';
+}
+
+// ── Notifications center ─────────────────────────────────────────────────
+// Reads from S.auditLog (the recent-mutations ring) and from any in-flight
+// notifications attached to the current user. Renders a right-aligned panel
+// with the latest 25 events, click-to-mark-read.
+function _gatherNotifications(){
+  // We surface two streams:
+  //   1. Audit-log entries that touch CU.physId (their shifts etc.)
+  //   2. Swap requests addressed to / from CU
+  const out = [];
+  if(typeof CU === 'undefined' || !CU) return out;
+  const myPhysId = CU.physId;
+  const audit = (S.auditLog || []).slice().reverse(); // newest first
+  audit.slice(0, 30).forEach(a => {
+    const d = a.detail || {};
+    if(myPhysId && d.physId === myPhysId){
+      const niceAction = (a.action||'').replace(/\./g, ' ');
+      out.push({
+        ts: a.ts,
+        title: niceAction,
+        body: d.date ? `${d.date}${d.shift ? ' · ' + d.shift : ''}${d.site ? ' @ ' + d.site : ''}` : '',
+      });
+    }
+  });
+  // Swap requests addressed to me
+  (S.swapRequests || []).filter(s => s.toPhysId === myPhysId && s.status === 'pending')
+    .forEach(s => out.push({
+      ts: s.ts || s.createdAt,
+      title: `Swap request from ${pname(s.fromPhysId)}`,
+      body: `For ${s.date}${s.reason ? ' — ' + s.reason : ''}`,
+    }));
+  // Sort newest-first by ts
+  out.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+  return out.slice(0, 25);
+}
+
+function _updateNotifDot(){
+  const dot = document.getElementById('rs-notif-dot');
+  if(!dot) return;
+  const items = _gatherNotifications();
+  const lastSeen = (function(){
+    try{ return parseInt(localStorage.getItem('rs.lastNotifSeen')||'0', 10) || 0; }catch(_){ return 0; }
+  })();
+  const hasNew = items.some(i => {
+    const ts = i.ts ? new Date(i.ts).getTime() : 0;
+    return ts > lastSeen;
+  });
+  dot.style.display = hasNew ? 'block' : 'none';
+}
+
+function toggleNotificationsPanel(){
+  let panel = document.getElementById('rs-notif-panel');
+  if(panel && panel.classList.contains('on')){
+    panel.classList.remove('on');
+    return;
+  }
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'rs-notif-panel';
+    panel.className = 'rs-notif-panel';
+    document.body.appendChild(panel);
+  }
+  const items = _gatherNotifications();
+  const listHtml = items.length
+    ? items.map(i => `
+        <div class="rs-notif-item">
+          <div>${escHtml(i.title)}</div>
+          ${i.body ? `<div style="color:var(--rs-ink-2)">${escHtml(i.body)}</div>` : ''}
+          <span class="when">${i.ts ? escHtml(new Date(i.ts).toLocaleString()) : ''}</span>
+        </div>`).join('')
+    : '<div class="rs-notif-empty">You\'re all caught up.</div>';
+  panel.innerHTML = `
+    <div class="rs-notif-header">
+      <span>Notifications</span>
+      <button class="bsm" style="padding:3px 9px;font-size:11px" onclick="toggleNotificationsPanel()">Close</button>
+    </div>
+    <div class="rs-notif-list">${listHtml}</div>`;
+  panel.classList.add('on');
+  // Mark all as seen — clears the dot.
+  try{ localStorage.setItem('rs.lastNotifSeen', String(Date.now())); }catch(_){}
+  _updateNotifDot();
+  // Click outside to close.
+  setTimeout(() => {
+    const handler = (ev) => {
+      if(!panel.contains(ev.target) && !document.getElementById('rs-notif-toggle')?.contains(ev.target)){
+        panel.classList.remove('on');
+        document.removeEventListener('mousedown', handler);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+  }, 0);
+}
+
+// Periodic dot refresh (cheap; reads existing arrays).
+setInterval(() => { try{ _updateNotifDot(); }catch(_){} }, 60000);
+
+// ── Empty-state renderer ─────────────────────────────────────────────────
+// Composable "no data yet" panel. Pass a target element id and a config:
+//   { icon: '🩺', title: 'No physicians yet', body: '...', action: {...} }
+// Action is { label, onclick } and renders as a primary button.
+function _emptyState(targetElId, opts){
+  const el = document.getElementById(targetElId);
+  if(!el) return;
+  opts = opts || {};
+  const icon  = opts.icon  || '·';
+  const title = opts.title || 'Nothing here yet';
+  const body  = opts.body  || '';
+  const actionHtml = opts.action
+    ? `<button class="bp" onclick="${opts.action.onclick}" style="padding:10px 18px;font-size:13px">${escHtml(opts.action.label)}</button>`
+    : '';
+  const secondaryHtml = opts.secondary
+    ? `<button class="bsm" onclick="${opts.secondary.onclick}" style="padding:10px 16px;font-size:12px">${escHtml(opts.secondary.label)}</button>`
+    : '';
+  el.innerHTML = `
+    <div class="rs-empty">
+      <div class="rs-empty-icon">${icon}</div>
+      <div class="rs-empty-title">${escHtml(title)}</div>
+      ${body ? `<div class="rs-empty-body">${escHtml(body)}</div>` : ''}
+      ${actionHtml}${secondaryHtml}
+    </div>`;
+}
+
+// ── Skeleton renderer ───────────────────────────────────────────────────
+// Render N pulsing placeholder rows into a target element while data is
+// loading. `widths` is an optional array of percentage widths for variety
+// (defaults to a deterministic mix that looks alive without being chaotic).
+function _showSkeleton(targetElId, rows, widths){
+  const el = document.getElementById(targetElId);
+  if(!el) return;
+  rows = rows || 4;
+  widths = widths || ['72%','58%','83%','50%','68%','77%','45%','62%'];
+  let html = '<div class="rs-skel-stack">';
+  for(let i = 0; i < rows; i++){
+    const w = widths[i % widths.length];
+    html += `<div class="rs-skel-row">
+      <div class="rs-skel" style="width:32px;height:32px;border-radius:50%;flex-shrink:0"></div>
+      <div class="rs-skel-stack" style="flex:1;gap:5px">
+        <div class="rs-skel" style="width:${w};height:13px"></div>
+        <div class="rs-skel" style="width:${Math.round(parseInt(w,10)*0.6)}%;height:9px"></div>
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ── Progress bar ────────────────────────────────────────────────────────
+// Render a determinate progress bar (current/total) or an indeterminate
+// pulse. Used by auto-assigners and the drive-time refresh to show that
+// long synchronous loops are actually advancing instead of frozen.
+function _showProgress(targetElId, label, current, total){
+  const el = document.getElementById(targetElId);
+  if(!el) return;
+  const isInd = (current == null || total == null);
+  const pct = isInd ? 0 : Math.min(100, Math.max(0, Math.round(100 * current / total)));
+  el.innerHTML = `
+    <div class="rs-progress">
+      <div class="rs-progress-bar ${isInd ? 'indeterminate' : ''}" style="width:${pct}%"></div>
+    </div>
+    <div class="rs-progress-label">${escHtml(label || '')}${isInd ? '' : ` — ${current} of ${total} (${pct}%)`}</div>`;
+}
+
+function _hideProgress(targetElId){
+  const el = document.getElementById(targetElId);
+  if(el) el.innerHTML = '';
+}
+
+// ── Toast with action button ─────────────────────────────────────────────
+// Like _toast() but renders one extra button after the message that invokes
+// the supplied callback. Used for "Save failed → Retry" and similar
+// recovery flows where we want to surface the failure non-blockingly AND
+// give the user a one-click path back instead of an alert + manual retry.
+// The toast hangs around for 8s (vs 3s) so the action has time to be seen.
+function _toastAction(msg, actionLabel, actionFn, type){
+  if(!msg) return;
+  const host = (function ensureHost(){
+    let h = document.getElementById('rs-toast-host');
+    if(h) return h;
+    h = document.createElement('div');
+    h.id = 'rs-toast-host';
+    h.setAttribute('role','status');
+    h.setAttribute('aria-live','polite');
+    h.style.cssText = 'position:fixed;top:60px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:340px';
+    document.body.appendChild(h);
+    return h;
+  })();
+  const t = document.createElement('div');
+  const bg = type === 'warn' ? 'var(--amber,#d97706)'
+          : type === 'info' ? 'var(--blue-t,#2563eb)'
+          : type === 'err' ? 'var(--red,#dc2626)'
+          : 'var(--green-t,#059669)';
+  t.style.cssText = `background:${bg};color:#fff;padding:10px 13px;border-radius:8px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.18);pointer-events:auto;line-height:1.4;display:flex;align-items:center;gap:10px;animation:rsToastIn .25s ease`;
+  const span = document.createElement('span');
+  span.textContent = String(msg);
+  span.style.flex = '1';
+  t.appendChild(span);
+  if(actionLabel && typeof actionFn === 'function'){
+    const btn = document.createElement('button');
+    btn.textContent = actionLabel;
+    btn.style.cssText = 'background:rgba(255,255,255,0.22);border:1px solid rgba(255,255,255,0.4);color:#fff;font:inherit;font-weight:600;padding:5px 11px;border-radius:6px;cursor:pointer;font-size:12px;letter-spacing:-0.005em;flex-shrink:0';
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      try{ actionFn(); }finally{ t.remove(); }
+    };
+    t.appendChild(btn);
+  }
+  const dismiss = document.createElement('button');
+  dismiss.textContent = '×';
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.style.cssText = 'background:transparent;border:none;color:rgba(255,255,255,0.7);font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0';
+  dismiss.onclick = () => t.remove();
+  t.appendChild(dismiss);
+  host.appendChild(t);
+  if(!document.getElementById('rs-toast-style')){
+    const st = document.createElement('style');
+    st.id = 'rs-toast-style';
+    st.textContent = '@keyframes rsToastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}';
+    document.head.appendChild(st);
+  }
+  setTimeout(() => {
+    if(t.isConnected){ t.style.transition='opacity .2s'; t.style.opacity='0'; setTimeout(()=>t.remove(), 220); }
+  }, 8000);
+}
+
+// ── Print helper ─────────────────────────────────────────────────────────
+// Open the browser print dialog with a context-aware title rendered above
+// the calendar grid. The print stylesheet handles the rest (hides chrome,
+// expands cells, hairline borders). Bound to the toolbar 🖨 Print button
+// and to Cmd/Ctrl+P globally (browser default would print everything; our
+// override scrolls the active page to the top first so the print region
+// starts where the user expects).
+function printSchedule(){
+  // Build a context-aware page title — month, current page name, practice
+  // name. Inserted as the first child of #app and removed after print.
+  const activePage = document.querySelector('.page.on');
+  const pageName = activePage?.querySelector('.pg-title')?.textContent?.trim() || 'Schedule';
+  const monthInput = activePage?.querySelector('input[type="month"]');
+  const monthLabel = monthInput?.value
+    ? new Date(monthInput.value+'-01').toLocaleString('en-US',{month:'long',year:'numeric'})
+    : '';
+  const practice = (typeof _PRACTICES !== 'undefined')
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'rs-print-title';
+  titleEl.textContent = `${practice} — ${pageName}${monthLabel ? ' — ' + monthLabel : ''}`;
+  const app = document.getElementById('app');
+  if(app && activePage){
+    activePage.insertBefore(titleEl, activePage.firstChild);
+  }
+  // Defer to next tick so the title actually paints before print fires.
+  setTimeout(() => {
+    try{ window.print(); }
+    catch(e){ console.warn('[RS] print failed', e); }
+    finally{ titleEl.remove(); }
+  }, 50);
+}
+
 function _toast(msg, type){
   if(!msg) return;
   let host = document.getElementById('rs-toast-host');
@@ -28638,6 +30200,18 @@ async function _pushToSupabase(){
     // — "retrying" loses meaning if it's been failing for 5 minutes.
     if(_consecutiveSaveFails >= 5){
       _updateSaveUI(`⚠ Sync failing (${_consecutiveSaveFails}× in a row) — check connection`,'var(--red-t)');
+      // After 5 consecutive failures the auto-retry has been hitting walls
+      // for at least ~3 minutes. Surface a Retry-now action so the user
+      // can force an attempt the moment connectivity returns instead of
+      // waiting for the backoff timer.
+      if(typeof _toastAction === 'function' && _consecutiveSaveFails === 5){
+        _toastAction(
+          'Sync failing — your last edits aren\'t saved.',
+          'Retry now',
+          () => _pushToSupabase(),
+          'err'
+        );
+      }
     } else {
       _updateSaveUI('⚠ Sync failed — retrying…','var(--red-t)');
     }
