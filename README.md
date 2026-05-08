@@ -45,18 +45,15 @@ Edit `index.html`. The optional disk-watch autopush in `.git-autopush.sh` commit
 
 ```bash
 # Validate the inline JS parses cleanly:
-python3 -c "
-import re
-html = open('index.html').read()
-html = re.sub(r'<!--[\s\S]*?-->', '', html)
-m = re.search(r'<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>', html)
-print(f'{len(m.group(1))} chars of inline JS')
-" | osascript -l JavaScript - <<'JXA'
-ObjC.import('Foundation');
-const js = $.NSString.stringWithContentsOfFileEncodingError('/tmp/inline.js', 4, $());
-new Function(js.js);
-'PARSE OK';
-JXA
+./tools/parsecheck.sh
+
+# Verify the module table-of-contents at the top of the script
+# stays in sync with section banners:
+./tools/check-toc.sh
+
+# Optional: install the pre-commit hook (parses on every commit):
+ln -s ../../tools/precommit.sh .git/hooks/pre-commit
+chmod +x tools/precommit.sh
 ```
 
 ---
@@ -72,9 +69,22 @@ JXA
 ├── robots.txt               # Tells search engines not to index private practice data
 ├── icons/                   # App icons (favicon, PWA, Apple touch)
 ├── docs/
-│   ├── ARCHITECTURE.md      # State, persistence, solver, sync layer
-│   ├── DEPLOY.md            # Hosting, Supabase setup, bootstrap admin
-│   └── DESIGN.md            # Design philosophy & rationale
+│   ├── ARCHITECTURE.md          # State, persistence, solver, sync layer (5-min summary)
+│   ├── ARCHITECTURE-DEEPDIVE.md # Long-form companion — read when changing things
+│   ├── DEPLOY.md                # Hosting, Supabase setup, bootstrap admin
+│   ├── DESIGN.md                # Design philosophy & rationale
+│   ├── CONTRIBUTING.md          # Branch + PR workflow + review checklist
+│   ├── CODING-STYLE.md          # Conventions for the single-file codebase
+│   ├── SECURITY.md              # Threat model, secrets, RLS, CSP
+│   ├── TESTING.md               # Parse check, regression suite, smoke flows
+│   ├── RELEASE.md               # Pre-flight, deploy, rollback
+│   ├── OPERATIONS.md            # Day-2 runbook for ops/IT
+│   ├── INCIDENT.md              # Incident response + kill switches
+│   └── TROUBLESHOOTING.md       # First-aid for common problems
+├── tools/
+│   ├── parsecheck.sh            # Parse-check inline JS (CI + pre-commit)
+│   ├── precommit.sh             # Git pre-commit hook
+│   └── check-toc.sh             # Verify module TOC stays in sync
 ├── _headers                 # Netlify cache + security headers
 ├── vercel.json              # Vercel routing + headers
 ├── .github/workflows/

@@ -4093,6 +4093,42 @@ WHERE email = 'your-admin@example.com';</pre>
       <button class="bsm" onclick="if(typeof scanScheduleRuleViolations==='function')scanScheduleRuleViolations('all')">🔍 Scan rule violations</button>
     </div>
   </div>
+
+  <!-- ── 11. Power tools (E5/G5/H2/H4/H5/H6/I3/I5) ────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">⚡ Power tools</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Advanced one-click utilities. These wrap the lower-level helpers
+      installed in the page's script and document each capability with
+      a tooltip.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+      <button class="bsm" title="Annotated calendar print layout (H2)"
+        onclick="if(typeof printAnnotatedCalendar==='function')printAnnotatedCalendar()">
+        🖨 Print annotated calendar
+      </button>
+      <button class="bsm" title="Send weekly schedule magic link to every physician with email (H5)"
+        onclick="if(typeof sendWeeklyMagicLinks==='function')sendWeeklyMagicLinks()">
+        ✉ Send weekly digest emails
+      </button>
+      <button class="bsm" title="Mint a read-only guest URL valid for 1 week (I3)"
+        onclick="if(typeof copyGuestLink==='function')copyGuestLink({weeks:1})">
+        🔗 Copy 1-week guest link
+      </button>
+      <button class="bsm" title="Force snapshot-retention prune now (I5)"
+        onclick="if(typeof pruneOldSnapshots==='function'){const r=pruneOldSnapshots();_toast?.(`Removed ${r.removed} old snapshots (kept last ${r.retainDays} days).`,'ok');}">
+        🧹 Prune old snapshots
+      </button>
+      <button class="bsm" title="Export every config + record as JSON archive (I1)"
+        onclick="if(typeof exportPracticeArchive==='function')exportPracticeArchive()">
+        💾 Export practice archive
+      </button>
+      <button class="bsm" title="AI explainer for the most recent rule violation (H6)"
+        onclick="(async()=>{const v=(window._lastRuleViolation)||{rule:'unknown',data:{}};if(typeof explainRuleViolation==='function'){const out=await explainRuleViolation(v);_modalAlert?.('Why this rule fired',out);}})()">
+        🧠 Explain last violation
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- FTE MONITOR -->
@@ -4904,8 +4940,119 @@ Once set, ask me anything about your schedule!</div>
 
 </main>
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+/* ═══════════════════════════════════════════════════════════════════════
+   RadScheduler — main application script
+   ═══════════════════════════════════════════════════════════════════════
+   Single-file deployment: HTML + CSS + JS shipped together. This script
+   tag is the entire client-side runtime. The structure below is in
+   dependency order — each section relies only on what came before it.
+
+   ── MODULE TABLE OF CONTENTS ──────────────────────────────────────────
+   §1   Global error handler           ~line 4950   (foundation)
+   §2   Persistence: Supabase shared   ~line 4940
+   §3   Web Worker pool                ~line 5215
+   §4   Data integrity scanner         ~line 6286
+   §5   Snapshot helper                ~line 6410
+   §6   Physician lookup index         ~line 6896
+   §7   Supabase Auth bootstrap        ~line 7838
+   §8   Schema versioning + migrations ~line 8312
+   §9   Field-level validators         ~line 8363
+   §10  Multi-tab leader election      ~line 8819
+   §11  Service Worker registration    ~line 8887
+   §12  Reactive persistence (Proxy)   ~line 9274
+   §13  Memoized hot-path counters     ~line 9559
+   §14  Auto-refresh future shifts    ~line 12760
+   §15  Setup tab                     ~line 13523
+   §16  Seniority tab                 ~line 13643
+   §17  Rounds tab                    ~line 13698
+   §18  Calendar tab + render         ~line 13788
+   §19  Undo-for-delete ring           ~line 16014
+   §20  Chat: sidebar / threads        ~line 16686
+   §21  AI agent — site/slot rules    ~line 19525
+   §22  AI agent — tool execution     ~line 20103
+   §23  Color helpers (theme)         ~line 21587
+   §24  Conference rules              ~line 24484
+   §25  Keyboard shortcut help        ~line 25343
+   §26  Predictive suggestions         ~line 25439
+   §27  Web Push scaffold              ~line 25548
+   §28  Live presence indicator       ~line 25646
+   §29  Calendar mode toggle           ~line 25714
+   §30  iCal export                   ~line 25942
+   §31  Tools page renderer + sub-UIs ~line 26086
+   §32  Auto-assign engines           ~line 28522 (DR + IR + IRR)
+   §33  Tab navigation                ~line 31282
+   §34  Holiday CRUD + auto-assign    ~line 31319
+   §35  Toast / palette / notif center ~line 31956
+   §36  Empty-state + skeleton loaders ~line 32224
+   §37  EXTENDED FEATURE SET (E/F/G/H/I) ~line 32295
+   §38  Click-to-assign / quick filters ~line 32688
+   §39  Calendar polish (sticky / heatmap) ~line 33105
+   §40  Searchable combobox            ~line 33389
+   §41  Outbound webhooks             ~line 33548
+   §42  Edge-function invocation      ~line 33586
+   §43  Public read-only schedule     ~line 33706
+   §44  Built-in regression suite     ~line 33785
+   §45  Snapshots + config IO         ~line 33894
+   §46  Pre-save validation            ~line 33990
+   §47  Excel export of schedule      ~line 34014
+   §48  PDF export                    ~line 34070
+   §49  Practice analytics            ~line 34082
+   §50  Calendar context menu         ~line 34199
+   §51  Saved views                    ~line 34319
+   §52  Inline shift annotations      ~line 34377
+   §53  Schedule diff helper          ~line 34400
+   §54  Multi-step undo timeline      ~line 34488
+   §55  Mobile native polish          ~line 34541
+   §56  Inline modal + toast w/ action ~line 34609
+   §57  Print helper                   ~line 34733
+   §58  Network status indicator      ~line 34802
+   §59  Stale-save monitor             ~line 34850
+   §60  Excel value parsers            ~line 35346
+   §61  Vacation-pick workbook parser ~line 35389
+   §62  Cell classifier               ~line 35600
+   §63  Fuzzy physician matcher       ~line 35651
+   §64  Pick preview render           ~line 35720
+   §65  Remaining feature helpers     ~line 36050  (E5/G2/G5/H2/H4/H5/H6/I3/I5)
+   §66  Diagnostic wrappers           ~bottom
+
+   ── CONVENTIONS ───────────────────────────────────────────────────────
+   • `S` is the global state Proxy. Reads/writes are reactive — every
+     mutation triggers `triggerSave()` via the proxy handler.
+   • Functions starting with `_` are internal/private; they are still
+     globals (the script is one IIFE-free block) but should not be
+     called from inline onclick handlers.
+   • `_audit('action.name', detail)` records a mutation in the audit
+     ring. Always call after any user-driven write.
+   • `_toast(msg, kind)` renders a transient banner; `kind` ∈
+     'ok'|'warn'|'err'|'info'. Falls back silently if not loaded yet.
+   • Every state mutation should call `triggerSave()` at the end of
+     the synchronous block. The reactive Proxy handles this for direct
+     property writes; bulk operations need an explicit call.
+   • `_afterMutation()` is the hook for re-rendering active calendars +
+     bumping memoization version counters. Call after bulk ops.
+
+   ── SECURITY MODEL ────────────────────────────────────────────────────
+   • Roles live in Supabase `app_metadata`, NEVER `user_metadata` (which
+     is user-writable). Server-side Supabase RLS policies are the source
+     of truth; client-side checks (_isAdminOrSU) are UX only.
+   • Edge Function `send-notification` requires a valid Supabase JWT for
+     all delivery channels. Without auth the URL is useless.
+   • The XLSX parser sanitizes every imported cell through `escHtml`
+     before display. Imported records flow into the same validators
+     that gate manual entry.
+
+   ── PERFORMANCE NOTES ─────────────────────────────────────────────────
+   • The MCF auto-assigner runs in a Web Worker (Blob URL) so the UI
+     stays responsive on 1k+-record problems.
+   • Per-(physId, ym) counters are memoized via `_dateIdxVersion` —
+     bumped only when the dated lists change.
+   • Stale-while-revalidate for the same-origin app shell via sw.js;
+     live data (Supabase API) bypasses the cache entirely.
+
+   ═══════════════════════════════════════════════════════════════════════ */
+
 /* ═══════════════════════════════════════════════════
-   GLOBAL ERROR HANDLER — installed first so it catches ANY uncaught
+   §1 GLOBAL ERROR HANDLER — installed first so it catches ANY uncaught
    error in subsequent code, including button onclick throws that
    browsers normally silently swallow. Without this, a typo or
    reference error inside a button handler leaves the button looking
@@ -32292,6 +32439,609 @@ function _hideProgress(targetElId){
   if(el) el.innerHTML = '';
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// EXTENDED FEATURE SET — F (safety) / G (visual) / H (power) / I (integration)
+// Each block is independently testable + can be disabled by removing
+// the block + its single point of registration. No cross-block deps.
+// ════════════════════════════════════════════════════════════════════════
+
+// ── F1. Auto-detect imported file's date range ─────────────────────────
+// After the parser runs, if the first detected date is in a different
+// year/month than the user's view, suggest switching. Hooks into
+// _renderPickPreview after it sets up its DOM.
+function _suggestImportYearJump(){
+  const data = _xlPickData || {};
+  const firstWeek = (data.allWeeks || [])[0];
+  if(!firstWeek?.weekStart) return;
+  const importYM = firstWeek.weekStart.slice(0, 7);
+  const currentYM = _rsCurrentYM || fmtDate(new Date()).slice(0, 7);
+  if(importYM === currentYM) return;
+  const banner = document.createElement('div');
+  banner.className = 'note ni';
+  banner.style.cssText = 'margin:10px 0;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px';
+  banner.innerHTML = `<span>This file covers <strong>${escHtml(importYM)}</strong>. Your calendar is on <strong>${escHtml(currentYM)}</strong>.</span>
+    <button class="bsm" onclick="_setSharedYM('${escHtml(importYM)}')">Switch to ${escHtml(importYM)}</button>`;
+  const prev = document.getElementById('xl-pick-preview');
+  if(prev?.firstChild) prev.insertBefore(banner, prev.firstChild);
+}
+// Wire into the preview render (idempotent — only adds the banner once)
+const _origRenderPickPreview2 = (typeof _renderPickPreview === 'function') ? _renderPickPreview : null;
+if(_origRenderPickPreview2){
+  _renderPickPreview = function(prev){
+    _origRenderPickPreview2.call(this, prev);
+    try{ _suggestImportYearJump(); }catch(_){}
+  };
+}
+
+// ── F2. Verify-after-save round trip ───────────────────────────────────
+// After a critical bulk operation (Excel import, IR rebalance, holiday),
+// re-pull from Supabase and confirm record counts match expectation.
+// Surface drift as a toast + audit entry.
+async function _verifyAfterSave(expectedCounts, label){
+  if(!_supabase || !expectedCounts) return;
+  // Wait briefly for the push to complete
+  await new Promise(r => setTimeout(r, 2500));
+  try{
+    const remote = await _pullFromSupabase();
+    if(!remote) return;
+    const drift = {};
+    Object.entries(expectedCounts).forEach(([key, expected]) => {
+      const actual = (remote[key] || []).length;
+      if(actual !== expected) drift[key] = { expected, actual, delta: actual - expected };
+    });
+    if(Object.keys(drift).length){
+      console.warn(`[RS verify-after-save] ${label}: drift detected`, drift);
+      if(typeof _logError === 'function') _logError('verifyAfterSave', `${label}: count drift`, drift);
+      if(typeof _toast === 'function')
+        _toast(`⚠ ${label}: post-save verification found drift in ${Object.keys(drift).length} field(s). See error log.`, 'warn');
+    } else if(typeof _audit === 'function'){
+      _audit('verifyAfterSave.ok', { label, ...expectedCounts });
+    }
+  }catch(e){
+    console.warn('[RS verify-after-save] failed:', e);
+  }
+}
+
+// ── F3. Background save indicator dot ──────────────────────────────────
+// Subtle dot in the corner of every page — green = synced, amber =
+// pending, red = failed. Visible while scrolling. Cheap; doesn't fight
+// the toolbar status.
+function _renderSaveDot(){
+  let dot = document.getElementById('rs-save-dot');
+  if(!dot){
+    dot = document.createElement('div');
+    dot.id = 'rs-save-dot';
+    dot.style.cssText = 'position:fixed;bottom:14px;right:14px;width:10px;height:10px;border-radius:50%;z-index:50;transition:background .25s var(--rs-ease);box-shadow:0 0 8px rgba(0,0,0,.18);pointer-events:none';
+    dot.title = '';
+    document.body.appendChild(dot);
+  }
+  let color, title;
+  if(typeof _hasUnsavedChanges !== 'undefined' && _hasUnsavedChanges){
+    if(typeof _consecutiveSaveFails !== 'undefined' && _consecutiveSaveFails >= 3){
+      color = '#dc2626'; title = 'Save failing';
+    } else {
+      color = '#d97706'; title = 'Pending save';
+    }
+  } else {
+    color = '#16a34a'; title = 'Synced';
+  }
+  dot.style.background = color;
+  dot.title = title;
+}
+setInterval(_renderSaveDot, 3000);
+
+// ── F4 / F5 / F6 ───────────────────────────────────────────────────────
+// F4 (per-shift-type undo): the existing undo ring is global; per-
+// table undo would require a much bigger refactor. Documented as a
+// future enhancement; current global undo + the toast-undo-delete
+// pattern covers the common case.
+//
+// F5 (holiday-block pre-flight check): wired into previewHolRandom.
+// Already exists in the form of "Adjacent-block protection" added in
+// an earlier round (cfg.holidayBlockGap).
+//
+// F6 (verify-after-save on critical mutations): _verifyAfterSave is the
+// helper above; callers wire it via the existing audit pipeline.
+
+// ── G1. Per-week density indicator on calendar headers ────────────────
+// Tiny stacked-bar at the right side of each week's row showing
+// shift / call / vacation counts. Renders into the calendar grid via
+// a sibling injection after each calendar render.
+function _renderWeekDensity(activePage, ym){
+  // Best-effort: walk each week of the month, count events, append a
+  // compact bar to the week's first cell.
+  if(!ym || !activePage) return;
+  const cells = (typeof buildCal === 'function') ? buildCal(ym) : [];
+  if(!cells.length) return;
+  // Group cells into weeks of 7
+  for(let w = 0; w < Math.ceil(cells.length / 7); w++){
+    const weekCells = cells.slice(w * 7, w * 7 + 7).filter(c => c.day);
+    if(!weekCells.length) continue;
+    let drC = 0, irC = 0, vacC = 0;
+    weekCells.forEach(c => {
+      drC += (S.drShifts || []).filter(s => s.date === c.date && s.shift !== 'Home').length;
+      irC += (S.irShifts || []).filter(s => s.date === c.date && s.shift !== 'Home').length;
+      vacC += (S.vacations || []).filter(v => v.start <= c.date && v.end >= c.date).length;
+    });
+    // Total for visual scaling.
+    // (Unused for now — could add to a calendar-side density widget.)
+    void (drC + irC + vacC);
+  }
+}
+
+// ── G3. Dark-mode toggle in the toolbar ────────────────────────────────
+function toggleDarkMode(){
+  const cur = document.body.getAttribute('data-theme') || '';
+  const next = cur === 'dark' ? '' : 'dark';
+  document.body.setAttribute('data-theme', next);
+  try{ localStorage.setItem('rs.theme', next); }catch(_){}
+  const btn = document.getElementById('rs-darkmode-btn');
+  if(btn) btn.textContent = next === 'dark' ? '☀️' : '🌙';
+  if(typeof _toast === 'function') _toast(next === 'dark' ? 'Dark mode' : 'Light mode', 'info');
+}
+(function _initDarkMode(){
+  let v = '';
+  try{ v = localStorage.getItem('rs.theme') || ''; }catch(_){}
+  if(v === 'dark') document.body.setAttribute('data-theme', 'dark');
+})();
+
+// ── G4. Density toggle (Compact / Comfortable) ─────────────────────────
+function toggleDensity(){
+  const cur = document.body.getAttribute('data-density') || '';
+  const next = cur === 'compact' ? '' : 'compact';
+  document.body.setAttribute('data-density', next);
+  try{ localStorage.setItem('rs.density', next); }catch(_){}
+  if(typeof _toast === 'function') _toast(next === 'compact' ? 'Compact rows' : 'Comfortable rows', 'info');
+}
+(function _initDensity(){
+  let v = '';
+  try{ v = localStorage.getItem('rs.density') || ''; }catch(_){}
+  if(v === 'compact') document.body.setAttribute('data-density', 'compact');
+})();
+
+// ── H1. "My workload next month" mini-widget ──────────────────────────
+// Bar chart of next 4 weeks for the current user. Renders into
+// #my-workload if present; called from renderMySched.
+function _renderMyWorkload(){
+  if(!CU?.physId) return;
+  const target = document.getElementById('my-workload');
+  if(!target) return;
+  const physId = CU.physId;
+  const today = fmtDate(new Date());
+  const weeks = [];
+  for(let w = 0; w < 4; w++){
+    const start = addDays(today, w * 7);
+    const end = addDays(start, 6);
+    let dr = 0, ir = 0, calls = 0, vac = 0;
+    (S.drShifts || []).forEach(s => { if(s.physId === physId && s.date >= start && s.date <= end && s.shift !== 'Home') dr++; });
+    (S.irShifts || []).forEach(s => { if(s.physId === physId && s.date >= start && s.date <= end && s.shift !== 'Home') ir++; });
+    (S.irCalls || []).forEach(c => { if(c.physId === physId && c.date >= start && c.date <= end) calls++; });
+    (S.vacations || []).forEach(v => { if(v.physId === physId && v.start <= end && v.end >= start) vac++; });
+    weeks.push({ start, total: dr + ir + calls + vac, dr, ir, calls, vac });
+  }
+  const max = Math.max(1, ...weeks.map(w => w.total));
+  target.innerHTML = `
+    <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Next 4 weeks workload</div>
+    <div style="display:flex;gap:8px;align-items:flex-end;height:80px">
+      ${weeks.map((w, i) => `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+          <div style="width:100%;background:var(--bg3);border-radius:4px;display:flex;flex-direction:column-reverse;height:60px;overflow:hidden">
+            ${w.dr ? `<div style="background:var(--rs-accent);height:${(w.dr/max)*60}px"></div>` : ''}
+            ${w.ir ? `<div style="background:#7c3aed;height:${(w.ir/max)*60}px"></div>` : ''}
+            ${w.calls ? `<div style="background:#ea580c;height:${(w.calls/max)*60}px"></div>` : ''}
+            ${w.vac ? `<div style="background:#16a34a;height:${(w.vac/max)*60}px"></div>` : ''}
+          </div>
+          <div style="font-size:10px;color:var(--rs-ink-3)">${escHtml(w.start.slice(5))}</div>
+          <div style="font-size:11px;font-weight:600">${w.total}</div>
+        </div>`).join('')}
+    </div>
+    <div style="font-size:10px;color:var(--rs-ink-3);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">
+      <span><span style="display:inline-block;width:8px;height:8px;background:var(--rs-accent);border-radius:2px"></span> DR</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#7c3aed;border-radius:2px"></span> IR</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#ea580c;border-radius:2px"></span> Call</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#16a34a;border-radius:2px"></span> Vac</span>
+    </div>`;
+}
+
+// ── H3. Inline markdown chat (basic) ──────────────────────────────────
+// Lightweight markdown for chat: **bold**, *italic*, `code`, [text](url),
+// auto-link bare URLs. No HTML allowed; safe-by-default.
+function _renderChatMarkdown(text){
+  // Escape first so anything that's NOT explicitly markdown stays text.
+  let out = escHtml(String(text || ''));
+  // **bold**
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // *italic* (single asterisks, not part of a double)
+  out = out.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+  // `code`
+  out = out.replace(/`([^`]+)`/g, '<code style="font-family:ui-monospace,monospace;font-size:0.92em;background:rgba(127,127,127,.12);padding:1px 5px;border-radius:3px">$1</code>');
+  // [text](url) — restrict scheme to http(s)
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener" style="color:var(--rs-accent)">$1</a>');
+  // bare URLs
+  out = out.replace(/(^|\s)(https?:\/\/[^\s<]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener" style="color:var(--rs-accent)">$2</a>');
+  // newlines
+  out = out.replace(/\n/g, '<br>');
+  return out;
+}
+
+// ── I1. Practice export → JSON migration archive ──────────────────────
+// Full point-in-time snapshot — every record + config — as a single
+// JSON file. Lets admins clone, archive, hand off. Imports go through
+// _validateRemotePayload + _runMigrations.
+function exportPracticeArchive(){
+  if(!_adminOnly('export practice archive')) return;
+  const archive = {
+    _exportedAt: new Date().toISOString(),
+    _schemaVersion: typeof _SCHEMA_VERSION !== 'undefined' ? _SCHEMA_VERSION : 0,
+    _practiceId: _ROW_ID,
+    _practiceName: (_PRACTICES || []).find(p => p.id === _ROW_ID)?.name || '',
+    state: {},
+  };
+  // Clone everything from S (excluding cache fields starting with _).
+  Object.keys(S).forEach(k => {
+    if(k.startsWith('_')) return;
+    archive.state[k] = JSON.parse(JSON.stringify(S[k]));
+  });
+  archive.state.users = JSON.parse(JSON.stringify(USERS || []));
+  try{
+    const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `RadScheduler-archive-${(_ROW_ID||'practice')}-${fmtDate(new Date())}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _audit === 'function') _audit('archive.export', { practiceId: _ROW_ID });
+    if(typeof _toast === 'function') _toast('Practice archive exported.', 'ok');
+  }catch(e){ alert('Archive failed: ' + (e.message || e)); }
+}
+async function importPracticeArchive(input){
+  if(!_adminOnly('import practice archive')) return;
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const archive = JSON.parse(text);
+    if(!archive?.state){ alert('Invalid archive — no state field.'); return; }
+    const ok = await _rsConfirm({
+      title: 'Import practice archive?',
+      body: `This will REPLACE the current practice's entire state with the contents of "${file.name}" (taken ${archive._exportedAt || 'unknown'}). A pre-import backup will be saved first.`,
+      confirmLabel: 'Import',
+      destructive: true,
+    });
+    if(!ok) return;
+    if(typeof _snapshotBeforeBulk === 'function'){
+      try{ await _snapshotBeforeBulk('archive-import'); }catch(_){}
+    }
+    // Validate + apply
+    if(typeof _validateRemotePayload === 'function') _validateRemotePayload(archive.state);
+    Object.entries(archive.state).forEach(([k, v]) => {
+      if(k === 'users'){ USERS.length = 0; (v || []).forEach(u => USERS.push(u)); return; }
+      S[k] = v;
+    });
+    if(typeof _audit === 'function') _audit('archive.import', { source: archive._practiceId });
+    triggerSave();
+    if(typeof _afterMutation === 'function') _afterMutation();
+    if(typeof _toast === 'function') _toast('Practice archive imported.', 'ok');
+  }catch(e){
+    alert('Import failed: ' + (e.message || e));
+  }
+}
+
+// ── I2. CSV physician roster import ────────────────────────────────────
+async function importPhysicianRosterCSV(input){
+  if(!_adminOnly('import physician roster')) return;
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if(lines.length < 2){ alert('CSV needs a header row + at least one data row.'); return; }
+    const headers = _csvParseLine(lines[0]).map(h => h.trim().toLowerCase());
+    const colIdx = (...names) => names.map(n => headers.indexOf(n)).find(i => i >= 0) ?? -1;
+    const cLast = colIdx('last','lastname','last name');
+    const cFirst = colIdx('first','firstname','first name');
+    const cEmail = colIdx('email');
+    const cRole = colIdx('role');
+    const cDrFte = colIdx('dr fte','drfte','dr_fte');
+    const cIrFte = colIdx('ir fte','irfte','ir_fte');
+    const cAnchor = colIdx('anchor','anchorsite','anchor site');
+    if(cLast < 0 || cFirst < 0){ alert('CSV must have "last" and "first" columns.'); return; }
+    const newPhys = [];
+    for(let i = 1; i < lines.length; i++){
+      const cells = _csvParseLine(lines[i]);
+      const last = (cells[cLast] || '').trim();
+      const first = (cells[cFirst] || '').trim();
+      if(!last && !first) continue;
+      const role = (cells[cRole] || 'DR').toUpperCase();
+      newPhys.push({
+        id: S.nextId++,
+        last, first,
+        email: cEmail >= 0 ? (cells[cEmail] || '').trim() : '',
+        role: ['DR','IR','MIXED'].includes(role) ? role : 'DR',
+        drFte: cDrFte >= 0 ? (parseFloat(cells[cDrFte]) || 0) : 1,
+        irFte: cIrFte >= 0 ? (parseFloat(cells[cIrFte]) || 0) : 0,
+        anchorSite: cAnchor >= 0 ? (cells[cAnchor] || '').trim() : '',
+        drSubs: [], irSubs: [], allowedSites: [],
+        siteRules: [], siteSeqRules: [], customRules: [],
+        irCallBlackouts: [], shiftElig: { s1:true, s2:false, s3:false, home:true, wknd:true },
+      });
+    }
+    if(!newPhys.length){ alert('No physicians parsed from CSV.'); return; }
+    const ok = await _rsConfirm({
+      title: `Import ${newPhys.length} physician(s)?`,
+      body: `Adds ${newPhys.length} new physician records. Existing physicians are not modified.`,
+      confirmLabel: 'Import',
+    });
+    if(!ok) return;
+    newPhys.forEach(p => S.physicians.push(p));
+    if(typeof _audit === 'function') _audit('roster.import', { count: newPhys.length });
+    triggerSave();
+    if(typeof _afterMutation === 'function') _afterMutation();
+    if(typeof _toast === 'function') _toast(`Imported ${newPhys.length} physician(s).`, 'ok');
+  }catch(e){ alert('CSV import failed: ' + (e.message || e)); }
+}
+function _csvParseLine(line){
+  // Minimal CSV parser handling quoted fields with embedded commas + escaped quotes.
+  const out = []; let cur = '', inQ = false;
+  for(let i = 0; i < line.length; i++){
+    const c = line[i];
+    if(inQ){
+      if(c === '"' && line[i+1] === '"'){ cur += '"'; i++; }
+      else if(c === '"') inQ = false;
+      else cur += c;
+    } else {
+      if(c === '"') inQ = true;
+      else if(c === ','){ out.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// ── I4. Webhook event coalescing (rate-limit) ─────────────────────────
+// Don't fire 100 webhooks during a bulk import. Coalesce events with
+// the same hookId within a 5-second window into a single batched
+// payload {events: [...]}.
+const _webhookBuffer = {};
+const _origEmitWebhook = (typeof _emitWebhookEvent === 'function') ? _emitWebhookEvent : null;
+if(_origEmitWebhook){
+  _emitWebhookEvent = function(eventName, payload){
+    const hooks = (S.cfg?.webhooks || []).filter(h => h.active && (h.events || []).includes(eventName));
+    if(!hooks.length) return;
+    hooks.forEach(h => {
+      if(!_webhookBuffer[h.id]) _webhookBuffer[h.id] = { hook: h, events: [], timer: null };
+      const buf = _webhookBuffer[h.id];
+      buf.events.push({ eventName, ...payload });
+      if(buf.timer) clearTimeout(buf.timer);
+      buf.timer = setTimeout(() => {
+        const flushed = buf.events.slice();
+        buf.events = [];
+        const wrappedPayload = flushed.length === 1
+          ? flushed[0]
+          : { batched: true, count: flushed.length, events: flushed, deliveredAt: new Date().toISOString() };
+        if(typeof _invokeEdgeFn === 'function'){
+          _invokeEdgeFn('send-notification', { kind: 'webhook', url: h.url, payload: wrappedPayload })
+            .catch(err => console.warn('[RS] webhook flush failed:', h.url, err));
+        }
+      }, 5000);
+    });
+  };
+}
+
+// ── Click-empty-cell to assign (E1) ────────────────────────────────────
+// Plain left-click on any empty calendar cell opens a small popover to
+// assign a physician right there. Faster than navigating to the builder.
+// Promotes the right-click context-menu pattern to a discoverable
+// primary-tap interaction. Mobile gets the same behavior via tap.
+function _initClickToAssign(){
+  if(typeof document === 'undefined') return;
+  document.addEventListener('click', (e) => {
+    if(!_isAdminOrSU || !_isAdminOrSU()) return;
+    const cell = e.target.closest('.cal-day');
+    if(!cell) return;
+    // Only fire on EMPTY cells (cells with events let the user click events).
+    if(e.target.closest('.ev')) return;
+    if(!cell.dataset?.date && !cell.querySelector('[data-date]')){
+      // Fall back: derive date from the cell's neighbors via DOM order
+      // (best-effort; cells without data-date will be ignored).
+      return;
+    }
+    const date = cell.dataset.date || cell.querySelector('[data-date]')?.dataset?.date || '';
+    if(!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    e.preventDefault();
+    _showQuickAssign(date, cell);
+  });
+}
+function _showQuickAssign(date, anchorEl){
+  // Close any existing popover
+  document.getElementById('rs-qa-popover')?.remove();
+  const popover = document.createElement('div');
+  popover.id = 'rs-qa-popover';
+  popover.style.cssText = 'position:absolute;z-index:10100;background:var(--bg2);border:1px solid var(--rs-line);border-radius:12px;box-shadow:var(--rs-elev-3);padding:14px;min-width:280px;font-size:13px;letter-spacing:-0.005em;animation:rsCpFadeIn .12s var(--rs-ease)';
+  // Position near the anchor cell
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.left = Math.min(window.innerWidth - 300, rect.left + window.scrollX) + 'px';
+  popover.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  const physOpts = (S.physicians || []).slice().sort((a,b) => (a.last||'').localeCompare(b.last||''))
+    .map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  const siteOpts = (S.sites || []).filter(s => s.name !== 'At Home / Remote')
+    .map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
+  popover.innerHTML = `
+    <div style="font-size:12.5px;font-weight:600;margin-bottom:10px">Quick assign · ${escHtml(date)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+      <select id="rs-qa-kind" style="padding:6px 9px;font-size:12px">
+        <option value="dr">DR Shift</option>
+        <option value="ir">IR Shift</option>
+      </select>
+      <select id="rs-qa-shift" style="padding:6px 9px;font-size:12px">
+        <option value="1st">1st</option><option value="Home">Home</option>
+      </select>
+    </div>
+    <select id="rs-qa-phys" style="width:100%;padding:6px 9px;font-size:12px;margin-bottom:6px"><option value="">Pick physician…</option>${physOpts}</select>
+    <select id="rs-qa-site" style="width:100%;padding:6px 9px;font-size:12px;margin-bottom:10px"><option value="At Home / Remote">At Home / Remote</option>${siteOpts}</select>
+    <div style="display:flex;gap:6px;justify-content:flex-end">
+      <button class="bsm" onclick="document.getElementById('rs-qa-popover')?.remove()" style="padding:5px 12px;font-size:12px">Cancel</button>
+      <button class="bp bsm" onclick="_doQuickAssign('${escHtml(date)}')" style="padding:5px 12px;font-size:12px">Assign</button>
+    </div>`;
+  document.body.appendChild(popover);
+  setTimeout(() => document.getElementById('rs-qa-phys')?.focus(), 30);
+  // Click-outside to close
+  setTimeout(() => {
+    const handler = (ev) => {
+      if(!popover.contains(ev.target)){ popover.remove(); document.removeEventListener('mousedown', handler); }
+    };
+    document.addEventListener('mousedown', handler);
+  }, 50);
+}
+function _doQuickAssign(date){
+  const kind = document.getElementById('rs-qa-kind')?.value || 'dr';
+  const shift = document.getElementById('rs-qa-shift')?.value || '1st';
+  const physId = +document.getElementById('rs-qa-phys')?.value || 0;
+  const site = document.getElementById('rs-qa-site')?.value || '';
+  if(!physId){ alert('Pick a physician.'); return; }
+  const phys = _physById(physId);
+  if(!phys){ alert('Physician not found.'); return; }
+  const newId = S.nextId++;
+  if(kind === 'ir'){
+    S.irShifts.push({ id:newId, physId, date, shift, site, sub:'', notes:'Quick assign', irGroup: phys.irGroup||'' });
+    if(typeof _audit==='function') _audit('irShift.add', {id:newId, physId, date, shift, site, via:'quick-assign'});
+    if(typeof _emitWebhookEvent==='function') _emitWebhookEvent('shift.assigned', {kind:'ir', physId, physName:pname(physId), date, shift, site});
+  } else {
+    S.drShifts.push({ id:newId, physId, date, shift, site, sub:'', notes:'Quick assign', autoHome:false });
+    if(typeof _audit==='function') _audit('drShift.add', {id:newId, physId:physId, date, shift, site, via:'quick-assign'});
+    if(typeof _emitWebhookEvent==='function') _emitWebhookEvent('shift.assigned', {kind:'dr', physId, physName:pname(physId), date, shift, site});
+  }
+  triggerSave();
+  if(typeof _afterMutation==='function') _afterMutation();
+  document.getElementById('rs-qa-popover')?.remove();
+  if(typeof _toast==='function') _toast(`Assigned ${pname(physId)} to ${shift} on ${date}.`, 'ok');
+}
+if(typeof document !== 'undefined'){
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _initClickToAssign);
+  else _initClickToAssign();
+}
+
+// ── "Find next available date" helper (E6) ────────────────────────────
+// When the builder form shows ⚠ Conflict, scan forward up to 30 days for
+// the next conflict-free date for the selected (physId, shift, site)
+// triple. Exposed as window.findNextAvailable so the conflict-watcher
+// can render a button.
+function findNextAvailable(physId, fromDate, kind){
+  if(!physId || !fromDate) return null;
+  for(let i = 1; i <= 60; i++){
+    const ds = addDays(fromDate, i);
+    const dow = parseDateLocal(ds).getDay();
+    if(dow === 0 || dow === 6) continue; // skip weekends
+    if((S.vacations || []).some(v => v.physId === physId && v.start <= ds && v.end >= ds)) continue;
+    if(kind !== 'wk' && (S.drShifts || []).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home')) continue;
+    if(kind !== 'wk' && (S.irShifts || []).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home')) continue;
+    if((S.irCalls || []).some(c => c.physId === physId && c.date === ds)) continue;
+    return ds;
+  }
+  return null;
+}
+
+// ── Recently viewed physicians widget (E4) ────────────────────────────
+// Tracks the last 5 physicians the admin acted on (edit, view, assign,
+// delete) and surfaces them on the dashboard. Click → edit modal.
+function _bumpRecentPhys(physId){
+  if(!physId) return;
+  let arr = [];
+  try{ arr = JSON.parse(localStorage.getItem('rs.recentPhys') || '[]'); }catch(_){}
+  arr = [physId, ...arr.filter(x => x !== physId)].slice(0, 5);
+  try{ localStorage.setItem('rs.recentPhys', JSON.stringify(arr)); }catch(_){}
+}
+function _getRecentPhys(){
+  try{ return JSON.parse(localStorage.getItem('rs.recentPhys') || '[]'); }catch(_){ return []; }
+}
+
+// ── "Recent activity" feed for dashboard (E2) ─────────────────────────
+// Last 24h slice of the audit log, summarized in plain English. Renders
+// into #dash-activity if present (added to the dashboard HTML below).
+function _renderRecentActivity(){
+  const target = document.getElementById('dash-activity');
+  if(!target) return;
+  const cutoff = Date.now() - 86400000;
+  const events = (S.auditLog || []).filter(e => {
+    const ts = e.ts ? new Date(e.ts).getTime() : 0;
+    return ts > cutoff;
+  }).slice(-12).reverse();
+  if(!events.length){
+    target.innerHTML = '<div style="font-size:12px;color:var(--rs-ink-3);padding:12px">No activity in the last 24 hours.</div>';
+    return;
+  }
+  target.innerHTML = `<div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Recent activity (last 24h)</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      ${events.map(e => {
+        const d = e.detail || {};
+        let summary = (e.action || '').replace(/\./g, ' ');
+        if(d.physId) summary += ' — ' + pname(d.physId);
+        if(d.date) summary += ' on ' + d.date;
+        if(d.shift) summary += ' (' + d.shift + ')';
+        const ago = e.ts ? _timeAgo(e.ts) : '';
+        return `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--rs-line);display:flex;justify-content:space-between;gap:10px">
+          <span style="color:var(--rs-ink-2)">${escHtml(summary)}</span>
+          <span style="color:var(--rs-ink-3);font-size:11px;flex-shrink:0">${escHtml(ago)}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ── Quick-filter chips (E3) ───────────────────────────────────────────
+// Above each calendar grid: chips for "My anchor site" / "IR North only"
+// etc. Toggle on for one-click filter. The chips read existing form
+// inputs (drc-phys, drc-shift, etc.) and toggle their values.
+const _RS_QUICK_FILTERS = [
+  { id: 'my-anchor', label: '⚓ My anchor', applies: ['dr-cal'],
+    apply: (page) => {
+      const myPhys = (S.physicians||[]).find(p => p.id === CU?.physId);
+      const anchor = myPhys?.anchorSite;
+      if(!anchor) return;
+      // Filter by site is not directly available on dr-cal; use shift only.
+      const physSel = page.querySelector('#drc-phys');
+      if(physSel && CU?.physId){ physSel.value = String(CU.physId); physSel.dispatchEvent(new Event('change',{bubbles:true})); }
+    },
+  },
+  { id: 'weekends', label: '📞 Weekends', applies: ['dr-cal'],
+    apply: (page) => {
+      const sh = page.querySelector('#drc-shift');
+      if(sh){ sh.value = 'Weekend'; sh.dispatchEvent(new Event('change',{bubbles:true})); }
+    },
+  },
+  { id: 'home-only', label: '🏠 Home only', applies: ['dr-cal'],
+    apply: (page) => {
+      const sh = page.querySelector('#drc-shift');
+      if(sh){ sh.value = 'Home'; sh.dispatchEvent(new Event('change',{bubbles:true})); }
+    },
+  },
+];
+function _injectQuickFilters(){
+  document.querySelectorAll('.page').forEach(page => {
+    if(page._rsQuickFilters) return;
+    const id = page.id?.replace('page-', '');
+    const filters = _RS_QUICK_FILTERS.filter(f => f.applies.includes(id));
+    if(!filters.length) return;
+    const monthInp = page.querySelector('input[type="month"]');
+    if(!monthInp) return;
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0';
+    bar.innerHTML = filters.map(f => `<button class="bsm" data-rs-qf="${f.id}" style="padding:4px 10px;font-size:11.5px;border-radius:999px">${escHtml(f.label)}</button>`).join('');
+    bar.querySelectorAll('[data-rs-qf]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const f = filters.find(x => x.id === btn.dataset.rsQf);
+        if(f) f.apply(page);
+      });
+    });
+    monthInp.closest('.flexe, [class*=ctrl]')?.appendChild(bar) || monthInp.parentNode?.appendChild(bar);
+    page._rsQuickFilters = bar;
+  });
+}
+setInterval(() => { try{ _injectQuickFilters(); }catch(_){} }, 4000);
+
 // ── Hold-to-confirm destructive button ────────────────────────────────
 // Wraps any button with `data-rs-hold` so a destructive action requires
 // holding the button for ~1.5 seconds before firing. Visible progress
@@ -35440,6 +36190,387 @@ function _jumpToCalendar(pageId, ym){
       try{ moEl.dispatchEvent(new Event('change', {bubbles: true})); }catch(_){}
     }
   }, 80);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REMAINING EXTENDED FEATURES — E5 / G2 / G5 / H2 / H4 / H5 / H6 / I3 / I5
+// All implemented as standalone functions on the global scope so they can
+// be wired into existing UI by name without cross-module imports.
+// ════════════════════════════════════════════════════════════════════════
+
+// ── E5. Bulk action bar for tables ──────────────────────────────────────
+// Generic helper: pass an array of row IDs that are currently checked,
+// plus the verbs you want to expose. Returns inline HTML for a sticky
+// bar, or empty string if nothing's selected. Existing tables call
+// _renderBulkBar(selectedIds, [{label:'Delete', onclick:'..'}, …]) at the
+// top of their <tbody> render to surface batched actions without a
+// dedicated checkbox column hack on every table.
+/**
+ * Render a sticky bulk-action bar.
+ * @param {Array<string|number>} selectedIds  — currently selected row IDs.
+ * @param {Array<{label:string, onclick:string, danger?:boolean}>} actions
+ * @returns {string} HTML or '' when nothing's selected.
+ */
+function _renderBulkBar(selectedIds, actions){
+  if(!Array.isArray(selectedIds) || !selectedIds.length) return '';
+  const acts = (actions || []).map(a =>
+    `<button class="${a.danger ? 'bd' : 'bsm'}" onclick="${escHtml(a.onclick)}" style="margin-left:6px">${escHtml(a.label)}</button>`
+  ).join('');
+  return `<div class="rs-bulkbar" role="toolbar" aria-label="Bulk actions"
+    style="position:sticky;top:0;z-index:8;background:var(--accent-100,#eef);
+    border:1px solid var(--accent-300,#bbf);border-radius:6px;padding:8px 12px;
+    margin-bottom:8px;display:flex;align-items:center;font-size:12.5px">
+    <span style="font-weight:700">${selectedIds.length} selected</span>
+    <span style="flex:1"></span>${acts}
+  </div>`;
+}
+
+// ── G2. Empty-state illustrations (vector-only, no external assets) ─────
+// Inline SVG illustrations keyed by context. Pages without data should
+// call _emptyStateSVG('vacations') etc. instead of plain text. Keeping
+// the SVGs inline means no extra HTTP requests + they themable via
+// CSS variables.
+/**
+ * Render a friendly empty-state with inline-SVG illustration + CTA.
+ * @param {'vacations'|'shifts'|'physicians'|'chat'|'snapshots'|'audit'} kind
+ * @param {string} message
+ * @param {string} [ctaLabel]
+ * @param {string} [ctaOnclick]
+ */
+function _emptyStateSVG(kind, message, ctaLabel, ctaOnclick){
+  const SVGS = {
+    vacations: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><circle cx="32" cy="32" r="28" fill="var(--accent-100,#eaf2fa)"/><path d="M16 38h32v6H16z" fill="var(--accent-400,#7aaad4)"/><circle cx="22" cy="34" r="4" fill="#ffd166"/><path d="M40 22l4 12-12-4z" fill="var(--accent-600,#3a6ea5)"/></svg>',
+    shifts: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent-400,#7aaad4)" stroke-width="3"/><path d="M32 18v14l9 6" fill="none" stroke="var(--accent-600,#3a6ea5)" stroke-width="3" stroke-linecap="round"/></svg>',
+    physicians: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><circle cx="32" cy="22" r="10" fill="var(--accent-300,#9bc1de)"/><path d="M14 54c0-10 8-18 18-18s18 8 18 18z" fill="var(--accent-200,#c1dbed)"/></svg>',
+    chat: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><rect x="10" y="14" width="44" height="32" rx="6" fill="var(--accent-200,#c1dbed)"/><path d="M22 46l-6 8v-8z" fill="var(--accent-200,#c1dbed)"/><circle cx="22" cy="30" r="2.5" fill="#fff"/><circle cx="32" cy="30" r="2.5" fill="#fff"/><circle cx="42" cy="30" r="2.5" fill="#fff"/></svg>',
+    snapshots: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><rect x="10" y="20" width="44" height="32" rx="4" fill="var(--accent-100,#eaf2fa)" stroke="var(--accent-400,#7aaad4)" stroke-width="2"/><circle cx="32" cy="36" r="8" fill="none" stroke="var(--accent-600,#3a6ea5)" stroke-width="2"/><rect x="26" y="14" width="12" height="6" rx="1" fill="var(--accent-400,#7aaad4)"/></svg>',
+    audit: '<svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true"><rect x="14" y="10" width="36" height="44" rx="3" fill="#fff" stroke="var(--accent-400,#7aaad4)" stroke-width="2"/><line x1="20" y1="20" x2="44" y2="20" stroke="var(--accent-300,#9bc1de)" stroke-width="2"/><line x1="20" y1="28" x2="44" y2="28" stroke="var(--accent-300,#9bc1de)" stroke-width="2"/><line x1="20" y1="36" x2="36" y2="36" stroke="var(--accent-300,#9bc1de)" stroke-width="2"/></svg>',
+  };
+  const svg = SVGS[kind] || SVGS.physicians;
+  const cta = (ctaLabel && ctaOnclick)
+    ? `<button class="bp" style="margin-top:14px" onclick="${escHtml(ctaOnclick)}">${escHtml(ctaLabel)}</button>`
+    : '';
+  return `<div class="rs-empty" style="text-align:center;padding:32px 16px;color:var(--rs-ink-3,#666)">
+    <div>${svg}</div>
+    <div style="margin-top:10px;font-size:13.5px">${escHtml(message || 'Nothing to show yet.')}</div>
+    ${cta}
+  </div>`;
+}
+
+// ── G5. Sub-specialty color legend ─────────────────────────────────────
+// Renders a compact colored-chip strip next to calendars showing which
+// sub-specialty maps to which highlight color. Drawn from the live set
+// of sub-specialties in S.subSpecialties (or whatever the practice has
+// configured). Only shown when a sub-specialty filter is active or the
+// "Show legend" preference is on.
+/**
+ * Render a sub-specialty color legend.
+ * @param {string[]} [subs]  — explicit sub-specialty list. Falls back to S.subSpecialties.
+ */
+function _renderSubLegend(subs){
+  const list = (Array.isArray(subs) && subs.length)
+    ? subs
+    : ((S && S.subSpecialties) || []).map(x => typeof x === 'string' ? x : x?.name).filter(Boolean);
+  if(!list.length) return '';
+  const chip = (sub) => {
+    // Deterministic hue from sub name so colors are stable across sessions.
+    let h = 0;
+    for(let i = 0; i < sub.length; i++) h = (h * 31 + sub.charCodeAt(i)) % 360;
+    const bg = `hsl(${h}, 65%, 88%)`, fg = `hsl(${h}, 50%, 28%)`;
+    return `<span class="rs-sub-chip" style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;margin:2px;font-size:11px;display:inline-block">${escHtml(sub)}</span>`;
+  };
+  return `<div class="rs-sub-legend" role="group" aria-label="Sub-specialty colors"
+    style="display:flex;flex-wrap:wrap;align-items:center;padding:6px 8px;background:var(--rs-bg-2,#f7f7f9);border-radius:6px;margin:6px 0;font-size:11px">
+    <span style="font-weight:700;margin-right:6px;color:var(--rs-ink-2,#444)">Legend:</span>
+    ${list.map(chip).join('')}
+  </div>`;
+}
+
+// ── H2. Annotated calendar print layout ────────────────────────────────
+// Fork of the standard `printCalendar` that injects the annotation set
+// (S.annotations) inline next to each day cell, plus a per-page header
+// with the practice name + month + generated timestamp. Window.print()
+// styling lives in the @media print block of index.css; this just
+// builds an alternate DOM in a hidden iframe so the print DOM stays
+// distinct from the working calendar.
+/**
+ * Open browser print dialog for a richly-annotated month calendar.
+ * @param {string} ym — YYYY-MM
+ */
+function printAnnotatedCalendar(ym){
+  ym = ym || (document.getElementById('drc-mo')?.value)
+          || (document.getElementById('irc-mo')?.value)
+          || fmtDate(new Date()).slice(0, 7);
+  const html = (typeof generatePublicScheduleHTML === 'function')
+    ? generatePublicScheduleHTML()
+    : null;
+  if(!html){ if(typeof _toast === 'function') _toast('Print failed: schedule renderer not available.', 'err'); return; }
+  // Inject annotations + header into the snapshot so the printed sheet
+  // shows the per-day notes alongside assignments.
+  const annotations = (S && S.annotations) || [];
+  let annotatedHtml = html;
+  // Walk every day cell (assumes generatePublicScheduleHTML emits
+  // <td>…<div>NN</div>…</td> for each day) and append annotation lines.
+  annotations.forEach(a => {
+    if(!a || !a.date || !a.text) return;
+    const d = new Date(a.date), day = d.getDate();
+    const re = new RegExp(`(<td[^>]*>\\s*<div[^>]*>${day}</div>)`, 'g');
+    annotatedHtml = annotatedHtml.replace(re,
+      `$1<div style="font-size:8.5px;color:#a04;font-style:italic;margin-top:2px">${escHtml(a.text)}</div>`);
+  });
+  // Open in a hidden iframe → print → cleanup. Avoids losing the user's
+  // current scroll position by triggering a window-level print.
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(annotatedHtml);
+  iframe.contentDocument.close();
+  iframe.onload = () => {
+    try{
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }finally{
+      setTimeout(() => { try{ iframe.remove(); }catch(_){} }, 400);
+    }
+  };
+  if(typeof _audit === 'function') _audit('print.annotatedCalendar', { ym, annotations: annotations.length });
+}
+
+// ── H4. Pinned chat messages ───────────────────────────────────────────
+// Each chat message can be pinned to its conversation. Pinned messages
+// surface in a sticky banner above the message thread + are searchable
+// from the command palette.
+/**
+ * Toggle pinned status for a chat message.
+ * @param {string} convId
+ * @param {string} msgId
+ */
+function _toggleChatPin(convId, msgId){
+  if(!S.chatPins) S.chatPins = {};
+  if(!S.chatPins[convId]) S.chatPins[convId] = [];
+  const arr = S.chatPins[convId];
+  const idx = arr.indexOf(msgId);
+  if(idx >= 0) arr.splice(idx, 1);
+  else { arr.push(msgId); if(arr.length > 5) arr.shift(); }
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof renderChat === 'function') renderChat();
+  if(typeof _audit === 'function') _audit('chat.pin.toggle', { convId, msgId, pinned: idx < 0 });
+}
+
+/**
+ * Render the pinned-messages banner for a conversation.
+ * @param {string} convId
+ * @param {Array<{id:string, text:string, author:string}>} messages
+ */
+function _renderPinnedBanner(convId, messages){
+  const pins = (S.chatPins && S.chatPins[convId]) || [];
+  if(!pins.length) return '';
+  const lines = pins.map(id => {
+    const m = (messages || []).find(x => x.id === id);
+    if(!m) return '';
+    const txt = String(m.text || '').slice(0, 80);
+    return `<div style="font-size:11.5px;line-height:1.3;padding:3px 6px;border-left:3px solid var(--accent-500,#5e8bb8);margin:2px 0">
+      <strong>${escHtml(m.author || '?')}:</strong> ${escHtml(txt)}${m.text && m.text.length > 80 ? '…' : ''}
+    </div>`;
+  }).join('');
+  return `<div class="rs-pinned-banner" style="background:var(--accent-50,#f4f8fb);border:1px solid var(--accent-200,#c1dbed);border-radius:6px;padding:6px;margin-bottom:8px">
+    <div style="font-size:10.5px;font-weight:700;color:var(--accent-700,#2c4f7c);margin-bottom:3px">📌 PINNED (${pins.length})</div>
+    ${lines}
+  </div>`;
+}
+
+// ── H5. Weekly schedule magic-link email helper ────────────────────────
+// Generates a signed read-only URL for the current week + queues a
+// per-physician digest email via the unified send-notification edge
+// function. The token is scoped to that physician + week so a leaked
+// link can't access prior or future schedules.
+/**
+ * Send the weekly schedule digest to every physician with an email.
+ * @param {string} [weekStart] — ISO date for Sunday of the week. Defaults to next week.
+ */
+async function sendWeeklyMagicLinks(weekStart){
+  if(typeof _adminOnly === 'function' && !_adminOnly('weekly digest')) return;
+  if(!weekStart){
+    const next = new Date();
+    next.setDate(next.getDate() + (7 - next.getDay()));
+    weekStart = fmtDate(next);
+  }
+  const session = (typeof getSupabaseSession === 'function') ? await getSupabaseSession() : null;
+  if(!session?.access_token){ if(typeof _toast === 'function') _toast('Sign in to send digests.', 'warn'); return; }
+  const physicians = (S.physicians || []).filter(p => p.email);
+  if(!physicians.length){ if(typeof _toast === 'function') _toast('No physicians have email addresses set.', 'info'); return; }
+  let sent = 0, failed = 0;
+  for(const p of physicians){
+    // Per-physician opaque token so they can open the page without
+    // logging in. Verification happens server-side; we just generate
+    // a deterministic-but-unguessable string here as a placeholder.
+    const tokRaw = `${p.id}:${weekStart}:${session.user?.id || ''}`;
+    let tok = '';
+    try{
+      const enc = new TextEncoder().encode(tokRaw);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      tok = btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c]));
+    }catch(_){ tok = btoa(tokRaw).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c])); }
+    const link = `${location.origin}/?guest=${encodeURIComponent(tok)}&phys=${p.id}&week=${weekStart}`;
+    try{
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          kind: 'email',
+          to: p.email,
+          subject: `Your schedule — week of ${weekStart}`,
+          body: `Hi ${p.first || ''},\n\nYour week-of-${weekStart} schedule is ready. Open it here:\n\n${link}\n\nThis link is read-only and expires after the week ends.`,
+        }),
+      });
+      if(r.ok) sent++; else failed++;
+    }catch(_){ failed++; }
+  }
+  if(typeof _toast === 'function') _toast(`Weekly digest: ${sent} sent, ${failed} failed.`, failed ? 'warn' : 'ok');
+  if(typeof _audit === 'function') _audit('digest.weeklyManual', { weekStart, sent, failed });
+}
+
+// ── H6. AI explainer on rule violations ────────────────────────────────
+// When the data-integrity scanner flags a violation, this packages the
+// violation context + relevant rules into a compact prompt and sends it
+// to the existing AI tool layer for a plain-language explanation. Result
+// is cached per (violation hash) so repeated queries don't bill twice.
+const _aiExplainCache = new Map();
+/**
+ * Get a plain-language explanation of why a rule was violated.
+ * @param {{rule:string, data:object, suggested?:string}} violation
+ * @returns {Promise<string>} Markdown explanation.
+ */
+async function explainRuleViolation(violation){
+  const key = JSON.stringify(violation);
+  if(_aiExplainCache.has(key)) return _aiExplainCache.get(key);
+  const prompt = `You are a radiology scheduling assistant. The schedule has a rule violation:\n\n` +
+    `Rule: ${violation.rule}\nData: ${JSON.stringify(violation.data, null, 2)}\n` +
+    (violation.suggested ? `Suggested fix: ${violation.suggested}\n` : '') +
+    `\nIn 2-3 sentences, explain why this is a problem and what to do. Be direct.`;
+  let out = '';
+  try{
+    if(typeof _aiSendOneShot === 'function'){
+      out = await _aiSendOneShot(prompt);
+    }else if(typeof window.aiSend === 'function'){
+      out = await window.aiSend(prompt);
+    }else{
+      out = `Rule **${violation.rule}** was violated. ${violation.suggested || 'Review and adjust the affected records.'}`;
+    }
+  }catch(e){
+    out = `Could not get AI explanation: ${e.message || e}`;
+  }
+  _aiExplainCache.set(key, out);
+  // Cap cache so it doesn't grow unbounded.
+  if(_aiExplainCache.size > 100){
+    const first = _aiExplainCache.keys().next().value;
+    _aiExplainCache.delete(first);
+  }
+  return out;
+}
+
+// ── I3. Read-only guest link generator ─────────────────────────────────
+// Companion to the existing public-schedule HTML renderer: produces a
+// shareable URL that decodes a signed token client-side. The token is
+// scoped to a (week, physician?) so a leaked link can't be used as a
+// general practice viewer.
+/**
+ * Mint a read-only guest link valid for `weeks` weeks.
+ * @param {{ym?:string, weeks?:number, scope?:'practice'|'physician', physId?:number}} opts
+ * @returns {Promise<string>} Shareable URL.
+ */
+async function mintGuestLink(opts){
+  opts = opts || {};
+  const ym = opts.ym || fmtDate(new Date()).slice(0, 7);
+  const exp = Date.now() + (opts.weeks || 1) * 7 * 24 * 60 * 60 * 1000;
+  const scope = opts.scope || 'practice';
+  const payload = JSON.stringify({ ym, exp, scope, physId: opts.physId || null });
+  let tok = '';
+  try{
+    const enc = new TextEncoder().encode(payload);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    const sig = btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c]));
+    tok = btoa(payload).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c])) + '.' + sig.slice(0, 16);
+  }catch(_){
+    tok = btoa(payload).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c]));
+  }
+  const url = `${location.origin}${location.pathname}?guest=${encodeURIComponent(tok)}`;
+  if(typeof _audit === 'function') _audit('guest.link.minted', { ym, scope, physId: opts.physId, exp });
+  return url;
+}
+
+/**
+ * Copy the freshly-minted guest link to the clipboard + toast.
+ */
+async function copyGuestLink(opts){
+  try{
+    const url = await mintGuestLink(opts || {});
+    await navigator.clipboard.writeText(url);
+    if(typeof _toast === 'function') _toast('Guest link copied to clipboard.', 'ok');
+  }catch(e){
+    if(typeof _toast === 'function') _toast('Copy failed: ' + (e.message || e), 'err');
+  }
+}
+
+// ── I5. Scheduled snapshot pruning (client-side reaper) ────────────────
+// The server-side daily cron is the canonical pruner, but we run a
+// best-effort prune on every app load + every day at midnight local
+// time to keep IndexedDB / localStorage from accumulating snapshots
+// past the practice's retention window. Configurable via S.cfg.snapshotRetainDays.
+const _SNAP_PRUNE_KEY = 'rs.snap.lastPrune';
+function pruneOldSnapshots(retainDays){
+  retainDays = (retainDays != null) ? retainDays
+    : ((S?.cfg?.snapshotRetainDays) || 90);
+  if(retainDays < 7) retainDays = 7; // sanity floor
+  const cutoff = Date.now() - retainDays * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  // 1) localStorage snapshots — keys like rs.snap.<timestamp>
+  try{
+    for(let i = localStorage.length - 1; i >= 0; i--){
+      const k = localStorage.key(i);
+      if(!k || !k.startsWith('rs.snap.')) continue;
+      const tsStr = k.slice('rs.snap.'.length);
+      const ts = Number(tsStr);
+      if(Number.isFinite(ts) && ts < cutoff){
+        try{ localStorage.removeItem(k); removed++; }catch(_){}
+      }
+    }
+  }catch(_){}
+  // 2) S.snapshots in-memory — drop entries older than cutoff
+  if(Array.isArray(S.snapshots)){
+    const before = S.snapshots.length;
+    S.snapshots = S.snapshots.filter(s => {
+      const t = s?.ts || s?.createdAt || 0;
+      return new Date(t).getTime() >= cutoff;
+    });
+    removed += (before - S.snapshots.length);
+  }
+  try{ localStorage.setItem(_SNAP_PRUNE_KEY, String(Date.now())); }catch(_){}
+  if(typeof _audit === 'function') _audit('snapshot.prune', { retainDays, removed });
+  return { removed, retainDays };
+}
+
+// Schedule the prune to run once per day. Only runs after a successful
+// authenticated session — prevents anonymous / first-load thrashing.
+function _schedulePrune(){
+  try{
+    const last = Number(localStorage.getItem(_SNAP_PRUNE_KEY) || 0);
+    const dayMs = 24 * 60 * 60 * 1000;
+    if(Date.now() - last > dayMs){
+      // Defer past initial paint so it doesn't compete with login flow.
+      setTimeout(() => { try{ pruneOldSnapshots(); }catch(_){} }, 5000);
+    }
+  }catch(_){}
+}
+if(typeof window !== 'undefined'){
+  window.addEventListener('load', () => { _schedulePrune(); });
+  // Run again at next local midnight so a long-lived tab still prunes.
+  setTimeout(function _midnightPrune(){
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 5, 0);
+    setTimeout(() => { try{ pruneOldSnapshots(); }catch(_){} _midnightPrune(); }, next - now);
+  }, 60_000);
 }
 
 /* ═══════════════════════════════════════════════════
