@@ -511,6 +511,32 @@ tbody tr:hover{background:var(--bg3)}
     }
     button[disabled]:active { transform: none; }
 
+    /* ── Page hierarchy ──────────────────────────────────────────────── */
+    /* Consistent treatment for page titles and the optional subtitle that
+       lives directly below them. Display weight, generous tracking, soft
+       lower border on the subtitle so the rest of the page reads as a
+       quieter region. */
+    .pg-title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      color: var(--rs-ink-1);
+      margin-bottom: 6px;
+      line-height: 1.25;
+    }
+    .pg-sub {
+      font-size: 13px;
+      color: var(--rs-ink-3);
+      letter-spacing: -0.005em;
+      line-height: 1.55;
+      margin-bottom: 18px;
+      max-width: 56ch;
+    }
+    @media (max-width: 720px) {
+      .pg-title { font-size: 20px; }
+      .pg-sub { font-size: 12.5px; margin-bottom: 14px; }
+    }
+
     /* ── Cards ────────────────────────────────────────────────────────── */
     /* Hairline border + subtle shadow instead of heavy borders. Padding
        generous so content has room to breathe. Backwards-compatible with
@@ -530,6 +556,15 @@ tbody tr:hover{background:var(--bg3)}
       font-size: 15px;
       margin-bottom: var(--rs-md);
       letter-spacing: -0.011em;
+    }
+    /* Section header inside a card — a tertiary heading. */
+    .card-section {
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--rs-ink-3);
+      margin: var(--rs-md) 0 var(--rs-sm);
     }
 
     /* ── Inputs ───────────────────────────────────────────────────────── */
@@ -1365,6 +1400,7 @@ tbody tr:hover{background:var(--bg3)}
     </div>
     <span id="save-indicator" style="font-size:10px;color:var(--txt3);margin-right:4px"></span>
     <span id="rs-stale-save-badge" style="display:none;font-size:11px;font-weight:700;background:var(--red,#dc2626);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" onclick="(function(){ if(typeof _pushToSupabase==='function') _pushToSupabase(); })()" title="Click to retry save now"></span>
+    <span id="rs-net-badge" style="display:none;font-size:11px;font-weight:600;background:var(--amber,#d97706);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;align-items:center" title="Network status">⚠ Offline</span>
     <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
     <button id="fs-toggle-btn" class="tb-btn" style="margin-right:4px;display:none" title="Auto-save updates to your local index.html (Chrome / Edge only)">📁 Auto-save to file…</button>
     <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
@@ -3659,6 +3695,37 @@ WHERE email = 'your-admin@example.com';</pre>
     <div id="ccf-result" style="margin-top:14px"></div>
   </div>
 
+  <!-- ── 7b. Data integrity scanner ──────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔬 Data integrity scan</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Detects orphaned references — assignments pointing to a physician
+      that's been deleted, swap requests with deleted parties, open
+      shifts claimed by missing users, etc. Runs automatically once per
+      session after login; surface here lets you re-scan on demand and
+      one-click clean up findings.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bp bsm" onclick="(function(){
+          const r = _scanDataIntegrity();
+          const el = document.getElementById('di-result');
+          if(!r.total){
+            el.innerHTML = '<div class=\'note ns\' style=\'font-size:12px;margin-top:10px\'>✓ No orphan references — schedule data is clean.</div>';
+            return;
+          }
+          const counts = Object.entries(r.counts).filter(([_,n])=>n>0).map(([k,n])=>`<span class=\'tag\' style=\'font-size:10.5px;margin-right:4px;background:var(--rs-accent-soft);color:var(--rs-accent)\'>${escHtml(k)} × ${n}</span>`).join('');
+          const sample = r.issues.slice(0, 12).map(i => `<div style=\'font-size:11px;color:var(--rs-ink-2);font-family:ui-monospace,monospace;margin-top:2px\'>${escHtml(i.detail)}</div>`).join('');
+          el.innerHTML = `<div class='note nw' style='margin-top:10px'>
+            <div style='font-weight:600'>Found ${r.total} orphan reference(s).</div>
+            <div style='margin-top:6px'>${counts}</div>
+            <details style='margin-top:8px'><summary style='cursor:pointer;font-size:11.5px'>▶ Sample issues (first 12)</summary><div style='margin-top:6px'>${sample}</div></details>
+            <div style='margin-top:10px'><button class='br bsm' onclick='if(confirm(\"Permanently remove all orphan references? This cannot be undone.\")){const n = _repairDataIntegrity(); if(n != null && typeof _toast === \"function\") _toast(`Removed ${n} orphan reference(s).`, \"ok\"); _afterMutation(); document.getElementById(\"di-result\").innerHTML = \"\";}'>🗑 Repair (delete all orphans)</button></div>
+          </div>`;
+        })()">🔬 Scan now</button>
+    </div>
+    <div id="di-result"></div>
+  </div>
+
   <!-- ── 8. Audit log viewer ──────────────────────────────────────────── -->
   <div class="card" style="margin-bottom:14px">
     <div class="card-title">📜 Audit log</div>
@@ -5748,6 +5815,168 @@ const _BACKUP_KEEP_DAYS = 7;
 // source row's access policy.
 const _BACKUP_TABLE = 'radscheduler_backups';
 
+// ── Data integrity scanner ─────────────────────────────────────────────
+// Detects orphaned references — assignments pointing to a physician that
+// no longer exists, swap requests with deleted parties, etc. Runs once
+// per session (after the first remote apply settles) and surfaces any
+// findings via the error log so an admin sees them without having to
+// look. Pure function; never mutates state. Returns:
+//   { issues:[{kind,id,detail}], counts:{...} }
+function _scanDataIntegrity(){
+  const physIds = new Set((S.physicians||[]).map(p => p.id));
+  const issues = [];
+  const counts = { drShifts:0, irShifts:0, irCalls:0, weekendCalls:0, vacations:0, holidays:0, swaps:0, openShifts:0 };
+  // Helper: orphan check on physId field.
+  const checkPhys = (recs, kind, key) => {
+    let c = 0;
+    (recs || []).forEach(r => {
+      const id = r[key];
+      if(id != null && !physIds.has(id)){
+        c++;
+        if(issues.length < 50) issues.push({ kind, id: r.id, detail: `${kind} #${r.id} references unknown physId ${id}` });
+      }
+    });
+    counts[kind] = c;
+  };
+  checkPhys(S.drShifts,     'drShifts',     'physId');
+  checkPhys(S.irShifts,     'irShifts',     'physId');
+  checkPhys(S.irCalls,      'irCalls',      'physId');
+  checkPhys(S.weekendCalls, 'weekendCalls', 'physId');
+  checkPhys(S.vacations,    'vacations',    'physId');
+  checkPhys(S.holidays,     'holidays',     'physId');
+  // Swaps reference both fromPhysId and toPhysId.
+  let swapOrphans = 0;
+  (S.swapRequests || []).forEach(s => {
+    if(s.fromPhysId != null && !physIds.has(s.fromPhysId)){
+      swapOrphans++;
+      if(issues.length < 50) issues.push({ kind:'swaps', id: s.id, detail: `swap #${s.id} from-physId ${s.fromPhysId} unknown` });
+    }
+    if(s.toPhysId != null && !physIds.has(s.toPhysId)){
+      swapOrphans++;
+      if(issues.length < 50) issues.push({ kind:'swaps', id: s.id, detail: `swap #${s.id} to-physId ${s.toPhysId} unknown` });
+    }
+  });
+  counts.swaps = swapOrphans;
+  // Open shifts have a claimedBy that may dangle.
+  let openOrphans = 0;
+  (S.openShifts || []).forEach(o => {
+    if(o.claimedBy != null && !physIds.has(o.claimedBy)){
+      openOrphans++;
+      if(issues.length < 50) issues.push({ kind:'openShifts', id: o.id, detail: `open shift #${o.id} claimedBy ${o.claimedBy} unknown` });
+    }
+  });
+  counts.openShifts = openOrphans;
+  // Site references — every assignment's site should exist in S.sites
+  // (we don't enforce this strictly because legacy snapshots may have
+  // historical site names, so it's WARN-only).
+  const siteNames = new Set((S.sites || []).map(s => s.name));
+  let siteIssues = 0;
+  (S.drShifts || []).forEach(s => {
+    if(s.site && !siteNames.has(s.site)){
+      siteIssues++;
+      if(issues.length < 50) issues.push({ kind:'siteRef', id: s.id, detail: `drShift #${s.id} site "${s.site}" not in roster` });
+    }
+  });
+  counts.siteRefs = siteIssues;
+  return { issues, counts, total: Object.values(counts).reduce((a,b) => a+b, 0) };
+}
+
+// Repair orphans by deleting them. Refuses to run unless admin; logs
+// each deletion via _audit so the audit trail captures the cleanup.
+function _repairDataIntegrity(){
+  if(!_adminOnly('repair data integrity')) return null;
+  const physIds = new Set((S.physicians||[]).map(p => p.id));
+  let removed = 0;
+  const removeOrphan = (key, refField, kind) => {
+    const before = (S[key] || []).length;
+    if(refField === 'fromOrTo'){
+      S[key] = (S[key] || []).filter(r =>
+        physIds.has(r.fromPhysId) && physIds.has(r.toPhysId)
+      );
+    } else if(refField === 'claimedBy-nullable'){
+      // Don't drop the open shift — just clear the orphan reference.
+      (S[key] || []).forEach(r => {
+        if(r.claimedBy != null && !physIds.has(r.claimedBy)){ r.claimedBy = null; removed++; }
+      });
+      return;
+    } else {
+      S[key] = (S[key] || []).filter(r => physIds.has(r[refField]));
+    }
+    const after = S[key].length;
+    if(after < before){
+      removed += (before - after);
+      if(typeof _audit === 'function') _audit(`integrity.${kind}.purgeOrphans`, { count: before - after });
+    }
+  };
+  removeOrphan('drShifts',     'physId',          'drShift');
+  removeOrphan('irShifts',     'physId',          'irShift');
+  removeOrphan('irCalls',      'physId',          'irCall');
+  removeOrphan('weekendCalls', 'physId',          'weekendCall');
+  removeOrphan('vacations',    'physId',          'vacation');
+  removeOrphan('holidays',     'physId',          'holiday');
+  removeOrphan('swapRequests', 'fromOrTo',        'swap');
+  removeOrphan('openShifts',   'claimedBy-nullable', 'openShift');
+  triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  return removed;
+}
+
+// Run integrity scan once after remote apply, log findings.
+function _scheduleIntegrityScan(){
+  setTimeout(() => {
+    try{
+      const result = _scanDataIntegrity();
+      if(result.total > 0){
+        const summary = Object.entries(result.counts)
+          .filter(([_, n]) => n > 0)
+          .map(([k, n]) => `${k}: ${n}`)
+          .join(', ');
+        if(typeof _logError === 'function'){
+          _logError('integrity', `Found ${result.total} orphan reference(s): ${summary}`, result.issues.slice(0, 20));
+        }
+      }
+    }catch(e){ /* non-fatal */ }
+  }, 4000); // wait for the page to settle before scanning
+}
+
+// ── Snapshot helper for risky operations ────────────────────────────────
+// Before any bulk mutation (Excel import, holiday auto-assign, IR
+// rebalance, full clear, restore), take an out-of-band backup tagged with
+// the operation kind. Lets admins roll back via Settings → Backups even
+// if the operation succeeds but produces unintended results.
+//
+// Returns true on success; false if Supabase isn't available or the
+// backup write fails. Callers can decide whether to abort the operation
+// or proceed without a snapshot — the caller's choice, not ours.
+async function _snapshotBeforeBulk(operationKind){
+  if(!_supabase) return false;
+  if(!_ROW_ID) return false;
+  try{
+    // Read the current main row's data, write to a date+tag-keyed backup id
+    const { data: rowData, error: fetchErr } = await _supabase
+      .from(_TABLE).select('data').eq('id', _ROW_ID).single();
+    if(fetchErr || !rowData?.data) return false;
+    const stamp = fmtDate(new Date()) + '_' + new Date().toTimeString().slice(0,8).replace(/:/g,'');
+    const backupId = `${_ROW_ID}_pre-${operationKind}_${stamp}`;
+    const { error: putErr } = await _supabase.from(_BACKUP_TABLE).upsert({
+      id: backupId,
+      practice_id: _ROW_ID,
+      data: rowData.data,
+    });
+    if(putErr){
+      console.warn('[RS] _snapshotBeforeBulk: backup failed', putErr);
+      return false;
+    }
+    if(typeof _audit === 'function') _audit('backup.preBulk', { operationKind, backupId });
+    if(typeof _toast === 'function')
+      _toast(`✓ Pre-${operationKind} backup saved`, 'ok');
+    return true;
+  }catch(e){
+    console.warn('[RS] _snapshotBeforeBulk error:', e);
+    return false;
+  }
+}
+
 async function _runDailyBackupIfDue(){
   try{
     if(!_supabase) return;
@@ -7567,6 +7796,10 @@ async function launchApp(){
       // BroadcastChannel. Falls back to per-tab subscription on browsers
       // without BroadcastChannel.
       _initLeaderElection();
+      // Schedule a one-shot data-integrity scan a few seconds after the
+      // load settles. Surfaces orphan references via the error log so an
+      // admin sees them on next visit; non-fatal.
+      if(typeof _scheduleIntegrityScan === 'function') _scheduleIntegrityScan();
     }catch(e){
       console.error('[RS] Supabase load error:',e);
       if(si){si.textContent='⚠ DB error — working offline';si.style.color='var(--red-t)';}
@@ -7654,6 +7887,91 @@ function _runMigrations(d){
   return d;
 }
 
+// ── Field-level validators ───────────────────────────────────────────────
+// Per-record sanity checks. Each runs in isolation: if a record fails its
+// validator, the validator returns a corrected version (or null to drop)
+// AND a problem string. Callers loop over arrays applying these.
+const _ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function _isISO(d){ return typeof d === 'string' && _ISO_DATE_RE.test(d); }
+
+function _validatePhysician(p){
+  const issues = [];
+  if(!p || typeof p !== 'object'){ return { fixed:null, issues:['not an object'] }; }
+  // id must be a positive integer.
+  if(typeof p.id !== 'number' || !Number.isInteger(p.id) || p.id < 0){
+    issues.push(`physician id ${JSON.stringify(p.id)} not a positive integer`);
+    return { fixed:null, issues };
+  }
+  // first / last must be non-empty strings (drop record otherwise; these
+  // appear in 200+ render call sites and would crash without).
+  if(typeof p.first !== 'string') p.first = String(p.first || '');
+  if(typeof p.last !== 'string') p.last = String(p.last || '');
+  if(!p.last.trim() && !p.first.trim()){
+    issues.push(`physician ${p.id} has no name`);
+    return { fixed:null, issues };
+  }
+  // FTE must be 0–1 finite. Out-of-range = clamp to legal range.
+  const clampFte = (v) => {
+    if(v == null) return 0;
+    const n = +v;
+    if(!isFinite(n)) return 0;
+    if(n < 0) return 0;
+    if(n > 1) return 1;
+    return n;
+  };
+  const newDr = clampFte(p.drFte);
+  if(newDr !== p.drFte){ issues.push(`drFte ${p.drFte} clamped → ${newDr}`); p.drFte = newDr; }
+  const newIr = clampFte(p.irFte);
+  if(newIr !== p.irFte){ issues.push(`irFte ${p.irFte} clamped → ${newIr}`); p.irFte = newIr; }
+  // role must be one of the known values.
+  const validRoles = ['DR','IR','MIXED','superuser','admin','user'];
+  if(p.role && !validRoles.includes(p.role)){
+    issues.push(`role "${p.role}" not in known set; defaulting to DR`);
+    p.role = 'DR';
+  }
+  // Array-shape fields default to [].
+  ['drSubs','irSubs','allowedSites','irCallBlackouts','siteRules','siteSeqRules','customRules'].forEach(k => {
+    if(p[k] != null && !Array.isArray(p[k])){
+      issues.push(`physician ${p.id}.${k}: expected array, got ${typeof p[k]}; resetting`);
+      p[k] = [];
+    }
+  });
+  return { fixed:p, issues };
+}
+
+function _validateDateRecord(rec, kind){
+  // Shared validator for shifts / calls / weekend calls / vacations /
+  // holidays. Required fields: physId (positive int), and at least one
+  // ISO date field. Returns null + problem if structurally broken.
+  const issues = [];
+  if(!rec || typeof rec !== 'object'){ return { fixed:null, issues:[`${kind} record not an object`] }; }
+  if(typeof rec.physId !== 'number' || !Number.isInteger(rec.physId) || rec.physId <= 0){
+    return { fixed:null, issues:[`${kind} #${rec.id} has invalid physId ${JSON.stringify(rec.physId)}`] };
+  }
+  // Pick the date field(s) for this record kind.
+  const dateFields = (kind === 'weekend')
+    ? ['satDate','sunDate','date']
+    : (kind === 'vacation')
+    ? ['start','end']
+    : ['date'];
+  let hasValid = false;
+  dateFields.forEach(f => {
+    if(rec[f] != null && !_isISO(rec[f])){
+      issues.push(`${kind} #${rec.id}.${f}: not ISO date (${rec[f]})`);
+      delete rec[f];
+    } else if(rec[f]) hasValid = true;
+  });
+  if(!hasValid){
+    return { fixed:null, issues:[...issues, `${kind} #${rec.id} has no valid date`] };
+  }
+  // For vacations, end >= start.
+  if(kind === 'vacation' && rec.start && rec.end && rec.end < rec.start){
+    issues.push(`vacation #${rec.id}: end ${rec.end} < start ${rec.start}; swapping`);
+    const t = rec.start; rec.start = rec.end; rec.end = t;
+  }
+  return { fixed: rec, issues };
+}
+
 function _validateRemotePayload(d){
   const problems = [];
   if(!d || typeof d !== 'object' || Array.isArray(d)){
@@ -7689,7 +8007,34 @@ function _validateRemotePayload(d){
       d.nextId = 100;
     }
   }
-  return { ok:true, fatal:false, problems };
+  // Field-level validation per record. Drop records that fail; report the
+  // count + details so an admin can investigate. Cap problems output so a
+  // wholly-corrupted payload doesn't produce 10,000 lines of noise.
+  const dropCounts = {};
+  const validateArr = (key, validator, kind) => {
+    if(!Array.isArray(d[key])) return;
+    const kept = [];
+    let drops = 0;
+    for(const rec of d[key]){
+      const { fixed, issues } = validator(rec, kind);
+      if(fixed) kept.push(fixed);
+      else drops++;
+      if(issues.length && problems.length < 50) issues.forEach(i => problems.push(i));
+    }
+    if(drops){
+      dropCounts[key] = drops;
+      problems.push(`${key}: dropped ${drops} invalid record${drops===1?'':'s'}`);
+    }
+    d[key] = kept;
+  };
+  validateArr('physicians', _validatePhysician);
+  validateArr('drShifts',     (r) => _validateDateRecord(r, 'drShift'));
+  validateArr('irShifts',     (r) => _validateDateRecord(r, 'irShift'));
+  validateArr('irCalls',      (r) => _validateDateRecord(r, 'irCall'));
+  validateArr('weekendCalls', (r) => _validateDateRecord(r, 'weekend'));
+  validateArr('vacations',    (r) => _validateDateRecord(r, 'vacation'));
+  validateArr('holidays',     (r) => _validateDateRecord(r, 'holiday'));
+  return { ok:true, fatal:false, problems, dropCounts };
 }
 
 function _applyRemoteData(d){
@@ -8738,12 +9083,64 @@ function maxDR(p,t){
   if(t==='ir-wknd')  return Math.round((cfg.irWkndMax || 4) * irFte);
   return 0;
 }
-function drCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
+// ── Memoization for hot per-(physId, ym) counters ───────────────────────
+// drCnt / wkCnt / irCnt / etc. are called thousands of times per render
+// (every cell × every physician). Each call does a full O(N) scan over
+// S.drShifts / S.irCalls etc. Memoizing on the (physId, ym) tuple cuts
+// the cost to one scan per pair, with the cache invalidated on every
+// mutation via the existing _dateIdxVersion counter.
+const _countCaches = {};
+let _countCacheBuilt = -1;
+function _ensureCountCacheFresh(){
+  if(_countCacheBuilt === _dateIdxVersion) return;
+  _countCacheBuilt = _dateIdxVersion;
+  ['dr','wk','irDaily','irWknd','irAll','drHome'].forEach(k => { _countCaches[k] = null; });
+}
+function _buildCountIndex(arrayName, dateField, predicate){
+  const idx = {};
+  (S[arrayName] || []).forEach(rec => {
+    if(predicate && !predicate(rec)) return;
+    const date = rec[dateField] || '';
+    if(!date) return;
+    const ym = date.slice(0, 7);
+    const key = rec.physId + '|' + ym;
+    idx[key] = (idx[key] || 0) + 1;
+  });
+  return idx;
+}
+function drCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.dr){
+    _countCaches.dr = _buildCountIndex('drShifts', 'date');
+  }
+  return _countCaches.dr[pid + '|' + ym] || 0;
+}
+function _legacyDrCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
 // Count of Home (read-from-home) DR shifts only — used by the auto-assigner's
 // home/in-person preference enforcement so it can compute current Home% per
 // physician relative to their drHomePctPref target.
-function drHomeCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)&&s.shift==='Home').length;}
-function wkCnt(pid,ym){return S.weekendCalls.filter(w=>(w.satDate||w.date||"").startsWith(ym)&&w.physId===pid).length;}
+function drHomeCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.drHome){
+    _countCaches.drHome = _buildCountIndex('drShifts', 'date', s => s.shift === 'Home');
+  }
+  return _countCaches.drHome[pid + '|' + ym] || 0;
+}
+function wkCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.wk){
+    const idx = {};
+    (S.weekendCalls || []).forEach(w => {
+      const date = w.satDate || w.date || '';
+      if(!date) return;
+      const ym = date.slice(0, 7);
+      const key = w.physId + '|' + ym;
+      idx[key] = (idx[key] || 0) + 1;
+    });
+    _countCaches.wk = idx;
+  }
+  return _countCaches.wk[pid + '|' + ym] || 0;
+}
 // Regular IR call counters — exclude holiday-synced entries so they don't inflate
 // a physician's day/weekend totals. Those entries are created by _syncHolidayToIRCall
 // (tagged with "(Holiday)" in notes) and should only be reflected in the Holiday
@@ -8756,9 +9153,27 @@ function _isHolidaySyncedCall(c){
   if(!c || typeof c.notes !== 'string') return false;
   return c.notes.includes('(Holiday)');
 }
-function irCnt(pid,ym){return S.irCalls.filter(s=>s.physId===pid&&s.date.startsWith(ym)&&!_isHolidaySyncedCall(s)).length;}
-function irDailyCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='daily'&&!_isHolidaySyncedCall(c)).length;}
-function irWkndCnt(pid,ym){return S.irCalls.filter(c=>c.physId===pid&&c.date.startsWith(ym)&&c.callType==='weekend'&&!_isHolidaySyncedCall(c)).length;}
+function irCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.irAll){
+    _countCaches.irAll = _buildCountIndex('irCalls', 'date', c => !_isHolidaySyncedCall(c));
+  }
+  return _countCaches.irAll[pid + '|' + ym] || 0;
+}
+function irDailyCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.irDaily){
+    _countCaches.irDaily = _buildCountIndex('irCalls', 'date', c => c.callType === 'daily' && !_isHolidaySyncedCall(c));
+  }
+  return _countCaches.irDaily[pid + '|' + ym] || 0;
+}
+function irWkndCnt(pid, ym){
+  _ensureCountCacheFresh();
+  if(!_countCaches.irWknd){
+    _countCaches.irWknd = _buildCountIndex('irCalls', 'date', c => c.callType === 'weekend' && !_isHolidaySyncedCall(c));
+  }
+  return _countCaches.irWknd[pid + '|' + ym] || 0;
+}
 
 // Holiday-only counters — reads from S.holidays (the Holiday Call tab's list) rather
 // than S.irCalls, so the source of truth is the authoritative holiday assignment.
@@ -10101,7 +10516,14 @@ function renderVacations(){
         <button class="br bxs" onclick="deleteVacation(${v.id})">X</button>
       </td>
     </tr>`;
-  }).join('')||'<tr><td colspan="7" style="color:var(--txt3);text-align:center">None</td></tr>';
+  }).join('') || `<tr><td colspan="7" style="padding:0">
+    <div class="rs-empty">
+      <div class="rs-empty-icon">🏖</div>
+      <div class="rs-empty-title">No time off recorded</div>
+      <div class="rs-empty-body">Add vacations, CME, or other time-off entries above. The auto-assigner treats physicians on vacation as unavailable; weekend-call assignments adjacent to these dates are also blocked.</div>
+      <button class="bp" onclick="document.getElementById('v-phys')?.focus()" style="padding:9px 17px;font-size:13px">+ Add the first entry</button>
+    </div>
+  </td></tr>`;
 }
 function addVac(){
   if(!_adminOnly('add time off'))return;
@@ -11398,13 +11820,36 @@ async function calcAllDriveTimes(){
 
 async function updateTrafficTimes(){
   if(!_adminOnly('refresh traffic times')) return;
-  const statusEl=document.getElementById('gmaps-calc-status');
-  const setStatus=t=>{if(statusEl)statusEl.textContent=t;};
-  const physWithAddr=S.physicians.filter(p=>p.address?.trim());
-  const sitesWithAddr=S.sites.filter(s=>s.address?.trim()&&s.name!=='At Home / Remote');
-  if(!physWithAddr.length){setStatus('⚠ No physician addresses configured.');return;}
-  if(!sitesWithAddr.length){setStatus('⚠ No hospital addresses configured.');return;}
-  if(!S.driveTimes) S.driveTimes={};
+  const statusEl = document.getElementById('gmaps-calc-status');
+  // Inline progress bar so the user sees forward motion across the multi-
+  // minute Maps API job. We render to the same element setStatus writes
+  // to, but use _showProgress so each batch updates a determinate bar
+  // instead of a static "Round-trip traffic: …" string.
+  const setStatus = (msg) => { if(statusEl) statusEl.textContent = msg; };
+  const setProgress = (label, current, total) => {
+    if(!statusEl) return;
+    if(!statusEl.querySelector('.rs-progress')){
+      // First call — replace any existing static text with a progress
+      // surface. The label sits below the bar so the user can scan
+      // "Round-trip traffic: DR 1st — 12 of 84 (14%)" at a glance.
+      statusEl.innerHTML = '<div class="rs-progress"><div class="rs-progress-bar"></div></div><div class="rs-progress-label" style="margin-top:6px"></div>';
+    }
+    const bar = statusEl.querySelector('.rs-progress-bar');
+    const lab = statusEl.querySelector('.rs-progress-label');
+    if(current == null || total == null){
+      if(bar) bar.classList.add('indeterminate');
+      if(lab) lab.textContent = label || '';
+    } else {
+      const pct = Math.min(100, Math.max(0, Math.round(100 * current / total)));
+      if(bar){ bar.classList.remove('indeterminate'); bar.style.width = pct + '%'; }
+      if(lab) lab.textContent = `${label} — ${current} of ${total} (${pct}%)`;
+    }
+  };
+  const physWithAddr = S.physicians.filter(p => p.address?.trim());
+  const sitesWithAddr = S.sites.filter(s => s.address?.trim() && s.name !== 'At Home / Remote');
+  if(!physWithAddr.length){ setStatus('⚠ No physician addresses configured.'); return; }
+  if(!sitesWithAddr.length){ setStatus('⚠ No hospital addresses configured.'); return; }
+  if(!S.driveTimes) S.driveTimes = {};
   const now=new Date().toISOString();
   let done=0, errors=0;
   const BATCH=10;
@@ -11450,8 +11895,11 @@ async function updateTrafficTimes(){
       continue;
     }
 
-    setStatus(`Round-trip traffic: ${shift.label}…`);
+    setProgress(`Round-trip traffic: ${shift.label}`, 0, physWithAddr.length);
     for(let i=0;i<physWithAddr.length;i+=BATCH){
+      // Update progress before each batch (after the previous batch's await
+      // resolved) so the bar advances visibly across the long async run.
+      setProgress(`Round-trip traffic: ${shift.label}`, i, physWithAddr.length);
       const batch=physWithAddr.slice(i,i+BATCH);
       const batchAddrs=batch.map(p=>p.address.trim());
       // Promise.allSettled instead of Promise.all so a single batch failure
@@ -15607,7 +16055,15 @@ function renderOpenShifts(){
   const selP=pid?S.physicians.find(p=>p.id===pid):null;
   const opens=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)).sort((a,b)=>a.date>b.date?1:-1);
   const el=document.getElementById('os-list');if(!el)return;
-  if(!opens.length){el.innerHTML='<div class="note ns">No open shifts this month!</div>';return;}
+  if(!opens.length){
+    el.innerHTML = `
+      <div class="rs-empty">
+        <div class="rs-empty-icon" style="background:rgba(22,163,74,.10);color:#16a34a">✓</div>
+        <div class="rs-empty-title">All shifts covered</div>
+        <div class="rs-empty-body">No unfilled or up-for-grabs shifts this month. Open shifts appear here when an admin posts a slot for any physician to claim.</div>
+      </div>`;
+    return;
+  }
   const unclaimed=opens.filter(o=>!o.claimedBy).length;
   let html=`<div style="font-size:12px;color:var(--txt2);margin-bottom:8px">${opens.length} total — ${unclaimed} unclaimed</div>`;
   opens.forEach(o=>{
@@ -16049,9 +16505,19 @@ function renderSwaps(){
     </div>`;
   };
   const pendEl=document.getElementById('swp-pending-list');
-  if(pendEl) pendEl.innerHTML=pending.map(renderCard).join('')||'<div class="note ni">No pending swap requests.</div>';
+  if(pendEl) pendEl.innerHTML = pending.map(renderCard).join('') || `
+    <div class="rs-empty">
+      <div class="rs-empty-icon">🔁</div>
+      <div class="rs-empty-title">No pending swap requests</div>
+      <div class="rs-empty-body">When physicians submit swap requests they'll show up here for review.</div>
+    </div>`;
   const histEl=document.getElementById('swp-history-list');
-  if(histEl) histEl.innerHTML=history.map(renderCard).join('')||'<div class="note ni">No completed swaps yet.</div>';
+  if(histEl) histEl.innerHTML = history.map(renderCard).join('') || `
+    <div class="rs-empty">
+      <div class="rs-empty-icon">📜</div>
+      <div class="rs-empty-title">No swap history yet</div>
+      <div class="rs-empty-body">Approved and denied swap requests are archived here.</div>
+    </div>`;
 }
 function resolveSwap(id,status){
   if(!_adminOnly('resolve swap'))return;
@@ -29161,9 +29627,15 @@ function _irrUpdateDistribution(){
   });
 }
 
-function applyIRRebalance(){
+async function applyIRRebalance(){
   if(!_adminOnly('apply IR rebalance')) return;
   if(!_irrPlan) return;
+  // Pre-bulk backup — IR rebalance can touch hundreds of records across
+  // months, so an out-of-band snapshot lets the admin roll back via
+  // Settings → Backups even if the rebalance is exactly what they ran.
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('ir-rebalance'); }catch(_){}
+  }
   const months  =_irrMonths();
   const grp     =document.getElementById('irr-grp')?.value||'both';
   const typ     =document.getElementById('irr-type')?.value||'both';
@@ -30197,9 +30669,13 @@ function previewHolRandom(){
   if(note) note.textContent=`${preview.length} ready — re-roll anytime before applying.`;
 }
 
-function applyHolRandom(){
+async function applyHolRandom(){
   if(!_adminOnly('apply holiday auto-assign')) return;
   if(!_holRandomPreview.length) return;
+  // Pre-bulk backup so a re-roll-then-apply mistake is recoverable.
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('holiday-auto'); }catch(_){}
+  }
 
   // Capture assignments for notification AFTER the loop runs (to group dates per physician+holiday)
   const notifByPhys = {}; // physId → [{name, group, dates:[]}]
@@ -30750,6 +31226,54 @@ function _toast(msg, type){
   setTimeout(()=>{
     if(t.isConnected){ t.style.transition='opacity .2s'; t.style.opacity='0'; setTimeout(()=>t.remove(), 220); }
   }, type==='warn'?5000:3000);
+}
+
+// ── Network status indicator ───────────────────────────────────────────
+// Watches navigator.onLine + fires a flush when connectivity returns.
+// The badge is a calm visual hint, not a noisy alert; users notice
+// when they need to. On reconnect, _hasUnsavedChanges queued during
+// the offline window is automatically pushed via the existing
+// triggerSave plumbing — no extra queue layer needed because the
+// retry loop in _pushToSupabase already handles resumption.
+function _updateNetBadge(){
+  const badge = document.getElementById('rs-net-badge');
+  if(!badge) return;
+  const online = navigator.onLine !== false;
+  badge.style.display = online ? 'none' : 'inline-flex';
+}
+
+// Wire once at script load. The 'online' event fires when connectivity
+// returns; we use that to immediately flush any unsaved changes from
+// the offline window.
+if(typeof window !== 'undefined'){
+  window.addEventListener('online', () => {
+    _updateNetBadge();
+    if(typeof _hasUnsavedChanges !== 'undefined' && _hasUnsavedChanges){
+      // Reset consecutive-fails so backoff doesn't continue from where it
+      // left off, and force-attempt a save now.
+      try{ _consecutiveSaveFails = 0; }catch(_){}
+      if(typeof _pushToSupabase === 'function'){
+        const r = _pushToSupabase();
+        if(r && typeof r.then === 'function'){
+          r.then(ok => {
+            if(ok && typeof _toast === 'function')
+              _toast('Back online — your edits have been saved.', 'ok');
+          }).catch(() => {});
+        }
+      }
+    } else if(typeof _toast === 'function'){
+      _toast('Back online.', 'info');
+    }
+  });
+  window.addEventListener('offline', () => {
+    _updateNetBadge();
+    if(typeof _toast === 'function')
+      _toast('Offline — your edits will sync when you reconnect.', 'warn');
+  });
+  // Initial check + periodic re-check (covers cases where the events
+  // fire before our listener is registered, e.g., refresh while offline).
+  setTimeout(_updateNetBadge, 500);
+  setInterval(_updateNetBadge, 30000);
 }
 
 // ── Stale-save monitor ────────────────────────────────────────────────────
@@ -31669,12 +32193,18 @@ function rematchPickImport(){
   if(typeof _toast === 'function') _toast('Re-matched with manual mappings.', 'ok');
 }
 
-function applyPickImport(){
+async function applyPickImport(){
   if(!_adminOnly('apply vacation picks import')) return;
   const data = _xlPickData || {};
   const vac = data.vacations || [];
   const sh = data.shifts || [];
   if(!vac.length && !sh.length) return;
+  // Take an out-of-band backup before applying so the operation is
+  // reversible via Settings → Backups → Restore. Don't block on failure;
+  // worst case the user has the daily backup as fallback.
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('excel-import'); }catch(_){}
+  }
   let vacAdded = 0, vacSkipped = 0, shAdded = 0, shSkipped = 0;
   // Vacations
   vac.forEach(r => {
