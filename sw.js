@@ -82,3 +82,42 @@ self.addEventListener('message', (e) => {
       );
   }
 });
+
+// ── Push notifications ──────────────────────────────────────────────
+// Display incoming push messages as native browser notifications. The
+// server-side push payload (JSON: {title, body, url, tag, persist})
+// gets surfaced to the user; clicking focuses an existing RadScheduler
+// tab if one's open, or opens a new one to the supplied URL.
+self.addEventListener('push', (e) => {
+  if (!e.data) return;
+  let payload = {};
+  try { payload = e.data.json(); }
+  catch (_) { payload = { title: 'RadScheduler', body: e.data.text() }; }
+  const opts = {
+    body: payload.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: payload.tag || 'rs-notif',
+    data: { url: payload.url || '/' },
+    requireInteraction: payload.persist === true,
+  };
+  e.waitUntil(self.registration.showNotification(payload.title || 'RadScheduler', opts));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const targetUrl = e.notification.data?.url || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Focus an existing RadScheduler tab if one's open; otherwise open new.
+      for (const client of clientList) {
+        if (client.url.includes(self.location.host) && 'focus' in client) {
+          client.focus();
+          if ('navigate' in client) client.navigate(targetUrl);
+          return;
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
+});

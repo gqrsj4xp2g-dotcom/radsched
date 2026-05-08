@@ -1226,6 +1226,49 @@ tbody tr:hover{background:var(--bg3)}
     .rs-quickstart-name { flex: 1; }
     .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
 
+    /* ── Mobile calendar list mode ─────────────────────────────────────
+       The dense month grid becomes hard to read on phones; the toolbar
+       toggle (📅 ↔ 📋) sets data-cal-mode="list" on the body which
+       collapses the grid into a vertical day-list. The grid is hidden,
+       the list shows up — desktops can still toggle for a different
+       reading style if they prefer. */
+    .rs-cal-list { display: none; }
+    body[data-cal-mode="list"] .calmo,
+    body[data-cal-mode="list"] .cal-grid,
+    body[data-cal-mode="list"] .cal-grid-ir {
+      display: none !important;
+    }
+    body[data-cal-mode="list"] .rs-cal-list { display: block; }
+    .rs-cal-day {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--rs-line);
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .rs-cal-day-num {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      width: 38px;
+      flex-shrink: 0;
+      line-height: 1.4;
+    }
+    .rs-cal-day-num small {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--rs-ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+    .rs-cal-day-events { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .rs-cal-day.today { background: var(--rs-accent-soft); }
+    .rs-cal-day.today .rs-cal-day-num { color: var(--rs-accent); }
+    .rs-cal-day.weekend .rs-cal-day-num { color: var(--rs-ink-3); }
+    .rs-cal-day.empty { opacity: 0.55; }
+
     /* ── Mobile-first My Schedule ─────────────────────────────────────
        Most-used view by far, almost always on a phone. Override the
        desktop layout for the page when the viewport is narrow:
@@ -1409,8 +1452,10 @@ tbody tr:hover{background:var(--bg3)}
     <button id="rs-notif-toggle" class="tb-btn" onclick="toggleNotificationsPanel()" title="Notifications" aria-label="Notifications" style="margin-right:4px;font-size:14px"><span aria-hidden="true">🔔</span><span id="rs-notif-dot"></span></button>
     <button class="tb-btn" onclick="openCommandPalette()" title="Command palette (Cmd/Ctrl+K)" aria-label="Search" style="margin-right:4px;padding:6px 10px">⌕</button>
     <button class="tb-btn" onclick="openShortcutsHelp()" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" style="margin-right:4px;padding:6px 10px;font-size:13px">?</button>
+    <span id="rs-presence" style="display:none;font-size:11px;font-weight:500;background:var(--rs-accent-soft);color:var(--rs-accent);border-radius:10px;padding:2px 8px;margin-right:6px;align-items:center;cursor:default" title="Other people viewing this practice"></span>
     <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" disabled style="margin-right:2px;padding:6px 8px" title="Undo (Cmd/Ctrl+Z)">↶</button>
     <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled style="margin-right:4px;padding:6px 8px" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
+    <button id="rs-calmode-btn" class="tb-btn" onclick="toggleCalendarMode()" style="margin-right:4px;padding:6px 10px" title="Switch between grid and list view">📅</button>
     <button class="tb-btn" onclick="printSchedule()" style="margin-right:4px;padding:6px 10px" title="Print the active schedule view (Cmd/Ctrl+P)">🖨 Print</button>
     <button class="tb-btn" onclick="clearAllData()" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Reset to original default data">🗑 Reset</button>
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
@@ -1555,7 +1600,10 @@ tbody tr:hover{background:var(--bg3)}
 
 <!-- MY SCHEDULE -->
 <div id="page-my-schedule" class="page">
-  <div class="pg-title">My Schedule</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+    <div class="pg-title" style="margin-bottom:0">My Schedule</div>
+    <button class="bsm" onclick="if(CU?.physId) exportPhysicianICal(CU.physId); else alert('Your account isn\'t linked to a physician.');" title="Download a .ics calendar feed of your assignments">📅 Export to Calendar</button>
+  </div>
   <div class="tabs" id="mysched-tabs" style="margin-bottom:10px">
     <div class="tab on" onclick="mySchedTab('shifts',this)">📋 My Shifts</div>
     <div class="tab" onclick="mySchedTab('vacation',this)">🌴 Vacation Picks</div>
@@ -1624,6 +1672,32 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-comm-prefs" class="page">
   <div class="pg-title">🔔 Preferences</div>
   <div class="pg-sub">Personal settings — notification routing, display size, and delivery email.</div>
+
+  <!-- Push notifications card -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">📲 Push notifications on this device</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:10px">
+      Get notified the moment a shift is assigned to you, a swap is approved,
+      or you've been mentioned in chat — even when RadScheduler isn't open.
+      Requires the service worker (Settings → Offline support → Download
+      sw.js) and a one-time browser permission.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bp bsm" onclick="subscribeToWebPush()">🔔 Enable push</button>
+      <button class="br bsm" onclick="unsubscribeFromWebPush()">✕ Disable push</button>
+    </div>
+  </div>
+
+  <!-- iCal export card -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">📅 Add to your calendar app</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:10px">
+      Download a one-time .ics file containing every assignment on your
+      schedule. Open it in Apple Calendar, Google Calendar, Outlook, or
+      Fantastical and the events appear alongside everything else.
+    </div>
+    <button class="bp bsm" onclick="if(CU?.physId) exportPhysicianICal(CU.physId); else alert('Your account isn\'t linked to a physician.');">⬇ Download .ics</button>
+  </div>
 
   <div class="card" style="margin-bottom:12px">
     <div class="card-title">🔠 Display Size</div>
@@ -3695,6 +3769,40 @@ WHERE email = 'your-admin@example.com';</pre>
     <div id="ccf-result" style="margin-top:14px"></div>
   </div>
 
+  <!-- ── 7c. Predictive suggestions ───────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔮 Predictive suggestions</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Surfaces who's "due" for weekend call / holiday based on a 6-month
+      lookback. Useful as a starting point when you're picking a specific
+      person for a specific slot. The auto-assigner already weights
+      fairness, so this view's job is to make the manual pick faster.
+    </div>
+    <button class="bp bsm" onclick="renderPredictiveSuggestions()">🔮 Show suggestions</button>
+    <div id="ps-result" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ── 7a. Annual report ──────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📄 Annual report</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Per-physician year-end summary: total DR / IR shifts, weekend
+      calls, holiday days, vacation days, by month. Print-ready
+      (uses the same print stylesheet as the calendars). Useful for
+      year-end credentialing reviews and accreditation packets.
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0"><label>Physician</label><select id="ar-phys"></select></div>
+      <div class="fg" style="margin:0"><label>Year</label><input id="ar-year" type="number" value="" style="width:90px"></div>
+      <div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="bp bsm" onclick="renderAnnualReport()">📊 Generate</button>
+      <button class="bsm" onclick="if(typeof printSchedule==='function') printSchedule()">🖨 Print</button>
+    </div>
+    <div id="ar-result" style="margin-top:14px"></div>
+  </div>
+
   <!-- ── 7b. Data integrity scanner ──────────────────────────────────── -->
   <div class="card" style="margin-bottom:14px">
     <div class="card-title">🔬 Data integrity scan</div>
@@ -4888,6 +4996,154 @@ function _resetPersistedState(){
    Returns { flow, cost, edgeFlows[] }. edgeFlows[i] is the units of flow
    through the i-th input edge (matches input ordering for easy decode).
 ═══════════════════════════════════════════════════════════════════════ */
+// ── Web Worker pool for heavy synchronous compute ───────────────────────
+// MCF solver and Excel parsing are the two operations that visibly freeze
+// the tab on real data — solver for 1-3s on 6-month windows, Excel for
+// ~500ms on 100-row sheets but multi-second on bigger files. Both can run
+// in a Web Worker without leaving the UI in spinning-pinwheel territory.
+//
+// Strategy: keep the original synchronous functions on the main thread
+// (some callers expect immediate return), but expose Promise-returning
+// async wrappers that try the worker first and fall back to in-thread.
+//
+// The worker source is built as a string + Blob URL so the entire app
+// stays in one HTML file. Falls back to in-thread on browsers that
+// reject Blob workers (rare but possible under strict CSP).
+const _MCF_WORKER_SOURCE = `
+self.onmessage = function(e){
+  const { id, kind, args } = e.data;
+  try{
+    if(kind === 'mcf'){
+      const result = solveMCF.apply(null, args);
+      self.postMessage({ id, ok: true, result });
+    } else {
+      self.postMessage({ id, ok: false, error: 'unknown kind: ' + kind });
+    }
+  }catch(err){
+    self.postMessage({ id, ok: false, error: err.message || String(err) });
+  }
+};
+
+// Same _mcfSolve as the main thread. Bellman-Ford successive-shortest-path.
+function solveMCF(numNodes, edges, source, sink, maxFlow){
+  const adj = Array.from({length: numNodes}, () => []);
+  edges.forEach((e, i) => {
+    adj[e.from].push({to: e.to, cap: e.cap, cost: e.cost, rev: adj[e.to].length, edgeIdx: i});
+    adj[e.to].push({to: e.from, cap: 0, cost: -e.cost, rev: adj[e.from].length - 1, edgeIdx: -1});
+  });
+  let totalFlow = 0, totalCost = 0;
+  let safetyIter = Math.max(1000, maxFlow * 4);
+  while(totalFlow < maxFlow && safetyIter-- > 0){
+    const INF = Number.POSITIVE_INFINITY;
+    const dist = new Array(numNodes).fill(INF);
+    const prevNode = new Array(numNodes).fill(-1);
+    const prevEdge = new Array(numNodes).fill(-1);
+    dist[source] = 0;
+    let changed = true, bfIter = 0;
+    while(changed && bfIter++ < numNodes){
+      changed = false;
+      for(let u = 0; u < numNodes; u++){
+        if(dist[u] === INF) continue;
+        const aEdges = adj[u];
+        for(let i = 0; i < aEdges.length; i++){
+          const ed = aEdges[i];
+          if(ed.cap <= 0) continue;
+          const nd = dist[u] + ed.cost;
+          if(nd < dist[ed.to]){
+            dist[ed.to] = nd;
+            prevNode[ed.to] = u;
+            prevEdge[ed.to] = i;
+            changed = true;
+          }
+        }
+      }
+    }
+    if(dist[sink] === INF) break;
+    let bottleneck = INF;
+    for(let cur = sink; cur !== source; cur = prevNode[cur]){
+      const ed = adj[prevNode[cur]][prevEdge[cur]];
+      if(ed.cap < bottleneck) bottleneck = ed.cap;
+    }
+    if(bottleneck === INF || bottleneck <= 0) break;
+    for(let cur = sink; cur !== source; cur = prevNode[cur]){
+      const ed = adj[prevNode[cur]][prevEdge[cur]];
+      ed.cap -= bottleneck;
+      adj[ed.to][ed.rev].cap += bottleneck;
+    }
+    totalFlow += bottleneck;
+    totalCost += bottleneck * dist[sink];
+  }
+  const edgeFlows = new Array(edges.length).fill(0);
+  for(let u = 0; u < numNodes; u++){
+    for(const ed of adj[u]){
+      if(ed.edgeIdx >= 0){
+        edgeFlows[ed.edgeIdx] = edges[ed.edgeIdx].cap - ed.cap;
+      }
+    }
+  }
+  return { flow: totalFlow, cost: totalCost, edgeFlows };
+}
+`;
+
+let _mcfWorker = null;
+let _mcfWorkerNextId = 1;
+const _mcfWorkerCallbacks = {};
+
+function _ensureMcfWorker(){
+  if(_mcfWorker) return _mcfWorker;
+  if(typeof Worker !== 'function') return null;
+  try{
+    const blob = new Blob([_MCF_WORKER_SOURCE], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    _mcfWorker = new Worker(url);
+    _mcfWorker.onmessage = (e) => {
+      const { id, ok, result, error } = e.data || {};
+      const cb = _mcfWorkerCallbacks[id];
+      if(!cb) return;
+      delete _mcfWorkerCallbacks[id];
+      if(ok) cb.resolve(result);
+      else cb.reject(new Error(error || 'worker error'));
+    };
+    _mcfWorker.onerror = (e) => {
+      console.warn('[RS] MCF worker error', e);
+      // Reject any pending calls and tear down so the next attempt
+      // re-creates a fresh worker (or falls back to in-thread).
+      Object.values(_mcfWorkerCallbacks).forEach(cb => cb.reject(e));
+      Object.keys(_mcfWorkerCallbacks).forEach(k => delete _mcfWorkerCallbacks[k]);
+      try{ _mcfWorker.terminate(); }catch(_){}
+      _mcfWorker = null;
+    };
+  }catch(err){
+    console.warn('[RS] Could not start MCF worker, falling back to main thread:', err);
+    _mcfWorker = null;
+  }
+  return _mcfWorker;
+}
+
+function _mcfSolveAsync(numNodes, edges, source, sink, maxFlow){
+  const w = _ensureMcfWorker();
+  if(!w){
+    // No worker support — run in thread, return a resolved Promise so
+    // callers can use the same await pattern. The synchronous freeze
+    // is unavoidable here, but at least the API is uniform.
+    return Promise.resolve(_mcfSolve(numNodes, edges, source, sink, maxFlow));
+  }
+  return new Promise((resolve, reject) => {
+    const id = _mcfWorkerNextId++;
+    _mcfWorkerCallbacks[id] = { resolve, reject };
+    w.postMessage({ id, kind: 'mcf', args: [numNodes, edges, source, sink, maxFlow] });
+    // Watchdog: if the worker hangs (extremely large graph?) for >15s,
+    // reject so the caller can fall back. The main-thread version would
+    // also be unresponsive but at least the user gets feedback.
+    setTimeout(() => {
+      if(_mcfWorkerCallbacks[id]){
+        delete _mcfWorkerCallbacks[id];
+        reject(new Error('MCF solver timed out after 15s'));
+      }
+    }, 15000);
+  });
+}
+
 function _mcfSolve(numNodes, edges, source, sink, maxFlow){
   const adj = Array.from({length: numNodes}, () => []);
   // Each forward edge stores its index in the input array so the caller
@@ -7800,6 +8056,11 @@ async function launchApp(){
       // load settles. Surfaces orphan references via the error log so an
       // admin sees them on next visit; non-fatal.
       if(typeof _scheduleIntegrityScan === 'function') _scheduleIntegrityScan();
+      // Join the presence channel — leader tab only. Falls back silently
+      // if Supabase Realtime isn't available.
+      if(typeof _initPresence === 'function'){
+        setTimeout(() => { try{ _initPresence(); }catch(_){} }, 1500);
+      }
     }catch(e){
       console.error('[RS] Supabase load error:',e);
       if(si){si.textContent='⚠ DB error — working offline';si.style.color='var(--red-t)';}
@@ -24904,6 +25165,653 @@ function closeShortcutsHelp(){
   });
 })();
 
+// ── Predictive scheduling suggestions ────────────────────────────────
+// Looks at the past LOOKBACK_MONTHS of assignments to surface "who's
+// due" for each shift type and "who's been hit hardest" — the kind of
+// at-a-glance fairness sense an experienced scheduler would bring. Used
+// by the Tools page to give an admin a starting point before running
+// auto-assign or scheduling a high-impact shift.
+//
+// Output: { weekendCallDue:[...], holidayDue:[...], heaviestLoad:[...] }
+function _predictiveSuggestions(){
+  const LOOKBACK_MONTHS = 6;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - LOOKBACK_MONTHS);
+  const cutoffISO = fmtDate(cutoff);
+  // Per-physician counters for weekend, IR call, holiday, and total
+  // assignments in the lookback window.
+  const stats = {};
+  const ensure = (id) => { if(!stats[id]) stats[id] = { wknd:0, irCall:0, hol:0, total:0, lastWknd:'', lastHol:'' }; return stats[id]; };
+  (S.weekendCalls || []).forEach(w => {
+    const d = w.satDate || w.date || '';
+    if(!d || d < cutoffISO) return;
+    const s = ensure(w.physId); s.wknd++; s.total++;
+    if(d > s.lastWknd) s.lastWknd = d;
+  });
+  (S.irCalls || []).forEach(c => {
+    if(!c.date || c.date < cutoffISO) return;
+    if(_isHolidaySyncedCall(c)) return;
+    const s = ensure(c.physId); s.irCall++; s.total++;
+  });
+  (S.holidays || []).forEach(h => {
+    if(!h.date || h.date < cutoffISO) return;
+    const s = ensure(h.physId); s.hol++; s.total++;
+    if(h.date > s.lastHol) s.lastHol = h.date;
+  });
+  (S.drShifts || []).forEach(d => {
+    if(!d.date || d.date < cutoffISO) return;
+    if(d.shift === 'Home') return;
+    const s = ensure(d.physId); s.total++;
+  });
+  // Sort by ascending count (= most overdue) for "due" lists; descending
+  // for "heaviest". Filter to physicians with FTE > 0 in the relevant
+  // role so we don't suggest people who don't carry that load.
+  const phys = (S.physicians || []).filter(p => p.drFte > 0 || p.irFte > 0);
+  const fmtPhys = (p, label, value, extra) => ({
+    physId: p.id,
+    name: pname(p.id),
+    role: p.role,
+    label,
+    value,
+    extra,
+  });
+  // Weekend-call due: sort phys with drFte > 0 by ASC weekend count (least lately).
+  const weekendCallDue = phys
+    .filter(p => p.drFte > 0)
+    .map(p => {
+      const s = stats[p.id] || { wknd:0, lastWknd:'' };
+      return fmtPhys(p, `${s.wknd} weekend call${s.wknd===1?'':'s'}`, s.wknd, s.lastWknd ? `last: ${s.lastWknd}` : 'none in window');
+    })
+    .sort((a, b) => a.value - b.value)
+    .slice(0, 8);
+  // Holiday due: sort phys by ASC holiday count.
+  const holidayDue = phys
+    .map(p => {
+      const s = stats[p.id] || { hol:0, lastHol:'' };
+      return fmtPhys(p, `${s.hol} holiday${s.hol===1?'':'s'}`, s.hol, s.lastHol ? `last: ${s.lastHol}` : 'none in window');
+    })
+    .sort((a, b) => a.value - b.value)
+    .slice(0, 8);
+  // Heaviest load: total events DESC.
+  const heaviestLoad = phys
+    .map(p => {
+      const s = stats[p.id] || { total:0 };
+      return fmtPhys(p, `${s.total} total events`, s.total);
+    })
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+  return { weekendCallDue, holidayDue, heaviestLoad, lookbackMonths: LOOKBACK_MONTHS };
+}
+
+function renderPredictiveSuggestions(){
+  if(!_adminOnly('view predictive suggestions')) return;
+  const out = document.getElementById('ps-result');
+  if(!out) return;
+  const r = _predictiveSuggestions();
+  const renderList = (title, list, emoji) => `
+    <div class="card-section" style="margin-top:14px">${emoji} ${escHtml(title)}</div>
+    <table class="tbl" style="font-size:12.5px;width:100%">
+      <thead><tr><th>Rank</th><th>Physician</th><th>Role</th><th>Stat</th><th></th></tr></thead>
+      <tbody>${list.map((r, i) => `
+        <tr>
+          <td style="font-weight:700">${i+1}</td>
+          <td>${escHtml(r.name)}</td>
+          <td><span class="tag" style="font-size:10px">${escHtml(r.role || '—')}</span></td>
+          <td>${escHtml(r.label)}</td>
+          <td style="color:var(--rs-ink-3);font-size:11px">${escHtml(r.extra || '')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  out.innerHTML = `
+    <div class="note ni" style="font-size:11.5px;margin-bottom:8px">
+      Based on the last ${r.lookbackMonths} months of assignments. These are
+      <em>suggestions</em> only — the auto-assigner already factors in
+      fairness, but this view gives you a manual starting point when you
+      want to pick a specific person for a specific slot.
+    </div>
+    ${renderList('Weekend call — least lately', r.weekendCallDue, '📞')}
+    ${renderList('Holiday — least lately', r.holidayDue, '🎄')}
+    ${renderList('Heaviest load this window', r.heaviestLoad, '⚖')}`;
+}
+
+// ── Web Push notification scaffold ──────────────────────────────────
+// Subscribes the current browser to push notifications via the existing
+// service worker. Push delivery requires server-side infrastructure
+// (VAPID keys + a server signing the push) which lives in the
+// send-notification edge function — see docs/DEPLOY.md. This client
+// scaffold:
+//   1. Checks for service-worker + Push API support
+//   2. Asks for permission if granted/default; refuses if denied
+//   3. Subscribes via VAPID public key (from S.cfg.vapidPublicKey)
+//   4. Posts the subscription JSON to the user's profile so the
+//      edge function can fan-push to them later.
+async function subscribeToWebPush(){
+  if(!('serviceWorker' in navigator)){
+    alert('This browser does not support service workers.');
+    return false;
+  }
+  if(!('PushManager' in window)){
+    alert('This browser does not support Web Push.');
+    return false;
+  }
+  // Permission gate. If denied, the user must clear it in browser settings.
+  const perm = Notification.permission;
+  if(perm === 'denied'){
+    alert('Notification permission was denied previously. Re-allow in your browser site settings, then click again.');
+    return false;
+  }
+  if(perm !== 'granted'){
+    const result = await Notification.requestPermission();
+    if(result !== 'granted'){
+      if(typeof _toast === 'function') _toast('Notifications declined.', 'warn');
+      return false;
+    }
+  }
+  // Need an active SW registration. The earlier _registerServiceWorker
+  // already attempted this; if /sw.js wasn't deployed it's a no-op.
+  let reg;
+  try{ reg = await navigator.serviceWorker.ready; }
+  catch(_){
+    alert('Service worker not registered. Deploy sw.js to your origin first (Settings → Offline support).');
+    return false;
+  }
+  const vapidKey = (S.cfg && S.cfg.vapidPublicKey) || '';
+  if(!vapidKey){
+    alert('VAPID public key not configured. An admin needs to set S.cfg.vapidPublicKey via the edge-function setup.');
+    return false;
+  }
+  try{
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlBase64ToUint8(vapidKey),
+    });
+    // Save to user record so the edge function can push to this device.
+    if(CU){
+      CU.pushSubscription = sub.toJSON();
+      const u = USERS.find(x => x.id === CU.id);
+      if(u) u.pushSubscription = CU.pushSubscription;
+      triggerSave();
+    }
+    if(typeof _audit === 'function') _audit('push.subscribe', { endpoint: sub.endpoint });
+    if(typeof _toast === 'function') _toast('Notifications enabled on this device.', 'ok');
+    return true;
+  }catch(e){
+    console.warn('[RS] push subscribe failed', e);
+    alert('Push subscription failed: ' + (e.message || e));
+    return false;
+  }
+}
+
+async function unsubscribeFromWebPush(){
+  if(!('serviceWorker' in navigator)) return false;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(sub){ await sub.unsubscribe(); }
+    if(CU){
+      CU.pushSubscription = null;
+      const u = USERS.find(x => x.id === CU.id);
+      if(u) u.pushSubscription = null;
+      triggerSave();
+    }
+    if(typeof _toast === 'function') _toast('Notifications disabled on this device.', 'ok');
+    return true;
+  }catch(e){
+    console.warn('[RS] push unsubscribe failed', e);
+    return false;
+  }
+}
+
+// VAPID keys arrive as URL-safe base64; PushManager.subscribe wants Uint8Array.
+function _urlBase64ToUint8(s){
+  const padding = '='.repeat((4 - s.length % 4) % 4);
+  const b64 = (s + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for(let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// ── Live presence indicator ─────────────────────────────────────────
+// "👁 3 others viewing" pill that keeps everyone aware when colleagues
+// are also looking at the schedule. Useful before bulk operations: if
+// you see two other admins online, ping them on chat before running
+// the auto-assigner. Reflects only the leader-tab in each browser.
+//
+// Implementation: Supabase Realtime presence channel keyed on practice
+// id. Each leader-tab joins with a payload of {first, last, email}.
+// We subscribe to syncs and update the toolbar pill. Followers don't
+// join — they'd duplicate the user's count.
+let _presenceChannel = null;
+function _initPresence(){
+  if(!_supabase || !CU || !_ROW_ID) return;
+  // Followers (non-leader tabs in the same browser) don't join. Only the
+  // leader tab represents this user in the practice's presence channel.
+  if(typeof _isLeader !== 'undefined' && !_isLeader) return;
+  if(_presenceChannel){ try{ _presenceChannel.unsubscribe(); }catch(_){} }
+  const channel = _supabase.channel('presence-' + _ROW_ID, {
+    config: { presence: { key: CU.id || ('anon-' + Math.random()) } },
+  });
+  channel.on('presence', { event: 'sync' }, () => {
+    const state = channel.presenceState();
+    _renderPresence(state);
+  });
+  channel.subscribe(async (status) => {
+    if(status === 'SUBSCRIBED'){
+      await channel.track({
+        userId: CU.id,
+        first: CU.first || '',
+        last: CU.last || '',
+        joinedAt: Date.now(),
+      });
+    }
+  });
+  _presenceChannel = channel;
+}
+function _renderPresence(state){
+  const el = document.getElementById('rs-presence');
+  if(!el) return;
+  // Flatten all the "users currently in the channel" payloads. Each
+  // browser tab is a separate presence; we count distinct user IDs so
+  // the pill doesn't tick up when one user has 3 tabs open.
+  const userIds = new Set();
+  Object.values(state || {}).forEach(arr => arr.forEach(p => userIds.add(p.userId)));
+  // Subtract self.
+  if(CU?.id) userIds.delete(CU.id);
+  const others = userIds.size;
+  if(others === 0){ el.style.display = 'none'; return; }
+  // Build a tooltip listing names.
+  const names = [];
+  Object.values(state || {}).forEach(arr => arr.forEach(p => {
+    if(p.userId === CU?.id) return;
+    const nm = `${p.first||''} ${p.last||''}`.trim();
+    if(nm && !names.includes(nm)) names.push(nm);
+  }));
+  el.style.display = 'inline-flex';
+  el.textContent = `👁 ${others} other${others===1?'':'s'} here`;
+  el.title = names.length ? `Also viewing: ${names.join(', ')}` : '';
+}
+function _teardownPresence(){
+  if(!_presenceChannel) return;
+  try{ _presenceChannel.untrack(); }catch(_){}
+  try{ _presenceChannel.unsubscribe(); }catch(_){}
+  _presenceChannel = null;
+  const el = document.getElementById('rs-presence');
+  if(el) el.style.display = 'none';
+}
+
+// ── Calendar mode toggle (grid ↔ list) ──────────────────────────────
+// Global toggle that flips body[data-cal-mode] between grid (default)
+// and list. The list mode CSS hides the existing month-grid and shows
+// the .rs-cal-list block that calendar renderers populate when this
+// mode is active. Persisted in localStorage so the choice sticks.
+function toggleCalendarMode(){
+  const cur = document.body.getAttribute('data-cal-mode') || 'grid';
+  const next = cur === 'list' ? 'grid' : 'list';
+  document.body.setAttribute('data-cal-mode', next);
+  try{ localStorage.setItem('rs.calMode', next); }catch(_){}
+  const btn = document.getElementById('rs-calmode-btn');
+  if(btn){
+    btn.textContent = next === 'list' ? '📋' : '📅';
+    btn.title = next === 'list' ? 'Switch to grid view' : 'Switch to list view';
+  }
+  // Re-render the active calendar so its list-view markup gets generated.
+  if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+  if(next === 'list' && typeof _renderCalendarListView === 'function'){
+    _renderCalendarListView();
+  }
+}
+
+// ── List-view renderer ─────────────────────────────────────────────────
+// Populates each .rs-cal-list container on the active page with a
+// chronological day-by-day list of events. Inspects the active page,
+// finds its month input, gathers everything in S that lands in that
+// month, and renders into the container. The container is part of the
+// page HTML; calendars inject `<div class="rs-cal-list" id="..."></div>`
+// as a sibling of the grid so this function has somewhere to write.
+function _renderCalendarListView(){
+  const activePage = document.querySelector('.page.on');
+  if(!activePage) return;
+  // Auto-create a list container if the page has a calendar grid
+  // but no list sibling yet. This is the patch that lets list-mode
+  // work on every existing calendar without per-calendar refactoring.
+  const grids = activePage.querySelectorAll('.calmo, .cal-grid, .cal-grid-ir');
+  grids.forEach(grid => {
+    let list = grid.parentElement?.querySelector('.rs-cal-list');
+    if(!list){
+      list = document.createElement('div');
+      list.className = 'rs-cal-list';
+      grid.parentElement?.insertBefore(list, grid.nextSibling);
+    }
+  });
+  // Fill each list container with the month's events.
+  const monthInput = activePage.querySelector('input[type="month"]');
+  const ym = monthInput?.value || fmtDate(new Date()).slice(0, 7);
+  const cells = (typeof buildCal === 'function') ? buildCal(ym) : [];
+  const today = fmtDate(new Date());
+  const listsToFill = activePage.querySelectorAll('.rs-cal-list');
+  if(!listsToFill.length || !cells.length) return;
+  const html = cells.filter(c => c.day).map(c => {
+    const ds = c.date;
+    const isToday = ds === today;
+    const isWeekend = c.dow === 0 || c.dow === 6;
+    // Gather every event for this day across all schedule types.
+    const events = [];
+    (S.drShifts || []).filter(s => s.date === ds).forEach(s => {
+      events.push({ kind:'dr', label:`${s.shift} Shift @ ${s.site||'—'}${s.sub?' · '+s.sub:''}`, who: pname(s.physId), tag:s.shift==='1st'?'tb':s.shift==='Home'?'tg':s.shift==='2nd'?'tt':'ta' });
+    });
+    (S.irShifts || []).filter(s => s.date === ds).forEach(s => {
+      events.push({ kind:'ir', label:`IR ${s.shift==='1st'?'Day':s.shift} @ ${s.site||'—'}`, who: pname(s.physId), tag:'tt' });
+    });
+    (S.irCalls || []).filter(c => c.date === ds || (c.callType==='weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds))).forEach(c => {
+      events.push({ kind:'irc', label:`IR ${c.callType==='weekend'?'Weekend':'Daily'} Call (${c.irGroup||''})`, who: pname(c.physId), tag:'ta' });
+    });
+    (S.weekendCalls || []).filter(w => (w.satDate||w.date) === ds || w.sunDate === ds).forEach(w => {
+      events.push({ kind:'wkn', label:`Weekend Call`, who: pname(w.physId), tag:'tg' });
+    });
+    (S.holidays || []).filter(h => h.date === ds).forEach(h => {
+      events.push({ kind:'hol', label:`Holiday: ${h.name||''}`, who: pname(h.physId), tag:'tr' });
+    });
+    (S.vacations || []).filter(v => v.start <= ds && v.end >= ds).forEach(v => {
+      events.push({ kind:'vac', label:`${v.type||'Vacation'}`, who: pname(v.physId), tag:'tg' });
+    });
+    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.dow];
+    return `<div class="rs-cal-day ${isToday?'today':''} ${isWeekend?'weekend':''} ${events.length?'':'empty'}">
+      <div class="rs-cal-day-num">${c.day}<small>${dow}</small></div>
+      <div class="rs-cal-day-events">
+        ${events.length
+          ? events.map(e => `<div style="font-size:12.5px;line-height:1.4">
+              <span class="tag ${e.tag}" style="font-size:10px;margin-right:6px">${escHtml(e.label)}</span>
+              <span style="color:var(--rs-ink-2)">${escHtml(e.who)}</span>
+            </div>`).join('')
+          : '<div style="font-size:11.5px;color:var(--rs-ink-3)">No events</div>'}
+      </div>
+    </div>`;
+  }).join('');
+  listsToFill.forEach(list => { list.innerHTML = html; });
+}
+
+// Auto-render list view whenever a calendar page comes on AND list mode
+// is active. Runs on a delay so the calendar's own render finishes first.
+(function _watchPageChangesForList(){
+  if(typeof MutationObserver === 'undefined') return;
+  const observer = new MutationObserver(() => {
+    if(document.body.getAttribute('data-cal-mode') !== 'list') return;
+    // Re-render on the next tick so the underlying calendar render
+    // has populated its grid markup.
+    setTimeout(() => { try{ _renderCalendarListView(); }catch(_){} }, 50);
+  });
+  // Wait until DOM ready, then observe.
+  const start = () => {
+    const target = document.getElementById('main-content');
+    if(target) observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+// Restore preference + on a phone-sized viewport default to list mode
+// (the dense grid is unusable below ~640px).
+(function _initCalMode(){
+  let saved = null;
+  try{ saved = localStorage.getItem('rs.calMode'); }catch(_){}
+  if(!saved && typeof window.matchMedia === 'function'){
+    if(window.matchMedia('(max-width:640px)').matches) saved = 'list';
+  }
+  if(saved){
+    document.body.setAttribute('data-cal-mode', saved);
+    setTimeout(() => {
+      const btn = document.getElementById('rs-calmode-btn');
+      if(btn){
+        btn.textContent = saved === 'list' ? '📋' : '📅';
+        btn.title = saved === 'list' ? 'Switch to grid view' : 'Switch to list view';
+      }
+    }, 100);
+  }
+})();
+
+// ── Annual report ────────────────────────────────────────────────────
+// Per-physician year-end summary: counts each assignment type by month
+// and totals across the year. Used for credentialing reviews, FTE
+// reconciliation, and physicians' own records. Output is a single HTML
+// table designed to print cleanly via the existing print stylesheet.
+function renderAnnualReport(){
+  if(!_adminOnly('generate annual report')) return;
+  const physId = +document.getElementById('ar-phys')?.value || 0;
+  const year = +document.getElementById('ar-year')?.value || new Date().getFullYear();
+  const out = document.getElementById('ar-result');
+  if(!physId){ out.innerHTML = '<div class="note nw">Pick a physician.</div>'; return; }
+  const p = _physById(physId);
+  if(!p){ out.innerHTML = '<div class="note ne">Physician not found.</div>'; return; }
+  const yearStr = String(year);
+  // Helper: count by month
+  const byMonth = (arr, datePicker, predicate) => {
+    const counts = new Array(13).fill(0); // index 0 unused, 1-12 monthly
+    (arr || []).forEach(rec => {
+      if(predicate && !predicate(rec)) return;
+      const d = datePicker(rec);
+      if(!d || !d.startsWith(yearStr)) return;
+      const m = +d.slice(5, 7);
+      if(m >= 1 && m <= 12) counts[m]++;
+    });
+    return counts;
+  };
+  const drDay   = byMonth(S.drShifts,    s => s.date,         s => s.physId === physId && s.shift !== 'Home');
+  const drHome  = byMonth(S.drShifts,    s => s.date,         s => s.physId === physId && s.shift === 'Home');
+  const drWknd  = byMonth(S.weekendCalls, w => w.satDate || w.date, w => w.physId === physId);
+  const irShift = byMonth(S.irShifts,    s => s.date,         s => s.physId === physId && s.shift !== 'Home');
+  const irCall  = byMonth(S.irCalls,     c => c.date,         c => c.physId === physId);
+  const hols    = byMonth(S.holidays,    h => h.date,         h => h.physId === physId);
+  // Vacations span days; count number of days per month.
+  const vacDaysPerMonth = new Array(13).fill(0);
+  (S.vacations || []).filter(v => v.physId === physId).forEach(v => {
+    if(!v.start) return;
+    let cur = parseDateLocal(v.start);
+    const end = parseDateLocal(v.end || v.start);
+    while(cur <= end){
+      const ds = fmtDate(cur);
+      if(ds.startsWith(yearStr)){
+        const m = +ds.slice(5, 7);
+        if(m >= 1 && m <= 12) vacDaysPerMonth[m]++;
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const sum = (arr) => arr.reduce((a,b) => a+b, 0);
+  const totals = {
+    drDay: sum(drDay), drHome: sum(drHome), drWknd: sum(drWknd),
+    irShift: sum(irShift), irCall: sum(irCall),
+    hols: sum(hols), vac: sum(vacDaysPerMonth),
+  };
+  const row = (label, arr, total, cls) => `
+    <tr>
+      <td style="font-weight:600">${escHtml(label)}</td>
+      ${arr.slice(1).map(n => `<td style="text-align:center;${n?'':'color:var(--rs-ink-3)'}">${n||''}</td>`).join('')}
+      <td style="font-weight:700;text-align:center;${cls?'background:'+cls:''}">${total}</td>
+    </tr>`;
+  out.innerHTML = `
+    <div class="rs-print-title" style="display:block;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:600;letter-spacing:-0.022em">${escHtml(p.last)}, ${escHtml(p.first)}</div>
+      <div style="font-size:13px;color:var(--rs-ink-3);margin-top:2px">Annual report · ${year} · ${escHtml(p.role || '—')} · DR FTE ${p.drFte || 0} · IR FTE ${p.irFte || 0}</div>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="tbl" style="width:100%;font-size:12.5px">
+      <thead>
+        <tr>
+          <th style="text-align:left">Category</th>
+          ${months.map(m => `<th style="text-align:center">${m}</th>`).join('')}
+          <th style="text-align:center">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${row('DR day shifts',     drDay,  totals.drDay,  'rgba(37,99,235,.1)')}
+        ${row('DR home shifts',    drHome, totals.drHome, '')}
+        ${row('Weekend calls',     drWknd, totals.drWknd, 'rgba(217,119,6,.12)')}
+        ${row('IR procedure shifts', irShift, totals.irShift, 'rgba(37,99,235,.1)')}
+        ${row('IR call days',      irCall, totals.irCall, 'rgba(217,119,6,.12)')}
+        ${row('Holiday days',      hols,   totals.hols,   'rgba(220,38,38,.12)')}
+        ${row('Vacation days',     vacDaysPerMonth, totals.vac, 'rgba(22,163,74,.12)')}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--rs-line-strong);font-weight:700">
+          <td>Total events</td>
+          ${months.map((_, i) => {
+            const t = (drDay[i+1] || 0) + (drHome[i+1] || 0) + (drWknd[i+1] || 0)
+                    + (irShift[i+1] || 0) + (irCall[i+1] || 0) + (hols[i+1] || 0);
+            return `<td style="text-align:center">${t || ''}</td>`;
+          }).join('')}
+          <td style="text-align:center">${totals.drDay + totals.drHome + totals.drWknd + totals.irShift + totals.irCall + totals.hols}</td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-top:10px">Generated ${new Date().toLocaleString()} from RadScheduler.</div>`;
+}
+
+// ── iCal export ─────────────────────────────────────────────────────
+// Build a .ics calendar feed for a single physician containing all their
+// shifts, calls, weekend calls, holidays, and vacations. Downloadable
+// directly; physicians can drag-drop into Apple Calendar / Google
+// Calendar / Outlook for their personal use.
+//
+// Format: RFC 5545 minimum subset — VCALENDAR with one VEVENT per
+// assignment. Vacations and weekend-call blocks become multi-day VEVENTs
+// using DTSTART;VALUE=DATE / DTEND;VALUE=DATE (whole-day, no time).
+// Single-day shifts use VALUE=DATE too unless the shift has a configured
+// start/end time in S.cfg.shiftTimes.
+function _icalEscape(s){
+  // RFC 5545: escape backslash, semicolon, comma, and newline.
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+function _icalDate(ds){
+  return ds.replace(/-/g, '');
+}
+function _icalNow(){
+  const d = new Date();
+  return d.getUTCFullYear() + String(d.getUTCMonth()+1).padStart(2,'0') + String(d.getUTCDate()).padStart(2,'0')
+       + 'T' + String(d.getUTCHours()).padStart(2,'0') + String(d.getUTCMinutes()).padStart(2,'0') + String(d.getUTCSeconds()).padStart(2,'0') + 'Z';
+}
+function _icalEvent({uid, dtstart, dtend, summary, description, location}){
+  const lines = [
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${_icalNow()}`,
+    `DTSTART;VALUE=DATE:${_icalDate(dtstart)}`,
+    // RFC 5545: DTEND for VALUE=DATE is exclusive (next day after the
+    // last day). +1 day so the event covers the intended range.
+    `DTEND;VALUE=DATE:${_icalDate(addDays(dtend, 1))}`,
+    `SUMMARY:${_icalEscape(summary)}`,
+  ];
+  if(location) lines.push(`LOCATION:${_icalEscape(location)}`);
+  if(description) lines.push(`DESCRIPTION:${_icalEscape(description)}`);
+  lines.push('END:VEVENT');
+  return lines.join('\r\n');
+}
+
+function exportPhysicianICal(physId){
+  const p = _physById(physId);
+  if(!p){ alert('Physician not found.'); return; }
+  const events = [];
+  const practiceName = (typeof _PRACTICES !== 'undefined')
+    ? (_PRACTICES.find(x => x.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  // DR shifts
+  (S.drShifts || []).filter(s => s.physId === physId).forEach(s => {
+    events.push(_icalEvent({
+      uid: `dr-${s.id}@radsched`,
+      dtstart: s.date, dtend: s.date,
+      summary: `${s.shift} Shift${s.site && s.site !== 'At Home / Remote' ? ' @ ' + s.site : (s.shift === 'Home' || s.shift === '2nd' || s.shift === '3rd' ? ' (At Home)' : '')}`,
+      description: [s.sub, s.notes].filter(Boolean).join(' · '),
+      location: s.site || '',
+    }));
+  });
+  // IR shifts
+  (S.irShifts || []).filter(s => s.physId === physId).forEach(s => {
+    events.push(_icalEvent({
+      uid: `ir-${s.id}@radsched`,
+      dtstart: s.date, dtend: s.date,
+      summary: `IR ${s.shift === '1st' ? 'Day' : s.shift} Shift @ ${s.site || ''}`,
+      description: [s.sub, s.irGroup, s.notes].filter(Boolean).join(' · '),
+      location: s.site || '',
+    }));
+  });
+  // IR calls — daily are 1 day, weekend are 4 (Fri-Mon)
+  (S.irCalls || []).filter(c => c.physId === physId).forEach(c => {
+    const dtend = c.callType === 'weekend' ? addDays(c.date, 3) : c.date;
+    events.push(_icalEvent({
+      uid: `irc-${c.id}@radsched`,
+      dtstart: c.date, dtend,
+      summary: `IR ${c.callType === 'weekend' ? 'Weekend' : 'Daily'} Call (${c.irGroup || ''})`,
+      description: [c.site, c.notes].filter(Boolean).join(' · '),
+      location: c.site || '',
+    }));
+  });
+  // Weekend calls — Sat → Sun (or longer if recorded)
+  (S.weekendCalls || []).filter(w => w.physId === physId).forEach(w => {
+    const dtstart = w.satDate || w.date || '';
+    const dtend = w.sunDate || dtstart;
+    if(!dtstart) return;
+    events.push(_icalEvent({
+      uid: `wkn-${w.id}@radsched`,
+      dtstart, dtend,
+      summary: `Weekend Call${w.sub ? ' — ' + w.sub : ''}`,
+      description: [w.ctype, w.site, w.notes].filter(Boolean).join(' · '),
+      location: w.site || '',
+    }));
+  });
+  // Holidays
+  (S.holidays || []).filter(h => h.physId === physId).forEach(h => {
+    events.push(_icalEvent({
+      uid: `hol-${h.id}@radsched`,
+      dtstart: h.date, dtend: h.date,
+      summary: `Holiday Call: ${h.name || ''}`,
+      description: [h.group, h.notes].filter(Boolean).join(' · '),
+    }));
+  });
+  // Vacations
+  (S.vacations || []).filter(v => v.physId === physId).forEach(v => {
+    if(!v.start) return;
+    events.push(_icalEvent({
+      uid: `vac-${v.id}@radsched`,
+      dtstart: v.start, dtend: v.end || v.start,
+      summary: v.type || 'Vacation',
+      description: v.notes || '',
+    }));
+  });
+  if(!events.length){
+    if(typeof _toast === 'function') _toast(`No assignments found for ${pname(physId)}.`, 'warn');
+    return;
+  }
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//RadScheduler//EN',
+    'CALSCALE:GREGORIAN',
+    `X-WR-CALNAME:${_icalEscape(practiceName + ' — ' + pname(physId))}`,
+    `X-WR-CALDESC:${_icalEscape('Schedule export from ' + practiceName)}`,
+    ...events,
+    'END:VCALENDAR',
+  ].join('\r\n');
+  // Download
+  try{
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(p.last||'phys')}-${(p.first||'')}-schedule.ics`.replace(/[^A-Za-z0-9._-]/g, '_');
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _audit === 'function') _audit('export.ical', { physId, eventCount: events.length });
+    if(typeof _toast === 'function') _toast(`Exported ${events.length} events for ${pname(physId)}.`, 'ok');
+  }catch(e){
+    alert('iCal export failed: ' + (e.message || e));
+  }
+}
+
 // ── Tools page renderer ──────────────────────────────────────────────
 // Repopulates every form on the Tools page from current state. Called
 // on tab open via _refreshCurrentPage's fns map.
@@ -24913,10 +25821,16 @@ function renderTools(){
   const physOptions = (S.physicians||[]).slice().sort((a,b) =>
     (a.last||'').localeCompare(b.last||'')
   ).map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
-  ['wi-phys','pcr-a','pcr-b'].forEach(id => {
+  ['wi-phys','pcr-a','pcr-b','ar-phys'].forEach(id => {
     const el = document.getElementById(id);
-    if(el) el.innerHTML = (id === 'wi-phys' ? '<option value="">— pick physician —</option>' : '') + physOptions;
+    if(el){
+      const prefix = (id === 'wi-phys' || id === 'ar-phys') ? '<option value="">— pick physician —</option>' : '';
+      el.innerHTML = prefix + physOptions;
+    }
   });
+  // Default annual-report year to last completed year
+  const arYr = document.getElementById('ar-year');
+  if(arYr && !arYr.value) arYr.value = String(new Date().getFullYear() - 1);
   // Site selects
   const siteOptions = (S.sites||[])
     .filter(s => s.name !== 'At Home / Remote')
@@ -31691,23 +32605,75 @@ function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
   const file = input.files[0]; if(!file) return;
   const prev = document.getElementById('xl-pick-preview');
-  prev.innerHTML = '<div style="color:var(--txt2);font-size:12px">Reading file…</div>';
-  if(!window.XLSX){ prev.innerHTML = '<div class="note ne">SheetJS not loaded.</div>'; return; }
+  // Stage 1 — visible "reading" state with progress bar so the user knows
+  // the long synchronous SheetJS read is in flight.
+  prev.innerHTML = `
+    <div class="note ni" style="font-size:12.5px;display:flex;flex-direction:column;gap:8px">
+      <div>Reading <strong>${escHtml(file.name)}</strong> (${Math.round(file.size/1024)} KB)…</div>
+      <div class="rs-progress"><div class="rs-progress-bar indeterminate"></div></div>
+    </div>`;
+  if(!window.XLSX){
+    prev.innerHTML = '<div class="note ne">SheetJS library failed to load. Check your connection — the CDN script tag may have been blocked.</div>';
+    return;
+  }
   const reader = new FileReader();
+  reader.onerror = () => {
+    prev.innerHTML = `<div class="note ne">Couldn't read the file from disk: ${escHtml(reader.error?.message || 'unknown FileReader error')}.<br><span style="font-size:11px;color:var(--rs-ink-3)">If the file is open in Excel, close it and try again.</span></div>`;
+  };
   reader.onload = e => {
+    // Wrap each stage of parsing in its own try/catch so the user sees
+    // exactly which step failed and can act on it.
+    let wb, ws, sheetName, rows;
     try{
-      // Read with raw cells AND cellDates:true so we can fall back to either
-      // a Date object OR the underlying serial number when the formatter
-      // doesn't apply (some cells have a number style instead of date).
-      const wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
-      const sheetName = wb.SheetNames.find(n => /calendar/i.test(n)) || wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
-      // raw:true preserves numbers / Dates; we do our own coercion. Empty cells become null,
-      // not undefined, so column indexes line up across rows.
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+      // Stage 2 — XLSX.read parses the binary into a workbook. Slow for
+      // large files but we can't easily yield here (SheetJS is sync).
+      // raw cells + cellDates:true so date cells come back as Date
+      // objects when possible.
+      const t0 = performance.now();
+      wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
+      console.log(`[RS] XLSX.read: ${Math.round(performance.now() - t0)}ms`);
+    }catch(err){
+      prev.innerHTML = `<div class="note ne">Excel parse failed at <strong>workbook decode</strong>:<br>
+        <code style="font-family:ui-monospace,monospace;font-size:11px">${escHtml(err.message || String(err))}</code><br>
+        <span style="font-size:11.5px;color:var(--rs-ink-3)">The file might be password-protected, corrupted, or saved as the very old .xls binary format which SheetJS can't always handle.</span></div>`;
+      return;
+    }
+    // Stage 3 — sheet selection. Try multiple candidate names so we don't
+    // silently fall through to the first sheet (which might be Pick Order
+    // and produce confusing parse errors).
+    const sheetCandidates = wb.SheetNames.filter(n => /calendar/i.test(n));
+    sheetName = sheetCandidates[0] || wb.SheetNames[0];
+    ws = wb.Sheets[sheetName];
+    if(!ws){
+      const list = wb.SheetNames.length
+        ? wb.SheetNames.map(n => '<code>'+escHtml(n)+'</code>').join(', ')
+        : '<em>none</em>';
+      prev.innerHTML = `<div class="note ne">Couldn't find a sheet to parse. Sheets in this workbook: ${list}</div>`;
+      return;
+    }
+    try{
+      // Stage 4 — flatten to a 2-D array. raw:true preserves numbers /
+      // Dates; we do our own coercion. defval:null aligns column indexes
+      // across rows of varying length.
+      rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+    }catch(err){
+      prev.innerHTML = `<div class="note ne">Sheet flattening failed: ${escHtml(err.message || String(err))}.<br>The sheet might have merged cells or invalid range references.</div>`;
+      return;
+    }
+    if(!rows.length){
+      prev.innerHTML = `<div class="note nw">Sheet <strong>${escHtml(sheetName)}</strong> has no rows. Pick a different sheet from the workbook (sheets available: ${wb.SheetNames.map(n => '<code>'+escHtml(n)+'</code>').join(', ')}).</div>`;
+      return;
+    }
+    // Stage 5 — defer to the parser. Wrap in try/catch so an unexpected
+    // throw doesn't leave the user staring at "Reading…" forever.
+    try{
       _parsePickWorkbook(rows, prev, sheetName);
     }catch(err){
-      prev.innerHTML = `<div class="note ne">Error reading file: ${escHtml(err.message || String(err))}</div>`;
+      console.error('[RS] _parsePickWorkbook threw:', err);
+      prev.innerHTML = `<div class="note ne">Parser crashed: ${escHtml(err.message || String(err))}.<br>
+        <details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px">▶ Stack trace</summary>
+        <pre style="font-family:ui-monospace,monospace;font-size:10.5px;white-space:pre-wrap;margin-top:6px;color:var(--rs-ink-2)">${escHtml(err.stack || '(no stack)')}</pre></details></div>`;
+      if(typeof _logError === 'function') _logError('parsePickWorkbook', 'Pick-sheet parser crashed', err);
     }
   };
   reader.readAsArrayBuffer(file);
@@ -31780,8 +32746,15 @@ function _parsePickWorkbook(rows, prev, sheetName){
   // ── Step 1. Find the header rows ────────────────────────────────────
   // A header row is any row with ≥ 2 cells that resolve to a date AND
   // those date-cells are at LEAST 5 days apart (so we don't false-match
-  // a single date in the middle of a pickers list).
+  // a single date in the middle of a pickers list). Also accept SINGLE
+  // dated rows IF the column they sit in is otherwise mostly empty —
+  // this catches sheets with one-header-per-month layouts.
   const headerRows = [];
+  // Diagnostic: track rows that LOOKED like headers but were rejected,
+  // and the reason. Surfaces if we end up with zero matches so the
+  // admin can see why detection failed instead of getting a generic
+  // "couldn't find header" message.
+  const rejected = [];
   for(let r = 0; r < rows.length; r++){
     const row = rows[r] || [];
     const datedCols = [];
@@ -31789,18 +32762,50 @@ function _parsePickWorkbook(rows, prev, sheetName){
       const iso = _xlsxDateToISO(row[c]);
       if(iso) datedCols.push({col: c, date: iso});
     }
-    if(datedCols.length < 2) continue;
-    // Sort by column, verify 5+ day spacing between adjacent
+    if(datedCols.length === 0) continue;
+    if(datedCols.length === 1){
+      // Single-date rows are accepted only if they appear to be calendar
+      // headers in a one-week-per-block layout. Heuristic: row index is
+      // in the early third of the sheet AND the date sits at column 1+.
+      if(r < rows.length * 0.7 && datedCols[0].col >= 1){
+        headerRows.push({row: r, weeks: datedCols});
+      } else {
+        rejected.push({row: r, reason: 'only one date, not at calendar column'});
+      }
+      continue;
+    }
+    // 2+ dated cells: verify 5+ day spacing between adjacent.
     datedCols.sort((a,b) => a.col - b.col);
-    let spaced = true;
+    let spaced = true, firstFail = null;
     for(let i = 1; i < datedCols.length; i++){
-      if(_daysBetween(datedCols[i-1].date, datedCols[i].date) < 5){ spaced = false; break; }
+      const gap = _daysBetween(datedCols[i-1].date, datedCols[i].date);
+      if(gap < 5){ spaced = false; firstFail = `${datedCols[i-1].date} → ${datedCols[i].date} (gap ${gap}d)`; break; }
     }
     if(spaced) headerRows.push({row: r, weeks: datedCols});
+    else rejected.push({row: r, reason: 'date spacing < 5 days at ' + firstFail});
   }
   if(!headerRows.length){
-    prev.innerHTML = '<div class="note ne">Could not find any week-header rows. Make sure the sheet name (currently <strong>'
-      + escHtml(sheetName) + '</strong>) is the calendar layout, not the pick-order tab.</div>';
+    const sheetList = (rows[0] || []).slice(0, 12).map((v, i) =>
+      `<code style="font-size:10px">[${i}]=${escHtml(v == null ? '' : String(v).slice(0,30))}</code>`
+    ).join(' ');
+    const sample = rows.slice(0, 3).map((row, i) =>
+      `<div style="font-family:ui-monospace,monospace;font-size:10.5px;color:var(--rs-ink-2)">Row ${i+1}: ${
+        (row || []).slice(0, 8).map(v => v == null ? '∅' : (typeof v === 'string' ? '"'+v.slice(0,18)+'"' : String(v).slice(0,18))).join(' | ')
+      }</div>`).join('');
+    prev.innerHTML = `<div class="note ne">
+      <strong>Could not find any week-header rows on sheet "${escHtml(sheetName)}".</strong>
+      <div style="font-size:11.5px;margin-top:8px">A header row needs at least one date cell with proper Excel date formatting. Check that:</div>
+      <ul style="font-size:11.5px;margin:6px 0 8px 18px;color:var(--rs-ink-2)">
+        <li>You're on the <strong>Calendar View</strong> sheet, not Pick Order or Rounds</li>
+        <li>The dates in the top row are formatted as Excel dates (not text strings like "Jan 5")</li>
+        <li>Adjacent week columns are at least 5 days apart</li>
+      </ul>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:11.5px;font-weight:600">▶ Diagnostic — first 3 rows of the parsed sheet</summary>
+        <div style="margin-top:8px;padding:10px;background:var(--bg2);border-radius:8px">${sample}</div>
+        ${rejected.length ? `<div style="margin-top:8px;font-size:11px;color:var(--rs-ink-3)">${rejected.length} row(s) looked like headers but were rejected: ${rejected.slice(0,5).map(r => `row ${r.row+1} (${r.reason})`).join(', ')}${rejected.length>5?` and ${rejected.length-5} more`:''}</div>` : ''}
+      </details>
+    </div>`;
     return;
   }
   // ── Step 2. Walk each header → next header, collect cells per week ──
