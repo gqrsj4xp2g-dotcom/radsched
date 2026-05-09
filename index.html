@@ -34009,6 +34009,83 @@ function _renderFairnessScoreboard(isAdmin){
   </div>`;
 }
 
+// ── Equity Heatmap (forward-looking 90-day balance) ──────────────────
+// Pain solved: by the time the FTE Monitor or Fairness Scoreboard
+// surfaces an imbalance, the schedule is published and physicians are
+// already upset. This widget looks AHEAD 90 days and shows who's
+// over/under their FTE-adjusted share of UPCOMING work. Admins can
+// rebalance proactively.
+//
+// Design: one row per physician, three "bars" (DR shifts, IR call,
+// weekend) each colored by ratio of upcoming-share / FTE-share.
+//   • Green pill — within 15% of fair share
+//   • Amber       — 15-30% off
+//   • Red         — >30% off
+function _renderEquityHeatmap(){
+  const host = document.getElementById('dash-equity-heatmap');
+  if(!host) return;
+  const today = (typeof fmtDate === 'function')
+    ? fmtDate(new Date())
+    : new Date().toISOString().slice(0,10);
+  const horizonDays = 90;
+  const horizonEnd = (typeof addDays === 'function')
+    ? addDays(today, horizonDays)
+    : new Date(Date.now() + horizonDays * 86400000).toISOString().slice(0,10);
+  const inWindow = (d) => d >= today && d <= horizonEnd;
+  const physList = (S.physicians || []).filter(p => (p.drFte || 0) + (p.irFte || 0) > 0);
+  if(physList.length < 2){ host.innerHTML = ''; return; }
+  const totalFte = physList.reduce((a, p) => a + (p.drFte || 0) + (p.irFte || 0), 0) || 1;
+  // Per-physician forward counts.
+  const drFwd = {}, irFwd = {}, wkFwd = {};
+  physList.forEach(p => { drFwd[p.id] = 0; irFwd[p.id] = 0; wkFwd[p.id] = 0; });
+  (S.drShifts    || []).forEach(s => { if(inWindow(s.date) && drFwd[s.physId] != null && (s.shift==='1st'||s.shift==='2nd'||s.shift==='3rd')) drFwd[s.physId]++; });
+  (S.irCalls     || []).forEach(c => { if(inWindow(c.date) && irFwd[c.physId] != null) irFwd[c.physId]++; });
+  (S.weekendCalls|| []).forEach(w => { const d = w.satDate || w.date; if(inWindow(d) && wkFwd[w.physId] != null) wkFwd[w.physId]++; });
+  // Use _TUNE thresholds for color decision.
+  const ratioColor = (r) => {
+    const T = _TUNE;
+    if(r >= T.FAIRNESS_GREEN_LO && r <= T.FAIRNESS_GREEN_HI) return { bg:'#dcfce7', fg:'#166534' };
+    if(r >= T.FAIRNESS_AMBER_LO && r <= T.FAIRNESS_AMBER_HI) return { bg:'#fef3c7', fg:'#854d0e' };
+    return { bg:'#fee2e2', fg:'#991b1b' };
+  };
+  const total = (m) => Object.values(m).reduce((a,b)=>a+b, 0);
+  const totals = { dr: total(drFwd), ir: total(irFwd), wk: total(wkFwd) };
+  const rows = physList.map(p => {
+    const fteShare = ((p.drFte || 0) + (p.irFte || 0)) / totalFte;
+    const cell = (label, m, total) => {
+      const expected = total * fteShare;
+      const actual = m[p.id];
+      const ratio = expected > 0 ? actual / expected : 1;
+      const { bg, fg } = ratioColor(ratio);
+      const pct = Math.round(ratio * 100);
+      const tip = `${actual} actual vs ${expected.toFixed(1)} expected (${label}, next ${horizonDays}d)`;
+      return `<td style="text-align:center;padding:4px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${escHtml(tip)}">${actual} · ${pct}%</span></td>`;
+    };
+    return `<tr>
+      <td style="padding:5px 8px;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)}</td>
+      ${cell('DR shifts', drFwd, totals.dr)}
+      ${cell('IR call',   irFwd, totals.ir)}
+      ${cell('Weekend',   wkFwd, totals.wk)}
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>📈 Equity Heatmap — Next ${horizonDays} days</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3)">${today} → ${horizonEnd}</span>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Forward-looking balance: actual vs FTE-adjusted-expected for upcoming work. Rebalance now to head off disputes.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">Physician</th>
+        <th style="text-align:center;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">DR</th>
+        <th style="text-align:center;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">IR call</th>
+        <th style="text-align:center;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">Weekend</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
 // ── On-Call Confirmation (mobile-first reminder + ack) ────────────────
 // Pain solved: practice doesn't know whether tonight's on-call physician
 // got the message and is actually available. We surface a tonight panel
