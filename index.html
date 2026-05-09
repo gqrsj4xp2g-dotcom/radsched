@@ -7410,10 +7410,15 @@ async function renderBackupPicker(targetElId){
 /* ═══════════════════════════════════════════════════════════════════════
    ADMIN AUDIT LOG
    Records who did what (manual + AI-driven mutations) for accountability.
-   Stored on S.auditLog (last 500 entries) so it survives across sessions
-   via the normal Supabase persistence.
+   Stored on S.auditLog (LRU-evicted at _AUDIT_LOG_MAX entries) so it
+   survives across sessions via the normal Supabase persistence.
+   Cap is 5000: at 200-phys scale that's ~3 weeks of typical traffic,
+   still fits inside the JSON blob comfortably (<400 KB compressed).
+   Older entries are evicted in shift order — oldest first.
+   See docs/SCALING.md for the multi-table migration plan when this
+   isn't enough.
 ═══════════════════════════════════════════════════════════════════════ */
-const _AUDIT_LOG_MAX = 500;
+const _AUDIT_LOG_MAX = 5000;
 function _audit(action, detail){
   try{
     if(!Array.isArray(S.auditLog)) S.auditLog = [];
