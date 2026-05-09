@@ -54,11 +54,11 @@ function clearPairing(){
 // ─── Window management ────────────────────────────────────────────
 function createWindow(){
   mainWindow = new BrowserWindow({
-    width: 320,
-    height: 460,
-    minWidth: 280,
-    minHeight: 360,
-    maxWidth: 480,
+    width: 340,
+    height: 560,
+    minWidth: 300,
+    minHeight: 440,
+    maxWidth: 520,
     title: 'RadScheduler',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     show: false,

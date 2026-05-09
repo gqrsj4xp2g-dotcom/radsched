@@ -122,6 +122,130 @@
     font-size: 10.5px; color: var(--ink3);
   }
   .footer .err { color: var(--amber); }
+
+  /* ── Tabs ───────────────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 0;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink2);
+    text-align: center;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ── Linear progress / status bar (under the ring) ───────────── */
+  .statusbar-wrap { margin: 0 0 12px; }
+  .statusbar-rail {
+    background: rgba(148, 163, 184, 0.15);
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  .statusbar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.4s ease, background-color 0.3s ease;
+  }
+  .statusbar-fill.behind { background: var(--red); }
+  .statusbar-fill.onpace { background: var(--amber); }
+  .statusbar-fill.near { background: var(--accent); }
+  .statusbar-fill.met { background: var(--green); }
+  .statusbar-fill.over { background: linear-gradient(90deg, var(--green), #fbbf24); }
+  .statusbar-meta {
+    display: flex; justify-content: space-between;
+    font-size: 10.5px; color: var(--ink3);
+    margin-top: 4px;
+  }
+  .statusbar-meta .pct { font-weight: 600; color: var(--ink2); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .statusbar-meta .label { font-style: italic; }
+  .statusbar-meta .label.behind { color: var(--red); }
+  .statusbar-meta .label.onpace { color: var(--amber); }
+  .statusbar-meta .label.met,
+  .statusbar-meta .label.over { color: var(--green); }
+  /* Time-of-day expected marker — small notch over the rail. */
+  .statusbar-tick {
+    position: absolute; top: -2px; bottom: -2px;
+    width: 2px; background: var(--ink3);
+    border-radius: 1px;
+  }
+
+  /* ── Debulking tab ──────────────────────────────────────────── */
+  .debulk-elig {
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-align: center;
+    border-left: 4px solid var(--ink3);
+  }
+  .debulk-elig.yes { background: rgba(74, 222, 128, 0.12); color: var(--green); border-left-color: var(--green); }
+  .debulk-elig.no  { background: rgba(248, 113, 113, 0.12); color: var(--red); border-left-color: var(--red); }
+  .debulk-counters {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px; margin-bottom: 12px;
+  }
+  .debulk-counter {
+    background: var(--bg2);
+    border-radius: 8px;
+    padding: 10px 4px;
+    text-align: center;
+  }
+  .debulk-counter .n {
+    font-size: 22px; font-weight: 700; color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    line-height: 1;
+  }
+  .debulk-counter .lbl {
+    font-size: 9.5px; color: var(--ink3);
+    margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .debulk-section-title {
+    font-size: 10px; font-weight: 600; color: var(--ink3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 12px 0 6px;
+  }
+  .debulk-criteria {
+    background: var(--bg2);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+  .debulk-criteria .row { display: flex; gap: 8px; align-items: baseline; }
+  .debulk-criteria .row .check { width: 16px; flex-shrink: 0; }
+  .debulk-criteria .row.pass .check { color: var(--green); }
+  .debulk-criteria .row.fail .check { color: var(--red); }
+  .debulk-notice {
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    color: var(--ink2);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    margin-top: 10px;
+  }
+  .debulk-notice .tag {
+    display: inline-block; background: var(--accent); color: var(--bg);
+    padding: 1px 6px; border-radius: 4px; font-weight: 600;
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em;
+    margin-right: 4px; vertical-align: middle;
+  }
 </style>
 </head>
 <body>
@@ -133,6 +257,7 @@
     <button class="icon-btn nodrag" id="btn-settings" title="Settings">⋯</button>
   </div>
 </div>
+<div class="tabs" id="tabs" style="display:none"></div>
 <div class="body" id="root">
   <!-- Renderer JS replaces this on boot. -->
   <div style="text-align:center;padding:30px 0;color:var(--ink2);font-size:12px">Loading…</div>

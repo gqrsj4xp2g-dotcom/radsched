@@ -10,11 +10,34 @@
  * Refresh: every 5 minutes + manual button.
  *
  * The widget is read-only: it does not mutate any RadScheduler state.
- * (PACS integration in a future build will hook into a /pacs endpoint
- * to enrich studyCount + rvuEarned in real time.)
+ *
+ * ── PACS integration roadmap ────────────────────────────────────────
+ * The studyCount + debulking counters are stub-zero today. To wire up
+ * real data, implement fetchPACSStats(physId, dateISO) below — it should
+ * return:
+ *   {
+ *     studiesCompletedToday: number,
+ *     wRVUEarnedToday:       number,
+ *     debulkingToday:        number,
+ *     debulkingThisWeek:     number,
+ *     debulkingThisMonth:    number,
+ *   }
+ * Two recommended patterns:
+ *   1) Per-physician local broker on http://localhost:7711
+ *   2) Practice-wide PACS proxy with a shared bearer token
+ * Either way, update the CSP `connect-src` in renderer.html before
+ * shipping. The render path already consumes these fields — wire the
+ * fetch and the UI lights up automatically.
  */
 
 const root = document.getElementById('root');
+
+// ─── State ───────────────────────────────────────────────────────
+let _activeTab = 'today';          // 'today' | 'debulking'
+let _lastPayload = null;
+let _lastPractice = null;
+let _lastDigest = null;
+let _alwaysOnTop = true;
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function fromB64Url(s){
@@ -35,12 +58,8 @@ async function hmacB64Url(secret, msg){
 }
 
 function decodePairingCode(code){
-  try{
-    const json = fromB64Url(code.trim());
-    return JSON.parse(json);
-  } catch(_){
-    return null;
-  }
+  try{ return JSON.parse(fromB64Url(code.trim())); }
+  catch(_){ return null; }
 }
 
 async function verifyPairing(payload){
@@ -63,9 +82,6 @@ function escHtml(s){
 }
 
 // ─── Supabase fetch ──────────────────────────────────────────────
-// Query the practice's shared-state row by id. The schema is one big
-// JSONB column named `data` so we read it whole. The anon key is
-// public-by-design; RLS gates which row you can read.
 async function fetchPracticeData(p){
   const url = `${p.sbUrl}/rest/v1/practices?id=eq.${encodeURIComponent(p.practiceId)}&select=data`;
   const resp = await fetch(url, {
@@ -81,6 +97,22 @@ async function fetchPracticeData(p){
   return rows[0].data || {};
 }
 
+// ─── PACS fetch (stub) ───────────────────────────────────────────
+// Currently returns zeros + a `pacsConnected:false` flag. When you wire
+// up your PACS broker (see top-of-file comment), replace this body with
+// a real fetch and CORS will already be allowed for the new host (after
+// you update the CSP in renderer.html).
+async function fetchPACSStats(/* physId, dateISO */){
+  return {
+    pacsConnected: false,
+    studiesCompletedToday: 0,
+    wRVUEarnedToday: 0,
+    debulkingToday: 0,
+    debulkingThisWeek: 0,
+    debulkingThisMonth: 0,
+  };
+}
+
 // ─── Day computation ─────────────────────────────────────────────
 function computeDayDigest(practice, physId, dateISO){
   const out = {
@@ -92,15 +124,15 @@ function computeDayDigest(practice, physId, dateISO){
     driveTimeCredit: 0,
     onCall: false,
     onVacation: false,
+    debulkingEligibleByPolicy: false,
+    debulkingReasons: [],
   };
   const phys = (practice.physicians || []).find(p => p.id === physId);
   if(phys) out.physName = `${phys.first || ''} ${phys.last || ''}`.trim();
 
-  // Vacations covering today
   const onVac = (practice.vacations || []).some(v => v.physId === physId && v.start <= dateISO && v.end >= dateISO);
   out.onVacation = onVac;
 
-  // DR shifts on the day
   const cfg = practice.cfg || {};
   const wRVUDefaults = cfg.wRVUDefaults || {};
   const dtPerHour = +(cfg.driveTimeWRVUPerHour || 0);
@@ -127,12 +159,7 @@ function computeDayDigest(practice, physId, dateISO){
       out.wRVUGoalTotal += goal;
       const dt = driveCredit(s.site);
       out.driveTimeCredit += dt;
-      out.shifts.push({
-        kind: 'DR',
-        label: `${s.shift} · ${s.site || '—'}${s.sub ? ' · ' + s.sub : ''}`,
-        goal,
-        site: s.site,
-      });
+      out.shifts.push({ kind: 'DR', label: `${s.shift} · ${s.site || '—'}${s.sub ? ' · ' + s.sub : ''}`, goal, site: s.site });
     }
   });
   (practice.irShifts || []).forEach(s => {
@@ -174,17 +201,38 @@ function computeDayDigest(practice, physId, dateISO){
     }
   });
 
-  // Study target: tie to wRVU goal at a 1:1 placeholder ratio. Real
-  // value comes from PACS later; for now we present "n studies expected"
-  // proportional to wRVU goal so the metric is visible.
   out.studyTarget = Math.max(0, Math.round(out.wRVUGoalTotal / 1.5));
+
+  // ── Debulking eligibility computed client-side ──────────────────
+  // A physician is eligible to "debulk" (clear backlog studies) if:
+  //   • Admin flagged them eligible (p.debulkingEligible !== false)
+  //   • Not on vacation
+  //   • Not on call (call duties take priority)
+  //   • Has a regular DR/IR shift today (so they're "at work")
+  //   • Practice's debulking policy allows for today's day-of-week
+  // Each criterion is reported individually so the widget can show a
+  // checklist explaining the eligibility decision.
+  const policy = (practice.cfg && practice.cfg.debulkingPolicy) || {};
+  const adminAllowed = !phys || phys.debulkingEligible !== false;
+  const hasShiftToday = out.shifts.length > 0;
+  const dow = new Date(dateISO + 'T12:00:00').getDay();
+  const dowAllowed = policy.disabledDows ? !policy.disabledDows.includes(dow) : true;
+  const checks = [
+    { name: 'Admin-flagged eligible', pass: adminAllowed, detail: adminAllowed ? 'Yes' : 'No (admin disabled)' },
+    { name: 'Not on vacation', pass: !out.onVacation, detail: out.onVacation ? 'On vacation today' : 'Available' },
+    { name: 'Not exclusively on call', pass: !(out.onCall && out.shifts.length === 1), detail: out.onCall ? 'On call (lower priority for debulking)' : 'Not on call' },
+    { name: 'Working today', pass: hasShiftToday, detail: hasShiftToday ? `${out.shifts.length} shift${out.shifts.length===1?'':'s'} today` : 'No shift today' },
+    { name: 'Day-of-week allowed', pass: dowAllowed, detail: dowAllowed ? 'OK' : 'Practice excludes this DOW' },
+  ];
+  out.debulkingChecks = checks;
+  out.debulkingEligibleByPolicy = checks.every(c => c.pass);
 
   return out;
 }
 
 // ─── Renders ─────────────────────────────────────────────────────
 function renderPairing(errMsg){
-  root.innerHTML = `
+  document.querySelector('.body').innerHTML = `
     <div class="pair">
       <h2>Pair this widget</h2>
       <p>Paste the pairing code your RadScheduler admin gave you. The code links this widget to your physician profile.</p>
@@ -192,6 +240,9 @@ function renderPairing(errMsg){
       <button id="pair-submit">Pair widget</button>
       <div class="err" id="pair-err">${errMsg ? escHtml(errMsg) : ''}</div>
     </div>`;
+  // Hide the tab bar on pairing screen.
+  const tabs = document.getElementById('tabs');
+  if(tabs) tabs.style.display = 'none';
   document.getElementById('pair-submit').onclick = onPairSubmit;
   document.getElementById('pair-code').focus();
 }
@@ -215,7 +266,6 @@ function ringSvg(pct){
   const r = 50;
   const c = 2 * Math.PI * r;
   const off = c * (1 - Math.max(0, Math.min(1, pct)));
-  // Color based on progress: dim until 50%, accent through, green at 100+.
   const color = pct >= 1 ? 'var(--green)' : pct >= 0.5 ? 'var(--accent)' : 'var(--accent2)';
   return `<svg class="ring" viewBox="0 0 130 130">
     <circle cx="65" cy="65" r="${r}" fill="none" stroke="rgba(148,163,184,0.15)" stroke-width="10"></circle>
@@ -225,25 +275,96 @@ function ringSvg(pct){
   </svg>`;
 }
 
-function renderDashboard(payload, digest){
+// Time-of-day "expected" pace: how many wRVU should be done by now
+// assuming an 8a–6p workday. Returns 0 outside those hours.
+function expectedPaceFraction(){
+  const now = new Date();
+  const h = now.getHours() + now.getMinutes() / 60;
+  if(h < 8) return 0;
+  if(h > 18) return 1;
+  return (h - 8) / 10;
+}
+
+// Linear status bar — shows actual vs goal with a tick at the
+// time-of-day expected pace position.
+function statusBarHtml(actual, goal, pacsConnected){
+  if(goal <= 0){
+    return `<div class="statusbar-wrap">
+      <div class="statusbar-rail"><div class="statusbar-fill onpace" style="width:0%"></div></div>
+      <div class="statusbar-meta"><span class="label">No goal set today</span><span class="pct">—</span></div>
+    </div>`;
+  }
+  const pct = actual / goal;
+  const pctClamped = Math.max(0, Math.min(1.5, pct));
+  const fillPct = Math.min(100, pctClamped * 100);
+  const pace = expectedPaceFraction();
+  let cls = 'behind', label = 'Behind pace';
+  if(pct >= 1.0){ cls = (pct > 1.05) ? 'over' : 'met'; label = (pct > 1.05) ? `🎉 ${Math.round((pct - 1) * 100)}% over goal` : '✓ Goal reached'; }
+  else if(pct >= 0.85){ cls = 'near'; label = 'Approaching goal'; }
+  else if(pct >= pace * 0.85){ cls = 'onpace'; label = 'On pace'; }
+  else { cls = 'behind'; label = 'Behind pace'; }
+  // If PACS isn't wired up the actual is always 0; show a softer pill
+  // so users know this is awaiting integration rather than alarming.
+  const pacsHint = !pacsConnected
+    ? `<div style="font-size:10px;color:var(--ink3);margin-top:6px;text-align:center"><span style="background:var(--bg3);padding:2px 7px;border-radius:8px">⚙ Waiting for PACS — counts will populate when connected</span></div>`
+    : '';
+  return `<div class="statusbar-wrap">
+    <div class="statusbar-rail">
+      <div class="statusbar-fill ${cls}" style="width:${fillPct}%"></div>
+      ${pace > 0 && pace < 1 ? `<div class="statusbar-tick" style="left:${pace * 100}%" title="Expected pace by now"></div>` : ''}
+    </div>
+    <div class="statusbar-meta">
+      <span class="label ${cls}">${label}</span>
+      <span class="pct">${Math.round(pct * 100)}% · ${actual}/${goal}</span>
+    </div>
+    ${pacsHint}
+  </div>`;
+}
+
+function renderTabs(){
+  const tabs = document.getElementById('tabs');
+  if(!tabs) return;
+  tabs.style.display = 'flex';
+  tabs.innerHTML = `
+    <div class="tab ${_activeTab==='today'?'active':''}" data-tab="today">Today</div>
+    <div class="tab ${_activeTab==='debulking'?'active':''}" data-tab="debulking">Debulking</div>`;
+  tabs.querySelectorAll('.tab').forEach(t => {
+    t.onclick = () => {
+      _activeTab = t.dataset.tab;
+      renderTabs();
+      renderActiveTab();
+    };
+  });
+}
+
+function renderActiveTab(){
+  if(_activeTab === 'today') renderTodayTab();
+  else if(_activeTab === 'debulking') renderDebulkingTab();
+}
+
+// ─── Today tab ───────────────────────────────────────────────────
+function renderTodayTab(){
+  const body = document.querySelector('.body');
+  if(!body || !_lastDigest) return;
+  const digest = _lastDigest;
+  const pacs = digest._pacs || { pacsConnected: false, studiesCompletedToday: 0 };
+  const studyCount = pacs.studiesCompletedToday || 0;
   const initials = (digest.physName.split(/\s+/).map(s => s[0]).join('').slice(0,2)) || 'RS';
   const todayStr = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
   const goal = digest.wRVUGoalTotal;
-  const pct = goal > 0 ? digest.studyCount / Math.max(1, goal) : 0;
-  // Status pill
+  const ringPct = goal > 0 ? studyCount / goal : 0;
   let statusLabel = 'Off';
   let statusColor = 'var(--ink2)';
   if(digest.onVacation){ statusLabel = 'Vacation'; statusColor = 'var(--amber)'; }
   else if(digest.onCall){ statusLabel = 'On call'; statusColor = 'var(--accent)'; }
   else if(digest.shifts.length){ statusLabel = digest.shifts[0].kind; statusColor = 'var(--green)'; }
-  // Shifts list
   const shiftsHtml = digest.shifts.length
     ? digest.shifts.map(s => `<div class="row">
         <div class="left">${escHtml(s.label)}</div>
         <div class="right">${s.goal > 0 ? s.goal + ' wRVU' : '—'}</div>
       </div>`).join('')
     : '<div class="empty">No shifts scheduled today.</div>';
-  root.innerHTML = `
+  body.innerHTML = `
     <div class="top">
       <div class="avatar">${escHtml(initials)}</div>
       <div style="flex:1;min-width:0">
@@ -253,12 +374,14 @@ function renderDashboard(payload, digest){
     </div>
 
     <div class="ring-wrap">
-      ${ringSvg(pct)}
+      ${ringSvg(ringPct)}
       <div class="ring-label-wrap">
-        <div class="ring-num">${digest.studyCount}<span style="color:var(--ink3);font-size:14px;font-weight:400"> / ${goal || '—'}</span></div>
+        <div class="ring-num">${studyCount}<span style="color:var(--ink3);font-size:14px;font-weight:400"> / ${goal || '—'}</span></div>
         <div class="ring-sub">studies / wRVU goal</div>
       </div>
     </div>
+
+    ${statusBarHtml(studyCount, goal, pacs.pacsConnected)}
 
     <div class="stat-row">
       <div class="stat">
@@ -277,18 +400,69 @@ function renderDashboard(payload, digest){
     </div>
 
     <div class="footer">
-      <span>Last refreshed <span id="refresh-time">just now</span></span>
-      <span id="footer-err"></span>
+      <span>Last refreshed <span id="refresh-time">${new Date().toLocaleTimeString()}</span></span>
+      <span></span>
+    </div>`;
+}
+
+// ─── Debulking tab ───────────────────────────────────────────────
+function renderDebulkingTab(){
+  const body = document.querySelector('.body');
+  if(!body || !_lastDigest) return;
+  const digest = _lastDigest;
+  const pacs = digest._pacs || { pacsConnected: false, debulkingToday: 0, debulkingThisWeek: 0, debulkingThisMonth: 0 };
+  const eligible = !!digest.debulkingEligibleByPolicy;
+  const checks = digest.debulkingChecks || [];
+  body.innerHTML = `
+    <div class="debulk-elig ${eligible ? 'yes' : 'no'}">
+      ${eligible ? '✓ Eligible to debulk today' : '✗ Not eligible today'}
+    </div>
+
+    <div class="debulk-section-title">Debulking counts</div>
+    <div class="debulk-counters">
+      <div class="debulk-counter">
+        <div class="n">${pacs.debulkingToday || 0}</div>
+        <div class="lbl">Today</div>
+      </div>
+      <div class="debulk-counter">
+        <div class="n">${pacs.debulkingThisWeek || 0}</div>
+        <div class="lbl">Week</div>
+      </div>
+      <div class="debulk-counter">
+        <div class="n">${pacs.debulkingThisMonth || 0}</div>
+        <div class="lbl">Month</div>
+      </div>
+    </div>
+
+    <div class="debulk-section-title">Eligibility checklist</div>
+    <div class="debulk-criteria">
+      ${checks.map(c => `<div class="row ${c.pass ? 'pass' : 'fail'}">
+        <span class="check">${c.pass ? '✓' : '✗'}</span>
+        <span>${escHtml(c.name)} — <span style="color:var(--ink3)">${escHtml(c.detail)}</span></span>
+      </div>`).join('')}
+    </div>
+
+    <div class="debulk-notice">
+      <span class="tag">PACS</span>
+      Counts are <strong>0</strong> until the PACS plugin is wired up. The eligibility check above is computed from RadScheduler data and works today.
+      <div style="font-size:10px;color:var(--ink3);margin-top:4px">See widget/README.md → "PACS integration" for the broker spec.</div>
+    </div>
+
+    <div class="footer">
+      <span>Last refreshed <span id="refresh-time">${new Date().toLocaleTimeString()}</span></span>
+      <span></span>
     </div>`;
 }
 
 function renderError(msg, allowRepair){
-  root.innerHTML = `
+  document.querySelector('.body').innerHTML = `
     <div class="pair">
       <h2>⚠ Could not load</h2>
       <p style="color:var(--ink2)">${escHtml(msg)}</p>
       ${allowRepair ? `<button id="re-pair">Re-pair widget</button>` : ''}
     </div>`;
+  const tabs = document.getElementById('tabs');
+  if(tabs) tabs.style.display = 'none';
   if(allowRepair){
     document.getElementById('re-pair').onclick = async () => {
       await window.rsWidget.clearPairing();
@@ -298,7 +472,6 @@ function renderError(msg, allowRepair){
 }
 
 // ─── Refresh loop ────────────────────────────────────────────────
-let _alwaysOnTop = true;
 let _refreshTimer = null;
 
 async function refresh(){
@@ -315,8 +488,18 @@ async function refresh(){
     const practice = await fetchPracticeData(payload);
     const today = fmtDate(new Date());
     const digest = computeDayDigest(practice, payload.physId, today);
-    renderDashboard(payload, digest);
-    document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
+    // Fan-out: PACS stats run in parallel. When the broker isn't wired
+    // it returns zeros + pacsConnected:false. Both UIs handle this state.
+    let pacsStats;
+    try{ pacsStats = await fetchPACSStats(payload.physId, today); }
+    catch(_){ pacsStats = { pacsConnected:false, studiesCompletedToday:0, debulkingToday:0, debulkingThisWeek:0, debulkingThisMonth:0 }; }
+    digest._pacs = pacsStats;
+    digest.studyCount = pacsStats.studiesCompletedToday || 0;
+    _lastPayload = payload;
+    _lastPractice = practice;
+    _lastDigest = digest;
+    renderTabs();
+    renderActiveTab();
   } catch(e){
     console.error('refresh failed', e);
     renderError(e.message || String(e), true);
@@ -336,11 +519,10 @@ function bindHeader(){
     await window.rsWidget.setAlwaysOnTop(_alwaysOnTop);
     document.getElementById('btn-pin').style.opacity = _alwaysOnTop ? '1' : '0.4';
   };
-  // Tray "Re-pair" menu hook from main.
   if(window.rsWidget.onResetPairing) window.rsWidget.onResetPairing(() => renderPairing());
 }
 
 // Boot
 bindHeader();
 refresh();
-_refreshTimer = setInterval(refresh, 5 * 60 * 1000);  // every 5 minutes
+_refreshTimer = setInterval(refresh, 5 * 60 * 1000);

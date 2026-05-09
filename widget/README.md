@@ -112,31 +112,96 @@ access. All persistence + shell hooks go through the preload bridge.
 
 ## Future work — PACS integration
 
-The `studyCount` field is currently a placeholder (always 0). The
-intended integration is a tiny local broker that talks to your PACS
-(via DICOM C-FIND or the PACS vendor's REST API) and exposes a JSON
-endpoint the widget polls. Two patterns are supported:
+The widget displays five PACS-derived metrics today as **stub zeros**:
 
-### 1. Per-physician local broker
+| Field | Where shown |
+|---|---|
+| `studiesCompletedToday` | Today tab — ring numerator + status bar fill |
+| `wRVUEarnedToday` | (reserved for future use; currently same as studies) |
+| `debulkingToday` | Debulking tab — "Today" counter |
+| `debulkingThisWeek` | Debulking tab — "Week" counter |
+| `debulkingThisMonth` | Debulking tab — "Month" counter |
+
+All five flow through a single function: **`fetchPACSStats(physId, dateISO)`** in `src/renderer.js`. Replace its body with a real fetch and the UI lights up automatically — both the status bar and the Debulking counters consume these fields.
+
+Today's stub:
+
+```js
+async function fetchPACSStats(physId, dateISO){
+  return {
+    pacsConnected: false,           // when true the UI hides the "waiting" pill
+    studiesCompletedToday: 0,
+    wRVUEarnedToday: 0,
+    debulkingToday: 0,
+    debulkingThisWeek: 0,
+    debulkingThisMonth: 0,
+  };
+}
+```
+
+What you need to replace it with:
+
+```js
+async function fetchPACSStats(physId, dateISO){
+  const url = `http://localhost:7711/stats?physId=${physId}&date=${dateISO}`;
+  const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PACS_TOKEN } });
+  if(!resp.ok) throw new Error('PACS broker ' + resp.status);
+  const j = await resp.json();
+  return {
+    pacsConnected: true,
+    studiesCompletedToday: j.studies_today ?? 0,
+    wRVUEarnedToday:       j.wrvu_today    ?? 0,
+    debulkingToday:        j.debulk_today  ?? 0,
+    debulkingThisWeek:     j.debulk_week   ?? 0,
+    debulkingThisMonth:    j.debulk_month  ?? 0,
+  };
+}
+```
+
+### Two recommended PACS broker patterns
+
+**1. Per-physician local broker** (recommended for distribution)
+
 Each physician runs a small auth'd HTTP proxy on `localhost:7711` that
 queries the PACS for "studies signed by user X today". The widget
-hits `http://localhost:7711/today` and merges the result into the
-digest.
+hits `http://localhost:7711/stats?physId=X&date=Y`. Pros: no central
+infra, each physician's PACS auth stays local. Cons: every physician
+needs the broker installed.
 
-### 2. Practice-wide PACS proxy
-A central server (in the radiology network) exposes a single endpoint
-keyed by physician ID and the widget passes the paired physician ID
-in the request. Auth via a shared bearer token stored alongside the
-pairing code.
+**2. Practice-wide PACS proxy**
 
-Both approaches need a CSP whitelist update in `renderer.html`; today
-the policy allows only `https://*.supabase.*`. Add `http://localhost:*`
-or your PACS proxy host before shipping.
+A central server in the radiology network exposes a single endpoint
+keyed by physician ID; the widget passes the paired physician ID in
+the request, with a shared bearer token. Pros: single deployment, easy
+audit. Cons: needs hosting + a service account on PACS.
 
-`src/renderer.js#fetchPracticeData()` is the natural place to fan out
-a second `fetch('/pacs/today/' + physId)` and merge the result into
-the `digest` object. The dashboard already renders `digest.studyCount`
-so the UI requires zero changes.
+### CSP update before shipping
+
+The current Content-Security-Policy in `src/renderer.html` allows only
+`https://*.supabase.*`. Before wiring PACS, add your broker URL:
+
+```html
+<meta http-equiv="Content-Security-Policy" content="default-src 'self';
+  style-src 'self' 'unsafe-inline'; script-src 'self';
+  connect-src https://*.supabase.co https://*.supabase.in https://*.supabase.net
+              http://localhost:7711                 ← per-physician broker
+              https://pacs-proxy.your-practice.org">  ← practice-wide proxy
+```
+
+### What `pacsConnected: true` does
+
+When the PACS broker returns `pacsConnected: true`:
+
+- The "Waiting for PACS" pill on the status bar disappears
+- The status bar's color reflects pace (red/amber/green/gradient) based on actual progress
+- The Debulking tab's counter cards show real numbers
+- The Debulking tab's "PACS not connected" notice disappears
+
+When `pacsConnected: false` (the default stub state):
+
+- All counts show as 0
+- A subtle "Waiting for PACS" pill explains why
+- Eligibility checking still works (it's RadScheduler-driven, not PACS-driven)
 
 ## License
 
