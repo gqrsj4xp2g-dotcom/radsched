@@ -5116,6 +5116,53 @@ Once set, ask me anything about your schedule!</div>
    • Stale-while-revalidate for the same-origin app shell via sw.js;
      live data (Supabase API) bypasses the cache entirely.
 
+   ── FEATURE INDEX ─────────────────────────────────────────────────────
+   Each major user-facing feature lists its main entry points, so a dev
+   can find ALL pieces of one feature in one search. Grep for "FEATURE:"
+   to land here from anywhere.
+   FEATURE: Workload Fairness Scoreboard
+     → renderFn: _renderFairnessScoreboard()           ~line 33760
+     → DOM:     <div id="dash-fairness">                ~line 1717
+     → wire-up: renderDash() try-catch wrapper          ~line 10535
+   FEATURE: Coverage Gap Detector
+     → renderFn: _renderCoverageGapBanner(), _scanCoverageGaps()  ~33694
+     → DOM:     <div id="dash-coverage-gaps">           ~line 1664
+     → wire-up: renderDash() try-catch wrapper          ~line 10531
+   FEATURE: Shift Trade Marketplace (one-sided "give-up board")
+     → fns:     offerShiftForTrade / claimOfferedShift / cancelShiftOffer
+     → state:   S.shiftOffers (PERSISTED_KEYS)          ~line 5343
+     → schema:  v1→v2 migration                         ~line 8568
+     → render:  embedded in renderOpenShifts()          ~line 17030
+   FEATURE: Smart Vacation Guardrails
+     → fn:      _validateVacationWindow()
+     → DOM:     #v-phys / #v-start / #v-end / #v-guardrail
+   FEATURE: On-Call Confirmation Push
+     → fns:     _scheduleOnCallReminders / acknowledgeOnCall
+     → fns:     _renderOnCallConfirmation / _onCallPhysiciansForDate
+     → state:   S.onCallAcks (PERSISTED_KEYS)           ~line 5345
+     → schema:  v2→v3 migration                         ~line 8576
+     → DOM:     <div id="dash-oncall-confirm">          ~line 1722
+     → SW glue: sw.js notificationclick + push handlers
+   FEATURE: Slack/Teams Webhook Presets
+     → fns:     webhookPreset / _formatSlackPayload / _formatTeamsPayload
+     → fields:  S.cfg.webhooks[].flavor ('slack'|'teams'|'generic')
+     → DOM:     #wh-flavor + preset buttons             ~line 3933
+   FEATURE: Monthly Coverage Report Card
+     → fns:     previewMonthlyReportCard / sendMonthlyReportCard
+     → fns:     _computeMonthlyReportCard / _formatMonthlyReportMarkdown
+     → DOM:     #rc-month / #rc-result                  ~line 3995
+   FEATURE: Find-me-coverage AI command (/cover)
+     → tool:    'find_coverage' in _AI_TOOLS registry
+   FEATURE: Vacation Pick Sheet importer
+     → fns:     previewPickImport / applyPickImport / _parsePickWorkbook
+     → fns:     _xlsxClassifyCell / _matchPhysicianFuzzy / _renderPickPreview
+     → DOM:     #xl-pick-file / #xl-pick-preview        ~line 4854
+
+   ── TUNING CONSTANTS ──────────────────────────────────────────────────
+   See `const _TUNE = { ... }` immediately below for every magic number
+   the app uses (vacation cap, fairness thresholds, on-call reminder
+   window, etc.). Centralized so one search reveals every tunable knob.
+
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════
