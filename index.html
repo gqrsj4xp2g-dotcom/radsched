@@ -9210,6 +9210,36 @@ function _registerServiceWorker(){
       .then(reg => { console.log('[RS] Service worker registered ✓ scope:', reg.scope); })
       .catch(err => { console.warn('[RS] Service worker registration failed:', err); });
   }).catch(() => { /* probe failed — likely network error or no sw.js, silent */ });
+  // When the SW posts an update notification, surface a non-blocking
+  // banner offering to reload. Without this, users sit on the OLD HTML
+  // even though the new SW is installed (the cached shell is served
+  // until the page refreshes).
+  navigator.serviceWorker.addEventListener('message', (ev) => {
+    const m = ev.data || {};
+    if(m && m.type === 'rs:sw-updated'){
+      _showSwUpdateBanner(m.version || 'new');
+    }
+  });
+}
+let _swUpdateBannerShown = false;
+function _showSwUpdateBanner(version){
+  if(_swUpdateBannerShown) return;
+  _swUpdateBannerShown = true;
+  // Skip on the auth screen — we don't want to nag a user who hasn't
+  // even logged in yet. The banner re-arms after they sign in.
+  if(document.body && document.body.classList.contains('pre-auth')){
+    _swUpdateBannerShown = false;
+    return;
+  }
+  const banner = document.createElement('div');
+  banner.id = 'rs-sw-update';
+  banner.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1e3a8a;color:#fff;padding:10px 16px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:9999;display:flex;align-items:center;gap:12px;font-size:13px;font-family:inherit;max-width:90vw';
+  banner.innerHTML = `
+    <span>🔄 New version available (${version}).</span>
+    <button style="background:#fff;color:#1e3a8a;border:0;border-radius:6px;padding:5px 10px;font-weight:700;cursor:pointer;font-size:12px" onclick="location.reload()">Reload</button>
+    <button style="background:transparent;color:#cbd5e1;border:0;cursor:pointer;font-size:18px;line-height:1" onclick="this.parentElement.remove()" title="Dismiss">×</button>
+  `;
+  document.body.appendChild(banner);
 }
 // Fire-and-forget on script load. Doesn't block anything; if registration
 // fails or /sw.js doesn't exist, the app behaves exactly as before.
@@ -10191,6 +10221,82 @@ function _toggleMobileNav(force){
       topMost.classList.remove('open');
     }
   });
+})();
+
+// ── Universal page-state persistence ───────────────────────────────────
+// Listens to scroll events on .main and persists the scrollTop per
+// active page (and per active Tools sub-tab) on every scroll, debounced.
+// This means a hard reload, browser crash, or unexpected nav still
+// restores the user to where they were — not just clean nav() flows.
+//
+// Pair: also restores scroll on initial page show (DOMContentLoaded +
+// pageshow) so a hard reload lands the user at the same scroll position.
+const _RS_BUILD_TAG = 'rs-v3'; // bump in lockstep with sw.js CACHE_VERSION
+(function _installScrollPersistence(){
+  const wire = () => {
+    const scroller = document.querySelector('.main');
+    if(!scroller) return false;
+    let saveTimer = null;
+    scroller.addEventListener('scroll', () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try{
+          const pg = document.querySelector('.page.on')?.id?.replace('page-', '');
+          if(!pg) return;
+          const sc = scroller.scrollTop;
+          localStorage.setItem('rs.scroll.' + pg, String(sc));
+          if(pg === 'tools'){
+            const tab = document.getElementById('page-tools')?.getAttribute('data-active-tab');
+            if(tab) localStorage.setItem('rs.scroll.tools.' + tab, String(sc));
+          }
+        }catch(_){}
+      }, 180);
+    }, { passive: true });
+    // Restore scroll on initial mount — the page.on at boot is whatever
+    // the saved-tab init points to (default: dashboard).
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try{
+        const pg = document.querySelector('.page.on')?.id?.replace('page-', '');
+        if(!pg) return;
+        let key = 'rs.scroll.' + pg;
+        if(pg === 'tools'){
+          const tab = document.getElementById('page-tools')?.getAttribute('data-active-tab') || 'sim';
+          key = 'rs.scroll.tools.' + tab;
+        }
+        const saved = Number(localStorage.getItem(key) || 0);
+        if(!saved) return;
+        const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        scroller.scrollTop = Math.min(saved, max);
+      }catch(_){}
+    }));
+    // Build pill — visible in bottom-right so user can confirm they
+    // have the freshest code. Click → forces a re-fetch reload.
+    try{
+      if(!document.getElementById('rs-build-pill')){
+        const pill = document.createElement('div');
+        pill.id = 'rs-build-pill';
+        pill.title = 'Click to force-reload (bypass cache).';
+        pill.style.cssText = 'position:fixed;bottom:8px;right:8px;background:rgba(0,0,0,.5);color:#fff;font-size:9.5px;padding:2px 7px;border-radius:11px;cursor:pointer;z-index:9990;font-family:ui-monospace,monospace;letter-spacing:.5px;opacity:.55;transition:opacity .2s';
+        pill.textContent = _RS_BUILD_TAG;
+        pill.addEventListener('mouseenter', () => pill.style.opacity = '1');
+        pill.addEventListener('mouseleave', () => pill.style.opacity = '.55');
+        pill.addEventListener('click', () => {
+          // Force a full reload without using HTTP cache.
+          location.reload();
+        });
+        document.body.appendChild(pill);
+      }
+    }catch(_){}
+    return true;
+  };
+  if(!wire()){
+    // .main may not exist yet on script-eval order; retry once DOM is ready.
+    if(document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', wire, { once: true });
+    } else {
+      setTimeout(wire, 100);
+    }
+  }
 })();
 
 function nav(pg, el, subTab){

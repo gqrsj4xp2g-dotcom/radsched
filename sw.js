@@ -37,6 +37,14 @@ self.addEventListener('activate', (e) => {
         keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
       ))
       .then(() => self.clients.claim())
+      // Tell every open client a new SW version is active so the page
+      // can offer to reload (or auto-reload) and pick up the new HTML.
+      // Without this, users see a one-cycle delay where the OLD shell
+      // is served from cache even though the new SW is installed.
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => clients.forEach((c) =>
+        c.postMessage({ type: 'rs:sw-updated', version: CACHE_VERSION })
+      ))
   );
 });
 
