@@ -8518,6 +8518,10 @@ async function launchApp(){
       if(typeof _initPresence === 'function'){
         setTimeout(() => { try{ _initPresence(); }catch(_){} }, 1500);
       }
+      // Boot the on-call reminder scheduler. The helper is a no-op when
+      // the user isn't on call tonight or notifications aren't enabled,
+      // so it's cheap to call unconditionally.
+      if(typeof _bootOnCallReminders === 'function') _bootOnCallReminders();
     }catch(e){
       console.error('[RS] Supabase load error:',e);
       if(si){si.textContent='⚠ DB error — working offline';si.style.color='var(--red-t)';}
