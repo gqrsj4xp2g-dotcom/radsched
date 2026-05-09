@@ -4346,15 +4346,25 @@ WHERE email = 'your-admin@example.com';</pre>
   <div class="pg-sub">Generate pairing codes that physicians paste into the RadScheduler desktop widget (macOS + Windows). The widget shows their wRVU goal, scheduled shifts, study count, and drive-time credit for the day. Future PACS integration plugs in via the widget's API hook.</div>
 
   <div class="card" style="margin-bottom:14px">
-    <div class="card-title">📦 Download the widget</div>
+    <div class="card-title">📦 Widget download URLs</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:10px;line-height:1.55">
-      The widget source ships in this repo at <code>widget/</code>. To build:
-      <pre style="background:var(--bg2);padding:10px 12px;border-radius:6px;font-size:11.5px;margin-top:6px;line-height:1.5">cd widget
-npm install
-npm run build:mac     # produces widget/dist/RadScheduler-Widget.dmg
-npm run build:win     # produces widget/dist/RadScheduler-Widget Setup.exe</pre>
-      Distribute the resulting installer to physicians. After install, each physician launches the widget once and pastes their pairing code (below) to link it to their RadScheduler profile.
+      Paste the URLs of your published widget installers (typically a GitHub Releases asset). The "Send install kit" flow below uses these to give physicians one-click downloads. Build the widget once with <code>./widget/build-mac.sh</code> + <code>./widget/build-win.cmd</code> and either:
+      <ul style="margin:6px 0 0 18px;font-size:11.5px;color:var(--rs-ink-2)">
+        <li>Upload to <a href="https://github.com/gqrsj4xp2g-dotcom/radsched/releases/new" target="_blank" style="color:var(--rs-accent)">GitHub Releases</a> (free, no infra) and paste the asset URLs</li>
+        <li>Or upload to your own file host (Dropbox, S3, intranet) and paste those URLs</li>
+      </ul>
     </div>
+    <div class="g2" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0">
+        <label>macOS download URL (.dmg)</label>
+        <input id="cfg-widget-mac-url" placeholder="https://github.com/.../releases/download/v1.0.0/RadScheduler-Widget-1.0.0-arm64.dmg" oninput="saveWidgetDownloadUrls()" style="font-family:ui-monospace,monospace;font-size:11px">
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Windows download URL (.exe)</label>
+        <input id="cfg-widget-win-url" placeholder="https://github.com/.../releases/download/v1.0.0/RadScheduler-Widget-Setup-1.0.0.exe" oninput="saveWidgetDownloadUrls()" style="font-family:ui-monospace,monospace;font-size:11px">
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3)">URLs are stored in S.cfg and embedded into every install-kit email — physicians click straight from their inbox.</div>
   </div>
 
   <div class="card" style="margin-bottom:14px">
