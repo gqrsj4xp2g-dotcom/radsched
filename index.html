@@ -17952,6 +17952,25 @@ function renderSettings(){
   renderNatLangRules();
   if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
   if(typeof populateDtqSelects==='function') populateDtqSelects();
+  // wRVU defaults grid + drive-time credit input.
+  if(typeof populateWRVUDefaults === 'function') populateWRVUDefaults();
+  const dtCredit = document.getElementById('cfg-dt-wrvu');
+  if(dtCredit) dtCredit.value = (S.cfg?.driveTimeWRVUPerHour ?? 0);
+}
+
+// Build the wRVU defaults grid from S.cfg.wRVUDefaults. Each input
+// stores its key in a data-wrvu-key attribute so saveCfg() can read
+// them all in one query.
+function populateWRVUDefaults(){
+  const host = document.getElementById('wrvu-defaults-grid');
+  if(!host) return;
+  if(!S.cfg) S.cfg = {};
+  if(!S.cfg.wRVUDefaults) S.cfg.wRVUDefaults = {'1st': 30, '2nd': 25, '3rd': 20, 'Home': 0, 'IR daily': 28, 'IR weekend': 35, 'Weekend Call': 35, 'Holiday': 30};
+  const order = ['1st', '2nd', '3rd', 'Home', 'IR daily', 'IR weekend', 'Weekend Call', 'Holiday'];
+  host.innerHTML = order.map(k => `<div class="fg" style="margin:0">
+    <label style="font-size:11.5px">${escHtml(k)} shift</label>
+    <input type="number" data-wrvu-key="${escHtml(k)}" value="${+(S.cfg.wRVUDefaults[k] || 0)}" min="0" max="200" step="0.5" oninput="saveCfg()" style="width:90px;font-size:12px">
+  </div>`).join('');
 }
 
 function saveAdminInbox(){
