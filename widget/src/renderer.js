@@ -37,6 +37,7 @@ let _activeTab = 'today';          // 'today' | 'debulking'
 let _lastPayload = null;
 let _lastPractice = null;
 let _lastDigest = null;
+let _lastPairingCode = null;       // raw pairing code (for edge-fn POST)
 let _alwaysOnTop = true;
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -81,56 +82,73 @@ function escHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// ─── Supabase fetch ──────────────────────────────────────────────
-// The RadScheduler practice state lives in `public.radscheduler`
-// (one row per practice, JSONB column `data`). The table name is
-// historic — kept stable for back-compat. RLS policies gate which
-// row each anon-key holder can read, so this query is safe to fire
-// straight from a public client.
+// ─── Practice-data fetch via 'widget-data' edge function ──────────
+// As of v1.0.4 we proxy through a Supabase Edge Function (deployed
+// at /functions/v1/widget-data). Background:
 //
-// Diagnostic: every failure includes the URL, status, body, and the
-// first 12 chars of the anon key fingerprint so admins can match the
-// request to their Supabase config without spending a debug session.
+//   The radscheduler table's RLS policies require an authenticated
+//   user — direct PostgREST reads from the widget (anon-key only,
+//   no user JWT) returned 401 / "permission denied for table
+//   radscheduler" (PG error 42501).
+//
+// The edge function:
+//   1. Receives the full pairing code in the request body
+//   2. Verifies the HMAC signature with the anon key as shared secret
+//      (proves the code came from a RadScheduler admin)
+//   3. Uses the SERVICE ROLE (server-side only) to fetch the row
+//   4. Returns the practice JSON wrapped as { data: {...} }
+//
+// No RLS changes needed; service role key never leaves the server.
+//
+// We pass the FULL signed pairing code as the body and the public
+// anon key as Authorization. The function is verify_jwt:false so
+// PostgREST doesn't reject before our handler even runs.
 async function fetchPracticeData(p){
-  const url = `${p.sbUrl}/rest/v1/radscheduler?id=eq.${encodeURIComponent(p.practiceId)}&select=data`;
+  if(!_lastPairingCode){
+    throw new Error('Internal: pairing code not in scope. Re-launch the widget.');
+  }
+  const url = `${p.sbUrl}/functions/v1/widget-data`;
   let resp;
   try{
     resp = await fetch(url, {
+      method: 'POST',
       headers: {
         'apikey': p.sbAnonKey,
         'Authorization': 'Bearer ' + p.sbAnonKey,
-        'Accept': 'application/json',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ code: _lastPairingCode }),
     });
   } catch(e){
-    throw new Error('Network error: ' + (e.message || String(e)) + '\n\nURL: ' + url);
+    throw new Error('Network error contacting widget-data edge function:\n  ' + (e.message || String(e)) + '\n\nURL: ' + url);
   }
+  const bodyText = await resp.text().catch(() => '');
+  let parsed = null;
+  try{ parsed = JSON.parse(bodyText); } catch(_){}
   if(!resp.ok){
-    const body = await resp.text().catch(() => '(no body)');
+    const errMsg = (parsed && parsed.error) || bodyText || '(no body)';
     const keyFp = (p.sbAnonKey || '').slice(0, 12) + '…';
     let hint = '';
     if(resp.status === 401){
-      hint = '\n\nA 401 from /rest/v1 means the anon key was rejected. Likely causes:\n' +
-             '  • The Supabase anon key was rotated since this pairing code was issued — ask admin for a new code.\n' +
-             '  • The pairing code was generated with stale RadScheduler config (admin opened the app before the URL/key were saved).\n' +
-             '  • The Supabase project was paused (free-tier auto-pause after 1 week of inactivity).';
-    } else if(resp.status === 403){
-      hint = '\n\nA 403 means RLS denied the read. The widget queries with the anon key only (no user JWT), so any RLS policy that requires auth.uid() will block it. Consider adding an RLS policy that allows SELECT on the radscheduler row by anon when the practice has opted into widget access.';
+      hint = '\n\nThe edge function rejected the pairing code. Likely:\n' +
+             '  • Code expired — admin needs to issue a fresh one.\n' +
+             '  • Code was tampered with or the anon key changed.';
     } else if(resp.status === 404){
-      hint = '\n\nA 404 means the URL path is wrong. Make sure the Supabase URL ends without a trailing slash.';
+      hint = '\n\n404 may mean the widget-data edge function is not deployed in this Supabase project, OR the practice id in the code is wrong.';
+    } else if(resp.status === 500){
+      hint = '\n\nServer-side error inside the edge function. Check the Supabase dashboard → Edge Functions → widget-data → Logs.';
     }
     throw new Error(
-      'Supabase ' + resp.status + ' on ' + url + '\n' +
+      'widget-data ' + resp.status + ' on ' + url + '\n' +
       'Anon-key fingerprint: ' + keyFp + '\n' +
       'Practice id: ' + p.practiceId + '\n' +
-      'Response body: ' + body + hint
+      'Response: ' + errMsg + hint
     );
   }
-  const rows = await resp.json();
-  if(!rows.length){
-    throw new Error('No practice row found.\n\nURL: ' + url + '\nPractice id: ' + p.practiceId + '\nThe REST call succeeded but returned 0 rows. Either the practice id is wrong, or the row was deleted, or RLS hides it from the anon key.');
+  if(!parsed || !parsed.data){
+    throw new Error('Edge function returned no data field. Body:\n' + bodyText.slice(0, 600));
   }
-  return rows[0].data || {};
+  return parsed.data;
 }
 
 // ─── PACS fetch (stub) ───────────────────────────────────────────
@@ -553,6 +571,7 @@ async function refresh(){
       renderError('Pairing expired ' + payload.exp.slice(0,10) + '. Ask your admin for a new code.', true);
       return;
     }
+    _lastPairingCode = code;
     const practice = await fetchPracticeData(payload);
     const today = fmtDate(new Date());
     const digest = computeDayDigest(practice, payload.physId, today);
