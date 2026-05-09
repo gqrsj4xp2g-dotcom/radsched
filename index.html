@@ -38627,12 +38627,21 @@ async function applyPickImport(){
     ...sh.map(s => s.date),
   ].filter(Boolean).sort();
   const firstYM = (allDates[0] || '').slice(0, 7);
+  const lastYM = (allDates[allDates.length-1] || '').slice(0, 7);
   // Per-shift type counts — surfacing these directly in the success
   // message tells the user that 2nd / 3rd shifts WERE imported (the
   // original confusion was that they weren't showing up because the
   // classifier didn't recognize the format; this is belt-and-suspenders).
   const s2Added = sh.filter(s => s.shift === '2nd').length;
   const s3Added = sh.filter(s => s.shift === '3rd').length;
+  // Year breakdown across what we just wrote. Surfaces the year mismatch
+  // bug (2026 file → vacations land in 2025) at a glance: a row showing
+  // "2025: 30 records, 2026: 22 records" makes wrong-year obvious.
+  const yearTally = {};
+  vac.forEach(v => { const y = (v.start || '').slice(0,4); if(y) yearTally[y] = (yearTally[y] || 0) + 1; });
+  sh.forEach(s => { const y = (s.date || '').slice(0,4); if(y) yearTally[y] = (yearTally[y] || 0) + 1; });
+  const yearChips = Object.entries(yearTally).sort((a,b) => +a[0]-+b[0])
+    .map(([y, n]) => `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:11px;font-size:11px;font-weight:600">${escHtml(y)}: ${n}</span>`).join(' ');
   document.getElementById('xl-pick-preview').innerHTML = `
     <div class="note ns" style="line-height:1.55">
       ✓ Imported <strong>${vacAdded}</strong> vacation record${vacAdded===1?'':'s'}
@@ -38642,9 +38651,13 @@ async function applyPickImport(){
       ${shAdded === 0 && (data.allWeeks||[]).some(w => w.shift2.length || w.shift3.length)
         ? `<br><span style="color:var(--amber,#d97706);font-size:11.5px">⚠ Found ${(data.allWeeks||[]).reduce((n,w)=>n+w.shift2.length+w.shift3.length,0)} shift entries in the file but ALL were duplicates of existing data — nothing new to add.</span>`
         : ''}
+      ${allDates.length ? `<div style="margin-top:8px;font-size:12px">
+        📅 Date range: <strong>${escHtml(allDates[0])}</strong> → <strong>${escHtml(allDates[allDates.length-1])}</strong>
+        &nbsp; <span style="color:var(--rs-ink-3);font-size:11px">${yearChips}</span>
+      </div>` : ''}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         ${firstYM ? `
-          <button class="bp" onclick="_jumpToCalendar('dr-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">📅 View in DR Calendar</button>
+          <button class="bp" onclick="_jumpToCalendar('dr-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">📅 View in DR Calendar (${firstYM})</button>
           <button class="bsm" onclick="_jumpToCalendar('ir-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">⚕️ View in IR Calendar</button>
           <button class="bsm" onclick="_jumpToCalendar('vacations', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">🏖 View Vacations</button>
         ` : ''}
