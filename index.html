@@ -183,12 +183,29 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   .snav-sect{display:block;font-size:10px;padding:14px 16px 4px;background:var(--bg3);text-transform:uppercase;letter-spacing:.06em}
   .main{min-width:0;width:100%}
   .page{padding:12px 10px}
-  /* Topbar — show hamburger, hide non-essential elements */
+  /* Topbar — show hamburger, hide non-essential elements.
+     The bar is fixed-height with overflow:hidden so a stray non-hidden
+     element can't push the layout into horizontal scroll. Anything not
+     essential on a phone is hidden by .hide-on-mobile (a class added
+     to less-frequently-used controls below). The hamburger menu is the
+     primary navigation; sidebar holds Sign Out + everything else. */
   #mobile-nav-toggle{display:inline-flex !important}
-  .topbar{height:48px;padding:0 8px;gap:6px}
-  .tb-divider,.tb-practice,.tb-nm,.tb-rl,.tb-av{display:none}
-  .tb-logo{font-size:14px}
-  .topbar .tb-btn{padding:8px 10px;font-size:11px;min-height:36px}
+  .topbar{
+    height:48px; padding:0 8px; gap:6px;
+    overflow:hidden; flex-wrap:nowrap;
+    max-width:100vw;
+  }
+  /* User identity + practice name + non-critical status badges hidden */
+  .tb-divider, .tb-practice, .tb-nm, .tb-rl, .tb-av{display:none}
+  .tb-user{display:none}
+  /* Hide secondary action buttons & status indicators on mobile.
+     They're available via the sidebar drawer (Sign Out, Sign-in info)
+     or by switching to desktop for power-user actions (undo, print). */
+  .topbar .hide-on-mobile{display:none !important}
+  .tb-logo{font-size:14px; flex-shrink:0}
+  .tb-spacer{flex:1; min-width:0}
+  /* Buttons that REMAIN visible: keep them compact + non-shrinkable */
+  .topbar .tb-btn{padding:6px 10px; font-size:11px; min-height:36px; flex-shrink:0}
   /* Grids collapse */
   .g2,.g3,.g4{grid-template-columns:1fr;gap:8px}
   /* Cards full-width */
