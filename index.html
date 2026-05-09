@@ -37805,8 +37805,34 @@ function previewPickImport(input){
         <pre style="font-family:ui-monospace,monospace;font-size:10.5px;white-space:pre-wrap;margin-top:6px;color:var(--rs-ink-2)">${escHtml(err.stack || '(no stack)')}</pre></details></div>`;
       if(typeof _logError === 'function') _logError('parsePickWorkbook', 'Pick-sheet parser crashed', err);
     }
+    // Stash the parsed rows so target-year edits re-parse without
+    // forcing the user to re-pick the file from disk.
+    _xlPickLastRows = rows;
+    _xlPickLastSheet = sheetName;
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ── Target-year change handler ────────────────────────────────────────
+// Re-parses the previously-loaded sheet with the new target year so the
+// preview updates instantly. Debounced via requestAnimationFrame to
+// avoid jank if the user holds the up-arrow on the spinner.
+let _xlPickLastRows = null;
+let _xlPickLastSheet = null;
+let _rePickRaf = null;
+function _rePickWithTargetYear(){
+  if(!_xlPickLastRows) return;  // no file loaded yet
+  if(_rePickRaf) cancelAnimationFrame(_rePickRaf);
+  _rePickRaf = requestAnimationFrame(() => {
+    _rePickRaf = null;
+    const prev = document.getElementById('xl-pick-preview');
+    if(!prev) return;
+    try{
+      _parsePickWorkbook(_xlPickLastRows, prev, _xlPickLastSheet || '');
+    }catch(err){
+      console.error('[RS] re-parse threw:', err);
+    }
+  });
 }
 
 // ── Robust Excel value → ISO date converter ──────────────────────────────
