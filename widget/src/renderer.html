@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src https://*.supabase.co https://*.supabase.in https://*.supabase.net">
+<title>RadScheduler</title>
+<style>
+  /* Native-feeling widget UI. Dark by default to match Mac menu bar
+     widgets, with a subtle accent for the wRVU progress ring. */
+  :root {
+    --bg: #0f172a;
+    --bg2: #1e293b;
+    --bg3: #334155;
+    --ink: #e2e8f0;
+    --ink2: #94a3b8;
+    --ink3: #64748b;
+    --accent: #38bdf8;
+    --accent2: #0ea5e9;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --line: rgba(148, 163, 184, 0.15);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    height: 100%;
+    user-select: none;
+    overflow: hidden;
+  }
+  /* Drag handle: top header acts as the window-drag region. Native-only,
+     so the unsupported buttons inside it have no-drag set. */
+  .drag { -webkit-app-region: drag; }
+  .nodrag { -webkit-app-region: no-drag; }
+  .header {
+    padding: 8px 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    -webkit-app-region: drag;
+  }
+  .brand { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: var(--ink); }
+  .header-actions { display: flex; gap: 4px; -webkit-app-region: no-drag; }
+  .icon-btn {
+    background: transparent; border: 0; color: var(--ink2);
+    cursor: pointer; padding: 4px 6px; border-radius: 4px;
+    font-size: 13px; line-height: 1;
+  }
+  .icon-btn:hover { background: var(--bg3); color: var(--ink); }
+  .body { padding: 12px; }
+
+  /* ── Pairing screen ─────────────────────────────────────────── */
+  .pair { display: flex; flex-direction: column; gap: 10px; }
+  .pair h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+  .pair p { margin: 0; font-size: 12px; color: var(--ink2); line-height: 1.5; }
+  .pair textarea {
+    width: 100%; min-height: 90px; resize: vertical;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; line-height: 1.4;
+  }
+  .pair button {
+    background: var(--accent); color: var(--bg);
+    border: 0; padding: 8px 14px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .pair button:hover { background: var(--accent2); }
+  .pair .err { color: var(--red); font-size: 11.5px; min-height: 16px; }
+
+  /* ── Dashboard screen ───────────────────────────────────────── */
+  .top {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--accent2); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+  }
+  .name { font-size: 14px; font-weight: 600; }
+  .date { font-size: 11px; color: var(--ink2); }
+
+  .ring-wrap {
+    display: flex; flex-direction: column; align-items: center; margin: 8px 0 14px;
+  }
+  .ring { width: 130px; height: 130px; }
+  .ring-label-wrap { text-align: center; margin-top: -100px; pointer-events: none; }
+  .ring-num { font-size: 26px; font-weight: 700; line-height: 1; color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .ring-sub { font-size: 10.5px; color: var(--ink2); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .stat-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .stat {
+    flex: 1; background: var(--bg2); border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .stat-lbl { font-size: 10px; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+  .stat-val { font-size: 16px; font-weight: 700; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); }
+
+  .shifts {
+    background: var(--bg2); border-radius: 8px; padding: 8px 10px;
+    font-size: 11.5px; line-height: 1.5; min-height: 32px;
+  }
+  .shifts .row { display: flex; justify-content: space-between; gap: 8px; }
+  .shifts .row + .row { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+  .shifts .row .left { color: var(--ink); }
+  .shifts .row .right { color: var(--ink2); }
+  .empty { color: var(--ink3); font-style: italic; font-size: 11px; }
+
+  .footer {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10.5px; color: var(--ink3);
+  }
+  .footer .err { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="header drag">
+  <span class="brand">⚕ RadScheduler</span>
+  <div class="header-actions">
+    <button class="icon-btn nodrag" id="btn-refresh" title="Refresh">↻</button>
+    <button class="icon-btn nodrag" id="btn-pin" title="Pinned (always on top)">📌</button>
+    <button class="icon-btn nodrag" id="btn-settings" title="Settings">⋯</button>
+  </div>
+</div>
+<div class="body" id="root">
+  <!-- Renderer JS replaces this on boot. -->
+  <div style="text-align:center;padding:30px 0;color:var(--ink2);font-size:12px">Loading…</div>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>

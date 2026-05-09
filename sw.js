@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v11';
+const CACHE_VERSION = 'rs-v12';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new

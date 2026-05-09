@@ -1,0 +1,16 @@
+/* RadScheduler Widget — preload bridge.
+ * Exposes a narrow, typed surface to the renderer. Renderer itself
+ * has no direct Node access (sandbox + contextIsolation enforced in
+ * main.js). All persistence + shell hooks go through these channels.
+ */
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('rsWidget', {
+  getPairing:      () => ipcRenderer.invoke('rs:get-pairing'),
+  savePairing:     (code) => ipcRenderer.invoke('rs:save-pairing', code),
+  clearPairing:    () => ipcRenderer.invoke('rs:clear-pairing'),
+  openExternal:    (url) => ipcRenderer.invoke('rs:open-external', url),
+  setAlwaysOnTop:  (on) => ipcRenderer.invoke('rs:set-always-on-top', !!on),
+  onResetPairing:  (cb) => ipcRenderer.on('rs:reset-pairing', cb),
+});
