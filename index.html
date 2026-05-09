@@ -8556,15 +8556,15 @@ async function launchApp(){
 //   • non-destructive (preserve unknown fields for forward-compat)
 // The version is stored on the persisted payload as `_schemaVersion`.
 // A payload with no _schemaVersion is treated as version 0.
-const _SCHEMA_VERSION = 1;
+const _SCHEMA_VERSION = 2;
 const _MIGRATIONS = [
-  // Example future migration (kept here as a template):
-  // { from: 0, to: 1, fn: (d) => {
-  //     // e.g. rename a field, split a structure, add a default
-  //     if(d.oldField && !d.newField){ d.newField = d.oldField; delete d.oldField; }
-  //     return d;
-  //   }
-  // },
+  // v1 → v2: introduce shiftOffers array for the one-sided trade
+  // marketplace. Additive; legacy practices get an empty array.
+  { from: 1, to: 2, fn: (d) => {
+      if(!Array.isArray(d.shiftOffers)) d.shiftOffers = [];
+      return d;
+    }
+  },
 ];
 
 function _runMigrations(d){
