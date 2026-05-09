@@ -33381,19 +33381,32 @@ function _renderTodayCoverage(isAdmin){
     arr.forEach(x => { const k = fn(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); });
     return [...m.entries()];
   };
+  // ── Handoff note button helper ────────────────────────────────────
+  // Each shift can carry a `handoff` note (lightweight free text). The
+  // button shows 📝 if the shift has a note, else 💬. Clicking opens
+  // a modal where any user can edit the note for THIS shift. Notes
+  // persist on the shift record and survive nav / reload via S.*Shifts.
+  const noteBtn = (kind, id) => {
+    const arr = kind === 'dr' ? S.drShifts : kind === 'ir' ? S.irShifts : null;
+    const s = arr ? arr.find(x => x.id === id) : null;
+    const has = !!(s && s.handoff && s.handoff.trim());
+    const lbl = has ? '📝' : '💬';
+    const tip = has ? `Handoff note: ${(s.handoff || '').slice(0, 120)}` : 'Add a handoff note for this shift';
+    return `<button onclick="editShiftHandoff('${kind}',${id})" title="${escHtml(tip)}" style="background:transparent;border:0;cursor:pointer;font-size:13px;padding:0 2px;opacity:${has ? '.95' : '.45'}">${lbl}</button>`;
+  };
   const cellByShift = groupBy(drToday, s => s.shift + ' • ' + (s.site || '?'));
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:6px">';
   cellByShift.forEach(([key, items]) => {
-    const names = items.map(s => pname(s.physId)).join(', ');
+    const names = items.map(s => `${escHtml(pname(s.physId))} ${noteBtn('dr', s.id)}`).join(', ');
     html += `<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--bdr)">
       <div style="font-size:10.5px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.5px">${escHtml(key)}</div>
-      <div style="font-size:13px;margin-top:2px">${escHtml(names)}</div>
+      <div style="font-size:13px;margin-top:2px">${names}</div>
     </div>`;
   });
   irToday.forEach(s => {
     html += `<div style="padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--bdr)">
       <div style="font-size:10.5px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.5px">IR ${escHtml(s.shift)} • ${escHtml(s.site || '?')}</div>
-      <div style="font-size:13px;margin-top:2px">${escHtml(pname(s.physId))}</div>
+      <div style="font-size:13px;margin-top:2px">${escHtml(pname(s.physId))} ${noteBtn('ir', s.id)}</div>
     </div>`;
   });
   callToday.forEach(c => {
