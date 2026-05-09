@@ -5414,6 +5414,33 @@ Once set, ask me anything about your schedule!</div>
    FEATURE: Rest-period warning on manual assignment
      → fn:      _checkRestPeriod
      → wiring:  drShift add path (sb-add) before push
+   FEATURE: wRVU goals per shift
+     → fns:     getShiftWRVUGoal / getDriveTimeWRVUCredit
+     → state:   S.cfg.wRVUDefaults / s.wRVUGoal / p.wRVUMultiplier
+     → DOM:     #wrvu-defaults-grid / #cfg-dt-wrvu
+     → render:  inline on DR calendar shift chips
+   FEATURE: Desktop widget pairing
+     → fns:     generateWidgetPairing / renderWidgetPage / revokeWidgetPairing
+     → fns:     _hmacB64Url / _b64url / _emailPairingCode
+     → state:   S.widgetPairings (PERSISTED_KEYS)
+     → schema:  v5→v6 migration
+     → page:    #page-widget
+     → external: widget/ directory (Electron app)
+   FEATURE: Auto-assign rationale viewer
+     → fns:     explainShiftAssignment / showAssignmentRationale
+     → trigger: callable from any "Why?" link on a shift chip
+   FEATURE: Schedule comparison (month vs month)
+     → fn:      compareMonths
+     → DOM:     #cmp-month-a / #cmp-month-b / #cmp-result
+   FEATURE: Subspecialty coverage tracker
+     → fn:      renderSubspecialtyCoverage
+     → DOM:     #subcov-year / #subcov-result
+   FEATURE: Bulk physician import (Excel)
+     → fns:     downloadPhysTemplate / previewPhysImport / applyPhysImport
+     → DOM:     #xl-phys-file / #xl-phys-preview / #xl-phys-actions
+   FEATURE: Read-only public URL (multi-month + passcode-gate)
+     → fns:     openPublicSchedulePreview / downloadPublicScheduleMulti
+     → fn:      generatePublicScheduleHTMLMulti
 
    ── TUNING CONSTANTS ──────────────────────────────────────────────────
    See `const _TUNE = { ... }` immediately below for every magic number
