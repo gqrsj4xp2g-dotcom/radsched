@@ -8558,6 +8558,9 @@ async function launchApp(){
 // A payload with no _schemaVersion is treated as version 0.
 const _SCHEMA_VERSION = 2;
 const _MIGRATIONS = [
+  // v0 → v1: stamp the schema version. No structural changes; pre-versioned
+  // payloads are functionally equivalent to v1 since validators were lenient.
+  { from: 0, to: 1, fn: (d) => d },
   // v1 → v2: introduce shiftOffers array for the one-sided trade
   // marketplace. Additive; legacy practices get an empty array.
   { from: 1, to: 2, fn: (d) => {
