@@ -33365,6 +33365,79 @@ function findNextAvailable(physId, fromDate, kind){
   return null;
 }
 
+// ── Smart Vacation Guardrails ──────────────────────────────────────────
+// Live "is this date range over-subscribed?" check on the vacations
+// form. Surfaces a warning banner + suggests a nearby clear week so the
+// physician doesn't have to guess. Cap defaults to 35% of physicians off
+// in any given week (admin-tunable via S.cfg.maxVacationOverlapPct).
+function _validateVacationWindow(){
+  const banner = document.getElementById('v-guardrail');
+  if(!banner) return;
+  const startEl = document.getElementById('v-start');
+  const endEl   = document.getElementById('v-end');
+  const physEl  = document.getElementById('v-phys');
+  const start = startEl?.value, end = endEl?.value;
+  if(!start || !end || start > end){
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  const physId = Number(physEl?.value) || null;
+  const totalPhys = (S.physicians || []).length;
+  if(totalPhys < 2){ banner.style.display = 'none'; return; }
+  const cap = Math.max(0.05, Math.min(0.95, (S.cfg?.maxVacationOverlapPct ?? 0.35)));
+  // Count overlapping vacations on each day in the requested range.
+  // We report the WORST day (highest concurrent count).
+  const overlap = (ds) => {
+    let n = 0;
+    (S.vacations || []).forEach(v => {
+      if(physId && v.physId === physId) return; // exclude self
+      if(v.start <= ds && v.end >= ds) n++;
+    });
+    return n;
+  };
+  let worstDay = start, worstCount = -1;
+  let cur = start;
+  while(cur <= end){
+    const n = overlap(cur);
+    if(n > worstCount){ worstCount = n; worstDay = cur; }
+    cur = addDays(cur, 1);
+  }
+  // Self counts toward the future state.
+  const peak = worstCount + 1;
+  const peakPct = peak / totalPhys;
+  if(peakPct <= cap){
+    banner.style.display = '';
+    banner.innerHTML = `<div class="note ns" style="font-size:11.5px;padding:6px 10px">
+      ✓ Clear: ${worstCount} of ${totalPhys} other physicians off on the busiest day (${worstDay}).
+    </div>`;
+    return;
+  }
+  // Find the nearest clear week (search ±28 days from start).
+  let suggestion = null;
+  for(let i = 1; i <= 28; i++){
+    for(const dir of [+1, -1]){
+      const candStart = addDays(start, dir * i);
+      const candEnd = addDays(end, dir * i);
+      let bad = false;
+      let scan = candStart;
+      while(scan <= candEnd){
+        if((overlap(scan) + 1) / totalPhys > cap){ bad = true; break; }
+        scan = addDays(scan, 1);
+      }
+      if(!bad){ suggestion = { start: candStart, end: candEnd }; break; }
+    }
+    if(suggestion) break;
+  }
+  banner.style.display = '';
+  banner.innerHTML = `<div class="note nw" style="font-size:11.5px;padding:8px 12px">
+    ⚠ <strong>${peak} of ${totalPhys}</strong> physicians off on ${worstDay} (${Math.round(peakPct * 100)}% — exceeds the ${Math.round(cap * 100)}% practice cap).
+    ${suggestion
+      ? `<div style="margin-top:4px">Try <code style="background:var(--bg3);padding:1px 6px;border-radius:3px;cursor:pointer" onclick="document.getElementById('v-start').value='${suggestion.start}';document.getElementById('v-end').value='${suggestion.end}';_validateVacationWindow();">${suggestion.start} → ${suggestion.end}</code> — clear under the cap.</div>`
+      : `<div style="margin-top:4px">No clear ±4-week window found nearby. Admin override required.</div>`}
+  </div>`;
+}
+
 // ── Coverage Gap Detector ──────────────────────────────────────────────
 // Scans the next 30 days for unfilled critical slots:
 //   • Weekday with no 1st-shift physician at ANY active site
