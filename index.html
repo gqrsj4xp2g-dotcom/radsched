@@ -5613,7 +5613,10 @@ const _TUNE = Object.freeze({
   // Save watchdog: force-clear the save lock if a push hangs longer than this.
   SAVE_WATCHDOG_MS: 30 * 1000,                 // 30 seconds
   // Save debounce: ms between last keystroke and Supabase push.
-  SAVE_DEBOUNCE_MS: 500,
+  // Bumped 500 → 1500 to reduce write volume at 200-phys scale
+  // (see docs/SCALING.md). UI feels just as fast because writes
+  // are async; the local state mutation is instant either way.
+  SAVE_DEBOUNCE_MS: 1500,
   // Audit-log throttle for repeating events (e.g. coverage gap detector).
   AUDIT_THROTTLE_MS: 60 * 60 * 1000,           // 1 hour
   // Pick sheet block convention (Saturday → next Sunday inclusive).
