@@ -17428,6 +17428,164 @@ function downloadTemplate(kind){
   }catch(e){ alert('Template download failed: '+e.message); }
 }
 
+// ── Bulk physician import ────────────────────────────────────────────
+// Accepts CSV / XLSX with at minimum Last + First columns. Other columns
+// are optional. Existing physicians (case-insensitive last+first match)
+// are UPDATED in place; new rows are added with a fresh ID. Roster
+// bootstrap that previously took 30 minutes of clicking is one upload.
+let _xlPhysData = null;
+function downloadPhysTemplate(){
+  const csv = 'Last,First,Email,Role,DR FTE,IR FTE,Anchor Site,IR Group,wRVU multiplier\n' +
+              'Smith,Alice,alice@example.com,DR,1.0,0,CHE,,1.0\n' +
+              'Patel,Raj,raj@example.com,IR,0,1.0,,North,1.0\n';
+  try{
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'physicians_template.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){ alert('Template download failed: '+e.message); }
+}
+
+function previewPhysImport(input){
+  if(!_adminOnly('preview physicians import')) return;
+  const file = input.files[0]; if(!file) return;
+  const prev = document.getElementById('xl-phys-preview');
+  prev.innerHTML = `<div class="note ni" style="font-size:12px">Reading <strong>${escHtml(file.name)}</strong>…</div>`;
+  if(!window.XLSX){
+    prev.innerHTML = '<div class="note ne">SheetJS library failed to load.</div>';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if(!rows.length){ prev.innerHTML = '<div class="note nw">Sheet is empty.</div>'; return; }
+      // Normalize column names (case + whitespace insensitive).
+      const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const out = [];
+      const errors = [];
+      rows.forEach((r, i) => {
+        const get = (key) => {
+          const target = norm(key);
+          for(const k of Object.keys(r)){
+            if(norm(k) === target) return r[k];
+          }
+          return '';
+        };
+        const last = String(get('Last') || '').trim();
+        const first = String(get('First') || '').trim();
+        if(!last || !first){ errors.push(`Row ${i+2}: missing Last or First name`); return; }
+        const role = (String(get('Role') || 'DR').trim().toUpperCase().match(/^(DR|IR|MIXED)$/) || ['DR'])[0];
+        const drFte = +(get('DR FTE')) || 0;
+        const irFte = +(get('IR FTE')) || 0;
+        out.push({
+          last, first,
+          email: String(get('Email') || '').trim().toLowerCase(),
+          role,
+          drFte, irFte,
+          anchorSite: String(get('Anchor Site') || '').trim(),
+          irGroup: String(get('IR Group') || '').trim(),
+          wRVUMultiplier: +(get('wRVU multiplier') || 1) || 1,
+        });
+      });
+      // Match against existing physicians.
+      const existing = (S.physicians || []).map(p => ({
+        id: p.id,
+        key: ((p.last||'').toLowerCase().trim() + '|' + (p.first||'').toLowerCase().trim()),
+      }));
+      const existKeys = new Map(existing.map(e => [e.key, e.id]));
+      const willUpdate = [], willCreate = [];
+      out.forEach(p => {
+        const k = p.last.toLowerCase() + '|' + p.first.toLowerCase();
+        if(existKeys.has(k)){ willUpdate.push({ ...p, _existingId: existKeys.get(k) }); }
+        else { willCreate.push(p); }
+      });
+      _xlPhysData = { willUpdate, willCreate, errors };
+      // Render preview.
+      prev.innerHTML = `
+        <div style="display:flex;gap:14px;font-size:12px;margin-bottom:8px">
+          <span><strong>${out.length}</strong> rows parsed</span>
+          <span style="color:var(--green-t,#15803d)"><strong>${willCreate.length}</strong> to create</span>
+          <span style="color:var(--blue-t,#1e40af)"><strong>${willUpdate.length}</strong> to update</span>
+          ${errors.length ? `<span style="color:var(--red-t,#dc2626)"><strong>${errors.length}</strong> errors</span>` : ''}
+        </div>
+        ${errors.length ? `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;color:var(--red-t,#dc2626);cursor:pointer">▶ Errors (${errors.length})</summary>
+          <div style="font-size:11.5px;color:var(--rs-ink-2);padding:6px 0">${errors.slice(0,20).map(escHtml).join('<br>')}${errors.length>20?'<br>… and ' + (errors.length-20) + ' more':''}</div>
+        </details>` : ''}
+        <details open><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Physicians (${willCreate.length + willUpdate.length})</summary>
+          <table class="tbl" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Last</th><th>First</th><th>Role</th><th>DR FTE</th><th>IR FTE</th><th>Anchor</th><th>Action</th></tr></thead>
+          <tbody>${out.slice(0,80).map(p => {
+            const k = p.last.toLowerCase() + '|' + p.first.toLowerCase();
+            const isUpdate = existKeys.has(k);
+            return `<tr><td>${escHtml(p.last)}</td><td>${escHtml(p.first)}</td><td>${escHtml(p.role)}</td><td>${p.drFte}</td><td>${p.irFte}</td><td>${escHtml(p.anchorSite||'—')}</td><td>${isUpdate ? '<span style="color:var(--blue-t,#1e40af)">update</span>' : '<span style="color:var(--green-t,#15803d)">create</span>'}</td></tr>`;
+          }).join('')}</tbody></table>
+        </details>`;
+      const actions = document.getElementById('xl-phys-actions');
+      const cnt = document.getElementById('xl-phys-count');
+      if(actions) actions.style.display = 'block';
+      if(cnt) cnt.textContent = `${willCreate.length} new · ${willUpdate.length} updates`;
+    }catch(err){
+      prev.innerHTML = `<div class="note ne">Parse failed: ${escHtml(err.message)}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function applyPhysImport(){
+  if(!_adminOnly('apply physicians import')) return;
+  const data = _xlPhysData;
+  if(!data || (!data.willCreate.length && !data.willUpdate.length)){
+    alert('Nothing to import.');
+    return;
+  }
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('phys-bulk-import'); }catch(_){}
+  }
+  let created = 0, updated = 0;
+  data.willCreate.forEach(p => {
+    S.physicians.push({
+      id: S.nextId++,
+      last: p.last, first: p.first, email: p.email,
+      role: p.role,
+      drFte: p.drFte, irFte: p.irFte,
+      anchorSite: p.anchorSite || null,
+      irGroup: p.irGroup || null,
+      wRVUMultiplier: p.wRVUMultiplier,
+      drSubs: [], irSubs: [],
+      shiftElig: { s1: true, s2: true, s3: true, home: true },
+      allowedSites: [],
+      siteRules: [],
+      callDayRules: [],
+      siteSeqRules: [],
+      conferenceRules: [],
+    });
+    created++;
+  });
+  data.willUpdate.forEach(p => {
+    const existing = S.physicians.find(x => x.id === p._existingId);
+    if(!existing) return;
+    if(p.email) existing.email = p.email;
+    if(p.role) existing.role = p.role;
+    if(p.drFte != null) existing.drFte = p.drFte;
+    if(p.irFte != null) existing.irFte = p.irFte;
+    if(p.anchorSite) existing.anchorSite = p.anchorSite;
+    if(p.irGroup) existing.irGroup = p.irGroup;
+    if(p.wRVUMultiplier != null) existing.wRVUMultiplier = p.wRVUMultiplier;
+    updated++;
+  });
+  if(typeof _audit === 'function') _audit('physicians.bulkImport', { created, updated });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  document.getElementById('xl-phys-preview').innerHTML = `<div class="note ns">✓ Created <strong>${created}</strong> · Updated <strong>${updated}</strong> physician${(created+updated)===1?'':'s'}.</div>`;
+  document.getElementById('xl-phys-actions').style.display = 'none';
+  _xlPhysData = null;
+  if(typeof _toast === 'function') _toast(`Imported ${created + updated} physicians.`, 'ok');
+}
+
 /* ─── HOLIDAY MANUAL REASSIGNMENT ─── */
 
 function reassignHoliday(id){
