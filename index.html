@@ -35183,11 +35183,36 @@ const _WEBHOOK_EVENTS = [
 function _emitWebhookEvent(eventName, payload){
   const hooks = (S.cfg?.webhooks || []).filter(h => h.active && (h.events || []).includes(eventName));
   if(!hooks.length) return;
-  // Fire each subscribed webhook through the send-notification edge
-  // function (which has the right CORS posture + service-role key for
-  // logging). Async-fire-and-forget; errors logged to console + audit
-  // but don't block the originating mutation.
   hooks.forEach(h => {
+    const flavor = h.flavor || 'generic';
+    if(flavor === 'slack' || flavor === 'teams'){
+      // Slack incoming webhooks + Teams Connector cards both accept CORS
+      // POST from browsers. Skip the edge function and post directly so
+      // delivery works even without Supabase configured. The only cost is
+      // we don't get server-side delivery logs — but we still audit on
+      // both success and failure.
+      const body = (flavor === 'slack')
+        ? _formatSlackPayload(eventName, payload)
+        : _formatTeamsPayload(eventName, payload);
+      fetch(h.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => {
+        if(r.ok && typeof _audit === 'function')
+          _audit('webhook.delivered', { hookId: h.id, eventName, flavor });
+        else if(typeof _audit === 'function')
+          _audit('webhook.failed', { hookId: h.id, eventName, flavor, status: r.status });
+      }).catch(err => {
+        console.warn('[RS] ' + flavor + ' webhook failed:', h.url, err);
+        if(typeof _audit === 'function')
+          _audit('webhook.failed', { hookId: h.id, eventName, flavor, error: String(err) });
+      });
+      return;
+    }
+    // Generic JSON: route through the send-notification edge function
+    // for CORS + logging. Async-fire-and-forget; errors logged to console
+    // + audit but don't block the originating mutation.
     _invokeEdgeFn('send-notification', {
       kind: 'webhook',
       url: h.url,
@@ -35201,6 +35226,67 @@ function _emitWebhookEvent(eventName, payload){
         _audit('webhook.failed', { hookId: h.id, eventName, error: String(err) });
     });
   });
+}
+
+// ── Slack / Teams payload formatters ──────────────────────────────────
+// Both providers accept simple POST with JSON body. We build a friendly
+// human-readable message line so the channel surfaces the event without
+// raw JSON. _formatHumanLine is shared so both flavors stay in sync.
+function _formatHumanLine(eventName, payload){
+  const p = payload || {};
+  const physName = (id) => {
+    const phys = (typeof _physById === 'function') ? _physById(id) : null;
+    return phys ? `${phys.first} ${phys.last}` : (id ? `Phys#${id}` : 'someone');
+  };
+  switch(eventName){
+    case 'shift.assigned':   return `📋 Shift assigned: ${physName(p.physId)} → ${p.shift || ''} on ${p.date || ''}${p.site ? ' at ' + p.site : ''}`;
+    case 'shift.removed':    return `❌ Shift removed: ${physName(p.physId)} on ${p.date || ''}`;
+    case 'swap.requested':   return `🔄 Swap requested by ${physName(p.fromPhysId)} ↔ ${physName(p.toPhysId)} on ${p.date || ''}`;
+    case 'swap.approved':    return `✅ Swap approved: ${physName(p.fromPhysId)} ↔ ${physName(p.toPhysId)} on ${p.date || ''}`;
+    case 'swap.denied':      return `🚫 Swap denied: ${physName(p.fromPhysId)} ↔ ${physName(p.toPhysId)} on ${p.date || ''}`;
+    case 'vacation.added':   return `🌴 Vacation: ${physName(p.physId)} ${p.start || ''} → ${p.end || ''}`;
+    case 'vacation.removed': return `🗓 Vacation removed: ${physName(p.physId)} ${p.start || ''} → ${p.end || ''}`;
+    case 'holiday.assigned': return `🎄 Holiday assigned: ${physName(p.physId)} on ${p.date || ''} (${p.holidayName || ''})`;
+    case 'openShift.posted': return `📢 Open shift posted: ${p.shift || ''} on ${p.date || ''}${p.site ? ' at ' + p.site : ''}`;
+    case 'openShift.claimed':return `🙋 Open shift claimed by ${physName(p.physId)}: ${p.shift || ''} on ${p.date || ''}`;
+    case 'oncall.starting':  return `📞 On call starting: ${physName(p.physId)} for ${p.date || ''}`;
+    default:                 return `RadScheduler event: ${eventName}`;
+  }
+}
+function _formatSlackPayload(eventName, payload){
+  return { text: _formatHumanLine(eventName, payload) };
+}
+function _formatTeamsPayload(eventName, payload){
+  return {
+    '@type': 'MessageCard',
+    '@context': 'https://schema.org/extensions',
+    themeColor: '0078D4',
+    summary: 'RadScheduler — ' + eventName,
+    title: 'RadScheduler',
+    text: _formatHumanLine(eventName, payload),
+  };
+}
+
+// ── Webhook UI presets ────────────────────────────────────────────────
+// Pre-fills name + placeholder + sets the hidden flavor field so the
+// admin doesn't have to remember the exact JSON shape Slack/Teams expect.
+function webhookPreset(flavor){
+  const flavorEl = document.getElementById('wh-flavor');
+  const nameEl   = document.getElementById('wh-name');
+  const urlEl    = document.getElementById('wh-url');
+  if(flavorEl) flavorEl.value = flavor;
+  if(flavor === 'slack'){
+    if(nameEl && !nameEl.value) nameEl.value = 'Slack #scheduling';
+    if(urlEl) urlEl.placeholder = 'https://hooks.slack.com/services/T0000/B0000/XXXXX';
+    if(typeof _toast === 'function') _toast('Slack preset selected — paste your Incoming Webhook URL.', 'ok');
+  } else if(flavor === 'teams'){
+    if(nameEl && !nameEl.value) nameEl.value = 'Teams Channel';
+    if(urlEl) urlEl.placeholder = 'https://outlook.office.com/webhook/...';
+    if(typeof _toast === 'function') _toast('Teams preset selected — paste your Connector URL.', 'ok');
+  } else {
+    if(urlEl) urlEl.placeholder = 'https://example.com/your-webhook';
+    if(typeof _toast === 'function') _toast('Generic JSON preset selected.', 'ok');
+  }
 }
 
 // ── Edge-function invocation helper ────────────────────────────────────
