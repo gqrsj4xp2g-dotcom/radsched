@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v7';
+const CACHE_VERSION = 'rs-v8';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
@@ -106,18 +106,66 @@ self.addEventListener('push', (e) => {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     tag: payload.tag || 'rs-notif',
-    data: { url: payload.url || '/' },
-    requireInteraction: payload.persist === true,
+    data: {
+      url: payload.url || '/',
+      // Pass through any RadScheduler-specific markers so the
+      // notificationclick handler below can route ack actions.
+      rsKind:  payload.rsKind  || payload.kind || null,
+      rsPhysId: payload.rsPhysId || payload.physId || null,
+      rsDate:  payload.rsDate  || payload.date  || null,
+    },
+    requireInteraction: payload.persist === true || payload.kind === 'oncall-confirmation',
+    // For on-call confirmation pushes, surface a tappable action button
+    // so the user can confirm without opening the app.
+    actions: payload.kind === 'oncall-confirmation'
+      ? [{ action: 'oncall-ack', title: '✓ Acknowledge' }]
+      : (payload.actions || []),
   };
   e.waitUntil(self.registration.showNotification(payload.title || 'RadScheduler', opts));
 });
 
 self.addEventListener('notificationclick', (e) => {
+  const action = e.action || '';
+  const data = e.notification.data || {};
   e.notification.close();
-  const targetUrl = e.notification.data?.url || '/';
+  // ── On-call acknowledgement path ──────────────────────────────────
+  // Either a click on the explicit ✓ Acknowledge action button, or a
+  // body-tap when the underlying notification was an on-call reminder.
+  // We post back to any open clients so the page can write the audit
+  // entry + persist S.onCallAcks. If no client is open we open one to
+  // /#dashboard with an `?onCallAck` hint so the page can self-record.
+  const isOnCallAck = action === 'oncall-ack' ||
+    (data.rsKind === 'oncall-confirmation' && data.rsPhysId && data.rsDate);
+  if (isOnCallAck && data.rsPhysId && data.rsDate) {
+    e.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const client of clientList) {
+          if (client.url.includes(self.location.host)) {
+            client.postMessage({
+              type: 'rs:oncall-ack',
+              physId: data.rsPhysId,
+              date:   data.rsDate,
+            });
+            if ('focus' in client) client.focus();
+            return;
+          }
+        }
+        // No open tab — open one and let the boot wire-up notice the
+        // pending ack via the URL hint.
+        if (self.clients.openWindow) {
+          const url = (data.url || '/') +
+            (data.url && data.url.includes('?') ? '&' : '?') +
+            'onCallAck=' + encodeURIComponent(data.rsPhysId + ',' + data.rsDate);
+          return self.clients.openWindow(url);
+        }
+      })
+    );
+    return;
+  }
+  // ── Default behavior: focus an existing tab or open a new one ──────
+  const targetUrl = data.url || '/';
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Focus an existing RadScheduler tab if one's open; otherwise open new.
       for (const client of clientList) {
         if (client.url.includes(self.location.host) && 'focus' in client) {
           client.focus();
