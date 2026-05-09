@@ -38082,7 +38082,23 @@ function _parsePickWorkbook(rows, prev, sheetName){
   );
   const unmatched = Object.entries(nameMap).filter(([_, m]) => m.status === 'unmatched').map(([n]) => n);
   const lowConf = Object.entries(nameMap).filter(([_, m]) => m.status === 'low').map(([n,m]) => ({name: n, suggested: _physById(m.physId)?.last, score: m.score}));
-  _xlPickData = { vacations: dedupVac, shifts: dedupShifts, unmatched, allWeeks: weeks, nameMap, lowConf };
+  // Year-detection metadata for the preview banner. yearShift > 0 means
+  // "Target year override is shifting dates forward N years"; 0 means the
+  // file's own dates are being used as-is.
+  const yearMeta = {
+    yearCounts,         // {'2025': 30, '2026': 22, ...}
+    fileYear,           // most common year in the file
+    targetYear: targetYearInput || fileYear,
+    yearShift,
+    // Range of resulting dates after any shift, for the preview.
+    importedRange: vacRecs.length || shiftRecs.length
+      ? {
+          first: [...vacRecs.map(v=>v.start), ...shiftRecs.map(s=>s.date)].sort()[0],
+          last:  [...vacRecs.map(v=>v.end),   ...shiftRecs.map(s=>s.date)].sort().pop(),
+        }
+      : null,
+  };
+  _xlPickData = { vacations: dedupVac, shifts: dedupShifts, unmatched, allWeeks: weeks, nameMap, lowConf, yearMeta };
   _renderPickPreview(prev);
 }
 
