@@ -82,8 +82,13 @@ function escHtml(s){
 }
 
 // ─── Supabase fetch ──────────────────────────────────────────────
+// The RadScheduler practice state lives in `public.radscheduler`
+// (one row per practice, JSONB column `data`). The table name is
+// historic — kept stable for back-compat. RLS policies gate which
+// row each anon-key holder can read, so this query is safe to fire
+// straight from a public client.
 async function fetchPracticeData(p){
-  const url = `${p.sbUrl}/rest/v1/practices?id=eq.${encodeURIComponent(p.practiceId)}&select=data`;
+  const url = `${p.sbUrl}/rest/v1/radscheduler?id=eq.${encodeURIComponent(p.practiceId)}&select=data`;
   const resp = await fetch(url, {
     headers: {
       'apikey': p.sbAnonKey,
@@ -93,7 +98,7 @@ async function fetchPracticeData(p){
   });
   if(!resp.ok) throw new Error('Supabase ' + resp.status + ': ' + await resp.text().catch(() => ''));
   const rows = await resp.json();
-  if(!rows.length) throw new Error('No practice row found.');
+  if(!rows.length) throw new Error('No practice row found (id=' + p.practiceId + ' on table radscheduler).');
   return rows[0].data || {};
 }
 
