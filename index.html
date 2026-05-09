@@ -11182,6 +11182,21 @@ function editPhys(id){
   // Scroll form into view
   const paddrEl=document.getElementById('p-address');
   if(paddrEl) paddrEl.value=p.address||'';
+  // Color picker: load override (if any), update preview swatch.
+  const pcEl = document.getElementById('p-color');
+  const pcPv = document.getElementById('p-color-preview');
+  if(pcEl){
+    if(p.color){ pcEl.value = p.color; if(pcPv){ pcPv.style.background = p.color; pcPv.textContent = p.color; pcPv.style.color = '#fff'; pcPv.style.fontFamily = 'ui-monospace,monospace'; } }
+    else      { pcEl.value = ''; if(pcPv){ pcPv.style.background = 'var(--bg3)'; pcPv.textContent = 'auto'; pcPv.style.color = 'var(--txt2)'; pcPv.style.fontFamily = 'inherit'; } }
+    // Live preview as the user picks a color.
+    pcEl.oninput = () => {
+      if(!pcPv) return;
+      pcPv.style.background = pcEl.value;
+      pcPv.textContent = pcEl.value;
+      pcPv.style.color = '#fff';
+      pcPv.style.fontFamily = 'ui-monospace,monospace';
+    };
+  }
   document.querySelector('#page-physicians .ibox')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
