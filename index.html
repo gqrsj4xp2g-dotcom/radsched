@@ -20579,6 +20579,24 @@ Respects vacations, existing shifts, blackouts, site rules, sequence rules, and 
       },
       required: ['physId','ruleId']
     }
+  },
+  {
+    // Quick-action: ranks every eligible physician for a specific date /
+    // shift / site combo. Surfaces a one-click "find me coverage" answer
+    // without the admin manually walking through 12 physicians' rules.
+    name: 'find_coverage',
+    description: 'Find physicians eligible to cover a shift on a specific date. Returns a ranked list (best first) with eligibility reason and FTE-utilization context. Useful when an admin needs urgent coverage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date:   { type: 'string', description: 'Date in YYYY-MM-DD format' },
+        shift:  { type: 'string', enum: ['1st','2nd','3rd','Home','call','wknd'], description: 'Shift type or call type to find coverage for' },
+        site:   { type: 'string', description: 'Site name (optional — defaults to any)' },
+        sub:    { type: 'string', description: 'Sub-specialty filter (optional)' },
+        kind:   { type: 'string', enum: ['dr','ir'], description: 'DR or IR side (default: dr)' }
+      },
+      required: ['date','shift']
+    }
   }
 ];
 
