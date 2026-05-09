@@ -33830,6 +33830,181 @@ function _renderFairnessScoreboard(isAdmin){
   </div>`;
 }
 
+// ── On-Call Confirmation (mobile-first reminder + ack) ────────────────
+// Pain solved: practice doesn't know whether tonight's on-call physician
+// got the message and is actually available. We surface a tonight panel
+// on the dashboard, send a local notification ~1 h before the on-call
+// window starts (default 6 PM), and persist a one-tap acknowledgement.
+//
+// All client-side: no backend push fanout required. The local
+// notification is fired via the registered service worker so it works
+// even if the tab isn't focused on most modern browsers.
+
+// ───── Helpers: build the list of physicians on call for a given date ─
+function _onCallPhysiciansForDate(ds){
+  const out = [];
+  // Weekend call entries cover Sat + Sun (one row per Sat/Sun pair).
+  (S.weekendCalls || []).forEach(w => {
+    if(w.satDate === ds || w.sunDate === ds){
+      if(w.physId) out.push({ physId: w.physId, kind: 'weekend', label: 'Weekend Call' });
+    }
+  });
+  // IR daily call entries are 1 row per (date, group, callType).
+  (S.irCalls || []).forEach(c => {
+    if(c.date === ds && c.physId){
+      const group = c.irGroup ? ' ' + c.irGroup : '';
+      const ctype = c.callType ? ' ' + c.callType : '';
+      out.push({ physId: c.physId, kind: 'ir', label: 'IR Call' + group + ctype });
+    }
+  });
+  // Holiday assignment also implies on-call coverage that day.
+  (S.holidays || []).forEach(h => {
+    if(h.date === ds && h.physId){
+      out.push({ physId: h.physId, kind: 'holiday', label: 'Holiday Coverage' });
+    }
+  });
+  return out;
+}
+
+// ───── Has this physician acknowledged tonight's on-call window? ──────
+function _hasOnCallAck(physId, ds){
+  return (S.onCallAcks || []).some(a => a.physId === physId && a.date === ds);
+}
+
+// ───── Render the dashboard widget ─────────────────────────────────────
+function _renderOnCallConfirmation(isAdmin){
+  const host = document.getElementById('dash-oncall-confirm');
+  if(!host) return;
+  const today = (typeof fmtDate === 'function')
+    ? fmtDate(new Date())
+    : new Date().toISOString().slice(0,10);
+  const onCall = _onCallPhysiciansForDate(today);
+  if(!onCall.length){ host.innerHTML = ''; return; }
+  // Physicians see only their OWN on-call status (with a self-ack button).
+  // Admins see everyone with an at-a-glance confirmed/unconfirmed pill.
+  const myPhysId = CU?.physId || null;
+  const visible = isAdmin
+    ? onCall
+    : onCall.filter(o => o.physId === myPhysId);
+  if(!visible.length){ host.innerHTML = ''; return; }
+  const rows = visible.map(o => {
+    const phys = (typeof _physById === 'function') ? _physById(o.physId) : (S.physicians || []).find(p => p.id === o.physId);
+    if(!phys) return '';
+    const ackd = _hasOnCallAck(o.physId, today);
+    const isMe = o.physId === myPhysId;
+    const pillBg = ackd ? '#dcfce7' : '#fef3c7';
+    const pillFg = ackd ? '#166534' : '#854d0e';
+    const pillTxt = ackd ? '✓ Confirmed' : '⏳ Unconfirmed';
+    const ackBtn = (!ackd && isMe)
+      ? `<button class="bsm" style="margin-left:8px" onclick="acknowledgeOnCall(${o.physId},'${today}')" title="Confirm you got the message and are on call tonight">✓ Acknowledge</button>`
+      : '';
+    return `<tr>
+      <td style="padding:5px 8px;font-size:13px">${escHtml(phys.last)}, ${escHtml(phys.first)}${isMe ? ' <span style="color:var(--rs-ink-3);font-size:11px">(you)</span>' : ''}</td>
+      <td style="padding:5px 8px;font-size:12px;color:var(--rs-ink-2)">${escHtml(o.label)}</td>
+      <td style="padding:5px 8px;text-align:right">
+        <span style="background:${pillBg};color:${pillFg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600">${pillTxt}</span>
+        ${ackBtn}
+      </td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>📞 On Call Tonight</span>
+      <span style="font-size:11px;font-weight:400;color:var(--txt3)">${today}</span>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">${isAdmin ? 'Each physician confirms by tapping ✓ Acknowledge from the on-call reminder push or this card.' : 'Tap ✓ Acknowledge once you have your phone on you for tonight.'}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// ───── Mark an on-call shift acknowledged (audit + persist + re-render) ─
+function acknowledgeOnCall(physId, ds){
+  if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
+  if(_hasOnCallAck(physId, ds)) return; // idempotent
+  S.onCallAcks.push({
+    physId, date: ds,
+    ackBy: CU?.id || null,
+    ackAt: new Date().toISOString(),
+  });
+  if(typeof _audit === 'function') _audit('oncall.confirmed', { physId, date: ds, ackBy: CU?.id });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function') _toast('On-call confirmed for tonight.', 'ok');
+  try{ _renderOnCallConfirmation(CU?.role === 'admin'); }catch(_){}
+}
+
+// ───── Local notification scheduler (fires ~1 h before on-call start) ─
+// Runs once per app load + every 15 min thereafter. For each on-call
+// physician = the current user, if NOT yet acknowledged AND we're within
+// the reminder window (default 5–7 PM, ≈1 h before a 6 PM start), fire a
+// local notification via the SW registration. Idempotent per (physId,
+// date) thanks to a tag-based dedupe (browser collapses re-fires).
+async function _scheduleOnCallReminders(){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  if(!('serviceWorker' in navigator)) return;
+  let reg;
+  try{ reg = await navigator.serviceWorker.ready; }catch(_){ return; }
+  if(!reg || !reg.showNotification) return;
+  const today = (typeof fmtDate === 'function')
+    ? fmtDate(new Date())
+    : new Date().toISOString().slice(0,10);
+  const myPhysId = CU?.physId || null;
+  if(!myPhysId) return;
+  const onCall = _onCallPhysiciansForDate(today).filter(o => o.physId === myPhysId);
+  if(!onCall.length) return;
+  // Reminder window: 5–7 PM local. Outside that window we don't fire so
+  // we don't spam mid-day; users can still tap acknowledge from the
+  // dashboard widget any time.
+  const hour = new Date().getHours();
+  if(hour < 17 || hour > 19) return;
+  if(_hasOnCallAck(myPhysId, today)) return; // already confirmed
+  const labels = onCall.map(o => o.label).join(' + ');
+  try{
+    await reg.showNotification('🚨 You\'re on call tonight', {
+      body: `${labels} — tap to confirm you have your phone on you.`,
+      tag: 'rs-oncall-' + today + '-' + myPhysId,
+      requireInteraction: true,
+      data: {
+        url: '/#dashboard',
+        rsKind: 'oncall-confirmation',
+        rsPhysId: myPhysId,
+        rsDate: today,
+      },
+    });
+    if(typeof _audit === 'function') _audit('oncall.reminder.sent', { physId: myPhysId, date: today });
+  }catch(e){
+    console.warn('[RS] on-call reminder failed:', e);
+  }
+}
+
+// Boot the scheduler once the app has a current user. Keeps the timer
+// in a single global so re-init on user-switch doesn't multiply firings.
+let _onCallReminderTimer = null;
+function _bootOnCallReminders(){
+  if(_onCallReminderTimer) return;
+  // First fire after a short delay so initial render finishes; then every
+  // 15 min. The reminder helper itself is a no-op outside the 5–7 PM
+  // window, so this is a cheap interval.
+  setTimeout(() => { try{ _scheduleOnCallReminders(); }catch(_){} }, 8000);
+  _onCallReminderTimer = setInterval(() => {
+    try{ _scheduleOnCallReminders(); }catch(_){}
+  }, 15 * 60 * 1000);
+}
+
+// Listen for the SW posting an ack back from a notificationclick action.
+// The SW handler (in sw.js) fires this when the user taps the ✓
+// Acknowledge button on the notification while the page is open.
+if(typeof navigator !== 'undefined' && 'serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const m = e.data;
+    if(m && m.type === 'rs:oncall-ack' && m.physId && m.date){
+      try{ acknowledgeOnCall(m.physId, m.date); }catch(_){}
+    }
+  });
+}
+
 // ── Today's Coverage widget ────────────────────────────────────────────
 // Renders a glanceable "who's where right now" panel on the dashboard:
 // every shift assigned to today, the on-call rotation, and who's out.
