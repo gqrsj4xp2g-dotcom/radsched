@@ -35683,18 +35683,16 @@ async function _testPairingCode(){
       if(parsed && parsed.data){
         out.innerHTML = `<span style="color:var(--green-t,#15803d)">✓ Test passed via widget-data edge function. Practice has ${physCount} physician${physCount===1?'':'s'} and ${shiftCount} DR shift${shiftCount===1?'':'s'}. The widget will work with this code.</span>`;
       } else {
-        out.innerHTML = `<span style="color:var(--amber,#d97706)">⚠ Supabase returned 200 OK but 0 rows for practice id ${escHtml(String(payload.practiceId))}. Either the row doesn't exist, or RLS hides it from the anon key. Check that this row is visible to the anon role.</span>`;
+        out.innerHTML = `<span style="color:var(--amber,#d97706)">⚠ Edge function returned 200 OK but no data field. Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span>`;
       }
+    } else if(resp.status === 404){
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ 404 — widget-data edge function isn't deployed in this Supabase project.<br>
+        <span style="font-size:11px">Deploy via the Supabase MCP or copy the function source from <code>edge-functions/widget-data/</code> into the Supabase dashboard. (Already deployed for the radsched project.)</span></div>`;
     } else if(resp.status === 401){
-      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase 401 (anon key rejected).<br>
-        <span style="font-size:11px">Likely cause: the anon key was rotated, or the Supabase project is paused (free-tier auto-pause).<br>
-        Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
-    } else if(resp.status === 403){
-      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase 403 (RLS denied).<br>
-        <span style="font-size:11px">Add an RLS policy that allows SELECT for the anon role on the radscheduler row used by this practice. Or proxy the read through an edge function.<br>
-        Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ 401 — pairing code rejected by edge function.<br>
+        <span style="font-size:11px">Likely the code expired. Generate a fresh one. Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
     } else {
-      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase ${resp.status}.<br>
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Edge function returned ${resp.status}.<br>
         <span style="font-size:11px">URL: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(url)}</code><br>
         Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
     }
