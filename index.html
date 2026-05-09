@@ -35632,13 +35632,67 @@ async function generateWidgetPairing(){
       <div style="font-size:12px;font-weight:700;color:var(--rs-ink);margin-bottom:6px;font-family:inherit">Pairing code for ${escHtml(phys.last)}, ${escHtml(phys.first)}</div>
       <div style="font-size:10.5px;color:var(--rs-ink-3);margin-bottom:8px;font-family:inherit">Expires ${escHtml(exp.slice(0,10))} · ${days} days from now</div>
       <code id="wpair-code-out" style="user-select:all;display:block;background:white;color:var(--rs-ink);padding:8px;border-radius:4px;border:1px solid var(--rs-line)">${escHtml(code)}</code>
-      <div style="margin-top:8px;display:flex;gap:8px">
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="bp bsm" onclick="navigator.clipboard.writeText(document.getElementById('wpair-code-out').textContent).then(() => _toast?.('Copied to clipboard.', 'ok'))">📋 Copy code</button>
         <button class="bsm" onclick="_emailPairingCode(${physId})">📧 Email to physician</button>
+        <button class="bsm" onclick="_testPairingCode()">🧪 Test (simulates widget fetch)</button>
       </div>
+      <div id="wpair-test-result" style="margin-top:8px;font-size:11px"></div>
     </div>`;
   }
   if(typeof renderWidgetPage === 'function') renderWidgetPage();
+}
+
+// Round-trip test: decode the just-generated pairing code, hit
+// Supabase exactly the way the widget does, and surface the result.
+// Saves a 5-minute "rebuild + reinstall + observe" cycle to diagnose
+// 401s, RLS issues, or stale anon keys.
+async function _testPairingCode(){
+  const code = document.getElementById('wpair-code-out')?.textContent || '';
+  const out = document.getElementById('wpair-test-result');
+  if(!out) return;
+  out.innerHTML = '<span style="color:var(--rs-ink-3)">Testing…</span>';
+  try{
+    // Decode the code (base64url + JSON).
+    const b64 = code.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(code.length / 4) * 4, '=');
+    const payload = JSON.parse(atob(b64));
+    if(!payload.sbUrl || !payload.sbAnonKey || !payload.practiceId){
+      out.innerHTML = `<span style="color:var(--red-t,#dc2626)">✗ Pairing code is missing one of: sbUrl, sbAnonKey, practiceId.</span>`;
+      return;
+    }
+    const url = `${payload.sbUrl}/rest/v1/radscheduler?id=eq.${encodeURIComponent(payload.practiceId)}&select=data`;
+    const resp = await fetch(url, {
+      headers: {
+        'apikey': payload.sbAnonKey,
+        'Authorization': 'Bearer ' + payload.sbAnonKey,
+        'Accept': 'application/json',
+      },
+    });
+    const body = await resp.text().catch(() => '');
+    if(resp.ok){
+      let rowCount = 0;
+      try{ rowCount = JSON.parse(body).length; } catch(_){}
+      if(rowCount > 0){
+        out.innerHTML = `<span style="color:var(--green-t,#15803d)">✓ Test passed. Supabase returned ${rowCount} row${rowCount===1?'':'s'} for practice id ${escHtml(String(payload.practiceId))}. The widget will work with this code.</span>`;
+      } else {
+        out.innerHTML = `<span style="color:var(--amber,#d97706)">⚠ Supabase returned 200 OK but 0 rows for practice id ${escHtml(String(payload.practiceId))}. Either the row doesn't exist, or RLS hides it from the anon key. Check that this row is visible to the anon role.</span>`;
+      }
+    } else if(resp.status === 401){
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase 401 (anon key rejected).<br>
+        <span style="font-size:11px">Likely cause: the anon key was rotated, or the Supabase project is paused (free-tier auto-pause).<br>
+        Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
+    } else if(resp.status === 403){
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase 403 (RLS denied).<br>
+        <span style="font-size:11px">Add an RLS policy that allows SELECT for the anon role on the radscheduler row used by this practice. Or proxy the read through an edge function.<br>
+        Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
+    } else {
+      out.innerHTML = `<div style="color:var(--red-t,#dc2626)">✗ Supabase ${resp.status}.<br>
+        <span style="font-size:11px">URL: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(url)}</code><br>
+        Body: <code style="font-family:ui-monospace,monospace;font-size:10.5px">${escHtml(body.slice(0, 300))}</code></span></div>`;
+    }
+  } catch(e){
+    out.innerHTML = `<span style="color:var(--red-t,#dc2626)">✗ Test crashed: ${escHtml(e.message || String(e))}</span>`;
+  }
 }
 
 function _emailPairingCode(physId){
