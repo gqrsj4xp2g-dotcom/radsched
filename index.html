@@ -33441,6 +33441,77 @@ function _renderTodayCoverage(isAdmin){
   body.innerHTML = html;
 }
 
+// ── Today's Huddle: one-page printable summary ─────────────────────────
+// Generates a clean print-friendly page showing every shift, call, and
+// vacation for today, plus any handoff notes. Designed for the morning
+// huddle / pinning to the reading-room board. Hidden iframe = preserves
+// the live page's layout while triggering the browser print dialog.
+function printTodaysHuddle(){
+  const ds = fmtDate(new Date());
+  const d  = parseDateLocal(ds);
+  const dateLabel = d.toLocaleDateString('default', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  const drToday   = (S.drShifts || []).filter(s => s.date === ds && s.shift !== 'Home');
+  const irToday   = (S.irShifts || []).filter(s => s.date === ds && s.shift !== 'Home');
+  const callToday = (S.irCalls || []).filter(c => c.date === ds || (c.callType === 'weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds)));
+  const wkndToday = (S.weekendCalls || []).filter(w => (w.satDate || w.date) === ds || w.sunDate === ds);
+  const holToday  = (S.holidays || []).filter(h => h.date === ds);
+  const vacToday  = (S.vacations || []).filter(v => v.start <= ds && v.end >= ds);
+  const row = (label, name, handoff) => `
+    <tr>
+      <td style="padding:6px 8px;border:1px solid #ccc;font-weight:600;width:240px">${escHtml(label)}</td>
+      <td style="padding:6px 8px;border:1px solid #ccc;width:200px">${escHtml(name)}</td>
+      <td style="padding:6px 8px;border:1px solid #ccc;font-style:italic;color:#333">${escHtml(handoff || '')}</td>
+    </tr>`;
+  const rows = [];
+  drToday.forEach(s => rows.push(row(`${s.shift} • ${s.site || '?'}`, pname(s.physId), s.handoff)));
+  irToday.forEach(s => rows.push(row(`IR ${s.shift} • ${s.site || '?'}`, pname(s.physId), s.handoff)));
+  callToday.forEach(c => rows.push(row(`📞 IR ${c.callType === 'weekend' ? 'Weekend Call' : 'Call'}`, pname(c.physId), c.notes || '')));
+  wkndToday.forEach(w => rows.push(row(`📞 Weekend Call`, pname(w.physId), w.notes || '')));
+  holToday.forEach(h => rows.push(row(`🎉 ${h.name || 'Holiday'}`, pname(h.physId), h.notes || '')));
+  if(vacToday.length){
+    rows.push(`<tr>
+      <td colspan="3" style="padding:6px 8px;border:1px solid #ccc;background:#f0f9ff;color:#1e3a8a;font-weight:600">
+        🏖 Off today (${vacToday.length}): ${escHtml(vacToday.map(v => pname(v.physId)).join(', '))}
+      </td>
+    </tr>`);
+  }
+  if(!rows.length){
+    rows.push(`<tr><td colspan="3" style="padding:14px;border:1px solid #ccc;text-align:center;color:#666">No scheduled work today.</td></tr>`);
+  }
+  const practiceName = (typeof _PRACTICES !== 'undefined' && typeof _ROW_ID !== 'undefined')
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    <title>Huddle — ${escHtml(dateLabel)}</title>
+    <style>
+      body{font-family:-apple-system,"Segoe UI",sans-serif;padding:18px;color:#111;font-size:12px}
+      h1{font-size:18px;margin:0 0 4px 0}
+      .meta{color:#666;font-size:11px;margin-bottom:12px}
+      table{width:100%;border-collapse:collapse;margin-top:6px}
+      th{background:#eee;padding:6px 8px;border:1px solid #ccc;font-size:11px;text-align:left}
+      @media print{ @page{margin:0.5in} }
+    </style></head>
+    <body>
+      <h1>📍 ${escHtml(practiceName)} — Today's Huddle</h1>
+      <div class="meta">${escHtml(dateLabel)} &middot; Printed ${escHtml(new Date().toLocaleTimeString())}</div>
+      <table>
+        <thead><tr><th>Shift / Role</th><th>Physician</th><th>Handoff / Notes</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      </table>
+    </body></html>`;
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+  iframe.onload = () => {
+    try{ iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+    finally{ setTimeout(() => { try{ iframe.remove(); }catch(_){} }, 400); }
+  };
+  if(typeof _audit === 'function') _audit('print.todaysHuddle', { date: ds, items: rows.length });
+}
+
 // ── Shift handoff notes ────────────────────────────────────────────────
 // Lightweight free-text note attached to a shift. Useful for end-of-day
 // handoff comments ("Pt in CT2 still pending wet read", "Approved by Dr X
