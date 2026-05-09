@@ -34583,6 +34583,132 @@ function renderLockedMonths(){
   }</div>`;
 }
 
+// ── Practice-wide announcements ───────────────────────────────────────
+// Pain solved: practice has a memo to share ("New on-call policy",
+// "Holiday coverage volunteers needed by Friday") and currently has to
+// chase everyone over email. Announcements show as a dismissible banner
+// on every dashboard until the configured expiry date. Per-user dismissal
+// is stored in localStorage so it doesn't bloat the shared S state.
+
+// Schema: S.announcements = [{
+//   id, kind: 'info'|'warn'|'urgent',
+//   title, body,
+//   postedBy: userId, postedAt: ISO,
+//   expiresAt: ISO,
+// }]
+
+function _annDismissKey(annId){
+  const uid = CU?.id || 'anon';
+  return `rs:ann-dismissed:${uid}:${annId}`;
+}
+function _annIsDismissed(annId){
+  try{ return !!localStorage.getItem(_annDismissKey(annId)); }
+  catch(_){ return false; }
+}
+function _annDismiss(annId){
+  try{ localStorage.setItem(_annDismissKey(annId), '1'); }
+  catch(_){}
+  // Re-render the dashboard banner stack so the dismissed item disappears.
+  try{ _renderAnnouncements(); }catch(_){}
+}
+function _annIsExpired(a){
+  if(!a.expiresAt) return false;
+  return new Date(a.expiresAt).getTime() < Date.now();
+}
+
+// Dashboard render: stack of cards, one per active non-dismissed
+// announcement. Color-coded by kind.
+function _renderAnnouncements(){
+  const host = document.getElementById('dash-announcements');
+  if(!host) return;
+  const active = (S.announcements || [])
+    .filter(a => !_annIsExpired(a) && !_annIsDismissed(a.id))
+    .sort((a, b) => (b.postedAt || '').localeCompare(a.postedAt || ''));
+  if(!active.length){ host.innerHTML = ''; return; }
+  const palette = {
+    info:   { bg:'#dbeafe', fg:'#1e3a8a', border:'#3b82f6', icon:'ℹ️' },
+    warn:   { bg:'#fef3c7', fg:'#854d0e', border:'#f59e0b', icon:'⚠️' },
+    urgent: { bg:'#fee2e2', fg:'#7f1d1d', border:'#dc2626', icon:'🚨' },
+  };
+  host.innerHTML = active.map(a => {
+    const p = palette[a.kind] || palette.info;
+    return `<div style="background:${p.bg};color:${p.fg};border-left:4px solid ${p.border};padding:12px 14px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;margin-bottom:2px">${p.icon} ${escHtml(a.title || 'Announcement')}</div>
+        <div style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${escHtml(a.body || '')}</div>
+        <div style="font-size:10.5px;color:${p.fg};opacity:.7;margin-top:6px">Posted ${escHtml((a.postedAt||'').slice(0,10))}${a.expiresAt ? ` · expires ${escHtml(a.expiresAt.slice(0,10))}` : ''}</div>
+      </div>
+      <button onclick="_annDismiss(${a.id})" title="Dismiss" style="background:transparent;border:0;color:${p.fg};opacity:.6;cursor:pointer;font-size:18px;line-height:1;padding:0 6px">×</button>
+    </div>`;
+  }).join('');
+}
+
+// Admin UI: post a new announcement. Reads the form fields and validates.
+function postAnnouncement(){
+  if(!_adminOnly('post announcement')) return;
+  const title = (document.getElementById('ann-title')?.value || '').trim();
+  const body  = (document.getElementById('ann-body')?.value  || '').trim();
+  const kind  = document.getElementById('ann-kind')?.value || 'info';
+  const days  = +document.getElementById('ann-days')?.value || 7;
+  if(!title || !body){ alert('Title and body are required.'); return; }
+  if(!Array.isArray(S.announcements)) S.announcements = [];
+  const ann = {
+    id: S.nextId++,
+    kind,
+    title, body,
+    postedBy: CU?.id || null,
+    postedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + days * 86400000).toISOString(),
+  };
+  S.announcements.push(ann);
+  if(typeof _audit === 'function') _audit('announcement.posted', { id: ann.id, kind, title });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast(`Announcement posted (visible for ${days} days).`, 'ok');
+  // Reset form + refresh list.
+  ['ann-title','ann-body'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  if(typeof renderAnnouncementsList === 'function') renderAnnouncementsList();
+  if(typeof _renderAnnouncements === 'function') _renderAnnouncements();
+}
+
+// Remove an announcement (admin-only). Doesn't ask for confirmation
+// because it's reversible via undo.
+function removeAnnouncement(id){
+  if(!_adminOnly('remove announcement')) return;
+  if(!Array.isArray(S.announcements)) return;
+  S.announcements = S.announcements.filter(a => a.id !== id);
+  if(typeof _audit === 'function') _audit('announcement.removed', { id });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast('Announcement removed.', 'info');
+  if(typeof renderAnnouncementsList === 'function') renderAnnouncementsList();
+  if(typeof _renderAnnouncements === 'function') _renderAnnouncements();
+}
+
+// Admin Settings panel: list every announcement (active + expired) with
+// remove buttons and a "Posted by / on / expires" summary.
+function renderAnnouncementsList(){
+  const host = document.getElementById('ann-list');
+  if(!host) return;
+  const all = (S.announcements || []).slice().sort((a,b) => (b.postedAt||'').localeCompare(a.postedAt||''));
+  if(!all.length){
+    host.innerHTML = '<div class="note ni" style="font-size:11.5px">No announcements posted yet.</div>';
+    return;
+  }
+  host.innerHTML = `<table class="tbl" style="font-size:12px"><thead><tr>
+    <th>Title</th><th>Kind</th><th>Posted</th><th>Expires</th><th>Status</th><th></th>
+  </tr></thead><tbody>${all.map(a => {
+    const expired = _annIsExpired(a);
+    const status = expired ? '<span style="color:var(--rs-ink-3)">expired</span>' : '<span style="color:var(--green-t,#15803d)">active</span>';
+    return `<tr>
+      <td><strong>${escHtml(a.title)}</strong><div style="font-size:11px;color:var(--rs-ink-3);max-width:340px">${escHtml((a.body||'').slice(0,140))}${(a.body||'').length>140?'…':''}</div></td>
+      <td><span class="tag" style="font-size:10px">${escHtml(a.kind)}</span></td>
+      <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml((a.postedAt||'').slice(0,10))}</td>
+      <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml((a.expiresAt||'').slice(0,10))}</td>
+      <td>${status}</td>
+      <td><button class="br bxs" onclick="removeAnnouncement(${a.id})">✕</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
 // ── Today's Coverage widget ────────────────────────────────────────────
 // Renders a glanceable "who's where right now" panel on the dashboard:
 // every shift assigned to today, the on-call rotation, and who's out.
