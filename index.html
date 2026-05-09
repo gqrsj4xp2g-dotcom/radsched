@@ -5194,6 +5194,60 @@ window.addEventListener('unhandledrejection', function(ev){
     alert('⚠ RadScheduler async error:\n' + msg + (stk ? '\n\n' + stk : ''));
   } catch(_e){}
 });
+
+/* ═══════════════════════════════════════════════════
+   _TUNE — central tuning-constants module
+   ───────────────────────────────────────────────────
+   Every magic number in the app SHOULD live here so a maintainer can
+   adjust a single value (vacation cap, fairness thresholds, etc.) and
+   immediately see what's affected.
+   Conventions:
+     • Times are in MILLISECONDS unless suffixed with _SEC / _DAY.
+     • Percent thresholds are in [0,1] decimals.
+     • If you add a constant, also add a one-line comment explaining what
+       it tunes and the symptom of mis-tuning it.
+   For backwards compatibility, existing inline literals are NOT rewritten;
+   _TUNE is the canonical home for any NEW constants. As callsites get
+   touched they should switch to _TUNE.X references.
+═══════════════════════════════════════════════════ */
+const _TUNE = Object.freeze({
+  // Vacation guardrail: warn when this fraction of physicians are already
+  // off in the requested week. Above this threshold the request is likely
+  // to be denied. Practice override lives at S.cfg.maxVacationOverlapPct.
+  VACATION_OVERLAP_CAP_PCT: 0.35,
+  // Fairness scoreboard chip colors:
+  //   ratio in [LO, HI]   → green  (within target)
+  //   ratio in [LO2, HI2] → amber  (off-target but recoverable)
+  //   anything else       → red    (intervene)
+  FAIRNESS_GREEN_LO: 0.85,
+  FAIRNESS_GREEN_HI: 1.15,
+  FAIRNESS_AMBER_LO: 0.70,
+  FAIRNESS_AMBER_HI: 1.30,
+  // Coverage gap detector: how many days ahead to scan for unfilled slots.
+  COVERAGE_SCAN_DAYS: 30,
+  // On-call reminder local notification window (clock hours 24h).
+  // The reminder fires only inside [START, END] so we don't spam mid-day.
+  ONCALL_REMIND_START_HOUR: 17,  // 5 PM
+  ONCALL_REMIND_END_HOUR:   19,  // 7 PM
+  ONCALL_REMIND_INTERVAL_MS: 15 * 60 * 1000,  // 15 min poll interval
+  ONCALL_REMIND_FIRST_DELAY_MS: 8 * 1000,     // first fire after boot
+  // Stale-save warning: surface a red pill when unsaved edits sit longer.
+  STALE_SAVE_WARN_MS: 5 * 60 * 1000,           // 5 minutes
+  // Save watchdog: force-clear the save lock if a push hangs longer than this.
+  SAVE_WATCHDOG_MS: 30 * 1000,                 // 30 seconds
+  // Save debounce: ms between last keystroke and Supabase push.
+  SAVE_DEBOUNCE_MS: 500,
+  // Audit-log throttle for repeating events (e.g. coverage gap detector).
+  AUDIT_THROTTLE_MS: 60 * 60 * 1000,           // 1 hour
+  // Pick sheet block convention (Saturday → next Sunday inclusive).
+  PICK_BLOCK_DAYS: 9,
+  // Burnout heuristic: consecutive weekend-call rotations that triggers a
+  // "burnout" flag in the monthly report card.
+  BURNOUT_CONSECUTIVE_WEEKENDS: 3,
+  // Webhook flavors → list for documentation / validation.
+  WEBHOOK_FLAVORS: ['generic', 'slack', 'teams'],
+});
+
 /* ═══════════════════════════════════════════════════
    AUTH STATE
 ═══════════════════════════════════════════════════ */
