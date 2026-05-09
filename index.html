@@ -18322,6 +18322,37 @@ function renderSettings(){
   if(dtCredit) dtCredit.value = (S.cfg?.driveTimeWRVUPerHour ?? 0);
 }
 
+// ── Debulking policy persistence ────────────────────────────────────
+// Stores the practice's debulking targets + disabled-days-of-week into
+// S.cfg.debulkingPolicy. The desktop widget reads this when computing
+// per-physician eligibility for the Debulking tab.
+function saveDebulkingPolicy(){
+  if(!_adminOnly('change debulking policy')) return;
+  if(!S.cfg) S.cfg = {};
+  if(!S.cfg.debulkingPolicy) S.cfg.debulkingPolicy = {};
+  const dailyT  = +document.getElementById('cfg-debulk-target')?.value || 0;
+  const weeklyT = +document.getElementById('cfg-debulk-weekly')?.value || 0;
+  const monthlyT= +document.getElementById('cfg-debulk-monthly')?.value || 0;
+  const dowsRaw = (document.getElementById('cfg-debulk-dows')?.value || '').trim();
+  const disabledDows = dowsRaw
+    ? dowsRaw.split(/[,\s]+/).map(s => +s).filter(n => Number.isInteger(n) && n >= 0 && n <= 6)
+    : [];
+  S.cfg.debulkingPolicy = { dailyT, weeklyT, monthlyT, disabledDows };
+  if(typeof _audit === 'function') _audit('debulking.policy.update', S.cfg.debulkingPolicy);
+  if(typeof triggerSave === 'function') triggerSave();
+}
+function loadDebulkingPolicy(){
+  const p = (S.cfg && S.cfg.debulkingPolicy) || {};
+  const dailyEl = document.getElementById('cfg-debulk-target');
+  if(dailyEl) dailyEl.value = +(p.dailyT || 0);
+  const weeklyEl = document.getElementById('cfg-debulk-weekly');
+  if(weeklyEl) weeklyEl.value = +(p.weeklyT || 0);
+  const monthlyEl = document.getElementById('cfg-debulk-monthly');
+  if(monthlyEl) monthlyEl.value = +(p.monthlyT || 0);
+  const dowsEl = document.getElementById('cfg-debulk-dows');
+  if(dowsEl) dowsEl.value = (p.disabledDows || []).join(',');
+}
+
 // Build the wRVU defaults grid from S.cfg.wRVUDefaults. Each input
 // stores its key in a data-wrvu-key attribute so saveCfg() can read
 // them all in one query.
