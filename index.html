@@ -21142,6 +21142,76 @@ function _aiExecuteTool(name, input) {
     return { ok:true, message:`Deleted custom rule "${r.text}" from ${p.last}.` };
   }
 
+  if(name === 'find_coverage'){
+    // Rank-by-eligibility: for the requested date+shift+site, returns a
+    // list of physicians scored by:
+    //   - hard exclusions filtered out (vacation, conflict, post-call)
+    //   - lower fteUtilizationPct = better (under-quota)
+    //   - anchor-site preference bonus
+    //   - sub-specialty match bonus
+    const date = String(input.date || '').slice(0, 10);
+    const shift = String(input.shift || '').toLowerCase();
+    const site = input.site || null;
+    const sub  = input.sub || null;
+    const kind = (input.kind || 'dr').toLowerCase();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok:false, error:'date must be YYYY-MM-DD.' };
+    const candidates = (S.physicians || []).filter(p => {
+      // Sub-eligibility: shifted role must match
+      if(kind === 'dr' && (p.drFte || 0) <= 0 && p.role !== 'MIXED') return false;
+      if(kind === 'ir' && (p.irFte || 0) <= 0 && p.role !== 'MIXED') return false;
+      // Vacations: drop anyone off that day
+      if((S.vacations || []).some(v => v.physId === p.id && v.start <= date && v.end >= date)) return false;
+      // Already busy on a different shift that day
+      if(kind === 'dr' && (S.drShifts || []).some(s => s.physId === p.id && s.date === date && s.shift !== 'Home')) return false;
+      if(kind === 'ir' && (S.irShifts || []).some(s => s.physId === p.id && s.date === date && s.shift !== 'Home')) return false;
+      // On-call same day = busy
+      if((S.irCalls || []).some(c => c.physId === p.id && c.date === date)) return false;
+      // Allowed-sites filter
+      if(site && Array.isArray(p.allowedSites) && p.allowedSites.length && !p.allowedSites.includes(site)) return false;
+      // Shift-eligibility (s1/s2/s3/home/wknd) when set
+      const se = p.shiftElig || {};
+      const elKey = shift === '1st' ? 's1' : shift === '2nd' ? 's2' : shift === '3rd' ? 's3' : shift === 'home' ? 'home' : shift === 'wknd' ? 'wknd' : null;
+      if(elKey && se[elKey] === false) return false;
+      return true;
+    });
+    if(!candidates.length){
+      return { ok:true, results:[], message:'No eligible physicians found for that slot. All are vacation, busy, or shift-ineligible.' };
+    }
+    // Score each candidate.
+    const yr = date.slice(0, 4);
+    const ym = date.slice(0, 7);
+    const scored = candidates.map(p => {
+      let score = 0;
+      const reasons = [];
+      // Anchor site bonus (the physician's preferred site)
+      if(site && p.anchorSite === site){ score += 30; reasons.push('anchor site'); }
+      // Sub-specialty match
+      if(sub){
+        const sl = (kind === 'ir' ? p.irSubs : p.drSubs) || [];
+        if(sl.includes(sub)){ score += 20; reasons.push('sub match'); }
+      }
+      // FTE utilization heuristic — count this month's shifts vs FTE
+      const monthShifts = (S.drShifts || []).filter(s => s.date.startsWith(ym) && s.physId === p.id && s.shift !== 'Home').length
+                       + (S.irShifts || []).filter(s => s.date.startsWith(ym) && s.physId === p.id && s.shift !== 'Home').length
+                       + (S.irCalls || []).filter(c => c.date.startsWith(ym) && c.physId === p.id).length;
+      const fte = (p.drFte || 0) + (p.irFte || 0) || 0.5;
+      const expected = fte * 18; // 18 ≈ workdays/month per 1.0 FTE
+      const utilPct = Math.round((monthShifts / Math.max(1, expected)) * 100);
+      // Reward under-quota (lower utilization = higher score)
+      score += Math.max(0, 100 - utilPct);
+      if(utilPct > 110) reasons.push(`over-quota (${utilPct}%)`);
+      else if(utilPct < 80) reasons.push(`under-quota (${utilPct}%)`);
+      else reasons.push(`on-quota (${utilPct}%)`);
+      return { physId:p.id, name:`${p.last}, ${p.first}`, score, utilPct, reasons };
+    }).sort((a,b) => b.score - a.score);
+    return {
+      ok: true,
+      date, shift, site, sub, kind,
+      results: scored.slice(0, 6),
+      message: `Top ${Math.min(6, scored.length)} candidates ranked by eligibility + FTE utilization.`,
+    };
+  }
+
   return { ok:false, error:`Unknown tool: ${name}` };
 }
 
