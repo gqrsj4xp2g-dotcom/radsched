@@ -35664,20 +35664,24 @@ async function _testPairingCode(){
       out.innerHTML = `<span style="color:var(--red-t,#dc2626)">✗ Pairing code is missing one of: sbUrl, sbAnonKey, practiceId.</span>`;
       return;
     }
-    const url = `${payload.sbUrl}/rest/v1/radscheduler?id=eq.${encodeURIComponent(payload.practiceId)}&select=data`;
+    const url = `${payload.sbUrl}/functions/v1/widget-data`;
     const resp = await fetch(url, {
+      method: 'POST',
       headers: {
         'apikey': payload.sbAnonKey,
         'Authorization': 'Bearer ' + payload.sbAnonKey,
-        'Accept': 'application/json',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ code }),
     });
     const body = await resp.text().catch(() => '');
     if(resp.ok){
-      let rowCount = 0;
-      try{ rowCount = JSON.parse(body).length; } catch(_){}
-      if(rowCount > 0){
-        out.innerHTML = `<span style="color:var(--green-t,#15803d)">✓ Test passed. Supabase returned ${rowCount} row${rowCount===1?'':'s'} for practice id ${escHtml(String(payload.practiceId))}. The widget will work with this code.</span>`;
+      let parsed = null;
+      try{ parsed = JSON.parse(body); } catch(_){}
+      const physCount = ((parsed?.data?.physicians) || []).length;
+      const shiftCount = ((parsed?.data?.drShifts) || []).length;
+      if(parsed && parsed.data){
+        out.innerHTML = `<span style="color:var(--green-t,#15803d)">✓ Test passed via widget-data edge function. Practice has ${physCount} physician${physCount===1?'':'s'} and ${shiftCount} DR shift${shiftCount===1?'':'s'}. The widget will work with this code.</span>`;
       } else {
         out.innerHTML = `<span style="color:var(--amber,#d97706)">⚠ Supabase returned 200 OK but 0 rows for practice id ${escHtml(String(payload.practiceId))}. Either the row doesn't exist, or RLS hides it from the anon key. Check that this row is visible to the anon role.</span>`;
       }
