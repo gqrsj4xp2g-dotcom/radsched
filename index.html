@@ -33987,6 +33987,22 @@ async function _scheduleOnCallReminders(){
 // in a single global so re-init on user-switch doesn't multiply firings.
 let _onCallReminderTimer = null;
 function _bootOnCallReminders(){
+  // Honor an `?onCallAck=physId,date` hint left by the SW notification
+  // handler when it had to open a fresh tab to record the ack.
+  try{
+    const u = new URL(window.location.href);
+    const hint = u.searchParams.get('onCallAck');
+    if(hint){
+      const [pid, ds] = hint.split(',');
+      if(pid && ds && /^\d+$/.test(pid)){
+        // Fire after a short delay so S has finished loading.
+        setTimeout(() => { try{ acknowledgeOnCall(+pid, ds); }catch(_){} }, 2000);
+      }
+      // Strip the param from the URL so a refresh doesn't re-fire it.
+      u.searchParams.delete('onCallAck');
+      window.history.replaceState({}, '', u.toString());
+    }
+  }catch(_){}
   if(_onCallReminderTimer) return;
   // First fire after a short delay so initial render finishes; then every
   // 15 min. The reminder helper itself is a no-op outside the 5–7 PM
