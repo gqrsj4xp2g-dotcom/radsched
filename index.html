@@ -37789,6 +37789,36 @@ function _renderPickPreview(prev){
       <button class="bsm" style="margin-top:6px" onclick="rematchPickImport()">↻ Re-match with manual mappings</button>
       </details>`;
   }
+  // ── Unrecognized cells diagnostic ─────────────────────────────────────
+  // Surfaces cells the classifier didn't fit into any bucket. Critical
+  // for diagnosing "my 2nd-shift entries didn't import" — the user can
+  // see exactly which cells were dropped and why.
+  const allUnrecog = [];
+  (d.allWeeks || []).forEach(w => {
+    (w.unrecognized || []).forEach(u => allUnrecog.push({ ...u, weekStart: w.weekStart }));
+  });
+  if(allUnrecog.length){
+    html += `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--amber,#d97706)">⚠ Unrecognized cells (${allUnrecog.length}) — these were skipped, check format</summary>
+      <div style="font-size:11.5px;color:var(--rs-ink-2);margin-top:6px;line-height:1.55">
+        These cells didn't match any known pattern (vacation pick, BB, off, 2nd/3rd shift, or bare last name). If they're 2nd or 3rd shift entries, they may use a format the parser doesn't yet recognize. Supported shift formats are:
+        <code style="display:block;background:var(--bg2);padding:6px 8px;border-radius:4px;margin:6px 0;font-size:11px">
+          • "2nd shift - Smith"  (forward)<br>
+          • "Smith - 2nd shift"  (reverse)<br>
+          • "Smith - 2nd"        (short reverse)<br>
+          • "Smith (2nd)"        (parens)<br>
+          (same shapes for 3rd)
+        </code>
+      </div>
+      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Week</th><th>Cell content</th><th>Column</th></tr></thead><tbody>
+      ${allUnrecog.slice(0,80).map(u => `<tr>
+        <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(u.weekStart)}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11.5px">${escHtml(u.raw)}</td>
+        <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(u.side || '')}</td>
+      </tr>`).join('')}
+      ${allUnrecog.length > 80 ? `<tr><td colspan="3" style="color:var(--rs-ink-3)">… and ${allUnrecog.length - 80} more</td></tr>` : ''}
+      </tbody></table></div></details>`;
+  }
   prev.innerHTML = html;
   const actions = document.getElementById('xl-pick-actions');
   const cnt = document.getElementById('xl-pick-count');
