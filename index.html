@@ -38218,6 +38218,163 @@ function _runRegressionSuite(){
   return { pass, fail, total: results.length, results };
 }
 
+// ── Stress test for 200-physician scale ───────────────────────────────
+// Synthesizes a fake 200-physician roster + 1 year of shifts, then
+// times every major render path. Auto-snapshots before mutating so
+// the test is fully reversible. The end result is a table of:
+//   render fn | runtime ms | items rendered
+// + a "Revert to pre-test snapshot" button.
+//
+// Why it's useful: render performance scales poorly with N physicians.
+// At 30 phys we're well under 16ms per frame; at 200 phys some renders
+// can blow past 100ms. This tool surfaces which ones BEFORE a real
+// 200-phys practice files a "the calendar is slow" ticket.
+async function runStressTest(){
+  if(!_adminOnly('run stress test')) return;
+  const out = document.getElementById('rs-test-result');
+  if(!out) return;
+  if(!confirm('This will replace your current practice data with a synthetic 200-physician dataset for profiling. A snapshot will be taken first so you can revert. Continue?')) return;
+  out.innerHTML = '<div class="rs-progress"><div class="rs-progress-bar indeterminate"></div></div><div style="font-size:11.5px;color:var(--rs-ink-3);margin-top:8px">Snapshotting current state…</div>';
+  // Snapshot via the existing manual-snapshot path so we can revert.
+  let snapshotName = '';
+  try{
+    if(typeof _snapshotBeforeBulk === 'function'){
+      await _snapshotBeforeBulk('stress-test-pre');
+      snapshotName = 'stress-test-pre-' + new Date().toISOString().slice(0,16).replace(/[:T-]/g,'');
+    }
+  }catch(e){
+    out.innerHTML = `<div class="note ne">Snapshot failed: ${escHtml(e.message || String(e))}</div>`;
+    return;
+  }
+  // Yield once so the UI can paint the spinner before we synthesize.
+  await new Promise(r => setTimeout(r, 50));
+  // ── Synthesize ──────────────────────────────────────────────────
+  const N_PHYS = 200;
+  const N_DAYS = 365;
+  const t0 = performance.now();
+  const subs = ['Neuro', 'Body MRI', 'Chest', 'MSK', 'Breast', 'Pediatric', 'Nuclear', 'General', 'Mammo', 'IR'];
+  const sites = (S.sites && S.sites.filter(s => s.name !== 'At Home / Remote').map(s => s.name)) || ['Main', 'East', 'West', 'North'];
+  if(sites.length === 0) sites.push('Main', 'East');
+  const synth = {
+    physicians: [],
+    drShifts: [],
+    weekendCalls: [],
+    irCalls: [],
+    vacations: [],
+    holidays: [],
+  };
+  const lastNames = ['Smith','Patel','Lee','Chen','Garcia','Brown','Davis','Wilson','Mossa-Basha','Mohtashemi','Park','Anderson','Taylor','Thomas','Hernandez','Moore','Martin','Jackson','Thompson','White','Lopez','Martinez','Robinson','Clark','Rodriguez','Lewis','Young','Walker','Hall','Allen','King','Wright','Scott','Green','Baker','Adams','Nelson','Hill','Carter','Mitchell','Roberts','Gomez','Phillips','Evans','Turner','Diaz','Parker','Cruz','Edwards','Collins','Reyes','Stewart','Morris','Morales','Murphy','Cook','Rogers','Gutierrez','Ortiz','Morgan','Cooper','Peterson','Bailey','Reed','Kelly','Howard','Ramos','Kim','Cox','Ward','Richardson','Watson','Brooks','Chavez','Wood','James','Bennett','Gray','Mendoza','Ruiz','Hughes','Price','Alvarez','Castillo','Sanders','Patel','Myers','Long','Ross','Foster','Jimenez'];
+  const firstNames = ['Alex','Maria','James','Sara','Michael','Anna','David','Lisa','John','Emily','Robert','Jessica','Daniel','Patricia','Mark','Karen','Steven','Linda','Paul','Helen','Andrew','Susan','Joshua','Margaret','Kevin','Dorothy','Brian','Sandra','Edward','Ashley','Ronald','Kimberly','Timothy','Donna','Jason','Carol','Jeffrey','Michelle','Ryan','Amanda','Jacob','Melissa','Gary','Deborah','Nicholas','Stephanie','Eric','Rebecca','Jonathan','Laura','Stephen','Sharon','Larry','Cynthia'];
+  for(let i = 0; i < N_PHYS; i++){
+    const last = lastNames[i % lastNames.length] + (i >= lastNames.length ? '-' + Math.floor(i/lastNames.length) : '');
+    const first = firstNames[i % firstNames.length];
+    const role = (i % 5 === 0) ? 'IR' : (i % 7 === 0 ? 'MIXED' : 'DR');
+    synth.physicians.push({
+      id: 1000 + i,
+      first, last,
+      role,
+      drFte: role === 'IR' ? 0 : (0.5 + (i % 6) * 0.1),
+      irFte: role === 'DR' ? 0 : (0.5 + (i % 4) * 0.125),
+      degree: 'MD',
+      drSubs: subs.slice(i % subs.length, (i % subs.length) + 2),
+      irSubs: role === 'DR' ? [] : ['IR'],
+      anchorSite: sites[i % sites.length],
+      allowedSites: sites,
+      irGroup: role === 'DR' ? null : ((i % 2) ? 'North' : 'South'),
+      shiftElig: { s1: true, s2: i % 3 === 0, s3: i % 5 === 0, home: true, wknd: true },
+      siteRules: [], irCallBlackouts: [], dayConditions: [], tbRules: [],
+      callDayRules: [], siteSeqRules: [],
+      debulkingEligible: true, wRVUMultiplier: 1.0,
+    });
+  }
+  // Synthesize 1 year of shifts: per weekday, assign N physicians (~5
+  // per site) to 1st shift; weekends get 1 weekend-call physician.
+  const today = new Date();
+  let nextShiftId = 100000;
+  for(let d = 0; d < N_DAYS; d++){
+    const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180 + d);
+    const ds = fmtDate(dt);
+    const dow = dt.getDay();
+    if(dow === 0 || dow === 6){
+      // Weekend call
+      const pid = synth.physicians[(d * 13) % N_PHYS].id;
+      const satDate = dow === 6 ? ds : (dow === 0 ? fmtDate(new Date(dt.getTime() - 86400000)) : ds);
+      const sunDate = dow === 0 ? ds : fmtDate(new Date(dt.getTime() + 86400000));
+      // Only add once per Sat
+      if(dow === 6) synth.weekendCalls.push({ id: nextShiftId++, physId: pid, satDate, sunDate, site: sites[0], notes: 'Synth' });
+    } else {
+      // Weekday: 5 physicians per site for 1st shift
+      sites.forEach((site, sIdx) => {
+        for(let i = 0; i < 5; i++){
+          const pid = synth.physicians[((d * 11) + (sIdx * 7) + i * 3) % N_PHYS].id;
+          synth.drShifts.push({ id: nextShiftId++, physId: pid, date: ds, shift: '1st', site, sub: subs[i % subs.length], notes: 'Synth', autoHome: false });
+        }
+        // Plus 1 IR daily call per group
+        if(sIdx === 0){
+          const pid = synth.physicians[((d * 17)) % N_PHYS].id;
+          synth.irCalls.push({ id: nextShiftId++, physId: pid, date: ds, callType: 'daily', irGroup: 'North', notes: 'Synth' });
+        }
+      });
+    }
+  }
+  const tSynth = Math.round(performance.now() - t0);
+  // Apply (replace state — backed up by the snapshot above)
+  S.physicians = synth.physicians;
+  S.drShifts = synth.drShifts;
+  S.weekendCalls = synth.weekendCalls;
+  S.irCalls = synth.irCalls;
+  S.vacations = synth.vacations;
+  S.holidays = synth.holidays;
+  if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+  // ── Profile ─────────────────────────────────────────────────────
+  const renders = [
+    { name: 'renderDash',           fn: () => typeof renderDash === 'function' && renderDash() },
+    { name: 'renderDRCal',          fn: () => typeof renderDRCal === 'function' && renderDRCal() },
+    { name: 'renderIRCal',          fn: () => typeof renderIRCal === 'function' && renderIRCal() },
+    { name: 'renderPhysicians',     fn: () => typeof renderPhysicians === 'function' && renderPhysicians() },
+    { name: 'renderFTEMonitor',     fn: () => typeof renderFTEMonitor === 'function' && renderFTEMonitor() },
+    { name: 'renderVacations',      fn: () => typeof renderVacations === 'function' && renderVacations() },
+    { name: 'renderHolidayCounter', fn: () => typeof renderHolidayCounter === 'function' && renderHolidayCounter() },
+    { name: 'renderAuditLog',       fn: () => typeof renderAuditLog === 'function' && renderAuditLog() },
+  ];
+  const profile = [];
+  for(const r of renders){
+    const t = performance.now();
+    let err = null;
+    try{ r.fn(); } catch(e){ err = e.message || String(e); }
+    profile.push({ name: r.name, ms: Math.round(performance.now() - t), err });
+    // Yield so the UI can paint; otherwise the spinner freezes.
+    await new Promise(rs => setTimeout(rs, 0));
+  }
+  // Payload size measurement.
+  let payloadSize = 0;
+  try{
+    const payload = JSON.stringify(_buildPersistedPayload('online'));
+    payloadSize = payload.length;
+  }catch(_){}
+  // ── Render report ───────────────────────────────────────────────
+  const colorFor = (ms) => ms < 50 ? '#15803d' : ms < 200 ? '#d97706' : '#dc2626';
+  out.innerHTML = `
+    <div class="note ns" style="margin-bottom:10px">
+      ✓ Stress test complete. Synthesized ${N_PHYS} physicians + ${synth.drShifts.length + synth.weekendCalls.length + synth.irCalls.length} shifts in ${tSynth} ms.<br>
+      <span style="font-size:11px;color:var(--rs-ink-3)">Persisted payload: ${(payloadSize/1024).toFixed(1)} KB. Snapshot taken — revert via Settings → Backups & Restore.</span>
+    </div>
+    <table class="tbl" style="font-size:12.5px;margin-bottom:10px">
+      <thead><tr><th>Render fn</th><th style="text-align:right">Runtime</th><th>Status</th></tr></thead>
+      <tbody>${profile.map(p => `<tr>
+        <td><code style="font-family:ui-monospace,monospace;font-size:11.5px">${escHtml(p.name)}</code></td>
+        <td style="text-align:right;font-family:ui-monospace,monospace;font-size:12px;color:${colorFor(p.ms)};font-weight:700">${p.ms} ms</td>
+        <td style="font-size:11px;color:${p.err ? 'var(--red,#dc2626)' : 'var(--rs-ink-3)'}">${p.err ? '✕ ' + escHtml(p.err) : (p.ms < 50 ? '✓ fast' : p.ms < 200 ? '◐ acceptable' : '⚠ slow — needs optimization')}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:10px">
+      Thresholds: <strong style="color:#15803d">&lt;50ms</strong> = fast (well under 1 frame); <strong style="color:#d97706">&lt;200ms</strong> = acceptable (visible-but-not-jank); <strong style="color:#dc2626">≥200ms</strong> = needs optimization (visible jank).
+    </div>
+    <button class="bp bsm" onclick="if(confirm('Revert to the pre-stress-test snapshot? Your synthetic data will be discarded.')){ if(typeof renderRestoreFromBackups === 'function') renderRestoreFromBackups(); else location.reload(); }">↶ Revert (open Backups & Restore)</button>
+  `;
+  if(typeof _audit === 'function') _audit('stressTest.complete', { physCount: N_PHYS, payloadKB: Math.round(payloadSize/1024), profile });
+}
+
 function renderRegressionSuite(){
   if(!_adminOnly('run regression suite')) return;
   const out = document.getElementById('rs-test-result');
