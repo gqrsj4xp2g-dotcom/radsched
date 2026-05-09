@@ -4052,22 +4052,7 @@ WHERE email = 'your-admin@example.com';</pre>
       one-click clean up findings.
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="bp bsm" onclick="(function(){
-          const r = _scanDataIntegrity();
-          const el = document.getElementById('di-result');
-          if(!r.total){
-            el.innerHTML = '<div class=\'note ns\' style=\'font-size:12px;margin-top:10px\'>✓ No orphan references — schedule data is clean.</div>';
-            return;
-          }
-          const counts = Object.entries(r.counts).filter(([_,n])=>n>0).map(([k,n])=>`<span class=\'tag\' style=\'font-size:10.5px;margin-right:4px;background:var(--rs-accent-soft);color:var(--rs-accent)\'>${escHtml(k)} × ${n}</span>`).join('');
-          const sample = r.issues.slice(0, 12).map(i => `<div style=\'font-size:11px;color:var(--rs-ink-2);font-family:ui-monospace,monospace;margin-top:2px\'>${escHtml(i.detail)}</div>`).join('');
-          el.innerHTML = `<div class='note nw' style='margin-top:10px'>
-            <div style='font-weight:600'>Found ${r.total} orphan reference(s).</div>
-            <div style='margin-top:6px'>${counts}</div>
-            <details style='margin-top:8px'><summary style='cursor:pointer;font-size:11.5px'>▶ Sample issues (first 12)</summary><div style='margin-top:6px'>${sample}</div></details>
-            <div style='margin-top:10px'><button class='br bsm' onclick='if(confirm(\"Permanently remove all orphan references? This cannot be undone.\")){const n = _repairDataIntegrity(); if(n != null && typeof _toast === \"function\") _toast(`Removed ${n} orphan reference(s).`, \"ok\"); _afterMutation(); document.getElementById(\"di-result\").innerHTML = \"\";}'>🗑 Repair (delete all orphans)</button></div>
-          </div>`;
-        })()">🔬 Scan now</button>
+      <button class="bp bsm" onclick="runDataIntegrityScan()">🔬 Scan now</button>
     </div>
     <div id="di-result"></div>
   </div>
@@ -6581,6 +6566,41 @@ function _repairDataIntegrity(){
   triggerSave();
   if(typeof _afterMutation === 'function') _afterMutation();
   return removed;
+}
+
+// ── Data-integrity scan UI handlers ────────────────────────────────────
+// Extracted from inline-onclick HTML (which had \" inside an outer
+// onclick=\"\" and broke the HTML parser, causing the di-result element
+// to escape its container and render content on the wrong page).
+function runDataIntegrityScan(){
+  const r = _scanDataIntegrity();
+  const el = document.getElementById('di-result');
+  if(!el) return;
+  if(!r.total){
+    el.innerHTML = '<div class="note ns" style="font-size:12px;margin-top:10px">✓ No orphan references — schedule data is clean.</div>';
+    return;
+  }
+  const counts = Object.entries(r.counts)
+    .filter(([,n]) => n > 0)
+    .map(([k,n]) => `<span class="tag" style="font-size:10.5px;margin-right:4px;background:var(--rs-accent-soft);color:var(--rs-accent)">${escHtml(k)} × ${n}</span>`)
+    .join('');
+  const sample = r.issues.slice(0, 12)
+    .map(i => `<div style="font-size:11px;color:var(--rs-ink-2);font-family:ui-monospace,monospace;margin-top:2px">${escHtml(i.detail)}</div>`)
+    .join('');
+  el.innerHTML = `<div class="note nw" style="margin-top:10px">
+    <div style="font-weight:600">Found ${r.total} orphan reference(s).</div>
+    <div style="margin-top:6px">${counts}</div>
+    <details style="margin-top:8px"><summary style="cursor:pointer;font-size:11.5px">▶ Sample issues (first 12)</summary><div style="margin-top:6px">${sample}</div></details>
+    <div style="margin-top:10px"><button class="br bsm" onclick="repairDataIntegrityFindings()">🗑 Repair (delete all orphans)</button></div>
+  </div>`;
+}
+function repairDataIntegrityFindings(){
+  if(!confirm('Permanently remove all orphan references? This cannot be undone.')) return;
+  const n = _repairDataIntegrity();
+  if(n != null && typeof _toast === 'function') _toast(`Removed ${n} orphan reference(s).`, 'ok');
+  if(typeof _afterMutation === 'function') _afterMutation();
+  const el = document.getElementById('di-result');
+  if(el) el.innerHTML = '';
 }
 
 // Run integrity scan once after remote apply, log findings.
@@ -10246,7 +10266,7 @@ function _toggleMobileNav(force){
 //
 // Pair: also restores scroll on initial page show (DOMContentLoaded +
 // pageshow) so a hard reload lands the user at the same scroll position.
-const _RS_BUILD_TAG = 'rs-v6'; // bump in lockstep with sw.js CACHE_VERSION
+const _RS_BUILD_TAG = 'rs-v7'; // bump in lockstep with sw.js CACHE_VERSION
 // ── Boot-time page hide guard ──────────────────────────────────────────
 // Force every .page that doesn't have .on class to inline display:none.
 // The CSS rule `.page { display:none }` SHOULD do this, but a screenshot
