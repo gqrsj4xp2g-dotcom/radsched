@@ -19552,6 +19552,180 @@ function cancelMyListing(listingId){
   renderListingsMarket();
 }
 
+// ── One-click swap suggestion ─────────────────────────────────────────
+// Pain solved: "I need someone to take my Tuesday shift" requires the
+// physician to (a) know who's eligible, (b) know who's not over-booked,
+// (c) initiate a swap request to one of them. This function ranks
+// qualified colleagues for a given shift and returns the top picks.
+//
+// Eligibility filters:
+//   • Must have FTE for the shift category
+//   • Must not already be on call / on shift the same date
+//   • Must not be on vacation that date
+// Ranking: lower FTE-utilization first (= they "owe" more shifts under
+// fairness), tiebreak on least-recent swap to preserve rotation feel.
+function suggestSwapPartners(kind, shiftId, limit){
+  if(!kind || !shiftId) return [];
+  const lim = limit || 3;
+  // Resolve the shift across all collections.
+  const arrFor = (k) => k==='dr' ? S.drShifts : k==='ir' ? S.irShifts : k==='irc' ? S.irCalls : k==='wk' ? S.weekendCalls : null;
+  const arr = arrFor(kind);
+  if(!arr) return [];
+  const sh = arr.find(x => x.id === +shiftId);
+  if(!sh) return [];
+  const date = sh.date || sh.satDate;
+  if(!date) return [];
+  // FTE category requirement.
+  const requireDR = (kind === 'dr' || kind === 'wk');
+  const requireIR = (kind === 'ir' || kind === 'irc');
+  // Build per-physician forward count for fairness ranking (next 90 days).
+  const fwd = {};
+  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
+  const horizon = (typeof addDays === 'function') ? addDays(today, 90) : null;
+  const inRange = (d) => d && d >= today && (!horizon || d <= horizon);
+  (S.drShifts || []).forEach(s => { if(s.physId && inRange(s.date)){ fwd[s.physId] = (fwd[s.physId] || 0) + 1; } });
+  (S.irCalls  || []).forEach(c => { if(c.physId && inRange(c.date)){ fwd[c.physId] = (fwd[c.physId] || 0) + 1; } });
+  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(w.physId && inRange(d)){ fwd[w.physId] = (fwd[w.physId] || 0) + 1; } });
+  // Eligibility check per candidate.
+  const candidates = [];
+  (S.physicians || []).forEach(p => {
+    if(p.id === sh.physId) return; // can't swap with self
+    if(requireDR && (p.drFte || 0) <= 0) return;
+    if(requireIR && (p.irFte || 0) <= 0) return;
+    // On vacation that date?
+    const onVac = (S.vacations || []).some(v => v.physId === p.id && v.start <= date && v.end >= date);
+    if(onVac) return;
+    // Already has a shift / call that date?
+    const conflict = (S.drShifts || []).some(s => s.physId === p.id && s.date === date)
+                  || (S.irCalls  || []).some(c => c.physId === p.id && c.date === date)
+                  || (S.weekendCalls || []).some(w => w.physId === p.id && (w.satDate === date || w.sunDate === date))
+                  || (S.holidays || []).some(h => h.physId === p.id && h.date === date);
+    if(conflict) return;
+    // Compute fairness score: lower forward-count = higher priority (they
+    // "owe" more upcoming work).
+    const fteShare = (p.drFte || 0) + (p.irFte || 0);
+    const expected = fteShare * 5; // rough scale; the relative ordering is what matters
+    const ratio = expected > 0 ? (fwd[p.id] || 0) / expected : 1;
+    candidates.push({ phys: p, ratio, upcoming: fwd[p.id] || 0 });
+  });
+  // Sort: lowest ratio first (most under-allocated → likely happy to swap in).
+  candidates.sort((a, b) => a.ratio - b.ratio);
+  return candidates.slice(0, lim);
+}
+
+// ── My-shifts swap suggestion modal ────────────────────────────────────
+// Lists the current physician's upcoming shifts; clicking one shows the
+// top 3 swap candidates with a one-click "Request swap" button.
+function openSwapSuggestModal(){
+  if(!CU || !CU.physId){
+    alert('Your account isn\'t linked to a physician profile.');
+    return;
+  }
+  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
+  // Collect my upcoming shifts (next 30 days).
+  const myShifts = [];
+  (S.drShifts || []).forEach(s => {
+    if(s.physId === CU.physId && s.date >= today && s.shift !== 'Home' && !s.autoHome){
+      myShifts.push({ kind: 'dr', id: s.id, date: s.date, label: `${s.shift} @ ${s.site || '—'}` });
+    }
+  });
+  (S.irCalls || []).forEach(c => {
+    if(c.physId === CU.physId && c.date >= today){
+      myShifts.push({ kind: 'irc', id: c.id, date: c.date, label: `IR ${c.callType||'daily'} call` });
+    }
+  });
+  (S.weekendCalls || []).forEach(w => {
+    if(w.physId === CU.physId && (w.satDate || w.date) >= today){
+      myShifts.push({ kind: 'wk', id: w.id, date: w.satDate || w.date, label: 'Weekend Call' });
+    }
+  });
+  myShifts.sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = myShifts.filter(s => s.date <= addDays(today, 30));
+  if(!upcoming.length){
+    alert('No upcoming shifts in the next 30 days to swap.');
+    return;
+  }
+  // Build the modal HTML.
+  const rowsHtml = upcoming.map(s => `
+    <div style="border:1px solid var(--bord);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:600;font-size:13px">${escHtml(s.date)} — ${escHtml(s.label)}</div>
+          <div style="font-size:11px;color:var(--rs-ink-3)" id="ssm-status-${s.kind}-${s.id}">Click <em>See partners</em> to find candidates.</div>
+        </div>
+        <button class="bsm" onclick="_ssmShowPartners('${s.kind}', ${s.id})">See partners →</button>
+      </div>
+      <div id="ssm-partners-${s.kind}-${s.id}" style="margin-top:8px"></div>
+    </div>`).join('');
+  // Render into a generic modal slot.
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-wrap';
+  wrap.id = 'ssm-modal';
+  wrap.style.display = 'flex';
+  wrap.onclick = (e) => { if(e.target === wrap) document.getElementById('ssm-modal').remove(); };
+  wrap.innerHTML = `<div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="document.getElementById('ssm-modal').remove()">✕</button>
+    <div class="modal-title">🔄 Find swap partner</div>
+    <div style="font-size:11.5px;color:var(--rs-ink-3);margin-bottom:10px">Your upcoming shifts (next 30 days). Click <em>See partners</em> to get top candidates ranked by upcoming-work fairness.</div>
+    ${rowsHtml}
+  </div>`;
+  document.body.appendChild(wrap);
+}
+
+// Click handler for "See partners →" inside the suggest modal.
+function _ssmShowPartners(kind, shiftId){
+  const host = document.getElementById(`ssm-partners-${kind}-${shiftId}`);
+  if(!host) return;
+  const list = suggestSwapPartners(kind, shiftId, 3);
+  if(!list.length){
+    host.innerHTML = '<div style="font-size:11.5px;color:var(--rs-ink-3);padding:6px">No qualified partners found (everyone has a conflict that day).</div>';
+    return;
+  }
+  host.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">
+    ${list.map(c => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg2);border-radius:6px">
+      <div style="font-size:12.5px"><strong>${escHtml(c.phys.last)}, ${escHtml(c.phys.first)}</strong> <span style="font-size:11px;color:var(--rs-ink-3);margin-left:6px">${c.upcoming} upcoming</span></div>
+      <button class="bsm" onclick="_ssmInitiateSwap('${kind}', ${shiftId}, ${c.phys.id})">Request swap</button>
+    </div>`).join('')}
+  </div>`;
+}
+
+// Click handler for "Request swap" — creates the swap request directly.
+function _ssmInitiateSwap(kind, shiftId, toPhysId){
+  if(!CU || !CU.physId){ alert('Not signed in.'); return; }
+  const arrFor = (k) => k==='dr' ? S.drShifts : k==='ir' ? S.irShifts : k==='irc' ? S.irCalls : k==='wk' ? S.weekendCalls : null;
+  const sh = arrFor(kind)?.find(x => x.id === +shiftId);
+  if(!sh){ alert('Shift not found.'); return; }
+  if(!Array.isArray(S.swapRequests)) S.swapRequests = [];
+  const dateOf = (s) => s.date || s.satDate || '';
+  const labelOf = (s) => s.callType ? `IR Call (${s.callType})` : (s.satDate || s.sunDate ? 'Weekend Call' : (s.shift || 'Shift'));
+  S.swapRequests.push({
+    id: S.nextId++,
+    fromPhysId: CU.physId,
+    toPhysId,
+    date: dateOf(sh),
+    theirDate: '',
+    shiftType: labelOf(sh),
+    site: sh.site || '',
+    reason: '(One-click suggestion)',
+    status: 'pending',
+    ts: new Date().toISOString(),
+  });
+  if(typeof _audit === 'function') _audit('swap.requested', { fromPhysId: CU.physId, toPhysId, kind, shiftId });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  // Notify the target physician so they see it on their dashboard.
+  if(typeof _notify === 'function'){
+    _notify('swapReq', {
+      physId: toPhysId,
+      subject: `Swap request — ${dateOf(sh)}`,
+      body: `${CU.first || ''} ${CU.last || ''} requested you cover their ${labelOf(sh)} on ${dateOf(sh)}.`,
+    });
+  }
+  if(typeof _toast === 'function') _toast('Swap request sent.', 'ok');
+  // Close the modal so the user sees the toast confirmation.
+  document.getElementById('ssm-modal')?.remove();
+}
+
 function submitSwapRequest(){
   const myKey=document.getElementById('sw-my-shift')?.value||'';
   const toId=+document.getElementById('sw-their-phys')?.value;
