@@ -38011,10 +38011,32 @@ function _parsePickWorkbook(rows, prev, sheetName){
     return addDays(ds, -1 - dow);
   };
   const BLOCK_DAYS = 9; // Sat through next Sun, inclusive
+  // ── Year-shift override ──────────────────────────────────────────────
+  // The pick sheet was sometimes templated from the previous year and the
+  // year in the date headers wasn't updated. The "Target year" input lets
+  // the admin force every date to land in the intended year. Detection:
+  // we shift every date by (targetYear - mostCommonYearInFile) years, so
+  // bridging weeks (Dec → Jan) preserve their relative offset.
+  const targetYearInput = +(document.getElementById('xl-pick-target-year')?.value || 0);
+  // Compute the most-common year across all header dates.
+  const yearCounts = {};
+  weeks.forEach(w => {
+    const yr = (w.weekStart || '').slice(0, 4);
+    if(yr) yearCounts[yr] = (yearCounts[yr] || 0) + 1;
+  });
+  const fileYear = +Object.entries(yearCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || 0;
+  const yearShift = (targetYearInput && fileYear) ? (targetYearInput - fileYear) : 0;
+  const _shiftDate = (ds) => {
+    if(!ds || !yearShift) return ds;
+    // Add yearShift years; preserve month/day exactly.
+    const [y, m, d] = ds.split('-').map(Number);
+    const shifted = new Date(y + yearShift, m - 1, d);
+    return fmtDate(shifted);
+  };
   const vacRecs = []; // {physId, start, end, type, notes}
   const shiftRecs = []; // {physId, date, shift, site, notes}
   weeks.forEach(w => {
-    const blockStart = _blockStart(w.weekStart);
+    const blockStart = _shiftDate(_blockStart(w.weekStart));
     const blockEnd = addDays(blockStart, BLOCK_DAYS - 1);
     const mkVac = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name];
