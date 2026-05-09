@@ -26934,6 +26934,12 @@ function renderTools(){
   _renderSubNeedList();
   renderAuditLog();
   renderErrorLog();
+  // Schedule lock — render the locked-month chips + default the picker.
+  try{
+    if(typeof renderLockedMonths === 'function') renderLockedMonths();
+    const lp = document.getElementById('lock-month-picker');
+    if(lp && !lp.value) lp.value = (typeof fmtDate === 'function' ? fmtDate(new Date()) : new Date().toISOString().slice(0,10)).slice(0,7);
+  }catch(_){}
   _wiToggleFields();
   _initToolsTab();
 }
