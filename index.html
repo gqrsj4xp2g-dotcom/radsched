@@ -35725,6 +35725,92 @@ function loadWidgetDownloadUrls(){
   if(macEl) macEl.value = (S.cfg && S.cfg.widgetMacUrl) || '';
   const winEl = document.getElementById('cfg-widget-win-url');
   if(winEl) winEl.value = (S.cfg && S.cfg.widgetWinUrl) || '';
+  // Background: if the URLs are empty, auto-detect from GitHub Releases
+  // so a fresh install is never left with empty fields. Fire-and-forget;
+  // never blocks rendering.
+  const cur = (S.cfg && (S.cfg.widgetMacUrl || S.cfg.widgetWinUrl)) || '';
+  if(!cur && typeof fetchLatestWidgetReleaseUrls === 'function'){
+    setTimeout(() => fetchLatestWidgetReleaseUrls({silent: true}), 600);
+  }
+}
+
+// Fetch the latest widget release URLs from the GitHub Releases API.
+// Auto-detects which asset is which platform by filename suffix.
+// Updates the form fields in-place + saves to S.cfg.
+async function fetchLatestWidgetReleaseUrls(opts){
+  opts = opts || {};
+  const silent = !!opts.silent;
+  const status = document.getElementById('widget-url-autostatus');
+  if(status && !silent) status.textContent = 'Querying github.com…';
+  try{
+    const repo = 'gqrsj4xp2g-dotcom/radsched';
+    // List the most recent releases and pick the newest with a tag
+    // matching widget-vX.Y.Z (so we ignore non-widget releases that
+    // share the same repo).
+    const resp = await fetch('https://api.github.com/repos/' + repo + '/releases?per_page=20', {
+      headers: { 'Accept': 'application/vnd.github.v3+json' },
+    });
+    if(!resp.ok){
+      if(status) status.textContent = '⚠ GitHub API returned ' + resp.status + '.';
+      return;
+    }
+    const releases = await resp.json();
+    // Sort by tag's numeric version (descending) and pick the first
+    // widget-v* release that has assets attached.
+    const widgetReleases = (releases || [])
+      .filter(r => /^widget-v?\d+\.\d+\.\d+/.test(r.tag_name || ''))
+      .sort((a,b) => {
+        const va = (a.tag_name||'').match(/(\d+)\.(\d+)\.(\d+)/);
+        const vb = (b.tag_name||'').match(/(\d+)\.(\d+)\.(\d+)/);
+        if(!va || !vb) return 0;
+        for(let i = 1; i <= 3; i++){
+          const d = (+vb[i] || 0) - (+va[i] || 0);
+          if(d) return d;
+        }
+        return 0;
+      });
+    const latest = widgetReleases.find(r => (r.assets || []).length);
+    if(!latest){
+      if(status) status.textContent = '⚠ No widget releases found yet. Run ./widget/publish-release.sh first.';
+      return;
+    }
+    // Pick assets by filename suffix.
+    let macArm = null, macIntel = null, win = null;
+    (latest.assets || []).forEach(a => {
+      const name = (a.name || '').toLowerCase();
+      if(name.endsWith('.dmg') && name.includes('arm64')) macArm = a;
+      else if(name.endsWith('.dmg')) macIntel = a;
+      else if(name.endsWith('.exe')) win = a;
+    });
+    // Prefer arm64 .dmg as primary mac URL since most modern Macs are
+    // Apple Silicon. Fall back to Intel if only Intel is published.
+    const macAsset = macArm || macIntel;
+    const macUrl = macAsset ? macAsset.browser_download_url : '';
+    const winUrl = win ? win.browser_download_url : '';
+    if(!macUrl && !winUrl){
+      if(status) status.textContent = '⚠ Latest release has no .dmg or .exe assets.';
+      return;
+    }
+    // Update the form + persist.
+    const macEl = document.getElementById('cfg-widget-mac-url');
+    const winEl = document.getElementById('cfg-widget-win-url');
+    if(macEl) macEl.value = macUrl;
+    if(winEl) winEl.value = winUrl;
+    if(!S.cfg) S.cfg = {};
+    S.cfg.widgetMacUrl = macUrl;
+    S.cfg.widgetWinUrl = winUrl;
+    if(typeof triggerSave === 'function') triggerSave();
+    if(status){
+      const ymdAgo = (latest.published_at || '').slice(0, 10);
+      const parts = [];
+      if(macUrl) parts.push('macOS ' + (macArm ? '(arm64)' : '(Intel)'));
+      if(winUrl) parts.push('Windows');
+      status.textContent = `✓ ${escHtml(latest.tag_name)} (published ${escHtml(ymdAgo)}): ${parts.join(' + ')}`;
+    }
+    if(typeof _toast === 'function' && !silent) _toast('Widget URLs updated to latest release.', 'ok');
+  } catch(e){
+    if(status) status.textContent = '⚠ Auto-detect failed: ' + (e.message || String(e));
+  }
 }
 
 // ── Generate install kit (download links + pre-paired code) ────────
