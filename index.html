@@ -34749,6 +34749,52 @@ function renderLockedMonths(){
   }</div>`;
 }
 
+// ── wRVU goal system ─────────────────────────────────────────────────
+// Pain solved: physicians want to know what's expected of them per
+// shift, and admins want a single source of truth for productivity
+// targets. wRVU = work Relative Value Units, the standard radiology
+// productivity metric.
+//
+// Resolution order for any shift's wRVU goal:
+//   1. s.wRVUGoal           — explicit per-shift override
+//   2. p.wRVUMultiplier × cfg.wRVUDefaults[shiftKind]  — per-phys scaling
+//   3. cfg.wRVUDefaults[shiftKind]                     — practice default
+//   4. 0                                                — no goal set
+function getShiftWRVUGoal(shift, physId, kind){
+  if(!shift) return 0;
+  if(shift.wRVUGoal != null && +shift.wRVUGoal >= 0) return +shift.wRVUGoal;
+  const cfg = S.cfg || {};
+  const defaults = cfg.wRVUDefaults || {};
+  // Resolve a key from the shift shape. For DR shifts we use s.shift
+  // ("1st", "2nd", "3rd", "Home"); for IR daily/weekend we infer from
+  // the shape; for weekend calls and holidays we use named buckets.
+  let key = '';
+  if(kind === 'wk') key = 'Weekend Call';
+  else if(kind === 'hol') key = 'Holiday';
+  else if(kind === 'irc') key = (shift.callType === 'weekend') ? 'IR weekend' : 'IR daily';
+  else if(kind === 'ir')  key = 'IR daily';
+  else key = shift.shift || '1st';
+  let base = +defaults[key] || 0;
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  const mult = phys && phys.wRVUMultiplier != null ? +phys.wRVUMultiplier : 1.0;
+  return Math.round(base * mult);
+}
+
+// Drive-time wRVU credit. Returns the credit (in wRVU units) for a
+// physician driving to the given site on a given date. Returns 0 if
+// the physician is at home, the policy isn't enabled, or no drive time
+// exists for that pairing.
+function getDriveTimeWRVUCredit(physId, site, date){
+  if(!physId || !site || site === 'At Home / Remote') return 0;
+  const cfg = S.cfg || {};
+  const perHour = +(cfg.driveTimeWRVUPerHour || 0);
+  if(!perHour) return 0;
+  // Drive times are stored in S.driveTimes[physId][site] = round-trip min.
+  const dt = (S.driveTimes && S.driveTimes[physId] && S.driveTimes[physId][site]) || 0;
+  if(!dt) return 0;
+  return +(dt / 60 * perHour).toFixed(1);
+}
+
 // ── Practice-wide announcements ───────────────────────────────────────
 // Pain solved: practice has a memo to share ("New on-call policy",
 // "Holiday coverage volunteers needed by Friday") and currently has to
