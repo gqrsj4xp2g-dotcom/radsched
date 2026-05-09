@@ -5171,32 +5171,51 @@ function saveAuthSupabaseConfig(){
 }
 // Pre-fill the auth-screen Supabase form if there's a partial config in
 // localStorage (e.g. URL set but key cleared) so the user can see what was
-// there before. Updates the status badge in the <summary> too.
+// there before. The status badge reports the EFFECTIVE configuration:
+// localStorage override OR baked-in HTML constants OR truly missing.
+// Critical: if the deployed HTML has credentials baked in (the default
+// for any post-Save&Connect build), the badge must NOT say "not
+// configured" — the app works fine without any localStorage entry.
 (function _initAuthSBConfigForm(){
   const apply = () => {
     try{
-      const raw = localStorage.getItem('radscheduler_sb_config');
       const status = document.getElementById('auth-sb-status');
-      if(!raw){
-        if(status){ status.textContent = '⚠ not configured'; status.style.color='var(--red-t)'; }
-        return;
+      // Read the optional localStorage override (may be missing/corrupt).
+      let cfgUrl = '', cfgKey = '';
+      const raw = localStorage.getItem('radscheduler_sb_config');
+      if(raw){
+        try{
+          const c = JSON.parse(raw);
+          if(c && typeof c === 'object' && !Array.isArray(c)){
+            cfgUrl = c.url || ''; cfgKey = c.key || '';
+          }
+        }catch(_){}
       }
-      // Defend against scalar/array JSON in localStorage — a corrupted
-      // entry from an older build could be e.g. JSON.stringify('hello'),
-      // and JSON.parse returns "hello" without throwing. Bail unless we
-      // got an actual config object.
-      const c = JSON.parse(raw);
-      if(!c || typeof c !== 'object' || Array.isArray(c)){
-        if(status){ status.textContent = '⚠ corrupt'; status.style.color='var(--red-t)'; }
-        return;
-      }
+      // Pre-fill the form with the override (if any) so the user sees what
+      // was there. The form is intentionally NOT pre-filled with baked-in
+      // values — the user shouldn't think they must re-enter what's
+      // already wired in.
       const urlEl = document.getElementById('auth-sb-url');
       const keyEl = document.getElementById('auth-sb-key');
-      if(urlEl && c.url) urlEl.value = c.url;
-      if(keyEl && c.key) keyEl.value = c.key;
-      if(status){
-        if(c.url && c.key){ status.textContent = '✓ configured'; status.style.color='var(--green-t)'; }
-        else { status.textContent = '⚠ incomplete'; status.style.color='var(--amber,#d97706)'; }
+      if(urlEl && cfgUrl) urlEl.value = cfgUrl;
+      if(keyEl && cfgKey) keyEl.value = cfgKey;
+      // Effective values — what the app actually uses.
+      const effUrl = cfgUrl || (typeof _SUPABASE_URL !== 'undefined' ? _SUPABASE_URL : '');
+      const effKey = cfgKey || (typeof _SUPABASE_KEY !== 'undefined' ? _SUPABASE_KEY : '');
+      if(!status) return;
+      if(effUrl && effKey){
+        if(cfgUrl && cfgKey){
+          status.textContent = '✓ configured (local override)';
+        } else {
+          status.textContent = '✓ ready (built into this app)';
+        }
+        status.style.color = 'var(--green-t,#15803d)';
+      } else if(effUrl || effKey){
+        status.textContent = '⚠ incomplete';
+        status.style.color = 'var(--amber,#d97706)';
+      } else {
+        status.textContent = '⚠ not configured';
+        status.style.color = 'var(--red-t,#b91c1c)';
       }
     }catch(_){}
   };
