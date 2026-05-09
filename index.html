@@ -34941,6 +34941,138 @@ function getDriveTimeWRVUCredit(physId, site, date){
   return +(dt / 60 * perHour).toFixed(1);
 }
 
+// ── Schedule comparison (month vs month) ─────────────────────────────
+// Pain solved: "what changed since last month's draft?" requires
+// scanning the calendar. This diffs two months and surfaces only the
+// changes — added shifts, removed shifts, reassigned shifts.
+function compareMonths(){
+  if(!_adminOnly('compare schedules')) return;
+  const ymA = (document.getElementById('cmp-month-a')?.value || '').trim();
+  const ymB = (document.getElementById('cmp-month-b')?.value || '').trim();
+  if(!ymA || !ymB){ alert('Pick both months.'); return; }
+  // Build a per-(date, shift, site, slotLabel) → physId map for each month.
+  const buildKey = (s) => `${s.date}|${s.shift}|${s.site || ''}|${s.slotLabel || ''}`;
+  const indexBy = (ym) => {
+    const out = {};
+    (S.drShifts || []).forEach(s => {
+      if(s.date && s.date.startsWith(ym)) out[buildKey(s)] = s;
+    });
+    return out;
+  };
+  const a = indexBy(ymA), b = indexBy(ymB);
+  const allKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  // Normalize keys by mapping ymA → "DD" and ymB → "DD" for cross-month
+  // comparison: a Monday in ymA should compare to a Monday in ymB by
+  // ordinal position. Easier read: compare same DD across months.
+  const byOrdinal = (idx) => {
+    const out = {};
+    Object.values(idx).forEach(s => {
+      const dd = s.date.slice(8);
+      const k = `${dd}|${s.shift}|${s.site||''}|${s.slotLabel||''}`;
+      out[k] = s;
+    });
+    return out;
+  };
+  const aN = byOrdinal(a), bN = byOrdinal(b);
+  const allN = new Set([...Object.keys(aN), ...Object.keys(bN)]);
+  const added = [], removed = [], changed = [];
+  allN.forEach(k => {
+    const sa = aN[k], sb = bN[k];
+    if(sa && !sb) removed.push(sa);
+    else if(!sa && sb) added.push(sb);
+    else if(sa && sb && sa.physId !== sb.physId) changed.push({from: sa, to: sb});
+  });
+  const physName = (id) => {
+    const p = (typeof _physById === 'function') ? _physById(id) : null;
+    return p ? `${p.last}` : `#${id}`;
+  };
+  const out = document.getElementById('cmp-result');
+  if(!out) return;
+  if(!added.length && !removed.length && !changed.length){
+    out.innerHTML = '<div class="note ns" style="font-size:12px">No structural differences between these months.</div>';
+    return;
+  }
+  out.innerHTML = `
+    <div style="display:flex;gap:14px;margin-bottom:10px;font-size:12px">
+      <span><strong>${changed.length}</strong> reassignments</span>
+      <span><strong>${added.length}</strong> added in ${escHtml(ymB)}</span>
+      <span><strong>${removed.length}</strong> removed since ${escHtml(ymA)}</span>
+    </div>
+    ${changed.length ? `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Reassignments (${changed.length})</summary>
+      <table class="tbl" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Day</th><th>Shift</th><th>Site</th><th>Was (${escHtml(ymA)})</th><th>Now (${escHtml(ymB)})</th></tr></thead><tbody>${
+        changed.slice(0,80).map(c => `<tr><td>${escHtml(c.to.date)}</td><td>${escHtml(c.to.shift)}</td><td>${escHtml(c.to.site||'—')}</td><td style="color:var(--rs-ink-3)">${escHtml(physName(c.from.physId))}</td><td><strong>${escHtml(physName(c.to.physId))}</strong></td></tr>`).join('')
+      }</tbody></table>
+    </details>` : ''}
+    ${added.length ? `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Added in ${escHtml(ymB)} (${added.length})</summary>
+      <table class="tbl" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Day</th><th>Shift</th><th>Site</th><th>Physician</th></tr></thead><tbody>${
+        added.slice(0,80).map(s => `<tr><td>${escHtml(s.date)}</td><td>${escHtml(s.shift)}</td><td>${escHtml(s.site||'—')}</td><td>${escHtml(physName(s.physId))}</td></tr>`).join('')
+      }</tbody></table>
+    </details>` : ''}
+    ${removed.length ? `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ In ${escHtml(ymA)} but missing in ${escHtml(ymB)} (${removed.length})</summary>
+      <table class="tbl" style="font-size:11.5px;margin-top:6px"><thead><tr><th>Day</th><th>Shift</th><th>Site</th><th>Physician</th></tr></thead><tbody>${
+        removed.slice(0,80).map(s => `<tr><td>${escHtml(s.date)}</td><td>${escHtml(s.shift)}</td><td>${escHtml(s.site||'—')}</td><td>${escHtml(physName(s.physId))}</td></tr>`).join('')
+      }</tbody></table>
+    </details>` : ''}`;
+}
+
+// ── Subspecialty coverage tracker ────────────────────────────────────
+// Per-subspecialty grid. Each row = subspecialty; each column = week
+// of the year. Cell color = number of shifts staffed for that sub
+// that week. Blank/red weeks = coverage gaps.
+function renderSubspecialtyCoverage(){
+  if(!_adminOnly('subspecialty coverage')) return;
+  const yr = +(document.getElementById('subcov-year')?.value || new Date().getFullYear());
+  const subs = (S.drSubs || []).slice().sort();
+  if(!subs.length){ alert('No DR subspecialties defined yet.'); return; }
+  const yearStart = new Date(yr, 0, 1);
+  const yearEnd   = new Date(yr, 11, 31);
+  // Build week buckets: ISO week of year (52 or 53 weeks).
+  const weeks = [];
+  const cur = new Date(yearStart);
+  // Roll back to the Sunday of the week containing Jan 1.
+  cur.setDate(cur.getDate() - cur.getDay());
+  while(cur <= yearEnd){
+    weeks.push(fmtDate(cur));
+    cur.setDate(cur.getDate() + 7);
+  }
+  // For each (sub, week) count shifts whose date falls in that week.
+  const counts = {};
+  subs.forEach(s => { counts[s] = new Array(weeks.length).fill(0); });
+  (S.drShifts || []).forEach(s => {
+    if(!s.sub || !s.date) return;
+    const d = parseDateLocal(s.date);
+    if(d.getFullYear() !== yr) return;
+    if(!counts[s.sub]) return;
+    // Find which week index this date falls into.
+    for(let i = 0; i < weeks.length; i++){
+      const wkStart = parseDateLocal(weeks[i]);
+      const wkEnd = new Date(wkStart);
+      wkEnd.setDate(wkEnd.getDate() + 6);
+      if(d >= wkStart && d <= wkEnd){ counts[s.sub][i]++; break; }
+    }
+  });
+  // Render the heatmap.
+  const cellColor = (n) => {
+    if(n === 0) return '#fee2e2';   // red
+    if(n <= 2) return '#fef3c7';    // amber
+    if(n <= 5) return '#d1fae5';    // light green
+    return '#86efac';                // green
+  };
+  const out = document.getElementById('subcov-result');
+  if(!out) return;
+  out.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10.5px">
+    <thead><tr>
+      <th style="text-align:left;padding:4px 6px;background:var(--bg2);position:sticky;left:0;z-index:1">Subspecialty</th>
+      ${weeks.map((w, i) => `<th style="padding:4px 2px;color:var(--rs-ink-3);font-weight:400;text-align:center;width:18px" title="${escHtml(w)}">${i+1}</th>`).join('')}
+    </tr></thead>
+    <tbody>${subs.map(s => `<tr>
+      <td style="padding:4px 6px;font-weight:500;background:white;position:sticky;left:0;z-index:1;border-right:1px solid var(--rs-line)">${escHtml(s)}</td>
+      ${counts[s].map((n, i) => `<td style="padding:0;text-align:center;width:18px;height:18px;background:${cellColor(n)}" title="Week ${i+1} (${weeks[i]}): ${n} shift${n===1?'':'s'}">${n||''}</td>`).join('')}
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <div style="font-size:11px;color:var(--rs-ink-3);margin-top:8px">Cell colors: <span style="background:#fee2e2;padding:1px 6px;border-radius:3px">0 (gap)</span> · <span style="background:#fef3c7;padding:1px 6px;border-radius:3px">1-2</span> · <span style="background:#d1fae5;padding:1px 6px;border-radius:3px">3-5</span> · <span style="background:#86efac;padding:1px 6px;border-radius:3px">6+</span>. Numbers = shift count for that sub in that week.</div>`;
+}
+
 // ── Auto-assign rationale viewer ─────────────────────────────────────
 // Pain solved: physicians ask "why did I get this Tuesday shift?" and
 // admins have no quick answer. Even when MCF picks the optimal
