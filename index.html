@@ -37592,6 +37592,12 @@ async function generatePublicScheduleHTMLMulti(months, passcode){
     const buf = await crypto.subtle.digest('SHA-256', enc.encode(passcode));
     passHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
   }
+  // NOTE: the literal "</script>" below MUST be split with a backslash
+  // because we're embedding a script tag inside a template literal that
+  // is itself inside an HTML <script> block. The HTML parser would
+  // otherwise close our outer <script> tag at the first "</script>"
+  // sequence — even inside a string. Splitting the closing tag avoids
+  // that without changing the runtime behavior.
   const gateScript = passHash ? `
 <script>
 (async function(){
@@ -37608,7 +37614,7 @@ async function generatePublicScheduleHTMLMulti(months, passcode){
     alert('Wrong passcode.');
   }
 })();
-</script>
+<\/script>
 <style>html{visibility:hidden}</style>` : '';
   return `<!DOCTYPE html>
 <html lang="en">
