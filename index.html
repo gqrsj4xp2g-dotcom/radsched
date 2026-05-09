@@ -4280,6 +4280,49 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 </div>
 
+<!-- DESKTOP WIDGET PAIRING -->
+<div id="page-widget" class="page admin-only">
+  <div class="pg-title">🖥 Desktop Widget</div>
+  <div class="pg-sub">Generate pairing codes that physicians paste into the RadScheduler desktop widget (macOS + Windows). The widget shows their wRVU goal, scheduled shifts, study count, and drive-time credit for the day. Future PACS integration plugs in via the widget's API hook.</div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📦 Download the widget</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:10px;line-height:1.55">
+      The widget source ships in this repo at <code>widget/</code>. To build:
+      <pre style="background:var(--bg2);padding:10px 12px;border-radius:6px;font-size:11.5px;margin-top:6px;line-height:1.5">cd widget
+npm install
+npm run build:mac     # produces widget/dist/RadScheduler-Widget.dmg
+npm run build:win     # produces widget/dist/RadScheduler-Widget Setup.exe</pre>
+      Distribute the resulting installer to physicians. After install, each physician launches the widget once and pastes their pairing code (below) to link it to their RadScheduler profile.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">🔑 Generate pairing code</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:10px;line-height:1.55">
+      Pick a physician → click <strong>Generate</strong> → email or hand them the code. They paste it into the widget on first launch. Codes are signed with a timestamp and expire after 30 days; physicians can re-pair if they reset.
+    </div>
+    <div class="g3" style="gap:8px;margin-bottom:10px;align-items:end">
+      <div class="fg" style="margin:0">
+        <label>Physician</label>
+        <select id="wpair-phys"></select>
+      </div>
+      <div class="fg" style="margin:0">
+        <label>Code valid for (days)</label>
+        <input id="wpair-days" type="number" min="1" max="180" value="30" style="width:90px">
+      </div>
+      <div></div>
+    </div>
+    <button class="bp bsm" onclick="generateWidgetPairing()">🔑 Generate pairing code</button>
+    <div id="wpair-result" style="margin-top:14px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📜 Active pairings</div>
+    <div id="wpair-list"></div>
+  </div>
+</div>
+
 <!-- FTE MONITOR -->
 <div id="page-fte" class="page">
   <div class="pg-title">📊 FTE Monitor</div>
