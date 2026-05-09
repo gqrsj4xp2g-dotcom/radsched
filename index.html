@@ -9128,6 +9128,14 @@ const _MIGRATIONS = [
       return d;
     }
   },
+  // v6 → v7: introduce physicianCredits array — physicians log time-
+  // based credits (covering for sick colleague, teaching, CME, etc.)
+  // from the desktop widget. Additive; legacy practices empty.
+  { from: 6, to: 7, fn: (d) => {
+      if(!Array.isArray(d.physicianCredits)) d.physicianCredits = [];
+      return d;
+    }
+  },
 ];
 
 function _runMigrations(d){
