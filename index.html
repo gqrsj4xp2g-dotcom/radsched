@@ -34640,6 +34640,35 @@ function _canEditDate(dateOrYm){
   return false;
 }
 
+// Returns a warning string if assigning `physId` on `date` would
+// violate the rest-period of N days after a weekend call / holiday /
+// IR weekend call. Returns '' if no violation.
+//
+// The auto-assigner already enforces this; the warning surfaces it for
+// MANUAL assignments where the rule was previously silent. Non-blocking
+// — the caller decides whether to proceed.
+function _checkRestPeriod(physId, date, restDays){
+  if(!physId || !date || !restDays) return '';
+  const target = parseDateLocal(date);
+  // Look back `restDays` days for any weekend call, holiday, or IR
+  // weekend call assignment for this physician.
+  for(let i = 1; i <= restDays; i++){
+    const checkD = fmtDate(new Date(target.getFullYear(), target.getMonth(), target.getDate() - i));
+    // Weekend call (Sat/Sun)
+    const wk = (S.weekendCalls || []).find(w => w.physId === physId && (w.satDate === checkD || w.sunDate === checkD));
+    if(wk) return `was on weekend call ${i} day${i===1?'':'s'} ago (${checkD}); rest-period config requires ${restDays} day${restDays===1?'':'s'} off.`;
+    // Holiday (treated like weekend coverage)
+    const hol = (S.holidays || []).find(h => h.physId === physId && h.date === checkD);
+    if(hol) return `was on holiday call ${i} day${i===1?'':'s'} ago (${checkD}, ${hol.name||'holiday'}); rest-period config requires ${restDays} day${restDays===1?'':'s'} off.`;
+    // IR weekend call (4-day window starting Friday)
+    const irWk = (S.irCalls || []).find(c => c.physId === physId && c.callType === 'weekend' && (
+      checkD === c.date || checkD === addDays(c.date, 1) || checkD === addDays(c.date, 2) || checkD === addDays(c.date, 3)
+    ));
+    if(irWk) return `was on IR weekend call ${i} day${i===1?'':'s'} ago (${checkD}); rest-period config requires ${restDays} day${restDays===1?'':'s'} off.`;
+  }
+  return '';
+}
+
 // Lock a YYYY-MM. Admin-only. Idempotent.
 function lockMonth(ym){
   if(!_adminOnly('lock month')) return;
