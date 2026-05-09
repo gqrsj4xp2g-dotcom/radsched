@@ -34760,6 +34760,131 @@ function removeAnnouncement(id){
   if(typeof _renderAnnouncements === 'function') _renderAnnouncements();
 }
 
+// ── Leave-type balance tracking ──────────────────────────────────────
+// Pain solved: vacation tracking is just one big bucket; admins also
+// want to know "Smith has 5 CME days left" or "Patel has used 4/10 sick
+// days this year". Practices manage these accruals manually today; here
+// we surface annual allocations + used-this-year balances from the
+// existing S.vacations array (which already has a `type` field).
+//
+// Schema:
+//   S.leaveAllocations = {
+//     [physId]: { Vacation: 25, Sick: 10, CME: 5, Personal: 3, ... }
+//   }
+// "Used this year" comes from counting calendar days in S.vacations of
+// each type whose start..end overlaps the current year.
+
+const _LEAVE_TYPES = ['Vacation', 'Sick', 'CME', 'Personal', 'Bereavement', 'Admin', 'Other'];
+
+// Inclusive day count between two ISO dates (YYYY-MM-DD), clamped to
+// the given year. Used to compute year-current "used" totals.
+function _daysInYear(startISO, endISO, yr){
+  const yearStart = `${yr}-01-01`;
+  const yearEnd   = `${yr}-12-31`;
+  const s = (startISO < yearStart) ? yearStart : startISO;
+  const e = (endISO   > yearEnd  ) ? yearEnd   : endISO;
+  if(e < s) return 0;
+  const ms = parseDateLocal(e).getTime() - parseDateLocal(s).getTime();
+  return Math.round(ms / 86400000) + 1;
+}
+
+// Compute leave balance for one physician for the current year.
+// Returns: { Vacation: {allocated, used, remaining}, Sick: {…}, … }.
+function _computeLeaveBalances(physId, yr){
+  if(!yr) yr = new Date().getFullYear();
+  const alloc = (S.leaveAllocations && S.leaveAllocations[physId]) || {};
+  const out = {};
+  _LEAVE_TYPES.forEach(t => {
+    out[t] = { allocated: +(alloc[t] || 0), used: 0, remaining: +(alloc[t] || 0) };
+  });
+  (S.vacations || []).forEach(v => {
+    if(v.physId !== physId) return;
+    let key = v.type || 'Vacation';
+    // Treat "Vacation Sold Back" as "Vacation" for balance accounting
+    // since the practice typically allocates a single vacation pool.
+    if(key === 'Vacation Sold Back') key = 'Vacation';
+    if(!out[key]) out[key] = { allocated: 0, used: 0, remaining: 0 };
+    const days = _daysInYear(v.start, v.end, yr);
+    out[key].used += days;
+    out[key].remaining = Math.max(0, out[key].allocated - out[key].used);
+  });
+  return out;
+}
+
+// Admin UI: render the per-physician allocation editor as a table of
+// (physician × leave-type) inputs. Saves every change immediately.
+function renderLeaveAllocations(){
+  const host = document.getElementById('leave-alloc-list');
+  if(!host) return;
+  const ps = (S.physicians || []).slice().sort((a,b) => (a.last||'').localeCompare(b.last||''));
+  if(!ps.length){
+    host.innerHTML = '<div class="note ni" style="font-size:11.5px">Add physicians first.</div>';
+    return;
+  }
+  if(!S.leaveAllocations) S.leaveAllocations = {};
+  const yr = new Date().getFullYear();
+  host.innerHTML = `<div style="overflow-x:auto"><table class="tbl" style="font-size:11.5px">
+    <thead><tr>
+      <th style="text-align:left">Physician</th>
+      ${_LEAVE_TYPES.map(t => `<th style="text-align:center">${escHtml(t)}</th>`).join('')}
+    </tr></thead>
+    <tbody>${ps.map(p => {
+      const alloc = (S.leaveAllocations[p.id] || {});
+      const bal = _computeLeaveBalances(p.id, yr);
+      return `<tr>
+        <td style="white-space:nowrap"><strong>${escHtml(p.last)}</strong>, ${escHtml(p.first)}</td>
+        ${_LEAVE_TYPES.map(t => {
+          const used = bal[t].used;
+          const a = alloc[t];
+          const isOver = a > 0 && used > a;
+          return `<td style="text-align:center">
+            <input type="number" min="0" max="365" value="${a == null ? '' : a}" data-phys="${p.id}" data-type="${t}" oninput="_setLeaveAlloc(${p.id}, '${t}', this.value)" style="width:54px;font-size:11px;padding:2px 4px;text-align:center" placeholder="—">
+            <div style="font-size:9.5px;color:${isOver ? 'var(--red-t)' : 'var(--rs-ink-3)'};margin-top:1px">used ${used}</div>
+          </td>`;
+        }).join('')}
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>
+  <div style="font-size:11px;color:var(--rs-ink-3);margin-top:6px">"Used" columns count the calendar days inside ${yr} for each leave type from your time-off records. Cells turn red if used > allocated.</div>`;
+}
+
+function _setLeaveAlloc(physId, type, val){
+  if(!_adminOnly('set leave allocation')) return;
+  if(!S.leaveAllocations) S.leaveAllocations = {};
+  if(!S.leaveAllocations[physId]) S.leaveAllocations[physId] = {};
+  const n = +val;
+  if(!val || isNaN(n) || n < 0){ delete S.leaveAllocations[physId][type]; }
+  else { S.leaveAllocations[physId][type] = n; }
+  if(typeof _audit === 'function') _audit('leave.allocation.set', { physId, type, val: n });
+  if(typeof triggerSave === 'function') triggerSave();
+  // Soft re-render the "used" subtitles in case the allocation crossed
+  // the over-limit threshold. Skip a full re-render so the user's input
+  // focus is preserved while typing.
+}
+
+// My Schedule widget: render this physician's leave balances for the
+// current year. Hidden if the physician has no allocations.
+function _renderMyLeaveBalances(){
+  if(!CU || !CU.physId) return '';
+  const bal = _computeLeaveBalances(CU.physId);
+  const types = _LEAVE_TYPES.filter(t => bal[t].allocated > 0 || bal[t].used > 0);
+  if(!types.length) return '';
+  return `<div style="margin-bottom:14px">
+    <div style="font-size:11px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Leave balances (${new Date().getFullYear()})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${types.map(t => {
+      const b = bal[t];
+      const isOver = b.allocated > 0 && b.used > b.allocated;
+      const bg = isOver ? '#fee2e2' : (b.allocated > 0 && b.remaining <= b.allocated * 0.2 ? '#fef3c7' : '#dcfce7');
+      const fg = isOver ? '#7f1d1d' : (b.allocated > 0 && b.remaining <= b.allocated * 0.2 ? '#854d0e' : '#166534');
+      return `<div style="background:${bg};color:${fg};padding:8px 12px;border-radius:8px;min-width:104px">
+        <div style="font-size:11px;font-weight:600">${escHtml(t)}</div>
+        <div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">${b.used}${b.allocated > 0 ? `<span style="font-size:11px;font-weight:400;opacity:.7"> / ${b.allocated}</span>` : ''}</div>
+        ${b.allocated > 0 ? `<div style="font-size:10px;opacity:.85">${b.remaining} left</div>` : '<div style="font-size:10px;opacity:.7">no allocation set</div>'}
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+}
+
 // Admin Settings panel: list every announcement (active + expired) with
 // remove buttons and a "Posted by / on / expires" summary.
 function renderAnnouncementsList(){
