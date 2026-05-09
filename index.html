@@ -35317,21 +35317,30 @@ function addWebhook(){
   if(!_adminOnly('add webhook')) return;
   const url = (document.getElementById('wh-url')?.value || '').trim();
   const name = (document.getElementById('wh-name')?.value || '').trim() || 'webhook';
+  const flavor = (document.getElementById('wh-flavor')?.value || 'generic').toLowerCase();
   const events = [..._WEBHOOK_EVENTS].filter(ev =>
     document.getElementById('wh-ev-' + ev.replace(/\./g, '-'))?.checked
   );
   if(!url || !/^https?:\/\//i.test(url)){ alert('Provide a valid http(s) URL.'); return; }
   if(!events.length){ alert('Pick at least one event to subscribe to.'); return; }
+  // Soft sanity-check on flavor URL host. Warn but don't block — admins
+  // sometimes route through proxies or custom hostnames.
+  if(flavor === 'slack' && !/hooks\.slack\.com/i.test(url)){
+    if(!confirm('Slack preset selected but URL doesn\'t look like a Slack webhook (hooks.slack.com). Save anyway?')) return;
+  }
+  if(flavor === 'teams' && !/(outlook\.office\.com|webhook\.office\.com)/i.test(url)){
+    if(!confirm('Teams preset selected but URL doesn\'t look like a Teams Connector (outlook.office.com / webhook.office.com). Save anyway?')) return;
+  }
   if(!S.cfg) S.cfg = {};
   if(!S.cfg.webhooks) S.cfg.webhooks = [];
   S.cfg.webhooks.push({
     id: (S.nextId = (S.nextId || 1) + 1),
-    name, url, events, active: true,
+    name, url, events, active: true, flavor,
   });
-  if(typeof _audit === 'function') _audit('webhook.add', { name, url, events });
+  if(typeof _audit === 'function') _audit('webhook.add', { name, url, events, flavor });
   triggerSave();
   renderWebhooks();
-  if(typeof _toast === 'function') _toast(`Webhook "${name}" added.`, 'ok');
+  if(typeof _toast === 'function') _toast(`Webhook "${name}" added (${flavor}).`, 'ok');
 }
 function removeWebhook(id){
   if(!_adminOnly('remove webhook')) return;
