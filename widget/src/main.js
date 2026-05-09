@@ -13,7 +13,7 @@
  * launches read the stored code and skip the pairing screen.
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, safeStorage, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -107,6 +107,10 @@ ipcMain.handle('rs:get-pairing', () => loadPairing());
 ipcMain.handle('rs:save-pairing', (_, code) => { savePairing(code); return true; });
 ipcMain.handle('rs:clear-pairing', () => { clearPairing(); return true; });
 ipcMain.handle('rs:open-external', (_, url) => shell.openExternal(url));
+// Read the OS clipboard for the auto-pair flow on first launch.
+ipcMain.handle('rs:read-clipboard', () => {
+  try{ return clipboard.readText(); } catch(_){ return ''; }
+});
 ipcMain.handle('rs:set-always-on-top', (_, on) => {
   if(mainWindow) mainWindow.setAlwaysOnTop(!!on);
   return !!on;

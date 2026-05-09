@@ -127,22 +127,66 @@ shift.wRVUGoal  →  physician.wRVUMultiplier × cfg.wRVUDefaults[shiftType]  �
 
 ---
 
-## Issue your first pairing code
+## Distribute the widget — recommended end-to-end flow
 
-Once a physician installs the widget, they need a pairing code to link it to their RadScheduler profile.
+The cleanest physician onboarding takes 60 seconds and 3 clicks. Setup once on the admin side:
 
-1. Open RadScheduler (admin view) → sidebar **🖥 Desktop Widget**
-2. Pick the physician from the dropdown
-3. Set **Code valid for** (default 30 days)
-4. Click **🔑 Generate pairing code**
-5. The code appears as a long base64 string. Either:
-   - Click **📋 Copy code** and paste into Slack / email manually
-   - Click **📧 Email to physician** (opens your default mail app pre-filled)
-6. The physician launches the widget, pastes the code into the input field, clicks **Pair widget**. The widget fetches their day's schedule and persists the code in their OS keychain.
+### Admin: one-time setup (~5 min)
 
-If a physician resets their machine or the code expires, generate a new one — old codes stay in the *Active pairings* table for audit but the physician simply pastes the new one over.
+1. **Build the widget locally** (you've already done this):
+   ```bash
+   cd ~/RadApp/widget && ./build-mac.sh
+   ```
+   Output: `widget/dist/RadScheduler Widget-1.0.0-arm64.dmg` (and Intel).
+   Build the Windows installer on a Windows machine: `build-win.cmd`.
 
-To revoke a code (e.g., physician left the practice), use the **Revoke** button in the *Active pairings* table.
+2. **Publish to GitHub Releases** so physicians can download from a stable URL:
+   ```bash
+   brew install gh           # one-time, if not installed
+   gh auth login             # one-time, sign into GitHub
+   ./publish-release.sh      # uploads dist/* to a new release
+   ```
+   The script prints the asset URLs. Copy them.
+
+3. **Paste URLs into RadScheduler**:
+   - Open RadScheduler → sidebar **🖥 Desktop Widget**
+   - Top card "📦 Widget download URLs"
+   - Paste the macOS URL and Windows URL → it auto-saves
+
+You're done with setup. From here on, every install kit you send embeds these URLs.
+
+### Admin: send install kit per physician (~30 sec each)
+
+1. **🖥 Desktop Widget** page → "🚀 Send install kit" card
+2. Pick physician, pick validity (default 30 days)
+3. Click **🚀 Generate install kit**
+4. Result panel shows:
+   - 🍎 macOS download button + 🪟 Windows download button (auto-linked to your URLs)
+   - The pairing code in a copyable box
+   - **📧 Email install kit** button (mailto: pre-filled with everything)
+5. Click **📧 Email install kit** → your mail client opens with a complete email containing OS-specific download links + step-by-step instructions + the pairing code
+6. Send
+
+### Physician: install + pair (~60 sec, 3 clicks)
+
+The email they receive is self-contained. Their flow:
+
+1. Click their OS-specific download link in the email → installer downloads
+2. Install (drag .dmg to Applications, or run the .exe — first launch needs right-click → Open on macOS to bypass Gatekeeper)
+3. **Copy the pairing code** from the email (one tap) → launch the widget
+4. Widget detects the code on the clipboard → auto-pairs → done
+
+No paste, no settings. The widget persists the code in the OS keychain so subsequent launches are instant.
+
+### Re-pair / revoke
+
+If a physician resets their machine, the code is gone — generate a new install kit and re-send. Old codes remain in the *Active pairings* table for audit; click **Revoke** to invalidate one (e.g., physician left the practice). The widget stops syncing on its next refresh.
+
+---
+
+## Older flow: manual pairing code only
+
+If you don't want to host installer URLs (or you're testing in dev mode), use the **🔑 Pairing code only** button on the same page. It generates just the code without the install-kit panel; you hand it to the physician however you like, and they paste it into the widget's pairing screen manually.
 
 ---
 

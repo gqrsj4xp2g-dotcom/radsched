@@ -12,5 +12,9 @@ contextBridge.exposeInMainWorld('rsWidget', {
   clearPairing:    () => ipcRenderer.invoke('rs:clear-pairing'),
   openExternal:    (url) => ipcRenderer.invoke('rs:open-external', url),
   setAlwaysOnTop:  (on) => ipcRenderer.invoke('rs:set-always-on-top', !!on),
+  // Reads the OS clipboard. Used for one-click pairing: physician copies
+  // the code from their email, launches the widget, the widget grabs
+  // the code from the clipboard and self-pairs.
+  readClipboard:   () => ipcRenderer.invoke('rs:read-clipboard'),
   onResetPairing:  (cb) => ipcRenderer.on('rs:reset-pairing', cb),
 });

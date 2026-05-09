@@ -231,20 +231,52 @@ function computeDayDigest(practice, physId, dateISO){
 }
 
 // ─── Renders ─────────────────────────────────────────────────────
-function renderPairing(errMsg){
+async function renderPairing(errMsg){
   document.querySelector('.body').innerHTML = `
     <div class="pair">
       <h2>Pair this widget</h2>
       <p>Paste the pairing code your RadScheduler admin gave you. The code links this widget to your physician profile.</p>
       <textarea id="pair-code" placeholder="ABC...123 (paste here)"></textarea>
       <button id="pair-submit">Pair widget</button>
+      <button id="pair-from-clip" style="background:transparent;color:var(--accent);border:1px solid var(--accent);margin-top:6px">📋 Paste from clipboard</button>
       <div class="err" id="pair-err">${errMsg ? escHtml(errMsg) : ''}</div>
     </div>`;
-  // Hide the tab bar on pairing screen.
   const tabs = document.getElementById('tabs');
   if(tabs) tabs.style.display = 'none';
   document.getElementById('pair-submit').onclick = onPairSubmit;
+  document.getElementById('pair-from-clip').onclick = onPairFromClipboard;
   document.getElementById('pair-code').focus();
+  // ── Auto-pair: try the clipboard immediately on first show ──────
+  // The admin's "Send install kit" flow asks the physician to copy
+  // their pairing code BEFORE launching the widget. If we find a
+  // valid code waiting in the clipboard, pair silently and skip the
+  // textbox entirely. Falsy / wrong-shape clipboard contents fall
+  // through to the manual paste UI.
+  try{
+    const clip = (await window.rsWidget.readClipboard()) || '';
+    if(clip && clip.trim().length > 50){
+      const payload = decodePairingCode(clip.trim());
+      if(payload && await verifyPairing(payload) && (!payload.exp || new Date(payload.exp).getTime() >= Date.now())){
+        // Show a brief "auto-pairing…" message so the user sees what happened.
+        document.querySelector('.body').innerHTML = `<div class="pair"><h2>✓ Code detected on clipboard</h2><p>Pairing widget to ${escHtml((payload.physFirst||'') + ' ' + (payload.physLast||''))}…</p></div>`;
+        await window.rsWidget.savePairing(clip.trim());
+        await refresh();
+        return;
+      }
+    }
+  }catch(_){}
+}
+
+async function onPairFromClipboard(){
+  try{
+    const clip = await window.rsWidget.readClipboard();
+    const ta = document.getElementById('pair-code');
+    if(clip && ta){ ta.value = clip.trim(); }
+    await onPairSubmit();
+  }catch(e){
+    const errEl = document.getElementById('pair-err');
+    if(errEl) errEl.textContent = 'Could not read clipboard: ' + (e.message || e);
+  }
 }
 
 async function onPairSubmit(){
