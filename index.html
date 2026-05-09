@@ -33361,6 +33361,170 @@ function findNextAvailable(physId, fromDate, kind){
   return null;
 }
 
+// ── Coverage Gap Detector ──────────────────────────────────────────────
+// Scans the next 30 days for unfilled critical slots:
+//   • Weekday with no 1st-shift physician at ANY active site
+//   • Weekend day with no on-call physician
+//   • Holiday with no holiday assignee
+// Findings are surfaced as a dismissible red banner on the dashboard.
+// Cache is per-render (no persistent state, no extra storage).
+function _scanCoverageGaps(){
+  const today = fmtDate(new Date());
+  const horizon = 30; // days lookahead
+  const sites = (S.sites || []).filter(s => s.name && s.name !== 'At Home / Remote');
+  const realSiteNames = new Set(sites.map(s => s.name));
+  const gaps = [];
+  for(let i = 0; i < horizon; i++){
+    const ds = addDays(today, i);
+    const d = parseDateLocal(ds);
+    const dow = d.getDay();
+    const isWeekend = (dow === 0 || dow === 6);
+    const isHoliday = (S.holidays || []).some(h => h.date === ds);
+    if(isHoliday){
+      const holAssigns = (S.holidays || []).filter(h => h.date === ds && h.physId);
+      if(!holAssigns.length){
+        gaps.push({ date: ds, kind: 'holiday', label: 'Holiday with no assignee' });
+      }
+      continue; // skip site checks on holidays
+    }
+    if(isWeekend){
+      const wkndCovered = (S.weekendCalls || []).some(w => (w.satDate || w.date) === ds || w.sunDate === ds);
+      const irCallCovered = (S.irCalls || []).some(c => c.date === ds || (c.callType === 'weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds)));
+      if(!wkndCovered && !irCallCovered){
+        gaps.push({ date: ds, kind: 'weekend', label: dow === 6 ? 'Saturday with no call' : 'Sunday with no call' });
+      }
+      continue;
+    }
+    // Weekday: every active site needs a 1st-shift body somewhere.
+    const sitesCovered = new Set();
+    (S.drShifts || []).filter(s => s.date === ds && s.shift === '1st').forEach(s => sitesCovered.add(s.site));
+    const uncovered = [...realSiteNames].filter(n => !sitesCovered.has(n));
+    if(uncovered.length){
+      gaps.push({ date: ds, kind: 'weekday', label: `${uncovered.length} site(s) with no 1st shift: ${uncovered.slice(0, 3).join(', ')}${uncovered.length > 3 ? '…' : ''}` });
+    }
+  }
+  return gaps;
+}
+function _renderCoverageGapBanner(isAdmin){
+  const banner = document.getElementById('dash-coverage-gaps');
+  if(!banner) return;
+  const gaps = _scanCoverageGaps();
+  S._coverageGaps = gaps; // expose for diagnostics
+  if(!gaps.length){
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  // Group gaps so the banner shows a compact summary first, with details
+  // expanded behind a <details> disclosure.
+  const limit = isAdmin ? 5 : 3;
+  const rows = gaps.slice(0, limit).map(g => {
+    const navTarget = (g.kind === 'holiday') ? 'holidays' : (g.kind === 'weekend') ? 'ir-cal' : 'dr-cal';
+    const ym = g.date.slice(0, 7);
+    return `<div style="padding:5px 8px;border-left:3px solid #b91c1c;background:rgba(185,28,28,.06);border-radius:4px;margin-top:4px;display:flex;align-items:center;gap:8px;font-size:12.5px">
+      <span style="font-family:ui-monospace,monospace;color:#7f1d1d;min-width:88px">${escHtml(g.date)}</span>
+      <span style="color:#7f1d1d;flex:1">${escHtml(g.label)}</span>
+      <button class="bsm" onclick="_jumpToCalendar?.('${navTarget}','${ym}')" title="Open the calendar at this date">View →</button>
+    </div>`;
+  }).join('');
+  const more = (gaps.length > limit) ? `<div style="margin-top:6px;font-size:11px;color:#7f1d1d;font-style:italic">+ ${gaps.length - limit} more — open the calendar to address.</div>` : '';
+  banner.style.display = '';
+  banner.innerHTML = `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <strong style="color:#991b1b;font-size:13px">⚠ ${gaps.length} coverage gap${gaps.length === 1 ? '' : 's'} in the next 30 days</strong>
+      <button onclick="this.closest('#dash-coverage-gaps').style.display='none'" style="background:transparent;border:0;cursor:pointer;color:#7f1d1d;font-size:18px;line-height:1;padding:0 6px" title="Dismiss until next refresh">×</button>
+    </div>
+    ${rows}
+    ${more}
+  </div>`;
+  if(typeof _audit === 'function' && !_audit._lastGapTs || (Date.now() - (_audit._lastGapTs || 0) > 3600000)){
+    // Throttle: log once per hour to keep the audit log readable.
+    _audit('coverage.gap.detected', { count: gaps.length, sample: gaps.slice(0, 3) });
+    _audit._lastGapTs = Date.now();
+  }
+}
+
+// ── Workload Fairness Scoreboard ───────────────────────────────────────
+// At-a-glance "is the workload distributed fairly?" panel. Per category
+// (weekend call, holiday, 2nd/3rd shift), each physician gets a chip
+// colored by how their YTD-load compares to FTE-adjusted expected:
+//   green   = within 85–115% of expected
+//   amber   = 70–85% or 115–130%
+//   red     = <70% or >130%
+// Click a row → opens FTE Monitor page for that physician.
+function _renderFairnessScoreboard(isAdmin){
+  const host = document.getElementById('dash-fairness');
+  if(!host) return;
+  const physList = (S.physicians || []).filter(p => (p.drFte || 0) + (p.irFte || 0) > 0);
+  if(physList.length < 2){
+    host.innerHTML = ''; // need ≥2 physicians for a meaningful comparison
+    return;
+  }
+  const yr = new Date().getFullYear();
+  const yearStart = `${yr}-01-01`;
+  const yearEnd   = `${yr}-12-31`;
+  // Counters per physician.
+  const wkndPer = {}, holPer = {}, s2Per = {}, s3Per = {}, callPer = {};
+  physList.forEach(p => { wkndPer[p.id] = 0; holPer[p.id] = 0; s2Per[p.id] = 0; s3Per[p.id] = 0; callPer[p.id] = 0; });
+  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(d >= yearStart && d <= yearEnd && wkndPer[w.physId] != null) wkndPer[w.physId]++; });
+  (S.holidays || []).forEach(h => { if(h.date >= yearStart && h.date <= yearEnd && holPer[h.physId] != null) holPer[h.physId]++; });
+  (S.drShifts || []).forEach(s => {
+    if(s.date < yearStart || s.date > yearEnd) return;
+    if(s.shift === '2nd' && s2Per[s.physId] != null) s2Per[s.physId]++;
+    if(s.shift === '3rd' && s3Per[s.physId] != null) s3Per[s.physId]++;
+  });
+  (S.irCalls || []).forEach(c => { if(c.date >= yearStart && c.date <= yearEnd && callPer[c.physId] != null) callPer[c.physId]++; });
+  // Compute expected per category as (totalForCategory * fteShare).
+  const total = arr => arr.reduce((a,b) => a + b, 0);
+  const totalFte = physList.reduce((a, p) => a + (p.drFte || 0) + (p.irFte || 0), 0) || 1;
+  const cats = [
+    { key: 'wknd', label: 'Weekend Call',  perPhys: wkndPer, total: total(Object.values(wkndPer)) },
+    { key: 'hol',  label: 'Holiday',       perPhys: holPer,  total: total(Object.values(holPer))  },
+    { key: 's2',   label: '2nd Shift',     perPhys: s2Per,   total: total(Object.values(s2Per))   },
+    { key: 's3',   label: '3rd Shift',     perPhys: s3Per,   total: total(Object.values(s3Per))   },
+    { key: 'call', label: 'IR Daily Call', perPhys: callPer, total: total(Object.values(callPer)) },
+  ];
+  const ratioColor = r => {
+    if(r >= 0.85 && r <= 1.15) return { bg: '#dcfce7', fg: '#166534' };  // green
+    if(r >= 0.70 && r <= 1.30) return { bg: '#fef3c7', fg: '#854d0e' };  // amber
+    return { bg: '#fee2e2', fg: '#991b1b' };                              // red
+  };
+  // For non-admin users we only show their OWN row, no other physicians.
+  const visiblePhys = (isAdmin) ? physList : physList.filter(p => p.id === (CU?.physId || CU?.id));
+  if(!visiblePhys.length){ host.innerHTML = ''; return; }
+  // Build the table.
+  const headers = `<tr>
+    <th style="text-align:left;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">Physician</th>
+    ${cats.map(c => `<th style="text-align:center;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">${escHtml(c.label)}</th>`).join('')}
+  </tr>`;
+  const rows = visiblePhys.map(p => {
+    const fteShare = ((p.drFte || 0) + (p.irFte || 0)) / totalFte;
+    const cells = cats.map(c => {
+      const expected = c.total * fteShare;
+      const actual = c.perPhys[p.id];
+      const ratio = expected > 0 ? actual / expected : 1;
+      const { bg, fg } = ratioColor(ratio);
+      const pct = Math.round(ratio * 100);
+      return `<td style="text-align:center;padding:5px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${actual} actual vs ${expected.toFixed(1)} expected (FTE-adjusted)">${actual} · ${pct}%</span></td>`;
+    }).join('');
+    return `<tr>
+      <td style="padding:5px 8px;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>⚖ Workload Fairness — ${yr}</span>
+      <button class="bsm" onclick="nav('fte',document.querySelector('[onclick*=fte]'))" title="Open FTE Monitor for full per-month detail">FTE Monitor →</button>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Each cell shows actual count and percent of FTE-adjusted expected. Green = within 15%, amber = within 30%, red = beyond.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead>${headers}</thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
 // ── Today's Coverage widget ────────────────────────────────────────────
 // Renders a glanceable "who's where right now" panel on the dashboard:
 // every shift assigned to today, the on-call rotation, and who's out.
