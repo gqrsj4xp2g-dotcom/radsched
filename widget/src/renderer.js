@@ -87,18 +87,49 @@ function escHtml(s){
 // historic — kept stable for back-compat. RLS policies gate which
 // row each anon-key holder can read, so this query is safe to fire
 // straight from a public client.
+//
+// Diagnostic: every failure includes the URL, status, body, and the
+// first 12 chars of the anon key fingerprint so admins can match the
+// request to their Supabase config without spending a debug session.
 async function fetchPracticeData(p){
   const url = `${p.sbUrl}/rest/v1/radscheduler?id=eq.${encodeURIComponent(p.practiceId)}&select=data`;
-  const resp = await fetch(url, {
-    headers: {
-      'apikey': p.sbAnonKey,
-      'Authorization': 'Bearer ' + p.sbAnonKey,
-      'Accept': 'application/json',
-    },
-  });
-  if(!resp.ok) throw new Error('Supabase ' + resp.status + ': ' + await resp.text().catch(() => ''));
+  let resp;
+  try{
+    resp = await fetch(url, {
+      headers: {
+        'apikey': p.sbAnonKey,
+        'Authorization': 'Bearer ' + p.sbAnonKey,
+        'Accept': 'application/json',
+      },
+    });
+  } catch(e){
+    throw new Error('Network error: ' + (e.message || String(e)) + '\n\nURL: ' + url);
+  }
+  if(!resp.ok){
+    const body = await resp.text().catch(() => '(no body)');
+    const keyFp = (p.sbAnonKey || '').slice(0, 12) + '…';
+    let hint = '';
+    if(resp.status === 401){
+      hint = '\n\nA 401 from /rest/v1 means the anon key was rejected. Likely causes:\n' +
+             '  • The Supabase anon key was rotated since this pairing code was issued — ask admin for a new code.\n' +
+             '  • The pairing code was generated with stale RadScheduler config (admin opened the app before the URL/key were saved).\n' +
+             '  • The Supabase project was paused (free-tier auto-pause after 1 week of inactivity).';
+    } else if(resp.status === 403){
+      hint = '\n\nA 403 means RLS denied the read. The widget queries with the anon key only (no user JWT), so any RLS policy that requires auth.uid() will block it. Consider adding an RLS policy that allows SELECT on the radscheduler row by anon when the practice has opted into widget access.';
+    } else if(resp.status === 404){
+      hint = '\n\nA 404 means the URL path is wrong. Make sure the Supabase URL ends without a trailing slash.';
+    }
+    throw new Error(
+      'Supabase ' + resp.status + ' on ' + url + '\n' +
+      'Anon-key fingerprint: ' + keyFp + '\n' +
+      'Practice id: ' + p.practiceId + '\n' +
+      'Response body: ' + body + hint
+    );
+  }
   const rows = await resp.json();
-  if(!rows.length) throw new Error('No practice row found (id=' + p.practiceId + ' on table radscheduler).');
+  if(!rows.length){
+    throw new Error('No practice row found.\n\nURL: ' + url + '\nPractice id: ' + p.practiceId + '\nThe REST call succeeded but returned 0 rows. Either the practice id is wrong, or the row was deleted, or RLS hides it from the anon key.');
+  }
   return rows[0].data || {};
 }
 

@@ -1,0 +1,159 @@
+name: Build + publish widget installers
+
+# Cross-platform widget build: triggered by pushing a tag like
+# `widget-v1.0.4`. Runs the macOS + Windows builds on their native
+# runners and uploads the resulting .dmg / .exe to a GitHub Release
+# matching the tag.
+#
+# Usage from your Mac:
+#   cd widget
+#   # bump version in package.json (e.g. 1.0.3 → 1.0.4)
+#   git add package.json && git commit -m "widget: bump 1.0.4"
+#   git tag widget-v1.0.4
+#   git push origin main widget-v1.0.4
+#
+# That single tag push triggers this workflow → both .dmg AND .exe get
+# uploaded to the same release. The widget's auto-update banner picks
+# them up within 6 hours; manual check via the tray menu is instant.
+#
+# Eliminates the "I need a Windows machine to build the .exe" gap and
+# the "I forgot to run publish-release.sh" foot-gun. One tag, both OSes.
+
+on:
+  push:
+    tags:
+      - 'widget-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. widget-v1.0.4)'
+        required: true
+
+permissions:
+  contents: write   # required to create + upload to releases
+
+jobs:
+  # ── macOS build (.dmg, both arm64 + Intel) ───────────────────────
+  build-mac:
+    name: macOS .dmg
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: widget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: widget/package-lock.json
+      - run: npm ci
+      # Generate the placeholder icon if no real one is committed yet.
+      # Same gradient PNG the build-mac.sh script produces locally.
+      - name: Ensure icon exists
+        run: |
+          if [ ! -f build/icon.png ]; then
+            python3 - <<'PY'
+          import struct, zlib, os
+          W,H=512,512
+          def pc(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+          ihdr=struct.pack('>IIBBBBB',W,H,8,2,0,0,0)
+          raw=bytearray()
+          for y in range(H):
+            raw.append(0)
+            for x in range(W):
+              t=(x+y)/(W+H)
+              raw+=bytes([int(15+23*t),int(23+100*t),int(42+180*t)])
+          idat=zlib.compress(bytes(raw),9)
+          os.makedirs('build',exist_ok=True)
+          open('build/icon.png','wb').write(b'\x89PNG\r\n\x1a\n'+pc(b'IHDR',ihdr)+pc(b'IDAT',idat)+pc(b'IEND',b''))
+          PY
+          fi
+      # electron-builder for macOS — produces both arm64 + x64 .dmg
+      # files under widget/dist/. Uses ad-hoc signing (identity: "-")
+      # configured in package.json so unsigned distribution works.
+      - name: Build macOS .dmg
+        run: npx electron-builder --mac --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: widget/dist/*.dmg
+          if-no-files-found: error
+
+  # ── Windows build (.exe via NSIS) ─────────────────────────────────
+  build-win:
+    name: Windows .exe
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: widget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: widget/package-lock.json
+      - run: npm ci
+      # Generate icon via PowerShell GDI+ if not committed.
+      - name: Ensure icon exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/icon.png)) {
+            New-Item -ItemType Directory -Force -Path build | Out-Null
+            Add-Type -AssemblyName System.Drawing
+            $w=512; $h=512
+            $bm = New-Object System.Drawing.Bitmap($w, $h)
+            $g  = [System.Drawing.Graphics]::FromImage($bm)
+            $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+              (New-Object System.Drawing.Point 0,0),
+              (New-Object System.Drawing.Point $w,$h),
+              ([System.Drawing.Color]::FromArgb(15,23,42)),
+              ([System.Drawing.Color]::FromArgb(56,189,248)))
+            $g.FillRectangle($brush, 0, 0, $w, $h)
+            $bm.Save('build/icon.png', [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bm.Dispose()
+          }
+      - name: Build Windows .exe
+        run: npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-exe
+          path: widget/dist/*.exe
+          if-no-files-found: error
+
+  # ── Publish — combine both artifacts into a single release ────────
+  publish:
+    name: Publish to GitHub Releases
+    needs: [build-mac, build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: mac-dmg, path: ./release-assets }
+      - uses: actions/download-artifact@v4
+        with: { name: win-exe, path: ./release-assets }
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          echo "Release tag: $TAG"
+          ls -lh release-assets/
+          # gh CLI is preinstalled on GitHub-hosted runners.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release exists — overwriting assets."
+            gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            echo "Creating new release."
+            VERSION="${TAG#widget-v}"
+            gh release create "$TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "RadScheduler Widget $VERSION" \
+              --notes "Cross-platform widget build. macOS (.dmg) + Windows (.exe) installers attached.
+
+Auto-update from prior versions will pick this up within 6 hours, or manually via the widget tray menu → Check for updates…"
+          fi

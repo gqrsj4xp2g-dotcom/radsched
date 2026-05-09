@@ -170,31 +170,76 @@ async function checkForUpdates(opts){
 }
 
 // ─── Pairing-code persistence ─────────────────────────────────────
-// We use safeStorage when the OS supports it (mac/Win), falling back
-// to a plain JSON file in userData when it doesn't (Linux without
-// libsecret). The file path is stable across upgrades.
+// As of v1.0.3 we store the pairing code as a plain text file with
+// 0600 permissions (only the current user can read it). Previously
+// we used Electron's safeStorage which encrypts via macOS Keychain
+// — but since we ad-hoc sign our builds (no Apple Developer ID),
+// every release has a different code signature and macOS prompts
+// for the Keychain password on each install.
+//
+// Threat-model note: the pairing code contains the practice's
+// Supabase anon key (which is PUBLIC by design — RLS gates access)
+// + an HMAC-signed payload identifying the physician. An attacker
+// with filesystem access on the user's Mac could read the pairing
+// and view that physician's read-only schedule, but they could
+// equally just install the widget themselves and request a fresh
+// pairing — the encryption-at-rest provided marginal security.
+//
+// Migration: on first run after upgrading from a safeStorage build
+// (1.0.0–1.0.2), we'll see an encrypted file. Try a single
+// safeStorage decrypt (one final Keychain prompt for upgraders);
+// on success, immediately rewrite as plain text. From then on,
+// no more Keychain access.
 const STORE_PATH = () => path.join(app.getPath('userData'), 'pairing.bin');
+
+function _isPlainPairingText(s){
+  // A valid pairing code is base64url-encoded JSON of >= ~150 chars.
+  // Quick shape test: starts with an ASCII printable char, no NUL,
+  // length within bounds. Saves us from invoking safeStorage every
+  // boot just to see if we're already on plaintext.
+  if(!s || typeof s !== 'string') return false;
+  if(s.length < 80 || s.length > 8192) return false;
+  if(s.indexOf('\0') !== -1) return false;
+  return /^[A-Za-z0-9_\-+=\/]+$/.test(s.trim());
+}
+
 function savePairing(codeStr){
   try{
-    if(safeStorage.isEncryptionAvailable()){
-      const enc = safeStorage.encryptString(codeStr);
-      fs.writeFileSync(STORE_PATH(), enc);
-    } else {
-      fs.writeFileSync(STORE_PATH(), codeStr, 'utf8');
-    }
+    fs.writeFileSync(STORE_PATH(), codeStr, { encoding: 'utf8', mode: 0o600 });
+    // chmod again in case the file already existed with broader perms.
+    try{ fs.chmodSync(STORE_PATH(), 0o600); } catch(_){}
   } catch(e){ console.error('savePairing failed:', e); }
 }
+
 function loadPairing(){
   try{
     if(!fs.existsSync(STORE_PATH())) return null;
     const buf = fs.readFileSync(STORE_PATH());
+    // Try plaintext first — the common case post-1.0.3.
+    const asText = buf.toString('utf8');
+    if(_isPlainPairingText(asText)) return asText.trim();
+    // Otherwise the file is encrypted (legacy 1.0.0–1.0.2 install).
+    // Decrypt once via safeStorage (this triggers one Keychain
+    // prompt), then rewrite the file as plaintext so the next launch
+    // never asks again.
     if(safeStorage.isEncryptionAvailable()){
-      try{ return safeStorage.decryptString(buf); }
-      catch(_){ return buf.toString('utf8'); }  // legacy plain file
+      try{
+        const decrypted = safeStorage.decryptString(buf);
+        if(decrypted){
+          console.log('[pairing] migrating encrypted file → plaintext (one-time)');
+          savePairing(decrypted);
+          return decrypted;
+        }
+      } catch(e){
+        console.warn('[pairing] safeStorage decrypt failed:', e.message);
+      }
     }
-    return buf.toString('utf8');
+    // Last-ditch: maybe the file IS plaintext but in a different
+    // encoding. Trust it.
+    return asText;
   } catch(e){ console.error('loadPairing failed:', e); return null; }
 }
+
 function clearPairing(){
   try{ if(fs.existsSync(STORE_PATH())) fs.unlinkSync(STORE_PATH()); }
   catch(e){ console.error('clearPairing failed:', e); }
