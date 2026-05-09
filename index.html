@@ -11243,6 +11243,10 @@ function _saveEditPhys(id){
   }
   p.drSite=anchor||allowed[0]||S.sites[0]?.name||'';
   p.address=document.getElementById('p-address')?.value.trim()||'';
+  // Calendar color override. Empty input = auto-derive from physician id.
+  // Stored as the hex string from the <input type="color"> picker.
+  const _pcVal = document.getElementById('p-color')?.value || '';
+  p.color = (_pcVal && /^#[0-9a-f]{6}$/i.test(_pcVal)) ? _pcVal.toLowerCase() : null;
   // Ensure these fields exist on legacy physicians loaded from older saves
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
   if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
