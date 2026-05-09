@@ -2575,9 +2575,9 @@ tbody tr:hover{background:var(--bg3)}
   <div class="pg-title">Vacations & Time Off</div>
   <div class="ibox">
     <div class="g3">
-      <div class="fg"><label>Physician</label><select id="v-phys"></select></div>
-      <div class="fg"><label>Start</label><input id="v-start" type="date"></div>
-      <div class="fg"><label>End</label><input id="v-end" type="date"></div>
+      <div class="fg"><label>Physician</label><select id="v-phys" onchange="_validateVacationWindow()"></select></div>
+      <div class="fg"><label>Start</label><input id="v-start" type="date" oninput="_validateVacationWindow()"></div>
+      <div class="fg"><label>End</label><input id="v-end" type="date" oninput="_validateVacationWindow()"></div>
     </div>
     <div class="g2">
       <div class="fg"><label>Type</label><select id="v-type" onchange="document.getElementById('v-soldbk-note').style.display=this.value==='Vacation Sold Back'?'block':'none'"><option>Vacation</option><option>Vacation Sold Back</option><option>CME</option><option>Sick Leave</option><option>Personal</option><option>Conference</option></select></div>
@@ -2586,6 +2586,10 @@ tbody tr:hover{background:var(--bg3)}
     <div class="note ni" id="v-soldbk-note" style="display:none;font-size:11px">
       <strong>Vacation Sold Back:</strong> Weekdays in this period are automatically filled with DR Home shifts and blocked for IR assignment. The physician is considered "working" and available for DR read-from-home.
     </div>
+    <!-- Live guardrail banner: surfaces over-subscription warnings + suggests
+         a nearby clear week. Computed by _validateVacationWindow on every
+         keystroke in the date inputs. -->
+    <div id="v-guardrail" style="margin:6px 0"></div>
     <button class="bp" onclick="addVac()">Add Time Off</button>
   </div>
   <div class="card"><table><thead><tr><th>Physician</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Notes</th><th></th></tr></thead><tbody id="vac-tbody"></tbody></table></div>
