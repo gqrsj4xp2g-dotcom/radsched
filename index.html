@@ -7799,7 +7799,11 @@ function triggerSave(){
   // Snapshot for undo. _undoSuppressNext prevents a snapshot when triggerSave
   // was itself triggered by an undo/redo restore.
   if(typeof _undoSnapshot === 'function') _undoSnapshot('edit');
-  // Debounce: push to Supabase 500ms after last change.
+  // Debounce: push to Supabase after _TUNE.SAVE_DEBOUNCE_MS of quiet
+  // (default 1500 ms — bumped from 500 ms to reduce write volume at
+  // 200-physician scale; see docs/SCALING.md). Local UI feels just as
+  // snappy because triggerSave only enqueues; user-perceived latency
+  // is dominated by the in-memory render not the network round-trip.
   clearTimeout(_saveTimeout);
   _saveTimeout=setTimeout(()=>{
     // Re-check _isRestoring INSIDE the callback. Between scheduling and
