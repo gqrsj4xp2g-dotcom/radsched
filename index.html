@@ -18443,6 +18443,27 @@ function renderSettings(){
   if(typeof loadDebulkingPolicy === 'function') loadDebulkingPolicy();
 }
 
+// ── Credit-target persistence ───────────────────────────────────────
+// Per-practice weekly + monthly credit targets (hours). Surfaced on
+// the desktop widget Credits tab as progress chips.
+function saveCreditTargets(){
+  if(!_adminOnly('change credit targets')) return;
+  if(!S.cfg) S.cfg = {};
+  if(!S.cfg.creditTargets) S.cfg.creditTargets = {};
+  const w = +document.getElementById('cfg-credit-weekly')?.value || 0;
+  const m = +document.getElementById('cfg-credit-monthly')?.value || 0;
+  S.cfg.creditTargets = { weekly: w, monthly: m };
+  if(typeof _audit === 'function') _audit('credit.targets.update', S.cfg.creditTargets);
+  if(typeof triggerSave === 'function') triggerSave();
+}
+function loadCreditTargets(){
+  const t = (S.cfg && S.cfg.creditTargets) || {};
+  const wEl = document.getElementById('cfg-credit-weekly');
+  if(wEl) wEl.value = +(t.weekly || 0);
+  const mEl = document.getElementById('cfg-credit-monthly');
+  if(mEl) mEl.value = +(t.monthly || 0);
+}
+
 // ── Debulking policy persistence ────────────────────────────────────
 // Stores the practice's debulking targets + disabled-days-of-week into
 // S.cfg.debulkingPolicy. The desktop widget reads this when computing
