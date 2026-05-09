@@ -8927,6 +8927,13 @@ const _MIGRATIONS = [
       return d;
     }
   },
+  // v5 → v6: introduce widgetPairings array — admins issue pairing
+  // codes for the desktop widget. Additive; legacy practices empty.
+  { from: 5, to: 6, fn: (d) => {
+      if(!Array.isArray(d.widgetPairings)) d.widgetPairings = [];
+      return d;
+    }
+  },
 ];
 
 function _runMigrations(d){
