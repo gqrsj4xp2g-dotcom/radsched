@@ -10246,23 +10246,67 @@ function _toggleMobileNav(force){
 //
 // Pair: also restores scroll on initial page show (DOMContentLoaded +
 // pageshow) so a hard reload lands the user at the same scroll position.
-const _RS_BUILD_TAG = 'rs-v5'; // bump in lockstep with sw.js CACHE_VERSION
+const _RS_BUILD_TAG = 'rs-v6'; // bump in lockstep with sw.js CACHE_VERSION
 // ── Boot-time page hide guard ──────────────────────────────────────────
 // Force every .page that doesn't have .on class to inline display:none.
 // The CSS rule `.page { display:none }` SHOULD do this, but a screenshot
 // showed Tools-page cards leaking onto the Dashboard — implying CSS was
 // being bypassed somewhere in the field. Inline style is unmissable.
-(function _bootPageGuard(){
-  const sweep = () => {
+//
+// PLUS: a MutationObserver that watches for class changes on .page
+// elements and re-asserts the invariant (only ONE .page can be visible
+// at a time). This catches anything that adds .on to a second page or
+// removes inline display:none without our knowledge.
+window._pageState = function(){
+  // Console diagnostic — paste output here to share state.
+  return Array.from(document.querySelectorAll('.page')).map(p => ({
+    id: p.id,
+    classes: p.className,
+    inlineDisplay: p.style.display || '(empty)',
+    computedDisplay: getComputedStyle(p).display,
+    height: p.offsetHeight,
+  }));
+};
+let _pageGuardObserver = null;
+let _pageGuardSweeping = false;
+function _pageGuardSweep(){
+  if(_pageGuardSweeping) return; // prevent observer recursion
+  _pageGuardSweeping = true;
+  try{
+    const onPages = document.querySelectorAll('.page.on');
+    // Determine the canonical active page: keep the LAST one if multiple.
+    const keepId = onPages.length ? onPages[onPages.length - 1].id : null;
     document.querySelectorAll('.page').forEach(p => {
-      if(p.classList.contains('on')) p.style.display = '';
-      else p.style.display = 'none';
+      const shouldShow = (p.id === keepId);
+      if(shouldShow){
+        if(p.style.display !== '') p.style.display = '';
+        if(!p.classList.contains('on')) p.classList.add('on');
+      } else {
+        if(p.style.display !== 'none') p.style.display = 'none';
+        if(p.classList.contains('on')) p.classList.remove('on');
+      }
     });
+  } finally {
+    _pageGuardSweeping = false;
+  }
+}
+(function _bootPageGuard(){
+  const init = () => {
+    _pageGuardSweep();
+    // Watch every .page for class/style mutations — re-assert invariant.
+    try{
+      _pageGuardObserver = new MutationObserver(() => {
+        if(!_pageGuardSweeping) _pageGuardSweep();
+      });
+      document.querySelectorAll('.page').forEach(p => {
+        _pageGuardObserver.observe(p, { attributes: true, attributeFilter: ['class', 'style'] });
+      });
+    }catch(_){}
   };
   if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', sweep, { once: true });
+    document.addEventListener('DOMContentLoaded', init, { once: true });
   } else {
-    sweep();
+    init();
   }
 })();
 (function _installScrollPersistence(){
