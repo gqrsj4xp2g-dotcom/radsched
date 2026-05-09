@@ -37496,6 +37496,140 @@ function downloadPublicSchedule(){
   }catch(e){ alert('Download failed: ' + (e.message || e)); }
 }
 
+// ── Read-only public URL — passcode-gated multi-month snapshot ──────
+// Pain solved: the existing snapshot is a one-shot HTML download that
+// expires the moment the schedule changes. This generates a 3-month
+// snapshot in a new browser tab so admins can immediately preview what
+// non-login viewers will see. Optional passcode adds simple gating
+// (client-side hash check — deters casual sharing, not real security).
+async function openPublicSchedulePreview(){
+  if(!_adminOnly('preview public schedule')) return;
+  const passcode = (prompt('Optional passcode (leave blank for unprotected):') || '').trim();
+  const html = await generatePublicScheduleHTMLMulti(3, passcode);
+  if(!html) return;
+  try{
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => { try{ URL.revokeObjectURL(url); }catch(_){} }, 60000);
+  }catch(e){ alert('Open failed: ' + e.message); }
+}
+async function downloadPublicScheduleMulti(){
+  if(!_adminOnly('download public schedule')) return;
+  const months = +(prompt('How many months to include (default 3):') || 3) || 3;
+  const passcode = (prompt('Optional passcode (leave blank for unprotected):') || '').trim();
+  const html = await generatePublicScheduleHTMLMulti(months, passcode);
+  if(!html) return;
+  try{
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `RadScheduler-public-${months}mo-${fmtDate(new Date())}.html`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(url); a.remove(); }catch(_){} }, 1000);
+    if(typeof _toast === 'function') _toast(`${months}-month public schedule downloaded.`, 'ok');
+  }catch(e){ alert('Download failed: ' + (e.message || e)); }
+}
+
+async function generatePublicScheduleHTMLMulti(months, passcode){
+  if(!_adminOnly('generate public schedule')) return null;
+  const startYm = (document.getElementById('drc-mo')?.value)
+    || (document.getElementById('irc-mo')?.value)
+    || fmtDate(new Date()).slice(0, 7);
+  const [sy, sm] = startYm.split('-').map(Number);
+  const ymList = [];
+  for(let i = 0; i < (months || 1); i++){
+    const d = new Date(sy, sm - 1 + i, 1);
+    ymList.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const today = fmtDate(new Date());
+  const monthBlock = (ym) => {
+    const [y, m] = ym.split('-').map(Number);
+    const monthLabel = new Date(y, m - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+    const cells = (typeof buildCal === 'function') ? buildCal(ym) : [];
+    const bigCells = cells.map(c => {
+      if(!c.day) return '<td class="empty"></td>';
+      const ds = c.date;
+      const events = [];
+      (S.drShifts || []).filter(s => s.date === ds && s.shift !== 'Home').forEach(s =>
+        events.push(`${s.shift} ${s.site||''}: ${pname(s.physId)}`));
+      (S.irShifts || []).filter(s => s.date === ds && s.shift !== 'Home').forEach(s =>
+        events.push(`IR ${s.shift==='1st'?'Day':s.shift} ${s.site||''}: ${pname(s.physId)}`));
+      (S.irCalls || []).filter(c => c.date === ds || (c.callType==='weekend' && [0,1,2,3].some(o => addDays(c.date, o) === ds))).forEach(c =>
+        events.push(`IR ${c.callType==='weekend'?'WkndCall':'Call'}: ${pname(c.physId)}`));
+      (S.weekendCalls || []).filter(w => (w.satDate||w.date) === ds || w.sunDate === ds).forEach(w =>
+        events.push(`Weekend Call: ${pname(w.physId)}`));
+      (S.holidays || []).filter(h => h.date === ds).forEach(h =>
+        events.push(`Holiday (${h.name}): ${pname(h.physId)}`));
+      return `<td class="day${ds===today?' today':''}">
+        <div class="dnum">${c.day}</div>
+        ${events.slice(0,6).map(e => `<div class="ev">${escHtml(e)}</div>`).join('')}
+      </td>`;
+    });
+    const rows = [];
+    for(let i = 0; i < bigCells.length; i += 7){
+      rows.push('<tr>' + bigCells.slice(i, i + 7).join('') + '</tr>');
+    }
+    return `<section>
+      <h2>${escHtml(monthLabel)}</h2>
+      <table><thead><tr><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table>
+    </section>`;
+  };
+  const practiceName = (typeof _PRACTICES !== 'undefined')
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  // Compute SHA-256 of passcode for the gating prompt; nothing is real
+  // security here — just a "don't share without thinking" friction.
+  let passHash = '';
+  if(passcode){
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(passcode));
+    passHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  const gateScript = passHash ? `
+<script>
+(async function(){
+  const expected = '${passHash}';
+  let pw = sessionStorage.getItem('rs-pub-pw');
+  while(true){
+    if(!pw) pw = prompt('Enter passcode to view this schedule:');
+    if(!pw){ document.body.innerHTML = '<p style="text-align:center;padding:50px;font-family:sans-serif">Access denied.</p>'; return; }
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(pw));
+    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    if(hex === expected){ sessionStorage.setItem('rs-pub-pw', pw); document.documentElement.style.visibility='visible'; return; }
+    pw = null;
+    alert('Wrong passcode.');
+  }
+})();
+</script>
+<style>html{visibility:hidden}</style>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>${escHtml(practiceName)} — Read-only schedule</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 12px; padding: 20px; color: #111; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px 0; }
+  h2 { font-size: 15px; margin: 24px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+  .meta { color: #666; font-size: 11px; margin-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th { background: #f3f4f6; padding: 6px 4px; font-size: 11px; font-weight: 600; }
+  .day { vertical-align: top; border: 1px solid #e5e7eb; padding: 4px; min-height: 80px; height: 80px; font-size: 9.5px; line-height: 1.3; }
+  .empty { background: #fafafa; border: 1px solid #f3f4f6; }
+  .day.today { background: #fef9c3; }
+  .dnum { font-weight: 700; margin-bottom: 2px; }
+  .ev { margin-bottom: 1px; line-height: 1.2; word-break: break-word; }
+  @media print { body { padding: 0; } section { page-break-after: always; } }
+</style>${gateScript}</head>
+<body>
+  <h1>${escHtml(practiceName)}</h1>
+  <div class="meta">Read-only schedule snapshot · ${ymList.length} month${ymList.length===1?'':'s'} · Generated ${escHtml(new Date().toLocaleString())}</div>
+  ${ymList.map(monthBlock).join('')}
+</body>
+</html>`;
+}
+
 // ── Built-in regression suite ───────────────────────────────────────────
 // "Run all checks" — exercises the core machinery (date math, schema
 // validation, save/load round-trip, undo/redo, integrity scanner) against
