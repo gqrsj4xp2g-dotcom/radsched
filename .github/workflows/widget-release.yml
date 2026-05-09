@@ -48,30 +48,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: widget/package-lock.json
       - run: npm ci
-      # Generate the placeholder icon if no real one is committed yet.
-      # Same gradient PNG the build-mac.sh script produces locally.
-      - name: Ensure icon exists
-        run: |
-          if [ ! -f build/icon.png ]; then
-            python3 - <<'PY'
-          import struct, zlib, os
-          W,H=512,512
-          def pc(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
-          ihdr=struct.pack('>IIBBBBB',W,H,8,2,0,0,0)
-          raw=bytearray()
-          for y in range(H):
-            raw.append(0)
-            for x in range(W):
-              t=(x+y)/(W+H)
-              raw+=bytes([int(15+23*t),int(23+100*t),int(42+180*t)])
-          idat=zlib.compress(bytes(raw),9)
-          os.makedirs('build',exist_ok=True)
-          open('build/icon.png','wb').write(b'\x89PNG\r\n\x1a\n'+pc(b'IHDR',ihdr)+pc(b'IDAT',idat)+pc(b'IEND',b''))
-          PY
-          fi
       # electron-builder for macOS — produces both arm64 + x64 .dmg
       # files under widget/dist/. Uses ad-hoc signing (identity: "-")
       # configured in package.json so unsigned distribution works.
+      # Icon is read from build/icon.png (committed to the repo).
       - name: Build macOS .dmg
         run: npx electron-builder --mac --publish never
       - uses: actions/upload-artifact@v4
@@ -95,25 +75,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: widget/package-lock.json
       - run: npm ci
-      # Generate icon via PowerShell GDI+ if not committed.
-      - name: Ensure icon exists
-        shell: pwsh
-        run: |
-          if (-not (Test-Path build/icon.png)) {
-            New-Item -ItemType Directory -Force -Path build | Out-Null
-            Add-Type -AssemblyName System.Drawing
-            $w=512; $h=512
-            $bm = New-Object System.Drawing.Bitmap($w, $h)
-            $g  = [System.Drawing.Graphics]::FromImage($bm)
-            $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-              (New-Object System.Drawing.Point 0,0),
-              (New-Object System.Drawing.Point $w,$h),
-              ([System.Drawing.Color]::FromArgb(15,23,42)),
-              ([System.Drawing.Color]::FromArgb(56,189,248)))
-            $g.FillRectangle($brush, 0, 0, $w, $h)
-            $bm.Save('build/icon.png', [System.Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose(); $bm.Dispose()
-          }
+      # Icon read from build/icon.png (committed to the repo).
       - name: Build Windows .exe
         run: npx electron-builder --win --publish never
       - uses: actions/upload-artifact@v4
