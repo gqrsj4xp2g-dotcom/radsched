@@ -10749,6 +10749,10 @@ function renderDash(){
   document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
   ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
+  // Practice-wide announcements (banners). Each user can dismiss them
+  // independently — dismissals stored in localStorage so they persist
+  // across reloads but don't bloat the shared S state.
+  try{ _renderAnnouncements(); }catch(e){ if(typeof _logError === 'function') _logError('_renderAnnouncements', e.message, e); }
   // Today's-coverage widget (rendered before per-month metrics).
   try{ _renderTodayCoverage(isAdm); }catch(e){ if(typeof _logError === 'function') _logError('_renderTodayCoverage', e.message, e); }
   // Proactive coverage-gap banner: scans next 30 days for unfilled
