@@ -37560,6 +37560,11 @@ function _parsePickWorkbook(rows, prev, sheetName){
 // the SECONDARY column holds shift overlays and Off entries. But
 // we accept either form in either column because some pick sheets blur
 // the convention. Returns nothing — mutates the `week` accumulator.
+//
+// Cells that don't match any pattern get pushed into week.unrecognized
+// so the import preview can surface them — useful when an admin's
+// pick sheet uses a non-standard format and 2nd/3rd shift entries are
+// silently dropped (the original failure mode that surfaced this code).
 function _xlsxClassifyCell(v, week, side){
   if(v == null) return;
   if(typeof v !== 'string'){
@@ -37582,11 +37587,40 @@ function _xlsxClassifyCell(v, week, side){
   if(/\bclosed\b/i.test(lower)) return;
   // Common header / annotation strings that aren't physician entries.
   if(/^(week|day|date|holiday|note[s]?|comment[s]?)\s*[:\-]/i.test(lower)) return;
-  // 2nd shift — separator can be hyphen, en-dash, em-dash, or hyphen-space
-  let m = /^2(?:nd)?\s*shift\s*[-–—]\s*(.*)$/i.exec(s);
-  if(m){ const name = m[1].trim(); if(name) week.shift2.push({raw:s, name}); return; }
-  m = /^3(?:rd)?\s*shift\s*[-–—]\s*(.*)$/i.exec(s);
-  if(m){ const name = m[1].trim(); if(name) week.shift3.push({raw:s, name}); return; }
+  // ── 2nd / 3rd shift — multiple accepted formats ───────────────────
+  // Forward forms ("2nd shift - Lastname"):
+  //   "2nd shift - Smith"   "2 shift: Smith"   "2nd: Smith"
+  //   "2nd shift Smith"     "2nd-Smith"        "2: Smith"
+  // Reverse forms ("Lastname - 2nd shift"):
+  //   "Smith - 2nd shift"   "Smith - 2nd"      "Smith 2nd shift"
+  //   "Smith (2nd shift)"   "Smith (2nd)"      "Smith [2nd]"
+  // The separator can be hyphen, en-dash, em-dash, colon, or whitespace.
+  let m;
+  // Forward 2nd shift
+  m = /^2(?:nd)?\s*(?:shift)?\s*[-–—:]\s*(.+)$/i.exec(s);
+  if(m && /shift|[a-z]{2,}/i.test(s)){
+    const name = m[1].trim().replace(/^[-–—:]\s*/, '');
+    // Disambiguate: "2nd Smith" matches but "21 Smith" should not
+    if(name && /^[A-Za-z]/.test(name)){ week.shift2.push({raw:s, name}); return; }
+  }
+  // Forward 3rd shift
+  m = /^3(?:rd)?\s*(?:shift)?\s*[-–—:]\s*(.+)$/i.exec(s);
+  if(m){
+    const name = m[1].trim().replace(/^[-–—:]\s*/, '');
+    if(name && /^[A-Za-z]/.test(name)){ week.shift3.push({raw:s, name}); return; }
+  }
+  // Reverse 2nd shift: "Smith - 2nd shift" / "Smith - 2nd" / "Smith (2nd)"
+  m = /^(.+?)\s*[-–—:(\[]\s*2(?:nd)?(?:\s*shift)?\s*[)\]]?\s*$/i.exec(s);
+  if(m){
+    const name = m[1].trim();
+    if(name && /^[A-Za-z]/.test(name)){ week.shift2.push({raw:s, name}); return; }
+  }
+  // Reverse 3rd shift: "Smith - 3rd shift" / "Smith - 3rd" / "Smith (3rd)"
+  m = /^(.+?)\s*[-–—:(\[]\s*3(?:rd)?(?:\s*shift)?\s*[)\]]?\s*$/i.exec(s);
+  if(m){
+    const name = m[1].trim();
+    if(name && /^[A-Za-z]/.test(name)){ week.shift3.push({raw:s, name}); return; }
+  }
   // Off - Lastname (vacation overflow / non-pick absence)
   m = /^off\s*[-–—]\s*(.*)$/i.exec(s);
   if(m){ const name = m[1].trim(); if(name) week.off.push({raw:s, name}); return; }
@@ -37602,6 +37636,16 @@ function _xlsxClassifyCell(v, week, side){
   // "Fisher" with no pick number. Treat as a vacation pick.
   if(/^[A-Za-z][A-Za-z\-\s']{1,40}$/.test(s)){
     week.vacation.push({raw:s, name:s});
+    return;
+  }
+  // Anything else didn't match any known pattern. Track it so the import
+  // preview can surface "12 cells weren't recognized — check format".
+  // This is the fix for the original bug where 2nd/3rd shift entries in
+  // a non-standard format were silently dropped.
+  if(!week.unrecognized) week.unrecognized = [];
+  // Cap the list so we don't blow up the preview HTML on a giant sheet.
+  if(week.unrecognized.length < 50){
+    week.unrecognized.push({raw:s, side});
   }
 }
 
