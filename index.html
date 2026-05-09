@@ -35653,6 +35653,154 @@ function _emailPairingCode(physId){
   window.open(`mailto:${phys.email}?subject=${subj}&body=${body}`);
 }
 
+// Persist + load the configured widget download URLs (.dmg + .exe).
+// These are PUBLIC URLs — no secrets — so storage in S.cfg is fine.
+function saveWidgetDownloadUrls(){
+  if(!_adminOnly('change widget download URLs')) return;
+  if(!S.cfg) S.cfg = {};
+  S.cfg.widgetMacUrl = (document.getElementById('cfg-widget-mac-url')?.value || '').trim();
+  S.cfg.widgetWinUrl = (document.getElementById('cfg-widget-win-url')?.value || '').trim();
+  if(typeof triggerSave === 'function') triggerSave();
+}
+function loadWidgetDownloadUrls(){
+  const macEl = document.getElementById('cfg-widget-mac-url');
+  if(macEl) macEl.value = (S.cfg && S.cfg.widgetMacUrl) || '';
+  const winEl = document.getElementById('cfg-widget-win-url');
+  if(winEl) winEl.value = (S.cfg && S.cfg.widgetWinUrl) || '';
+}
+
+// ── Generate install kit (download links + pre-paired code) ────────
+// The "send install kit" UX combines:
+//   1. The OS-specific download URL (configured in S.cfg)
+//   2. A freshly-generated pairing code
+//   3. A copy-able email body the admin can send to the physician
+//
+// On the physician's side, the flow is:
+//   1. Click the OS-specific download link → installer downloads
+//   2. Install the widget (drag to Applications / run installer)
+//   3. Click "Copy pairing code" in the email → code on clipboard
+//   4. Launch the widget → it reads the clipboard → auto-pairs
+//
+// No manual paste, no settings to fiddle with.
+async function generateWidgetInstallKit(){
+  if(!_adminOnly('generate widget install kit')) return;
+  const physId = +document.getElementById('wpair-phys')?.value || 0;
+  if(!physId){ alert('Pick a physician first.'); return; }
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(!phys){ alert('Physician not found.'); return; }
+  const macUrl = (S.cfg && S.cfg.widgetMacUrl) || '';
+  const winUrl = (S.cfg && S.cfg.widgetWinUrl) || '';
+  if(!macUrl && !winUrl){
+    if(!confirm('No widget download URLs are configured yet. Continue and generate the pairing code only? (You can paste the URLs into the install kit manually.)')) return;
+  }
+  // Generate the pairing code by reusing the existing flow.
+  await generateWidgetPairing();
+  const code = document.getElementById('wpair-code-out')?.textContent || '';
+  if(!code){ return; }
+  // Build the install-kit panel — replaces the bare pairing-code panel.
+  const result = document.getElementById('wpair-result');
+  if(!result) return;
+  const days = +document.getElementById('wpair-days')?.value || 30;
+  result.innerHTML = `
+    <div style="background:var(--bg2);border-radius:8px;padding:14px">
+      <div style="font-size:13px;font-weight:700;color:var(--rs-ink);margin-bottom:4px">🚀 Install kit for ${escHtml(phys.last)}, ${escHtml(phys.first)}</div>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:14px">Code valid for ${days} days. Hand the kit to the physician via the channel that works (email, Slack DM, in-person).</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div style="background:white;border:1px solid var(--rs-line);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:36px;line-height:1">🍎</div>
+          <div style="font-size:12px;font-weight:600;margin:6px 0 8px">macOS</div>
+          ${macUrl
+            ? `<a href="${escHtml(macUrl)}" target="_blank" class="bp bsm" style="display:inline-block;text-decoration:none">⬇ Download .dmg</a>`
+            : '<div style="font-size:11px;color:var(--red-t,#dc2626)">URL not configured</div>'}
+        </div>
+        <div style="background:white;border:1px solid var(--rs-line);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:36px;line-height:1">🪟</div>
+          <div style="font-size:12px;font-weight:600;margin:6px 0 8px">Windows</div>
+          ${winUrl
+            ? `<a href="${escHtml(winUrl)}" target="_blank" class="bp bsm" style="display:inline-block;text-decoration:none">⬇ Download .exe</a>`
+            : '<div style="font-size:11px;color:var(--red-t,#dc2626)">URL not configured</div>'}
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Pairing code (auto-detected from clipboard)</div>
+      <code id="wpair-code-out" style="user-select:all;display:block;background:white;color:var(--rs-ink);padding:10px;border-radius:4px;border:1px solid var(--rs-line);font-family:ui-monospace,monospace;font-size:11px;line-height:1.5;word-break:break-all">${escHtml(code)}</code>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="bp bsm" onclick="navigator.clipboard.writeText(document.getElementById('wpair-code-out').textContent).then(() => _toast?.('Pairing code copied.', 'ok'))">📋 Copy code</button>
+        <button class="bsm" onclick="_emailInstallKit(${physId}, ${days})">📧 Email install kit</button>
+        <button class="bsm" onclick="_copyInstallKitText(${physId}, ${days})">📋 Copy email text</button>
+      </div>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin-top:10px;line-height:1.55">
+        <strong>Physician's flow (3 steps):</strong>
+        <ol style="margin:4px 0 0 18px">
+          <li>Click their OS-specific download link → installer downloads → install the widget.</li>
+          <li>Click <em>Copy pairing code</em> in the email → code goes to clipboard.</li>
+          <li>Launch the widget → it auto-pairs from the clipboard. Done.</li>
+        </ol>
+      </div>
+    </div>`;
+}
+
+function _buildInstallKitEmailBody(physId, days){
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  const code = document.getElementById('wpair-code-out')?.textContent || '';
+  const macUrl = (S.cfg && S.cfg.widgetMacUrl) || '';
+  const winUrl = (S.cfg && S.cfg.widgetWinUrl) || '';
+  const practiceName = (typeof _PRACTICES !== 'undefined')
+    ? (_PRACTICES.find(p => p.id === _ROW_ID)?.name || 'RadScheduler')
+    : 'RadScheduler';
+  return [
+    `Hi ${phys?.first || ''},`,
+    ``,
+    `Your RadScheduler desktop widget is ready. Install + pair in under a minute:`,
+    ``,
+    `── Step 1: Download (pick your OS) ──`,
+    macUrl ? `  macOS:   ${macUrl}` : `  macOS:   (not configured — ask admin)`,
+    winUrl ? `  Windows: ${winUrl}` : `  Windows: (not configured — ask admin)`,
+    ``,
+    `── Step 2: Install ──`,
+    `  • macOS: open the .dmg, drag the app to Applications, then`,
+    `    right-click → Open the first time (to bypass the security warning).`,
+    `  • Windows: run the .exe installer, follow the prompts. If`,
+    `    SmartScreen warns, click "More info" → "Run anyway".`,
+    ``,
+    `── Step 3: Pair ──`,
+    `  • Copy the pairing code below to your clipboard.`,
+    `  • Launch the widget — it'll auto-detect the code and pair itself.`,
+    `  • If auto-pair doesn't fire, click "Paste from clipboard" inside`,
+    `    the widget.`,
+    ``,
+    `── Pairing code (valid ${days} days) ──`,
+    code,
+    ``,
+    `That's it. The widget will refresh every 5 minutes and show your`,
+    `today's wRVU goal, scheduled shifts, drive-time credit, and`,
+    `debulking eligibility. Once your practice's PACS plugin is live,`,
+    `it'll also show your live study count.`,
+    ``,
+    `If anything goes wrong, ping ${practiceName} admin to issue a fresh`,
+    `code or troubleshoot.`,
+    ``,
+    `— ${practiceName}`,
+  ].join('\n');
+}
+
+function _emailInstallKit(physId, days){
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(!phys || !phys.email){
+    alert('Physician has no email on file. Add it on the profile first, or use "Copy email text" instead.');
+    return;
+  }
+  const subj = encodeURIComponent(`RadScheduler desktop widget — install kit for ${phys.first}`);
+  const body = encodeURIComponent(_buildInstallKitEmailBody(physId, days));
+  window.open(`mailto:${phys.email}?subject=${subj}&body=${body}`);
+}
+
+function _copyInstallKitText(physId, days){
+  const text = _buildInstallKitEmailBody(physId, days);
+  navigator.clipboard.writeText(text).then(() => {
+    if(typeof _toast === 'function') _toast('Install-kit message copied. Paste into Slack/email/etc.', 'ok');
+  }).catch(() => alert('Copy failed — select the text in the email body and copy manually.'));
+}
+
 // Render the widget page: physician dropdown + active pairings list.
 function renderWidgetPage(){
   if(!CU || CU.role !== 'admin') return;
