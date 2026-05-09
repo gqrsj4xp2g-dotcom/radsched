@@ -38032,11 +38032,21 @@ async function applyPickImport(){
     ...sh.map(s => s.date),
   ].filter(Boolean).sort();
   const firstYM = (allDates[0] || '').slice(0, 7);
+  // Per-shift type counts — surfacing these directly in the success
+  // message tells the user that 2nd / 3rd shifts WERE imported (the
+  // original confusion was that they weren't showing up because the
+  // classifier didn't recognize the format; this is belt-and-suspenders).
+  const s2Added = sh.filter(s => s.shift === '2nd').length;
+  const s3Added = sh.filter(s => s.shift === '3rd').length;
   document.getElementById('xl-pick-preview').innerHTML = `
     <div class="note ns" style="line-height:1.55">
       ✓ Imported <strong>${vacAdded}</strong> vacation record${vacAdded===1?'':'s'}
-      and <strong>${shAdded}</strong> shift entry / entries.
+      and <strong>${shAdded}</strong> shift entry / entries
+      ${shAdded ? `(<strong>${s2Added}</strong> × 2nd · <strong>${s3Added}</strong> × 3rd)` : ''}.
       ${(vacSkipped + shSkipped) ? `<br><span style="color:var(--rs-ink-3);font-size:11.5px">${vacSkipped + shSkipped} duplicate${(vacSkipped + shSkipped)===1?'':'s'} skipped.</span>` : ''}
+      ${shAdded === 0 && (data.allWeeks||[]).some(w => w.shift2.length || w.shift3.length)
+        ? `<br><span style="color:var(--amber,#d97706);font-size:11.5px">⚠ Found ${(data.allWeeks||[]).reduce((n,w)=>n+w.shift2.length+w.shift3.length,0)} shift entries in the file but ALL were duplicates of existing data — nothing new to add.</span>`
+        : ''}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         ${firstYM ? `
           <button class="bp" onclick="_jumpToCalendar('dr-cal', ${JSON.stringify(firstYM).replace(/"/g,'&quot;')})" style="padding:9px 16px">📅 View in DR Calendar</button>
