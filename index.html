@@ -33482,6 +33482,98 @@ function findNextAvailable(physId, fromDate, kind){
   return null;
 }
 
+// ── Shift Trade Marketplace (one-sided give-up board) ─────────────────
+// Different from existing swaps (two-sided pairing): a physician offers
+// their shift; any qualified physician can claim it, first-come-first-
+// served. The offer references the original shift; on claim, the shift's
+// physId is reassigned and the offer is marked claimed.
+function offerShiftForTrade(kind, shiftId, reason){
+  const arr = kind === 'dr' ? S.drShifts : kind === 'ir' ? S.irShifts : null;
+  if(!arr){ if(typeof _toast === 'function') _toast('Unknown shift kind.', 'err'); return; }
+  const s = arr.find(x => x.id === shiftId);
+  if(!s){ if(typeof _toast === 'function') _toast('Shift not found.', 'err'); return; }
+  if(!Array.isArray(S.shiftOffers)) S.shiftOffers = [];
+  // Don't double-post.
+  if(S.shiftOffers.some(o => o.kind === kind && o.shiftId === shiftId && !o.claimedBy && !o.cancelled)){
+    if(typeof _toast === 'function') _toast('This shift is already on the marketplace.', 'info');
+    return;
+  }
+  const offer = {
+    id: S.nextId++,
+    kind, shiftId,
+    fromPhysId: s.physId,
+    date: s.date,
+    shift: s.shift || '',
+    site: s.site || '',
+    sub: s.sub || '',
+    shiftLabel: `${kind === 'ir' ? 'IR ' : ''}${s.shift || ''}`,
+    reason: (reason || '').slice(0, 200),
+    postedAt: new Date().toISOString(),
+    claimedBy: null,
+    claimedAt: null,
+    cancelled: false,
+  };
+  S.shiftOffers.push(offer);
+  if(typeof _audit === 'function') _audit('shiftOffer.posted', { offerId: offer.id, kind, shiftId, fromPhysId: s.physId, date: s.date });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function') _toast('Shift offered for trade. Anyone qualified can claim it.', 'ok');
+}
+
+function claimOfferedShift(offerId, claimerPhysId){
+  if(!Array.isArray(S.shiftOffers)) return;
+  const offer = S.shiftOffers.find(o => o.id === offerId);
+  if(!offer || offer.claimedBy || offer.cancelled){
+    if(typeof _toast === 'function') _toast('That offer is no longer available.', 'warn');
+    if(typeof _afterMutation === 'function') _afterMutation();
+    return;
+  }
+  if(claimerPhysId === offer.fromPhysId){
+    if(typeof _toast === 'function') _toast('You can\'t claim your own offer.', 'warn');
+    return;
+  }
+  // Find the underlying shift; reassign physId.
+  const arr = offer.kind === 'dr' ? S.drShifts : offer.kind === 'ir' ? S.irShifts : null;
+  const s = arr?.find(x => x.id === offer.shiftId);
+  if(!s){
+    if(typeof _toast === 'function') _toast('Original shift no longer exists.', 'err');
+    offer.cancelled = true;
+    if(typeof triggerSave === 'function') triggerSave();
+    return;
+  }
+  // Light eligibility check — vacation, conflict, allowed-sites.
+  const claimer = (S.physicians || []).find(p => p.id === claimerPhysId);
+  if(!claimer){ if(typeof _toast === 'function') _toast('Claiming physician not found.', 'err'); return; }
+  if((S.vacations || []).some(v => v.physId === claimerPhysId && v.start <= s.date && v.end >= s.date)){
+    if(typeof _toast === 'function') _toast(`${claimer.last} is on vacation that day.`, 'warn');
+    return;
+  }
+  if(arr.some(x => x.physId === claimerPhysId && x.date === s.date && x.shift !== 'Home' && x.id !== s.id)){
+    if(typeof _toast === 'function') _toast(`${claimer.last} already has a shift that day.`, 'warn');
+    return;
+  }
+  const prevPhysId = s.physId;
+  s.physId = claimerPhysId;
+  s.notes = (s.notes ? s.notes + ' ' : '') + `(traded from #${prevPhysId})`;
+  offer.claimedBy = claimerPhysId;
+  offer.claimedAt = new Date().toISOString();
+  if(typeof _audit === 'function') _audit('shiftOffer.claimed', { offerId, claimerPhysId, prevPhysId, kind: offer.kind, shiftId: offer.shiftId, date: s.date });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function') _toast(`${claimer.last} now has the ${offer.shiftLabel} on ${s.date}.`, 'ok');
+}
+
+function cancelShiftOffer(offerId){
+  if(!Array.isArray(S.shiftOffers)) return;
+  const offer = S.shiftOffers.find(o => o.id === offerId);
+  if(!offer || offer.claimedBy){ return; }
+  offer.cancelled = true;
+  if(typeof _audit === 'function') _audit('shiftOffer.cancelled', { offerId });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function') _toast('Offer withdrawn.', 'info');
+}
+
 // ── Smart Vacation Guardrails ──────────────────────────────────────────
 // Live "is this date range over-subscribed?" check on the vacations
 // form. Surfaces a warning banner + suggests a nearby clear week so the
