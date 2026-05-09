@@ -34163,6 +34163,90 @@ if(typeof navigator !== 'undefined' && 'serviceWorker' in navigator){
   });
 }
 
+// ── Schedule Lock (published months) ────────────────────────────────
+// Pain solved: admin publishes the schedule for a month, then someone
+// accidentally re-runs auto-assign or drags a shift the wrong way and
+// distributes a different schedule. Locking marks a YYYY-MM as
+// "published" — mutations to that month require explicit unlock.
+//
+// This is *advisory* — it does not modify Supabase RLS. It's a UX guard
+// that catches the 99% case of accidental edits. Determined attackers
+// can edit S.lockedMonths directly; the audit log records every lock /
+// unlock so the practice has accountability.
+
+// Is the given date (or YYYY-MM) inside a locked month?
+function isMonthLocked(dateOrYm){
+  if(!Array.isArray(S.lockedMonths) || !S.lockedMonths.length) return false;
+  if(!dateOrYm) return false;
+  const ym = String(dateOrYm).slice(0, 7);
+  return S.lockedMonths.includes(ym);
+}
+
+// Generic guard for inline mutation handlers. Use as:
+//   if(!_canEditDate(s.date)) return;
+// Returns true (proceed) or false (blocked + toast surfaced).
+function _canEditDate(dateOrYm){
+  if(!isMonthLocked(dateOrYm)) return true;
+  if(typeof _toast === 'function')
+    _toast('🔒 ' + String(dateOrYm).slice(0,7) + ' is locked. Unlock from Settings to edit.', 'warn');
+  return false;
+}
+
+// Lock a YYYY-MM. Admin-only. Idempotent.
+function lockMonth(ym){
+  if(!_adminOnly('lock month')) return;
+  if(!ym || !/^\d{4}-\d{2}$/.test(ym)){ alert('Invalid month: ' + ym); return; }
+  if(!Array.isArray(S.lockedMonths)) S.lockedMonths = [];
+  if(S.lockedMonths.includes(ym)){
+    if(typeof _toast === 'function') _toast(`${ym} is already locked.`, 'info');
+    return;
+  }
+  S.lockedMonths.push(ym);
+  if(typeof _audit === 'function') _audit('schedule.lock', { ym });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast(`🔒 ${ym} locked. Edits will be blocked until unlocked.`, 'ok');
+  if(typeof renderLockedMonths === 'function') renderLockedMonths();
+}
+
+// Unlock a YYYY-MM. Admin-only. Records the unlock in the audit log so
+// the practice can see who removed the safety guard.
+async function unlockMonth(ym){
+  if(!_adminOnly('unlock month')) return;
+  if(!Array.isArray(S.lockedMonths)) return;
+  if(!S.lockedMonths.includes(ym)) return;
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Unlock ${ym}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.55">Once unlocked, anyone with admin access can modify shifts in this month. The unlock action is logged in the audit trail.</div>`,
+        confirmLabel: 'Unlock',
+        destructive: false,
+      })
+    : confirm(`Unlock ${ym}? Edits will be allowed.`);
+  if(!ok) return;
+  S.lockedMonths = S.lockedMonths.filter(m => m !== ym);
+  if(typeof _audit === 'function') _audit('schedule.unlock', { ym, by: CU?.id });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast(`🔓 ${ym} unlocked.`, 'info');
+  if(typeof renderLockedMonths === 'function') renderLockedMonths();
+}
+
+// Render the list of locked months in the Settings panel.
+function renderLockedMonths(){
+  const host = document.getElementById('locked-months-list');
+  if(!host) return;
+  const list = (S.lockedMonths || []).slice().sort();
+  if(!list.length){
+    host.innerHTML = '<div class="note ni" style="font-size:11.5px">No months locked. Locked months block accidental edits.</div>';
+    return;
+  }
+  host.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">${
+    list.map(ym => `<span class="tag" style="background:var(--bg2);color:var(--rs-ink-2);padding:4px 10px;border-radius:14px;font-size:12px;display:inline-flex;align-items:center;gap:6px">
+      🔒 ${escHtml(ym)}
+      <button class="bxs" style="border:0;background:transparent;color:var(--red-t);cursor:pointer;font-size:13px;padding:0" onclick="unlockMonth('${escHtml(ym)}')" title="Unlock ${escHtml(ym)}">✕</button>
+    </span>`).join('')
+  }</div>`;
+}
+
 // ── Today's Coverage widget ────────────────────────────────────────────
 // Renders a glanceable "who's where right now" panel on the dashboard:
 // every shift assigned to today, the on-call rotation, and who's out.
