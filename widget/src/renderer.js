@@ -547,9 +547,10 @@ async function refresh(){
 function bindHeader(){
   document.getElementById('btn-refresh').onclick = () => refresh();
   document.getElementById('btn-settings').onclick = async () => {
-    const choice = prompt('Type "repair" to re-pair, "url" to open RadScheduler in your browser, or close to cancel.');
+    const choice = prompt('Type "repair" to re-pair, "url" to open RadScheduler in your browser, "update" to check for updates, or close to cancel.');
     if(choice === 'repair'){ await window.rsWidget.clearPairing(); renderPairing(); }
     else if(choice === 'url'){ await window.rsWidget.openExternal('https://radsched.org'); }
+    else if(choice === 'update'){ if(window.rsWidget.checkUpdates) window.rsWidget.checkUpdates(); }
   };
   document.getElementById('btn-pin').onclick = async () => {
     _alwaysOnTop = !_alwaysOnTop;
@@ -558,6 +559,73 @@ function bindHeader(){
   };
   if(window.rsWidget.onResetPairing) window.rsWidget.onResetPairing(() => renderPairing());
 }
+
+// ─── Auto-update banner ─────────────────────────────────────────
+// Subscribed to two main-process events:
+//   • rs:update-available — a newer release exists; show the banner
+//   • rs:update-info      — interactive feedback (uptodate / no-asset / error)
+// The banner is dismissible per-version: once the user clicks "Later",
+// we remember that version in localStorage so we don't re-prompt for
+// the same release. New releases reset that.
+function _annDismissedKey(version){ return 'rs-widget-update-dismissed:' + version; }
+function _annIsDismissed(version){
+  try{ return !!localStorage.getItem(_annDismissedKey(version)); }
+  catch(_){ return false; }
+}
+function _annDismiss(version){
+  try{ localStorage.setItem(_annDismissedKey(version), '1'); }
+  catch(_){}
+}
+
+function showUpdateBanner(payload){
+  if(!payload || !payload.latestVersion || !payload.downloadUrl) return;
+  if(_annIsDismissed(payload.latestVersion)) return;
+  const el = document.getElementById('update-banner');
+  if(!el) return;
+  const sizeStr = payload.assetSizeMB ? ` (${payload.assetSizeMB} MB)` : '';
+  el.innerHTML = `
+    <div class="text">
+      🚀 Update available: <strong>v${escHtml(payload.latestVersion)}</strong>
+      <span style="color:var(--ink3)">(you have v${escHtml(payload.currentVersion)})</span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Download${escHtml(sizeStr)}</button>
+      <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
+      <button class="btn ghost" id="upd-later" title="Hide until next version">Later</button>
+    </div>`;
+  el.style.display = 'flex';
+  document.getElementById('upd-download').onclick = () => {
+    window.rsWidget.openExternal(payload.downloadUrl);
+  };
+  document.getElementById('upd-notes').onclick = () => {
+    window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
+  };
+  document.getElementById('upd-later').onclick = () => {
+    _annDismiss(payload.latestVersion);
+    el.style.display = 'none';
+  };
+}
+
+function showUpdateInfo(info){
+  if(!info) return;
+  const el = document.getElementById('update-banner');
+  if(!el) return;
+  // Interactive responses (from the Settings menu "update" action).
+  // These auto-dismiss after a few seconds.
+  let msg = '';
+  if(info.kind === 'uptodate') msg = `✓ You're on the latest version (v${escHtml(info.currentVersion)}).`;
+  else if(info.kind === 'no-release') msg = `ⓘ No published release yet. Ask your admin to run publish-release.sh.`;
+  else if(info.kind === 'no-asset') msg = `⚠ Latest release v${escHtml(info.latestVersion)} doesn't include a build for this OS.`;
+  else if(info.kind === 'error') msg = `⚠ Update check failed: ${escHtml(info.detail || '')}`;
+  if(!msg) return;
+  el.innerHTML = `<div class="text">${msg}</div><div class="actions"><button class="btn ghost" id="upd-close">✕</button></div>`;
+  el.style.display = 'flex';
+  document.getElementById('upd-close').onclick = () => { el.style.display = 'none'; };
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+if(window.rsWidget.onUpdateAvailable) window.rsWidget.onUpdateAvailable(showUpdateBanner);
+if(window.rsWidget.onUpdateInfo) window.rsWidget.onUpdateInfo(showUpdateInfo);
 
 // Boot
 bindHeader();

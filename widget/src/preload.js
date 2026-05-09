@@ -16,5 +16,11 @@ contextBridge.exposeInMainWorld('rsWidget', {
   // the code from their email, launches the widget, the widget grabs
   // the code from the clipboard and self-pairs.
   readClipboard:   () => ipcRenderer.invoke('rs:read-clipboard'),
+  // Auto-update bridges — main polls GitHub Releases and pushes
+  // events back here when a new version is available.
+  checkUpdates:    () => ipcRenderer.invoke('rs:check-updates'),
+  getVersion:      () => ipcRenderer.invoke('rs:get-version'),
+  onUpdateAvailable: (cb) => ipcRenderer.on('rs:update-available', (_, data) => cb(data)),
+  onUpdateInfo:    (cb) => ipcRenderer.on('rs:update-info', (_, data) => cb(data)),
   onResetPairing:  (cb) => ipcRenderer.on('rs:reset-pairing', cb),
 });

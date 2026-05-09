@@ -13,12 +13,161 @@
  * launches read the stored code and skip the pairing screen.
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, safeStorage, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, safeStorage, shell, clipboard, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow = null;
 let tray = null;
+
+// ─── Auto-update — GitHub Releases poll ──────────────────────────
+// Every 6 hours (and once on launch), the widget queries the public
+// GitHub Releases API for the most recent widget release. If the tag
+// version is greater than this app's package.json version AND a
+// platform-appropriate asset exists, the renderer is notified — it
+// shows a non-modal banner with a "Download update" button that opens
+// the asset URL in the system browser.
+//
+// We deliberately use the "open the download in the browser" pattern
+// instead of in-process auto-installation:
+//   • Works for unsigned + ad-hoc-signed builds (no Squirrel.Mac
+//     code-signing requirement)
+//   • The user remains in control (sees the file size, can cancel)
+//   • One mechanism for both macOS + Windows
+// When you eventually code-sign for production distribution, switching
+// to electron-updater for in-place auto-install is a 30-line change
+// — wrap this and call appUpdater.checkForUpdates() instead.
+
+const UPDATE_CHECK_HOURS = 6;
+// The repo + tag prefix have to match what publish-release.sh uses.
+const UPDATE_REPO = 'gqrsj4xp2g-dotcom/radsched';
+const UPDATE_TAG_PREFIX = 'widget-v';
+
+let _lastUpdateCheck = 0;
+
+function _versionCmp(a, b){
+  const pa = String(a||'').split('.').map(n => +n || 0);
+  const pb = String(b||'').split('.').map(n => +n || 0);
+  for(let i = 0; i < Math.max(pa.length, pb.length); i++){
+    const da = pa[i] || 0, db = pb[i] || 0;
+    if(da !== db) return da - db;
+  }
+  return 0;
+}
+
+// Returns the asset object that matches this OS + arch from the latest
+// release. Naming convention is whatever electron-builder produces:
+//   • macOS arm64:  "RadScheduler Widget-1.0.1-arm64.dmg"
+//   • macOS x64:    "RadScheduler Widget-1.0.1.dmg"
+//   • Windows x64:  "RadScheduler Widget Setup 1.0.1.exe"
+function _pickAssetForPlatform(assets){
+  if(!Array.isArray(assets) || !assets.length) return null;
+  const platform = process.platform;
+  const arch = process.arch;
+  if(platform === 'darwin'){
+    // Prefer arch-matching .dmg; fall back to the first .dmg we find.
+    const armish = assets.find(a => a.name.toLowerCase().includes('arm64') && a.name.toLowerCase().endsWith('.dmg'));
+    if(arch === 'arm64' && armish) return armish;
+    const intel = assets.find(a => /\.dmg$/i.test(a.name) && !/arm64/i.test(a.name));
+    if(arch !== 'arm64' && intel) return intel;
+    return armish || intel || assets.find(a => /\.dmg$/i.test(a.name));
+  }
+  if(platform === 'win32'){
+    return assets.find(a => /\.exe$/i.test(a.name));
+  }
+  // Linux / others: AppImage if present, otherwise nothing.
+  return assets.find(a => /\.AppImage$/i.test(a.name));
+}
+
+async function checkForUpdates(opts){
+  opts = opts || {};
+  const interactive = !!opts.interactive;
+  _lastUpdateCheck = Date.now();
+  // Prevent rapid manual re-clicks from hammering the API; 10s cooldown.
+  if(opts._fromInterval && Date.now() - (checkForUpdates._lastApiAt || 0) < 5000) return;
+  checkForUpdates._lastApiAt = Date.now();
+  return new Promise((resolve) => {
+    const req = net.request({
+      url: `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`,
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'RadScheduler-Widget' },
+      redirect: 'follow',
+    });
+    let body = '';
+    req.on('response', (resp) => {
+      if(resp.statusCode === 404){
+        // No releases yet — silently no-op unless the user clicked manually.
+        if(interactive && mainWindow){
+          mainWindow.webContents.send('rs:update-info', { kind:'no-release', currentVersion: app.getVersion() });
+        }
+        resolve(null); return;
+      }
+      if(resp.statusCode !== 200){
+        if(interactive && mainWindow){
+          mainWindow.webContents.send('rs:update-info', { kind:'error', detail: 'GitHub API returned ' + resp.statusCode });
+        }
+        resolve(null); return;
+      }
+      resp.on('data', (chunk) => body += chunk.toString());
+      resp.on('end', () => {
+        try{
+          const release = JSON.parse(body);
+          // Tag format: "widget-v1.0.1" → "1.0.1"
+          const tag = release.tag_name || '';
+          const m = new RegExp('^' + UPDATE_TAG_PREFIX.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\$&') + '?(\\d+\\.\\d+\\.\\d+)').exec(tag);
+          const latestVer = m ? m[1] : null;
+          const currentVer = app.getVersion();
+          if(!latestVer){
+            if(interactive && mainWindow){
+              mainWindow.webContents.send('rs:update-info', { kind:'no-release', currentVersion: currentVer });
+            }
+            resolve(null); return;
+          }
+          if(_versionCmp(latestVer, currentVer) <= 0){
+            // Already up to date.
+            if(interactive && mainWindow){
+              mainWindow.webContents.send('rs:update-info', { kind:'uptodate', currentVersion: currentVer });
+            }
+            resolve(null); return;
+          }
+          const asset = _pickAssetForPlatform(release.assets);
+          if(!asset){
+            if(interactive && mainWindow){
+              mainWindow.webContents.send('rs:update-info', { kind:'no-asset', latestVersion: latestVer, releaseUrl: release.html_url });
+            }
+            resolve(null); return;
+          }
+          // Notify the renderer to show the update banner.
+          if(mainWindow){
+            mainWindow.webContents.send('rs:update-available', {
+              currentVersion: currentVer,
+              latestVersion: latestVer,
+              downloadUrl: asset.browser_download_url,
+              assetName: asset.name,
+              assetSizeMB: Math.round((asset.size || 0) / 1024 / 1024),
+              releaseUrl: release.html_url,
+              releaseNotes: (release.body || '').slice(0, 800),
+            });
+          }
+          resolve(latestVer);
+        } catch(e){
+          console.warn('[update] parse failed:', e);
+          if(interactive && mainWindow){
+            mainWindow.webContents.send('rs:update-info', { kind:'error', detail: String(e.message || e) });
+          }
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', (err) => {
+      console.warn('[update] request failed:', err);
+      if(interactive && mainWindow){
+        mainWindow.webContents.send('rs:update-info', { kind:'error', detail: String(err.message || err) });
+      }
+      resolve(null);
+    });
+    req.end();
+  });
+}
 
 // ─── Pairing-code persistence ─────────────────────────────────────
 // We use safeStorage when the OS supports it (mac/Win), falling back
@@ -93,6 +242,7 @@ function createTray(){
     { label: 'Show widget', click: () => { if(mainWindow) mainWindow.show(); else createWindow(); } },
     { label: 'Re-pair…', click: () => { clearPairing(); if(mainWindow){ mainWindow.webContents.send('rs:reset-pairing'); mainWindow.show(); } } },
     { type: 'separator' },
+    { label: 'Check for updates…', click: () => { if(mainWindow) mainWindow.show(); checkForUpdates({ interactive: true }); } },
     { label: 'About RadScheduler Widget', click: () => shell.openExternal('https://github.com/gqrsj4xp2g-dotcom/radsched') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
@@ -115,6 +265,12 @@ ipcMain.handle('rs:set-always-on-top', (_, on) => {
   if(mainWindow) mainWindow.setAlwaysOnTop(!!on);
   return !!on;
 });
+// Renderer-triggered manual update check (from the "Check now" link
+// inside the update banner).
+ipcMain.handle('rs:check-updates', () => checkForUpdates({ interactive: true }));
+// Returns the running app's version so the renderer can display
+// "v1.0.1 → v1.0.2" deltas.
+ipcMain.handle('rs:get-version', () => app.getVersion());
 
 // ─── App lifecycle ───────────────────────────────────────────────
 // Single-instance lock so a second launch focuses the existing window
@@ -132,6 +288,13 @@ if(!gotLock){
     app.on('activate', () => {
       if(BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+    // Schedule update checks. First check fires 30s after launch so
+    // the dashboard has time to settle; then every UPDATE_CHECK_HOURS.
+    // Both are silent — only fires the renderer event when an update
+    // is actually available; "Check for updates…" in the tray menu is
+    // the interactive path.
+    setTimeout(() => { checkForUpdates({ _fromInterval: true }); }, 30 * 1000);
+    setInterval(() => { checkForUpdates({ _fromInterval: true }); }, UPDATE_CHECK_HOURS * 60 * 60 * 1000);
   });
   app.on('window-all-closed', () => {
     if(process.platform !== 'darwin') app.quit();

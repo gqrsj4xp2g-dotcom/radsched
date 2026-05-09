@@ -190,6 +190,62 @@ If you don't want to host installer URLs (or you're testing in dev mode), use th
 
 ---
 
+## Auto-update (every release reaches every physician)
+
+Once the widget is installed, it polls GitHub Releases every 6 hours (and once 30 seconds after launch) for newer published versions. When one is found, a banner appears at the top of the widget:
+
+```
+🚀 Update available: v1.0.2 (you have v1.0.1)    [⬇ Download (109 MB)] [Notes] [Later]
+```
+
+- **⬇ Download** opens the OS-appropriate `.dmg` or `.exe` in the system browser. The physician installs it the same way as the original (drag to Applications / run installer).
+- **Notes** opens the GitHub Release page so they can see what changed.
+- **Later** dismisses the banner for that specific version (it'll re-appear the next time you ship).
+
+Physicians can also force a check anytime via the tray menu → **Check for updates…**.
+
+### How to ship an update
+
+For each new widget release:
+
+1. Make your code changes in `widget/src/`
+2. Bump the version in `widget/package.json`:
+   ```jsonc
+   { "version": "1.0.2" }   // was "1.0.1"
+   ```
+3. Rebuild + republish:
+   ```bash
+   cd ~/RadApp/widget
+   ./build-mac.sh           # rebuilds dist/*.dmg
+   # build-win.cmd on a Windows box if you ship Windows updates
+   ./publish-release.sh     # uploads to GitHub Releases as widget-vX.Y.Z
+   ```
+
+Within 6 hours every physician's widget shows the update banner. If you want to push faster, ask them to use **Check for updates…** in the tray menu — fires the API request immediately.
+
+### Why not "in-place" auto-update?
+
+Electron supports full background download + auto-install via the `electron-updater` package, but it requires **code-signed builds** on macOS to satisfy Gatekeeper. We use the simpler "browser-download" pattern instead so:
+
+- Unsigned builds work fine (typical for internal practice distribution)
+- The physician sees the file size + can cancel mid-download
+- One mechanism for both macOS and Windows
+
+When you eventually obtain code-signing certs and want in-place updates, the swap is ~30 lines in `widget/src/main.js` (replace the `checkForUpdates()` body with `appUpdater.checkForUpdates()`).
+
+### Configuring the update repo
+
+The poll target is hardcoded at the top of `widget/src/main.js`:
+
+```js
+const UPDATE_REPO = 'gqrsj4xp2g-dotcom/radsched';
+const UPDATE_TAG_PREFIX = 'widget-v';
+```
+
+Change those if you fork the repo or use a different tag scheme.
+
+---
+
 ## Verify before distribution: dev-mode test
 
 Before building the installer, you can run the widget in dev mode to confirm everything works:
