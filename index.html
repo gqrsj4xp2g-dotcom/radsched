@@ -18059,6 +18059,14 @@ function saveCfg(){
   S.cfg.irMax       = S.cfg.irDailyMax; // legacy alias
   S.cfg.rest        = _readNum('cfg-rest',      1, 0, 14);
   S.cfg.anchorPct   = _readNum('cfg-anc',      70, 0, 100);
+  S.cfg.driveTimeWRVUPerHour = _readNum('cfg-dt-wrvu', 0, 0, 20);
+  // wRVU defaults — read each input from the populated grid.
+  if(!S.cfg.wRVUDefaults) S.cfg.wRVUDefaults = {};
+  document.querySelectorAll('[data-wrvu-key]').forEach(inp => {
+    const k = inp.dataset.wrvuKey;
+    const v = +inp.value;
+    if(k && v >= 0 && Number.isFinite(v)) S.cfg.wRVUDefaults[k] = v;
+  });
   // Solver selector. Falls back to 'greedy' if no radio is set.
   var solverRadio = document.querySelector('input[name="cfg-solver"]:checked');
   S.cfg.useSolver = solverRadio ? solverRadio.value : 'greedy';
