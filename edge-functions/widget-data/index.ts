@@ -1,9 +1,9 @@
-// widget-data — read-only proxy for the RadScheduler desktop widget.
+// widget-data — read/write proxy for the RadScheduler desktop widget.
 //
 // Why this exists: the widget runs as an unauthenticated public client
 // (only the practice's anon key, no user JWT). The radscheduler table's
-// RLS policies require an authenticated user, so a direct PostgREST read
-// returns 401 / "permission denied for table radscheduler" (PG 42501).
+// RLS policies require authenticated access, so direct PostgREST access
+// returns 401/permission denied for table radscheduler.
 //
 // Auth model:
 //   1. The widget POSTs the full pairing code (the same base64 blob
@@ -12,13 +12,18 @@
 //      embedded in the payload as the shared secret. This proves the
 //      code was issued by someone with admin access to the practice.
 //   3. On verify-success we use the SERVICE ROLE key (server-side only)
-//      to fetch the practice row. Bypasses RLS but only for codes we
-//      cryptographically verified.
+//      to fetch / update the practice row. Bypasses RLS but only for
+//      codes we cryptographically verified.
 //
-// Trade-off: the anon key is public-by-design, so anyone who CAPTURES
-// a pairing code can re-use it until it expires. Same threat model as
-// the existing widget design — pairings expire (default 30d) and admins
-// can revoke them via S.widgetPairings.
+// Operations (all POST, body shapes below):
+//   { code }
+//     → returns { data: <full practice JSON> }
+//   { code, action: 'add-credit', credit: {ts, hours, reason} }
+//     → appends to practice.physicianCredits, returns { ok, credit }
+//   { code, action: 'edit-credit', creditId, patch: {ts?, hours?, reason?} }
+//     → updates the matching credit by id (must belong to this physId)
+//   { code, action: 'delete-credit', creditId }
+//     → removes the credit (must belong to this physId)
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -49,82 +54,138 @@ async function hmacB64Url(secret: string, msg: string): Promise<string> {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+function jsonResp(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+async function verifyAndDecode(code: string): Promise<any> {
+  if (!code || typeof code !== 'string') throw new Error('missing code');
+  let payload: any;
+  try { payload = JSON.parse(fromB64Url(code.trim())); }
+  catch (_) { throw new Error('malformed code'); }
+  if (!payload.sig || !payload.sbAnonKey || !payload.practiceId || !payload.physId) {
+    throw new Error('pairing payload missing required fields');
+  }
+  const { sig, ...rest } = payload;
+  const expected = await hmacB64Url(payload.sbAnonKey, JSON.stringify(rest));
+  if (expected !== sig) throw new Error('signature mismatch');
+  if (payload.exp && new Date(payload.exp).getTime() < Date.now()) {
+    throw new Error('pairing expired');
+  }
+  return payload;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'POST only' }), {
-      status: 405,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-  try {
-    const body = await req.json();
-    const code = (body && body.code) || '';
-    if (!code || typeof code !== 'string') {
-      return new Response(JSON.stringify({ error: 'missing code' }), {
-        status: 400,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    // Decode the pairing payload.
-    let payload: any;
-    try { payload = JSON.parse(fromB64Url(code.trim())); }
-    catch (_) {
-      return new Response(JSON.stringify({ error: 'malformed code' }), {
-        status: 400,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    if (!payload.sig || !payload.sbAnonKey || !payload.practiceId || !payload.physId) {
-      return new Response(JSON.stringify({ error: 'pairing payload missing required fields' }), {
-        status: 400,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    // Verify the HMAC signature with the anon key as shared secret.
-    const { sig, ...rest } = payload;
-    const msg = JSON.stringify(rest);
-    const expected = await hmacB64Url(payload.sbAnonKey, msg);
-    if (expected !== sig) {
-      return new Response(JSON.stringify({ error: 'signature mismatch' }), {
-        status: 401,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    // Expiry check.
-    if (payload.exp && new Date(payload.exp).getTime() < Date.now()) {
-      return new Response(JSON.stringify({ error: 'pairing expired', exp: payload.exp }), {
-        status: 401,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    // Server-side fetch with service role (bypasses RLS).
-    const sb = createClient(SB_URL, SVC_KEY);
+  if (req.method !== 'POST') return jsonResp({ error: 'POST only' }, 405);
+  let body: any;
+  try { body = await req.json(); }
+  catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
+  let payload: any;
+  try { payload = await verifyAndDecode(body.code); }
+  catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
+  const sb = createClient(SB_URL, SVC_KEY);
+  const action = body.action || 'read';
+
+  // ── READ ────────────────────────────────────────────────────────
+  if (action === 'read') {
     const { data, error } = await sb
-      .from('radscheduler')
-      .select('data')
-      .eq('id', payload.practiceId)
-      .single();
-    if (error) {
-      return new Response(JSON.stringify({ error: 'practice fetch failed: ' + error.message }), {
-        status: 500,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    if (!data) {
-      return new Response(JSON.stringify({ error: 'practice not found', practiceId: payload.practiceId }), {
-        status: 404,
-        headers: { ...CORS, 'Content-Type': 'application/json' },
-      });
-    }
-    return new Response(JSON.stringify({ data: data.data || {} }), {
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    console.error('[widget-data] error:', e);
-    return new Response(JSON.stringify({ error: String((e as Error).message || e) }), {
-      status: 500,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
+      .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+    if (error) return jsonResp({ error: 'practice fetch failed: ' + error.message }, 500);
+    if (!data) return jsonResp({ error: 'practice not found', practiceId: payload.practiceId }, 404);
+    return jsonResp({ data: data.data || {} });
   }
+
+  // For all WRITE actions: read → mutate → write back. No retry on
+  // concurrent-modification — race window is small (a single physician
+  // tapping in the widget) and the practice JSON is bursty-write
+  // dominated by the main app, not the widget.
+  const { data: row, error: rdErr } = await sb
+    .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+  if (rdErr) return jsonResp({ error: 'practice fetch failed: ' + rdErr.message }, 500);
+  if (!row) return jsonResp({ error: 'practice not found' }, 404);
+  const practice = row.data || {};
+  if (!Array.isArray(practice.physicianCredits)) practice.physicianCredits = [];
+
+  // Helper: bump nextId once per write so add-credit gets a fresh ID
+  // even if the main app is between saves. nextId is the same field
+  // the main app uses for client-side ID allocation.
+  function allocateId(): number {
+    const next = (+practice.nextId || 100) + 1;
+    practice.nextId = next;
+    return next;
+  }
+
+  // ── ADD CREDIT ──────────────────────────────────────────────────
+  if (action === 'add-credit') {
+    const c = body.credit || {};
+    const hours = +c.hours;
+    const reason = (c.reason || '').toString().trim();
+    const ts = (c.ts || new Date().toISOString()).toString();
+    if (!hours || hours <= 0 || hours > 24) return jsonResp({ error: 'hours must be in (0, 24]' }, 400);
+    if (!reason) return jsonResp({ error: 'reason is required' }, 400);
+    const credit = {
+      id: allocateId(),
+      physId: payload.physId,
+      ts,
+      hours,
+      reason,
+      createdBy: payload.physId,
+      createdAt: new Date().toISOString(),
+    };
+    practice.physicianCredits.push(credit);
+    const { error: wrErr } = await sb
+      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    return jsonResp({ ok: true, credit });
+  }
+
+  // ── EDIT CREDIT ─────────────────────────────────────────────────
+  if (action === 'edit-credit') {
+    const id = +body.creditId;
+    const patch = body.patch || {};
+    if (!id) return jsonResp({ error: 'creditId required' }, 400);
+    const idx = practice.physicianCredits.findIndex((c: any) => c.id === id);
+    if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
+    const credit = practice.physicianCredits[idx];
+    if (credit.physId !== payload.physId) return jsonResp({ error: 'cannot edit another physician\'s credit' }, 403);
+    if (patch.hours != null) {
+      const h = +patch.hours;
+      if (!h || h <= 0 || h > 24) return jsonResp({ error: 'hours must be in (0, 24]' }, 400);
+      credit.hours = h;
+    }
+    if (patch.reason != null) {
+      const r = String(patch.reason).trim();
+      if (!r) return jsonResp({ error: 'reason cannot be empty' }, 400);
+      credit.reason = r;
+    }
+    if (patch.ts != null) credit.ts = String(patch.ts);
+    credit.updatedAt = new Date().toISOString();
+    practice.physicianCredits[idx] = credit;
+    const { error: wrErr } = await sb
+      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    return jsonResp({ ok: true, credit });
+  }
+
+  // ── DELETE CREDIT ───────────────────────────────────────────────
+  if (action === 'delete-credit') {
+    const id = +body.creditId;
+    if (!id) return jsonResp({ error: 'creditId required' }, 400);
+    const idx = practice.physicianCredits.findIndex((c: any) => c.id === id);
+    if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
+    if (practice.physicianCredits[idx].physId !== payload.physId) {
+      return jsonResp({ error: 'cannot delete another physician\'s credit' }, 403);
+    }
+    practice.physicianCredits.splice(idx, 1);
+    const { error: wrErr } = await sb
+      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    return jsonResp({ ok: true });
+  }
+
+  return jsonResp({ error: 'unknown action: ' + action }, 400);
 });

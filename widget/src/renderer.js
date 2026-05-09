@@ -33,12 +33,18 @@
 const root = document.getElementById('root');
 
 // ─── State ───────────────────────────────────────────────────────
-let _activeTab = 'today';          // 'today' | 'debulking'
+let _activeTab = 'today';          // 'today' | 'debulking' | 'credits'
 let _lastPayload = null;
 let _lastPractice = null;
 let _lastDigest = null;
 let _lastPairingCode = null;       // raw pairing code (for edge-fn POST)
 let _alwaysOnTop = true;
+// Last total of today's credit hours (for the auto-counter bump animation
+// — when it changes, we briefly scale the number up + green-flash it).
+let _lastCreditsToday = null;
+// Local edit state for the credits tab — id of the credit currently
+// being edited inline, or null.
+let _creditEditingId = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function fromB64Url(s){
@@ -413,6 +419,7 @@ function renderTabs(){
   tabs.style.display = 'flex';
   tabs.innerHTML = `
     <div class="tab ${_activeTab==='today'?'active':''}" data-tab="today">Today</div>
+    <div class="tab ${_activeTab==='credits'?'active':''}" data-tab="credits">Credits</div>
     <div class="tab ${_activeTab==='debulking'?'active':''}" data-tab="debulking">Debulking</div>`;
   tabs.querySelectorAll('.tab').forEach(t => {
     t.onclick = () => {
@@ -425,7 +432,64 @@ function renderTabs(){
 
 function renderActiveTab(){
   if(_activeTab === 'today') renderTodayTab();
+  else if(_activeTab === 'credits') renderCreditsTab();
   else if(_activeTab === 'debulking') renderDebulkingTab();
+}
+
+// ─── Credits helpers ─────────────────────────────────────────────
+// Filter the practice's credit log down to entries belonging to the
+// current physician + within the requested time window.
+function _myCredits(){
+  const physId = _lastPayload?.physId;
+  const all = (_lastPractice?.physicianCredits) || [];
+  return all.filter(c => c.physId === physId);
+}
+function _creditsToday(){
+  const today = fmtDate(new Date());
+  return _myCredits().filter(c => (c.ts || '').slice(0, 10) === today);
+}
+function _hoursSum(arr){
+  return arr.reduce((s, c) => s + (+c.hours || 0), 0);
+}
+function _fmtTs(iso){
+  if(!iso) return '';
+  try{
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  }catch(_){ return String(iso).slice(0,16).replace('T',' '); }
+}
+
+// POST a write op to the widget-data edge function. Returns the parsed
+// response on success, throws on error. Re-fetches practice data after
+// the write so the UI always reflects server truth.
+async function _creditsWrite(action, extra){
+  if(!_lastPayload || !_lastPairingCode) throw new Error('not paired');
+  const url = `${_lastPayload.sbUrl}/functions/v1/widget-data`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': _lastPayload.sbAnonKey,
+      'Authorization': 'Bearer ' + _lastPayload.sbAnonKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code: _lastPairingCode, action, ...extra }),
+  });
+  const txt = await resp.text();
+  let parsed = null;
+  try{ parsed = JSON.parse(txt); }catch(_){}
+  if(!resp.ok){
+    throw new Error((parsed && parsed.error) || ('HTTP ' + resp.status + ': ' + txt.slice(0, 200)));
+  }
+  // Re-fetch the practice so the local _lastPractice + counter stay current.
+  try{
+    _lastPractice = await fetchPracticeData(_lastPayload);
+  }catch(e){
+    console.warn('post-write refetch failed:', e);
+  }
+  return parsed;
 }
 
 // ─── Today tab ───────────────────────────────────────────────────
@@ -450,6 +514,12 @@ function renderTodayTab(){
         <div class="right">${s.goal > 0 ? s.goal + ' wRVU' : '—'}</div>
       </div>`).join('')
     : '<div class="empty">No shifts scheduled today.</div>';
+  // Live credits counter for today — auto-bumps with a flash animation
+  // when the value changes between renders.
+  const todayCredits = _creditsToday();
+  const todayHours = _hoursSum(todayCredits);
+  const bumped = (_lastCreditsToday !== null && _lastCreditsToday !== todayHours) ? 'bumped' : '';
+  _lastCreditsToday = todayHours;
   body.innerHTML = `
     <div class="top">
       <div class="avatar">${escHtml(initials)}</div>
@@ -457,6 +527,11 @@ function renderTodayTab(){
         <div class="name" title="${escHtml(digest.physName)}">${escHtml(digest.physName || 'Unknown')}</div>
         <div class="date">${escHtml(todayStr)} · <span style="color:${statusColor}">${escHtml(statusLabel)}</span></div>
       </div>
+    </div>
+
+    <div class="auto-counter">
+      <div class="label"><span class="live"></span>Credits today</div>
+      <div class="val ${bumped}">${todayHours.toFixed(1)}<span class="unit">hrs · ${todayCredits.length} entr${todayCredits.length===1?'y':'ies'}</span></div>
     </div>
 
     <div class="ring-wrap">
@@ -489,6 +564,175 @@ function renderTodayTab(){
       <span>Last refreshed <span id="refresh-time">${new Date().toLocaleTimeString()}</span></span>
       <span></span>
     </div>`;
+}
+
+// ─── Credits tab ─────────────────────────────────────────────────
+// Time-based credit log with a free-text reason. Read/write via the
+// widget-data edge function; service role does the actual table write.
+function renderCreditsTab(){
+  const body = document.querySelector('.body');
+  if(!body) return;
+  const mine = _myCredits().slice().sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+  const todayHours  = _hoursSum(_creditsToday());
+  // 7-day total
+  const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return fmtDate(d); })();
+  const weekHours = _hoursSum(mine.filter(c => (c.ts || '').slice(0,10) >= weekStart));
+  // Default the new-credit datetime field to "now" rounded down to the
+  // current minute (HTML datetime-local format).
+  const nowLocal = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const dy = String(d.getDate()).padStart(2,'0');
+    const h = String(d.getHours()).padStart(2,'0');
+    const mi = String(d.getMinutes()).padStart(2,'0');
+    return `${y}-${m}-${dy}T${h}:${mi}`;
+  })();
+  body.innerHTML = `
+    <div class="credits-summary">
+      <div class="stat">
+        <div class="n">${todayHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs</span></div>
+        <div class="lbl">Today</div>
+      </div>
+      <div class="stat">
+        <div class="n">${weekHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs</span></div>
+        <div class="lbl">Last 7 days</div>
+      </div>
+    </div>
+
+    <div class="credit-form">
+      <div class="row">
+        <div>
+          <label for="cf-ts">When</label>
+          <input id="cf-ts" type="datetime-local" value="${nowLocal}">
+        </div>
+        <div>
+          <label for="cf-hours">Hours</label>
+          <input id="cf-hours" type="number" min="0.1" max="24" step="0.25" value="1.0">
+        </div>
+      </div>
+      <label for="cf-reason">Reason</label>
+      <textarea id="cf-reason" rows="2" placeholder="e.g. Covering for Dr. Smith, journal club, MQSA review"></textarea>
+      <button id="cf-add">+ Add credit</button>
+      <div class="err" id="cf-err"></div>
+    </div>
+
+    <div style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">
+      All credits (${mine.length})
+    </div>
+    <div class="credit-list" id="credit-list">
+      ${mine.length ? mine.map(_renderCreditItem).join('') : '<div class="empty" style="padding:8px;text-align:center">No credits logged yet.</div>'}
+    </div>
+
+    <div class="footer">
+      <span>Credits are private to you. Edit/delete anytime.</span>
+    </div>`;
+
+  document.getElementById('cf-add').onclick = _onAddCredit;
+  // Hook in edit + delete buttons on each list item.
+  body.querySelectorAll('[data-credit-edit]').forEach(b => {
+    b.onclick = () => { _creditEditingId = +b.dataset.creditEdit; renderCreditsTab(); };
+  });
+  body.querySelectorAll('[data-credit-cancel]').forEach(b => {
+    b.onclick = () => { _creditEditingId = null; renderCreditsTab(); };
+  });
+  body.querySelectorAll('[data-credit-save]').forEach(b => {
+    b.onclick = () => _onSaveCreditEdit(+b.dataset.creditSave);
+  });
+  body.querySelectorAll('[data-credit-del]').forEach(b => {
+    b.onclick = () => _onDeleteCredit(+b.dataset.creditDel);
+  });
+}
+
+function _renderCreditItem(c){
+  const isEditing = _creditEditingId === c.id;
+  if(isEditing){
+    // Convert ISO timestamp to datetime-local string for the input.
+    const tsLocal = (() => {
+      try{
+        const d = new Date(c.ts);
+        return d.toISOString().slice(0, 16);
+      }catch(_){ return ''; }
+    })();
+    return `<div class="credit-item editing">
+      <div class="row1">
+        <input type="datetime-local" id="ce-ts-${c.id}" value="${escHtml(tsLocal)}" style="flex:1;font-size:11px">
+        <input type="number" id="ce-hr-${c.id}" min="0.1" max="24" step="0.25" value="${c.hours}" style="width:70px;font-size:11px">
+      </div>
+      <textarea id="ce-rs-${c.id}" rows="2">${escHtml(c.reason || '')}</textarea>
+      <div class="actions" style="justify-content:flex-end">
+        <button data-credit-save="${c.id}">Save</button>
+        <button data-credit-cancel="${c.id}">Cancel</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="credit-item">
+    <div class="row1">
+      <span class="when">${escHtml(_fmtTs(c.ts))}</span>
+      <span class="hrs">${(+c.hours).toFixed(1)}h</span>
+    </div>
+    <div class="reason">${escHtml(c.reason || '')}</div>
+    <div class="actions" style="justify-content:flex-end">
+      <button data-credit-edit="${c.id}">Edit</button>
+      <button class="del" data-credit-del="${c.id}">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function _onAddCredit(){
+  const tsEl  = document.getElementById('cf-ts');
+  const hrEl  = document.getElementById('cf-hours');
+  const rsEl  = document.getElementById('cf-reason');
+  const errEl = document.getElementById('cf-err');
+  const btn   = document.getElementById('cf-add');
+  errEl.textContent = '';
+  const hours = +hrEl.value;
+  const reason = (rsEl.value || '').trim();
+  if(!hours || hours <= 0 || hours > 24){ errEl.textContent = 'Hours must be between 0 and 24.'; return; }
+  if(!reason){ errEl.textContent = 'Reason is required.'; return; }
+  // datetime-local input → ISO. Treat as local time.
+  let ts = tsEl.value;
+  if(ts){ ts = new Date(ts).toISOString(); }
+  else { ts = new Date().toISOString(); }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    await _creditsWrite('add-credit', { credit: { ts, hours, reason } });
+    rsEl.value = '';                    // clear the reason for next entry
+    renderCreditsTab();                 // re-render with fresh data
+  }catch(e){
+    errEl.textContent = e.message || String(e);
+    btn.disabled = false;
+    btn.textContent = '+ Add credit';
+  }
+}
+
+async function _onSaveCreditEdit(creditId){
+  const tsEl = document.getElementById('ce-ts-' + creditId);
+  const hrEl = document.getElementById('ce-hr-' + creditId);
+  const rsEl = document.getElementById('ce-rs-' + creditId);
+  const hours = +hrEl.value;
+  const reason = (rsEl.value || '').trim();
+  if(!hours || hours <= 0 || hours > 24){ alert('Hours must be between 0 and 24.'); return; }
+  if(!reason){ alert('Reason cannot be empty.'); return; }
+  let ts = tsEl.value;
+  if(ts){ ts = new Date(ts).toISOString(); }
+  try{
+    await _creditsWrite('edit-credit', { creditId, patch: { ts, hours, reason } });
+    _creditEditingId = null;
+    renderCreditsTab();
+  }catch(e){
+    alert('Edit failed: ' + (e.message || String(e)));
+  }
+}
+
+async function _onDeleteCredit(creditId){
+  if(!confirm('Delete this credit entry?')) return;
+  try{
+    await _creditsWrite('delete-credit', { creditId });
+    renderCreditsTab();
+  }catch(e){
+    alert('Delete failed: ' + (e.message || String(e)));
+  }
 }
 
 // ─── Debulking tab ───────────────────────────────────────────────

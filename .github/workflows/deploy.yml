@@ -66,6 +66,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Concatenate src/parts/*.html into index.html (no-op while
+      # src/parts is empty; takes ownership progressively as the
+      # monolith is broken up). See src/README.md for the migration
+      # plan. Today's autoship pipeline keeps working unchanged.
+      - name: Build index.html from src/parts
+        run: ./tools/build-index.sh
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
