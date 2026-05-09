@@ -10513,6 +10513,14 @@ function renderDash(){
   ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
   // Today's-coverage widget (rendered before per-month metrics).
   try{ _renderTodayCoverage(isAdm); }catch(e){ if(typeof _logError === 'function') _logError('_renderTodayCoverage', e.message, e); }
+  // Proactive coverage-gap banner: scans next 30 days for unfilled
+  // critical slots (1st-shift weekday DR coverage, weekend call,
+  // holiday coverage). Hidden when zero gaps.
+  try{ _renderCoverageGapBanner(isAdm); }catch(e){ if(typeof _logError === 'function') _logError('_renderCoverageGapBanner', e.message, e); }
+  // Workload Fairness Scoreboard (transparency: each physician's call /
+  // shift / weekend load vs FTE-adjusted expected). Rendered below the
+  // dashboard's main grid so it doesn't crowd the top.
+  try{ _renderFairnessScoreboard(isAdm); }catch(e){ if(typeof _logError === 'function') _logError('_renderFairnessScoreboard', e.message, e); }
 
   // First-run wizard — refined design. Persistent until every required
   // setup step is complete; disappears the moment the last check turns
