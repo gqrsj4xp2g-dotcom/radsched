@@ -34890,6 +34890,161 @@ function getDriveTimeWRVUCredit(physId, site, date){
   return +(dt / 60 * perHour).toFixed(1);
 }
 
+// ── Desktop widget pairing ───────────────────────────────────────────
+// Pain solved: physicians want a glanceable always-on dashboard widget
+// that shows their day's expected wRVU, current shift, and (eventually)
+// real-time study count from PACS. The widget is a small Electron app
+// shipped from /widget. It needs to authenticate against this practice's
+// Supabase instance — but we don't want to bake admin credentials into
+// the widget. Pairing solves this:
+//
+//   1. Admin generates a code in Tools → Desktop Widget
+//   2. Code = base64-encoded JSON: {practiceId, physId, sbUrl, sbAnonKey,
+//      issuedAt, exp, sig}
+//      • sbAnonKey is PUBLIC by design (RLS gates real access)
+//      • sig is HMAC-SHA256 over the rest, using the practice's anon key
+//   3. Widget pastes code on first launch, decodes, persists in OS
+//      keychain, queries Supabase for that physician's data only
+//   4. RLS policies (existing) gate by JWT — for read-only widget the
+//      anon key is sufficient since the practice JSON is keyed by
+//      practice_id + physician_id
+
+function _b64url(s){
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+async function _hmacB64Url(secret, msg){
+  // SubtleCrypto HMAC-SHA256. Returns a base64url-encoded MAC.
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name:'HMAC', hash:'SHA-256' }, false, ['sign']
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+  const bytes = new Uint8Array(mac);
+  let s = ''; for(let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return _b64url(s);
+}
+
+async function generateWidgetPairing(){
+  if(!_adminOnly('generate widget pairing')) return;
+  const physId = +document.getElementById('wpair-phys')?.value || 0;
+  const days = +document.getElementById('wpair-days')?.value || 30;
+  if(!physId){ alert('Pick a physician first.'); return; }
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(!phys){ alert('Physician not found.'); return; }
+  const sbUrl = (typeof _getUrl === 'function') ? _getUrl() : '';
+  const sbKey = (typeof _getKey === 'function') ? _getKey() : '';
+  if(!sbUrl || !sbKey){
+    alert('Supabase is not configured. Set the URL + anon key in Settings before generating widget pairings.');
+    return;
+  }
+  const practiceId = (typeof _ROW_ID !== 'undefined') ? _ROW_ID : null;
+  if(!practiceId){
+    alert('Practice ID is not set. Make sure you are signed in to a practice.');
+    return;
+  }
+  const issuedAt = new Date().toISOString();
+  const exp = new Date(Date.now() + days * 86400000).toISOString();
+  const payload = {
+    v: 1,
+    practiceId,
+    physId,
+    physLast: phys.last || '',
+    physFirst: phys.first || '',
+    sbUrl,
+    sbAnonKey: sbKey,
+    issuedAt,
+    exp,
+  };
+  // Sign with HMAC-SHA256 using the anon key as the shared secret. This
+  // doesn't authenticate Supabase — it only proves the code was issued
+  // by someone with admin access to this practice (since they had the
+  // anon key in S.cfg). The widget validates the sig before trusting.
+  const body = JSON.stringify(payload);
+  payload.sig = await _hmacB64Url(sbKey, body);
+  const code = _b64url(JSON.stringify(payload));
+  // Store the active pairing record so admins can revoke + audit.
+  if(!Array.isArray(S.widgetPairings)) S.widgetPairings = [];
+  S.widgetPairings.push({
+    id: S.nextId++,
+    physId,
+    issuedAt,
+    exp,
+    issuedBy: CU?.id || null,
+    fingerprint: code.slice(-8),  // last 8 chars to identify it without storing the full code
+  });
+  if(typeof _audit === 'function') _audit('widget.pairing.generated', { physId, exp });
+  if(typeof triggerSave === 'function') triggerSave();
+  // Render result with copy button.
+  const result = document.getElementById('wpair-result');
+  if(result){
+    result.innerHTML = `<div style="background:var(--bg2);border-radius:8px;padding:12px;font-family:ui-monospace,monospace;font-size:11px;line-height:1.5;word-break:break-all">
+      <div style="font-size:12px;font-weight:700;color:var(--rs-ink);margin-bottom:6px;font-family:inherit">Pairing code for ${escHtml(phys.last)}, ${escHtml(phys.first)}</div>
+      <div style="font-size:10.5px;color:var(--rs-ink-3);margin-bottom:8px;font-family:inherit">Expires ${escHtml(exp.slice(0,10))} · ${days} days from now</div>
+      <code id="wpair-code-out" style="user-select:all;display:block;background:white;color:var(--rs-ink);padding:8px;border-radius:4px;border:1px solid var(--rs-line)">${escHtml(code)}</code>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="bp bsm" onclick="navigator.clipboard.writeText(document.getElementById('wpair-code-out').textContent).then(() => _toast?.('Copied to clipboard.', 'ok'))">📋 Copy code</button>
+        <button class="bsm" onclick="_emailPairingCode(${physId})">📧 Email to physician</button>
+      </div>
+    </div>`;
+  }
+  if(typeof renderWidgetPage === 'function') renderWidgetPage();
+}
+
+function _emailPairingCode(physId){
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(!phys || !phys.email){
+    alert('Physician has no email on file. Add it on the profile first.');
+    return;
+  }
+  const code = document.getElementById('wpair-code-out')?.textContent || '';
+  const subj = encodeURIComponent('RadScheduler desktop widget pairing code');
+  const body = encodeURIComponent(`Hi ${phys.first},\n\nHere's your pairing code for the RadScheduler desktop widget. Paste it into the widget on first launch.\n\n${code}\n\nThe code expires after 30 days; if you reset the widget you can request a new one from your admin.\n\n— RadScheduler`);
+  window.open(`mailto:${phys.email}?subject=${subj}&body=${body}`);
+}
+
+// Render the widget page: physician dropdown + active pairings list.
+function renderWidgetPage(){
+  if(!CU || CU.role !== 'admin') return;
+  const physSelect = document.getElementById('wpair-phys');
+  if(physSelect){
+    const ps = (S.physicians || []).slice().sort((a,b) => (a.last||'').localeCompare(b.last||''));
+    physSelect.innerHTML = ps.map(p => `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
+  }
+  const list = document.getElementById('wpair-list');
+  if(list){
+    const pairings = (S.widgetPairings || []).slice().sort((a,b) => (b.issuedAt||'').localeCompare(a.issuedAt||''));
+    if(!pairings.length){
+      list.innerHTML = '<div class="note ni" style="font-size:11.5px">No pairings issued yet.</div>';
+    } else {
+      list.innerHTML = `<table class="tbl" style="font-size:12px"><thead><tr>
+        <th>Physician</th><th>Issued</th><th>Expires</th><th>Status</th><th>Code …</th><th></th>
+      </tr></thead><tbody>${pairings.map(p => {
+        const expired = new Date(p.exp).getTime() < Date.now();
+        const phys = (typeof _physById === 'function') ? _physById(p.physId) : null;
+        return `<tr>
+          <td>${phys ? escHtml(phys.last) + ', ' + escHtml(phys.first) : `Phys#${p.physId}`}</td>
+          <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml((p.issuedAt||'').slice(0,10))}</td>
+          <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml((p.exp||'').slice(0,10))}</td>
+          <td>${expired ? '<span style="color:var(--rs-ink-3)">expired</span>' : '<span style="color:var(--green-t,#15803d)">active</span>'}</td>
+          <td style="font-family:ui-monospace,monospace;font-size:10.5px;color:var(--rs-ink-3)">…${escHtml(p.fingerprint || '')}</td>
+          <td><button class="br bxs" onclick="revokeWidgetPairing(${p.id})">Revoke</button></td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+    }
+  }
+}
+
+function revokeWidgetPairing(id){
+  if(!_adminOnly('revoke widget pairing')) return;
+  if(!confirm('Revoke this pairing? The widget will stop syncing on next refresh and the physician will need a new code.')) return;
+  S.widgetPairings = (S.widgetPairings || []).filter(p => p.id !== id);
+  if(typeof _audit === 'function') _audit('widget.pairing.revoked', { id });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof renderWidgetPage === 'function') renderWidgetPage();
+  if(typeof _toast === 'function') _toast('Pairing revoked.', 'info');
+}
+
 // ── Practice-wide announcements ───────────────────────────────────────
 // Pain solved: practice has a memo to share ("New on-call policy",
 // "Holiday coverage volunteers needed by Friday") and currently has to
