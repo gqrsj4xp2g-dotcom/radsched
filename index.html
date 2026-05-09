@@ -35448,6 +35448,218 @@ async function configureDigestSchedule(){
   if(typeof _toast === 'function') _toast(`Digest ${enabled ? 'enabled — ' + cadence + ' at ' + hour + ':00' : 'disabled'}.`, 'ok');
 }
 
+// ── Monthly Coverage Report Card ────────────────────────────────────────
+// Aggregates one month's operational health into a single email digest:
+//   • Coverage completeness — fraction of weekdays/weekends/holidays that
+//     have all required slots filled
+//   • Fairness — Gini coefficient across physician shift counts
+//   • Swap activity — requested/approved/denied tallies
+//   • Sick days + same-day cover rate
+//   • Burnout flags — physicians with ≥3 consecutive weekend-call rotations
+//   • Audit volume — count of mutating actions
+// All compute is client-side; the email body is markdown that the existing
+// send-notification edge function renders to HTML.
+function _computeMonthlyReportCard(ym){
+  if(!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  const monthLabel = new Date(y, m - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  const monthStart = `${ym}-01`;
+  const monthEnd   = fmtDate(new Date(y, m, 0));
+  const inMonth = (d) => d >= monthStart && d <= monthEnd;
+  const daysInMonth = +monthEnd.slice(8, 10);
+
+  // ── Coverage completeness ─────────────────────────────────────────────
+  // We define a day as "covered" if it has at least 1 1st-shift DR
+  // physician at any active site (weekdays) OR a weekend-call physician
+  // (Sat/Sun) OR a holiday assignee (holidays).
+  let coveredDays = 0, totalDays = 0;
+  const realSites = (S.sites || []).filter(s => s.name !== 'At Home / Remote');
+  const holDates = new Set((S.holidayDefs || []).filter(h => inMonth(h.date)).map(h => h.date));
+  for(let d = 1; d <= daysInMonth; d++){
+    const ds = `${ym}-${String(d).padStart(2, '0')}`;
+    const dt = new Date(y, m - 1, d);
+    const dow = dt.getDay();
+    totalDays++;
+    if(holDates.has(ds)){
+      const cov = (S.holidays || []).some(h => h.date === ds && h.physId);
+      if(cov) coveredDays++;
+    } else if(dow === 0 || dow === 6){
+      const cov = (S.weekendCalls || []).some(w => (w.satDate === ds || w.sunDate === ds) && w.physId);
+      if(cov) coveredDays++;
+    } else {
+      const cov = (S.drShifts || []).some(s => s.date === ds && s.shift === '1st' && s.physId);
+      if(cov) coveredDays++;
+    }
+  }
+  const coveragePct = totalDays ? Math.round((coveredDays / totalDays) * 100) : 0;
+
+  // ── Fairness (Gini) ───────────────────────────────────────────────────
+  // Compute Gini across this-month shift counts per physician. 0 = perfect
+  // equality, 1 = one physician has everything.
+  const counts = {};
+  (S.drShifts || []).forEach(s => { if(inMonth(s.date) && s.physId){ counts[s.physId] = (counts[s.physId] || 0) + 1; } });
+  (S.irShifts || []).forEach(s => { if(inMonth(s.date) && s.physId){ counts[s.physId] = (counts[s.physId] || 0) + 1; } });
+  (S.irCalls  || []).forEach(c => { if(inMonth(c.date) && c.physId){ counts[c.physId] = (counts[c.physId] || 0) + 1; } });
+  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(inMonth(d) && w.physId){ counts[w.physId] = (counts[w.physId] || 0) + 0.5; } });
+  const vals = Object.values(counts).sort((a, b) => a - b);
+  let gini = 0;
+  if(vals.length > 1){
+    const sum = vals.reduce((a, b) => a + b, 0);
+    if(sum > 0){
+      let cum = 0;
+      vals.forEach((v, i) => { cum += (i + 1) * v; });
+      gini = (2 * cum) / (vals.length * sum) - (vals.length + 1) / vals.length;
+    }
+  }
+
+  // ── Swap activity ─────────────────────────────────────────────────────
+  const swaps = (S.swapRequests || []).filter(r => inMonth((r.createdAt || '').slice(0, 10)));
+  const swapsByStatus = swaps.reduce((acc, r) => {
+    const k = r.status || 'pending';
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+
+  // ── Sick days ─────────────────────────────────────────────────────────
+  // Inferred from auditLog 'sickDay.coverApplied' entries this month.
+  const audit = (S.auditLog || []).filter(a => inMonth((a.at || a.ts || '').slice(0, 10)));
+  const sickDays = audit.filter(a => (a.action || '') === 'sickDay.coverApplied').length;
+
+  // ── Burnout flags ─────────────────────────────────────────────────────
+  // Physicians with ≥3 consecutive Sat→Sun weekend-call rotations leading
+  // up through this month's end. Uses Sat dates as the canonical anchor.
+  const weekendsByPhys = {};
+  (S.weekendCalls || []).forEach(w => {
+    const d = w.satDate;
+    if(!d || !w.physId) return;
+    if(!weekendsByPhys[w.physId]) weekendsByPhys[w.physId] = [];
+    weekendsByPhys[w.physId].push(d);
+  });
+  const burnout = [];
+  Object.entries(weekendsByPhys).forEach(([physId, satDates]) => {
+    satDates.sort();
+    let streak = 1, last = null;
+    for(const d of satDates){
+      if(last && Math.round((new Date(d) - new Date(last)) / 86400000) === 7){
+        streak++;
+        if(streak >= 3 && d <= monthEnd){
+          if(!burnout.find(b => b.physId === +physId)) burnout.push({ physId: +physId, streak, last: d });
+        }
+      } else {
+        streak = 1;
+      }
+      last = d;
+    }
+  });
+
+  return {
+    ym, monthLabel,
+    coverage:   { covered: coveredDays, total: totalDays, pct: coveragePct },
+    fairness:   { gini: +gini.toFixed(3) },
+    swaps:      { total: swaps.length, byStatus: swapsByStatus },
+    sick:       { count: sickDays },
+    burnout,
+    auditCount: audit.length,
+  };
+}
+
+function _formatMonthlyReportMarkdown(rc){
+  if(!rc) return '';
+  const physName = (id) => {
+    const phys = (typeof _physById === 'function') ? _physById(id) : null;
+    return phys ? `Dr. ${phys.last}` : `Phys#${id}`;
+  };
+  const cov = rc.coverage;
+  const covIcon = cov.pct === 100 ? '✓' : cov.pct >= 95 ? '✓' : '⚠';
+  const giniIcon = rc.fairness.gini < 0.15 ? '✓' : rc.fairness.gini < 0.25 ? '◐' : '⚠';
+  const giniLabel = rc.fairness.gini < 0.15 ? 'excellent'
+    : rc.fairness.gini < 0.25 ? 'fair'
+    : rc.fairness.gini < 0.35 ? 'uneven'
+    : 'concerning';
+  const swapLine = `${rc.swaps.total} requests · ${rc.swaps.byStatus.approved || 0} accepted · ${rc.swaps.byStatus.denied || 0} declined`;
+  const sickLine = rc.sick.count
+    ? `${rc.sick.count} (covered same-day)`
+    : `0 sick days reported`;
+  const burnoutLines = rc.burnout.length
+    ? rc.burnout.map(b => `   ⚠ ${physName(b.physId)} flagged: ${b.streak} consecutive weekend call`).join('\n')
+    : '   ✓ No burnout flags';
+  return [
+    `**RadScheduler — ${rc.monthLabel} Report Card**`,
+    ``,
+    `**Coverage**   ${covIcon}  ${cov.covered}/${cov.total} days fully covered (${cov.pct}%)`,
+    `**Fairness**   ${giniIcon}  Gini coefficient ${rc.fairness.gini} (${giniLabel})`,
+    `**Swaps**      ${swapLine}`,
+    `**Sick days**  ${sickLine}`,
+    `**Burnout**`,
+    burnoutLines,
+    `**Audit**      ${rc.auditCount} mutations`,
+    ``,
+    `_Generated ${new Date().toLocaleString()} by RadScheduler._`,
+  ].join('\n');
+}
+
+function previewMonthlyReportCard(){
+  if(!_adminOnly('preview report card')) return;
+  const ym = (document.getElementById('rc-month')?.value) || _lastMonthYm();
+  const rc = _computeMonthlyReportCard(ym);
+  const md = _formatMonthlyReportMarkdown(rc);
+  const out = document.getElementById('rc-result');
+  if(out){
+    out.innerHTML = `<div class="card" style="background:var(--bg2);font-family:ui-monospace,monospace;font-size:11.5px;white-space:pre-wrap">${escHtml(md)}</div>`;
+  }
+}
+
+async function sendMonthlyReportCard(){
+  if(!_adminOnly('send report card')) return;
+  const ym = (document.getElementById('rc-month')?.value) || _lastMonthYm();
+  const wantEmail = !!document.getElementById('rc-email')?.checked;
+  const rc = _computeMonthlyReportCard(ym);
+  const md = _formatMonthlyReportMarkdown(rc);
+  // Always show a preview locally even if we also email.
+  const out = document.getElementById('rc-result');
+  if(out){
+    out.innerHTML = `<div class="card" style="background:var(--bg2);font-family:ui-monospace,monospace;font-size:11.5px;white-space:pre-wrap">${escHtml(md)}</div>`;
+  }
+  if(!wantEmail) return;
+  // Recipients: every active admin user with a confirmed email.
+  const adminUsers = (USERS || []).filter(u => u.role === 'admin' && u.email);
+  if(!adminUsers.length){
+    alert('No admin users with email addresses found. Add admins under Tools → Account management first.');
+    return;
+  }
+  try{
+    await _invokeEdgeFn('send-notification', {
+      kind: 'broadcast',
+      subject: `RadScheduler — ${rc.monthLabel} Report Card`,
+      body: md,
+      recipients: adminUsers.map(u => ({ email: u.email, first: u.first, last: u.last })),
+    });
+    if(typeof _audit === 'function')
+      _audit('reportCard.sent', { ym, recipients: adminUsers.length });
+    if(typeof _toast === 'function')
+      _toast(`Report card emailed to ${adminUsers.length} admin(s).`, 'ok');
+  }catch(e){
+    alert(`Report card send failed: ${e.message || e}\n\nMake sure the send-notification edge function is deployed and RESEND_API_KEY is set.`);
+  }
+}
+
+// Default the report card month picker to the previous month (the most
+// common "review last month" use case).
+function _lastMonthYm(){
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return fmtDate(prev).slice(0, 7);
+}
+// Initialize the rc-month field on first render of the integrations panel.
+(function _initReportCardMonthOnce(){
+  const tag = () => {
+    const el = document.getElementById('rc-month');
+    if(el && !el.value) el.value = _lastMonthYm();
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tag);
+  else setTimeout(tag, 200);
+})();
+
 // ── Public read-only schedule view ─────────────────────────────────────
 // Generates a static HTML snapshot of the current calendar that an admin
 // can host externally for non-RadScheduler users (techs, schedulers,
