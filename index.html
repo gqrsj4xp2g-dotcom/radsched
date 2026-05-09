@@ -26170,14 +26170,18 @@ function renderDRCal(){
         // "At Home / Remote") and confuses admins into thinking the
         // record didn't import.
         const badge = s.shift==='2nd' ? 'Evening' : 'Overnight';
-        evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift (Home)${s.notes?' · '+s.notes:''}">
+        const wrvuG = (typeof getShiftWRVUGoal === 'function') ? getShiftWRVUGoal(s, s.physId, 'dr') : 0;
+        const wrvuTip = wrvuG > 0 ? ` · wRVU goal ${wrvuG}` : '';
+        evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift (Home)${wrvuTip}${s.notes?' · '+s.notes:''}">
           <div style="font-weight:700;font-size:11px">🌙 ${pshort(s.physId)}</div>
-          <div style="font-size:9px;opacity:.85">${s.shift} ${badge}</div>
+          <div style="font-size:9px;opacity:.85">${s.shift} ${badge}${wrvuG > 0 ? ` · ${wrvuG}` : ''}</div>
         </div>`;
       } else {
-        evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
+        const wrvuG = (typeof getShiftWRVUGoal === 'function') ? getShiftWRVUGoal(s, s.physId, 'dr') : 0;
+        const wrvuTip = wrvuG > 0 ? ` · wRVU goal ${wrvuG}` : '';
+        evs+=`<div class="ev ${cls}${nonAnc}" title="${pnameHtml(s.physId)} — ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}${wrvuTip}">
           <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
-          <div style="font-size:9px;opacity:.85">${s.shift} Shift</div>
+          <div style="font-size:9px;opacity:.85">${s.shift} Shift${wrvuG > 0 ? ` · ${wrvuG} wRVU` : ''}</div>
           <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl?' · '+subLbl:''}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'DR')}</div>
         </div>`;
       }
