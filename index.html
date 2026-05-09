@@ -35358,10 +35358,20 @@ function renderWebhooks(){
     el.innerHTML = '<div class="note ni" style="font-size:12px">No webhooks configured.</div>';
     return;
   }
+  const flavorPill = (f) => {
+    const map = {
+      slack: { bg:'#fce7f3', fg:'#9d174d', label:'Slack' },
+      teams: { bg:'#dbeafe', fg:'#1e40af', label:'Teams' },
+      generic: { bg:'#e5e7eb', fg:'#374151', label:'Generic' },
+    };
+    const m = map[f] || map.generic;
+    return `<span style="background:${m.bg};color:${m.fg};padding:1px 6px;border-radius:6px;font-size:10px;font-weight:600">${m.label}</span>`;
+  };
   el.innerHTML = `<table class="tbl" style="font-size:12px"><thead><tr>
-    <th>Name</th><th>URL</th><th>Events</th><th></th>
+    <th>Name</th><th>Flavor</th><th>URL</th><th>Events</th><th></th>
   </tr></thead><tbody>${hooks.map(h => `<tr>
     <td>${escHtml(h.name)}</td>
+    <td>${flavorPill(h.flavor || 'generic')}</td>
     <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(h.url)}</td>
     <td>${(h.events || []).map(e => `<span class="tag" style="font-size:10px;margin-right:3px">${escHtml(e)}</span>`).join('')}</td>
     <td><button class="br bxs" onclick="removeWebhook(${h.id})">✕</button></td>
