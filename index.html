@@ -10246,7 +10246,25 @@ function _toggleMobileNav(force){
 //
 // Pair: also restores scroll on initial page show (DOMContentLoaded +
 // pageshow) so a hard reload lands the user at the same scroll position.
-const _RS_BUILD_TAG = 'rs-v4'; // bump in lockstep with sw.js CACHE_VERSION
+const _RS_BUILD_TAG = 'rs-v5'; // bump in lockstep with sw.js CACHE_VERSION
+// ── Boot-time page hide guard ──────────────────────────────────────────
+// Force every .page that doesn't have .on class to inline display:none.
+// The CSS rule `.page { display:none }` SHOULD do this, but a screenshot
+// showed Tools-page cards leaking onto the Dashboard — implying CSS was
+// being bypassed somewhere in the field. Inline style is unmissable.
+(function _bootPageGuard(){
+  const sweep = () => {
+    document.querySelectorAll('.page').forEach(p => {
+      if(p.classList.contains('on')) p.style.display = '';
+      else p.style.display = 'none';
+    });
+  };
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', sweep, { once: true });
+  } else {
+    sweep();
+  }
+})();
 (function _installScrollPersistence(){
   const wire = () => {
     const scroller = document.querySelector('.main');
@@ -10347,9 +10365,20 @@ function nav(pg, el, subTab){
       localStorage.setItem('rs.scroll.' + id, String(sc));
     }
   }catch(_){}
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
-  document.querySelectorAll('.snav-item').forEach(i=>i.classList.remove('on'));
-  if(pageEl) pageEl.classList.add('on');
+  // Defensive: remove .on from every page AND force inline display:none.
+  // The CSS rule `.page { display:none }` should be enough, but a screenshot
+  // from a user showed Audit log + Error log (page-tools cards) leaking onto
+  // the Dashboard, suggesting some CSS path was failing in the field.
+  // Inline style.display='none' is impossible to silently override.
+  document.querySelectorAll('.page').forEach(p => {
+    p.classList.remove('on');
+    if(p !== pageEl) p.style.display = 'none';
+  });
+  document.querySelectorAll('.snav-item').forEach(i => i.classList.remove('on'));
+  if(pageEl){
+    pageEl.classList.add('on');
+    pageEl.style.display = ''; // clear any prior inline 'none' so CSS .on wins
+  }
   if(el) el.classList.add('on');
   // Ensure month inputs on this page have a value
   const now=new Date();
