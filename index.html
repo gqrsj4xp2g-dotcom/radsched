@@ -27404,6 +27404,19 @@ function renderTools(){
   try{
     if(typeof renderLeaveAllocations === 'function') renderLeaveAllocations();
   }catch(_){}
+  // Schedule comparison defaults: A = previous month, B = this month.
+  try{
+    const cmpA = document.getElementById('cmp-month-a');
+    const cmpB = document.getElementById('cmp-month-b');
+    const now = new Date();
+    const thisYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const prev = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const prevYm = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+    if(cmpA && !cmpA.value) cmpA.value = prevYm;
+    if(cmpB && !cmpB.value) cmpB.value = thisYm;
+    const subY = document.getElementById('subcov-year');
+    if(subY && !subY.value) subY.value = String(new Date().getFullYear());
+  }catch(_){}
   _wiToggleFields();
   _initToolsTab();
 }
