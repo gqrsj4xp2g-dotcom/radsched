@@ -37592,14 +37592,16 @@ async function generatePublicScheduleHTMLMulti(months, passcode){
     const buf = await crypto.subtle.digest('SHA-256', enc.encode(passcode));
     passHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
   }
-  // NOTE: the literal "</script>" below MUST be split with a backslash
-  // because we're embedding a script tag inside a template literal that
-  // is itself inside an HTML <script> block. The HTML parser would
-  // otherwise close our outer <script> tag at the first "</script>"
-  // sequence — even inside a string. Splitting the closing tag avoids
-  // that without changing the runtime behavior.
+  // NOTE: the embedded script-tag pair below is built by string concat
+  // because (a) the HTML parser would close our outer <script> tag at any
+  // literal "</script>" sequence, and (b) the parsecheck regex extracts
+  // every <script>...</script> pair, so a literal "<script>" inside a
+  // template literal would break script extraction too. Building both tags
+  // dynamically avoids both problems without changing runtime semantics.
+  const _open = '<' + 'script>';
+  const _close = '<' + '/' + 'script>';
   const gateScript = passHash ? `
-<script>
+${_open}
 (async function(){
   const expected = '${passHash}';
   let pw = sessionStorage.getItem('rs-pub-pw');
@@ -37614,7 +37616,7 @@ async function generatePublicScheduleHTMLMulti(months, passcode){
     alert('Wrong passcode.');
   }
 })();
-<\/script>
+${_close}
 <style>html{visibility:hidden}</style>` : '';
   return `<!DOCTYPE html>
 <html lang="en">
