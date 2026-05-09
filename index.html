@@ -17026,18 +17026,42 @@ function renderOpenShifts(){
   const ym=document.getElementById('os-mo')?.value||new Date().toISOString().slice(0,7);
   const selP=pid?S.physicians.find(p=>p.id===pid):null;
   const opens=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)).sort((a,b)=>a.date>b.date?1:-1);
+  // Trade-marketplace offers (one-sided "give-up" board) for the same month.
+  const offers = (S.shiftOffers || []).filter(o => o.date && o.date.startsWith(ym) && !o.claimedBy && !o.cancelled).sort((a,b) => a.date > b.date ? 1 : -1);
   const el=document.getElementById('os-list');if(!el)return;
-  if(!opens.length){
+  if(!opens.length && !offers.length){
     el.innerHTML = `
       <div class="rs-empty">
         <div class="rs-empty-icon" style="background:rgba(22,163,74,.10);color:#16a34a">✓</div>
         <div class="rs-empty-title">All shifts covered</div>
-        <div class="rs-empty-body">No unfilled or up-for-grabs shifts this month. Open shifts appear here when an admin posts a slot for any physician to claim.</div>
+        <div class="rs-empty-body">No unfilled or up-for-grabs shifts this month. Open shifts appear here when an admin posts a slot for any physician to claim, or when a physician offers their shift for trade.</div>
       </div>`;
     return;
   }
   const unclaimed=opens.filter(o=>!o.claimedBy).length;
-  let html=`<div style="font-size:12px;color:var(--txt2);margin-bottom:8px">${opens.length} total — ${unclaimed} unclaimed</div>`;
+  let html=`<div style="font-size:12px;color:var(--txt2);margin-bottom:8px">${opens.length} open admin-posted (${unclaimed} unclaimed) · ${offers.length} on trade marketplace</div>`;
+  // ─── Trade Marketplace offers ──────────────────────────────────────
+  // These are physician-posted "I'd like someone to take this" entries.
+  if(offers.length){
+    html += `<div style="font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">🔄 Trade Marketplace</div>`;
+    offers.forEach(of => {
+      const offerer = _physById?.(of.fromPhysId);
+      const offererName = offerer ? `${offerer.last}, ${offerer.first}` : 'Unknown';
+      const canClaim = selP && selP.id !== of.fromPhysId;
+      html += `<div style="border:1px solid var(--bdr);border-left:4px solid #f59e0b;border-radius:var(--rl);padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;background:rgba(245,158,11,.04)">
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:13px">${escHtml(of.date)} — <span class="tag ta">${escHtml(of.shiftLabel || of.shift || '')}</span> @ ${escHtml(of.site || 'TBD')}</div>
+          <div style="font-size:11px;color:var(--txt2);margin-top:2px">Offered by <strong>${escHtml(offererName)}</strong>${of.reason ? ' · ' + escHtml(of.reason) : ''}</div>
+          <div style="font-size:10.5px;color:var(--rs-ink-3);margin-top:2px">Posted ${escHtml(_timeAgo?.(of.postedAt) || '')}</div>
+        </div>
+        ${canClaim ? `<button class="bg bsm" onclick="claimOfferedShift(${of.id},${selP.id})" title="Take this shift from ${escHtml(offererName)}">✓ I'll take it</button>` : ''}
+        ${selP && selP.id === of.fromPhysId ? `<button class="br bsm" onclick="cancelShiftOffer(${of.id})" title="Withdraw this offer">↩ Withdraw</button>` : ''}
+      </div>`;
+    });
+    if(opens.length){
+      html += `<div style="font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 6px">📋 Admin-posted Open Shifts</div>`;
+    }
+  }
   opens.forEach(o=>{
     const isIR=o.group==='IR';const isClaimed=!!o.claimedBy;
     const isMyAnch=selP?.anchorSite===o.site;
