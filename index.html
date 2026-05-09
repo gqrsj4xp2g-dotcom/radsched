@@ -28567,6 +28567,20 @@ function addDRShift(){
     const msg = `The following physician rule(s) would be violated by this assignment:\n\n  • ${_violations.join('\n  • ')}\n\nAssign anyway?`;
     if(!confirm(msg)) return;
   }
+  // Schedule lock guard — refuse mutations on a published month unless
+  // an admin explicitly unlocks it first (audit-logged on unlock).
+  if(typeof _canEditDate === 'function' && !_canEditDate(date)) return;
+  // Rest-period warning — flags assigning a physician within `cfg.rest`
+  // days after a weekend call / holiday / IR weekend call. Non-blocking
+  // (admin override is by design), but surfaced loudly so accidental
+  // burnout assignments are caught.
+  const _rest = +(S.cfg?.rest || 1);
+  if(_rest > 0){
+    const restWarn = _checkRestPeriod(pid, date, _rest);
+    if(restWarn){
+      if(!confirm(`⚠ Rest-period warning: ${p.last} ${restWarn}\n\nAssign anyway?`)) return;
+    }
+  }
   const _newId = S.nextId++;
   S.drShifts.push({id:_newId,physId:pid,date,shift,site,sub:document.getElementById('sb-sub').value,notes:document.getElementById('sb-notes').value,autoHome:false});
   if(typeof _audit==='function') _audit('drShift.add', {id:_newId, physId:pid, date, shift, site});
