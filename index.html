@@ -4981,6 +4981,29 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
   <div class="pg-title">Import from Excel</div>
   <div class="pg-sub">Upload Excel files to auto-fill 2nd/3rd shifts and vacations. Download templates to see the required column format.</div>
 
+  <!-- Bulk physician import — bootstraps a roster from an Excel file. -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">👥 Import physicians (bulk)</div>
+    <div class="note ni" style="font-size:11.5px;line-height:1.55;margin-bottom:10px">
+      Bootstrap a roster from Excel. Required columns: <strong>Last</strong>, <strong>First</strong>. Optional:
+      <strong>Email</strong>, <strong>Role</strong> (DR/IR/MIXED), <strong>DR FTE</strong>, <strong>IR FTE</strong>,
+      <strong>Anchor Site</strong>, <strong>IR Group</strong>, <strong>wRVU multiplier</strong>.
+      Existing physicians (matched by case-insensitive last+first) are <strong>updated</strong>, not duplicated.
+    </div>
+    <div style="margin:10px 0">
+      <label style="display:inline-block;cursor:pointer">
+        <div class="bp" style="display:inline-block;padding:7px 14px">📂 Choose physicians Excel</div>
+        <input type="file" id="xl-phys-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="previewPhysImport(this)">
+      </label>
+      <button class="bt bsm" style="margin-left:8px" onclick="downloadPhysTemplate()">⬇ Template</button>
+    </div>
+    <div id="xl-phys-preview"></div>
+    <div id="xl-phys-actions" style="display:none;margin-top:8px">
+      <button class="bg" onclick="applyPhysImport()">✓ Import / update physicians</button>
+      <span id="xl-phys-count" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+    </div>
+  </div>
+
   <div class="g2" style="margin-bottom:12px">
     <!-- Shifts Import -->
     <div class="card">
