@@ -33438,6 +33438,52 @@ function _renderTodayCoverage(isAdmin){
   body.innerHTML = html;
 }
 
+// ── Shift handoff notes ────────────────────────────────────────────────
+// Lightweight free-text note attached to a shift. Useful for end-of-day
+// handoff comments ("Pt in CT2 still pending wet read", "Approved by Dr X
+// to leave 30min early", etc.). Visible to anyone viewing Today's
+// Coverage. Persisted on the shift record so it survives nav + reload.
+function editShiftHandoff(kind, id){
+  const arr = kind === 'dr' ? S.drShifts : kind === 'ir' ? S.irShifts : null;
+  if(!arr){ console.warn('editShiftHandoff: unknown kind', kind); return; }
+  const s = arr.find(x => x.id === id);
+  if(!s){ console.warn('editShiftHandoff: shift not found', kind, id); return; }
+  const physName = (typeof pname === 'function') ? pname(s.physId) : ('physician #' + s.physId);
+  const current = s.handoff || '';
+  // Use the existing modal helper if available; fall back to prompt().
+  if(typeof _modalConfirm === 'function'){
+    const body = `<p style="margin:0 0 8px 0;font-size:12.5px;color:var(--txt2)">
+      <strong>${escHtml(physName)}</strong> &middot; ${escHtml(s.date)} ${escHtml(s.shift || '')} ${escHtml(s.site ? '@ ' + s.site : '')}
+    </p>
+    <textarea id="rs-handoff-text" rows="4" maxlength="500"
+      placeholder="e.g. CT2 study still pending — please follow up. Or: approved to leave 30min early."
+      style="width:100%;padding:10px;font-size:13px;font-family:inherit;border:1px solid var(--bdr);border-radius:6px;background:var(--bg2);color:var(--txt1)"
+    >${escHtml(current)}</textarea>
+    <div style="font-size:10.5px;color:var(--txt3);margin-top:4px">Notes are visible to everyone viewing this shift. Up to 500 characters.</div>`;
+    _modalConfirm({
+      title: '📝 Shift handoff note',
+      body,
+      confirmLabel: current ? 'Save changes' : 'Save note',
+      cancelLabel: 'Cancel',
+    }).then(ok => {
+      if(!ok) return;
+      const txt = (document.getElementById('rs-handoff-text')?.value || '').trim().slice(0, 500);
+      if(txt === current) return; // no-op
+      s.handoff = txt || null;
+      if(typeof _audit === 'function') _audit('shift.handoff.set', { kind, id, length: txt.length });
+      if(typeof triggerSave === 'function') triggerSave();
+      if(typeof _afterMutation === 'function') _afterMutation();
+      if(typeof _toast === 'function') _toast(txt ? 'Handoff note saved.' : 'Handoff note cleared.', 'ok');
+    });
+  } else {
+    const txt = prompt(`Handoff note for ${physName} (${s.date} ${s.shift || ''}):`, current);
+    if(txt == null) return;
+    s.handoff = txt.trim().slice(0, 500) || null;
+    if(typeof triggerSave === 'function') triggerSave();
+    if(typeof _afterMutation === 'function') _afterMutation();
+  }
+}
+
 // ── Sick-day quick coverage flow ───────────────────────────────────────
 // Admin marks a physician out sick for the day. The app pulls up the
 // physician's shifts for today + the next two days, lets the admin pick
