@@ -8753,7 +8753,7 @@ async function launchApp(){
 //   • non-destructive (preserve unknown fields for forward-compat)
 // The version is stored on the persisted payload as `_schemaVersion`.
 // A payload with no _schemaVersion is treated as version 0.
-const _SCHEMA_VERSION = 4;
+const _SCHEMA_VERSION = 5;
 const _MIGRATIONS = [
   // v0 → v1: stamp the schema version. No structural changes; pre-versioned
   // payloads are functionally equivalent to v1 since validators were lenient.
@@ -8777,6 +8777,15 @@ const _MIGRATIONS = [
   // 'published' to block accidental edits. Additive; legacy data unlocked.
   { from: 3, to: 4, fn: (d) => {
       if(!Array.isArray(d.lockedMonths)) d.lockedMonths = [];
+      return d;
+    }
+  },
+  // v4 → v5: introduce announcements (practice-wide banners) and
+  // leaveAllocations (per-physician annual allocations of leave types).
+  // Both are additive; legacy practices start with empty containers.
+  { from: 4, to: 5, fn: (d) => {
+      if(!Array.isArray(d.announcements)) d.announcements = [];
+      if(!d.leaveAllocations || typeof d.leaveAllocations !== 'object') d.leaveAllocations = {};
       return d;
     }
   },
