@@ -1,45 +1,17 @@
-name: Build + publish widget installers
-
-# Cross-platform widget build: triggered by pushing a tag like
-# `widget-v1.0.4`. Runs the macOS + Windows builds on their native
-# runners and uploads the resulting .dmg / .exe to a GitHub Release
-# matching the tag.
-#
-# Usage from your Mac:
-#   cd widget
-#   # bump version in package.json (e.g. 1.0.3 → 1.0.4)
-#   git add package.json && git commit -m "widget: bump 1.0.4"
-#   git tag widget-v1.0.4
-#   git push origin main widget-v1.0.4
-#
-# That single tag push triggers this workflow → both .dmg AND .exe get
-# uploaded to the same release. The widget's auto-update banner picks
-# them up within 6 hours; manual check via the tray menu is instant.
-#
-# Eliminates the "I need a Windows machine to build the .exe" gap and
-# the "I forgot to run publish-release.sh" foot-gun. One tag, both OSes.
+name: widget-release
 
 on:
   push:
     tags:
       - 'widget-v*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag name (e.g. widget-v1.0.4)'
-        required: true
 
 permissions:
-  contents: write   # required to create + upload to releases
+  contents: write
 
 jobs:
-  # ── macOS build (.dmg, both arm64 + Intel) ───────────────────────
-  build-mac:
-    name: macOS .dmg
+  mac:
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: widget
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,25 +20,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: widget/package-lock.json
       - run: npm ci
-      # electron-builder for macOS — produces both arm64 + x64 .dmg
-      # files under widget/dist/. Uses ad-hoc signing (identity: "-")
-      # configured in package.json so unsigned distribution works.
-      # Icon is read from build/icon.png (committed to the repo).
-      - name: Build macOS .dmg
-        run: npx electron-builder --mac --publish never
+        working-directory: widget
+      - run: npx electron-builder --mac --publish never
+        working-directory: widget
       - uses: actions/upload-artifact@v4
         with:
           name: mac-dmg
           path: widget/dist/*.dmg
           if-no-files-found: error
 
-  # ── Windows build (.exe via NSIS) ─────────────────────────────────
-  build-win:
-    name: Windows .exe
+  win:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: widget
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,47 +39,36 @@ jobs:
           cache: 'npm'
           cache-dependency-path: widget/package-lock.json
       - run: npm ci
-      # Icon read from build/icon.png (committed to the repo).
-      - name: Build Windows .exe
-        run: npx electron-builder --win --publish never
+        working-directory: widget
+      - run: npx electron-builder --win --publish never
+        working-directory: widget
       - uses: actions/upload-artifact@v4
         with:
           name: win-exe
           path: widget/dist/*.exe
           if-no-files-found: error
 
-  # ── Publish — combine both artifacts into a single release ────────
   publish:
-    name: Publish to GitHub Releases
-    needs: [build-mac, build-win]
+    needs: [mac, win]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: { name: mac-dmg, path: ./release-assets }
+        with:
+          name: mac-dmg
+          path: ./assets
       - uses: actions/download-artifact@v4
-        with: { name: win-exe, path: ./release-assets }
-      - name: Create or update release
+        with:
+          name: win-exe
+          path: ./assets
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          TAG="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          fi
-          echo "Release tag: $TAG"
-          ls -lh release-assets/
-          # gh CLI is preinstalled on GitHub-hosted runners.
+          TAG="${GITHUB_REF_NAME}"
+          ls -lh assets/
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release exists — overwriting assets."
-            gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --clobber
           else
-            echo "Creating new release."
             VERSION="${TAG#widget-v}"
-            gh release create "$TAG" release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "RadScheduler Widget $VERSION" \
-              --notes "Cross-platform widget build. macOS (.dmg) + Windows (.exe) installers attached.
-
-Auto-update from prior versions will pick this up within 6 hours, or manually via the widget tray menu → Check for updates…"
+            gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --title "Widget $VERSION" --notes "Cross-platform widget installers."
           fi
