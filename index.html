@@ -34899,6 +34899,142 @@ function getDriveTimeWRVUCredit(physId, site, date){
   return +(dt / 60 * perHour).toFixed(1);
 }
 
+// ── Auto-assign rationale viewer ─────────────────────────────────────
+// Pain solved: physicians ask "why did I get this Tuesday shift?" and
+// admins have no quick answer. Even when MCF picks the optimal
+// assignment, the cost breakdown lives only in the worker's logs.
+//
+// This module computes a RETROACTIVE rationale for any assignment:
+// look at the physician's stats vs. alternatives, surface the factors
+// that likely drove the pick. Works for both auto-assigned and
+// manually-assigned shifts (rationale is "what makes this physician
+// a sensible choice for this slot?").
+//
+// Returns:
+//   {
+//     primary: { physId, factors: [{name, score, detail}], total },
+//     alternatives: [{ physId, factors, total, reason }]
+//   }
+function explainShiftAssignment(kind, shiftId){
+  const arrFor = (k) => k==='dr' ? S.drShifts : k==='wk' ? S.weekendCalls : k==='irc' ? S.irCalls : k==='ir' ? S.irShifts : k==='hol' ? S.holidays : null;
+  const arr = arrFor(kind);
+  if(!arr) return null;
+  const sh = arr.find(x => x.id === +shiftId);
+  if(!sh) return null;
+  const date = sh.date || sh.satDate;
+  if(!date) return null;
+  const ym = date.slice(0,7);
+  const physList = (S.physicians || []).filter(p => (p.drFte || 0) + (p.irFte || 0) > 0);
+  // Score one physician for this slot. Higher score = better fit.
+  function scoreOne(p){
+    const factors = [];
+    let total = 0;
+    // Eligibility: vacation, conflict, FTE category
+    const onVac = (S.vacations || []).some(v => v.physId === p.id && v.start <= date && v.end >= date);
+    if(onVac){ factors.push({name:'Vacation', score:-1000, detail:'On vacation that day'}); total += -1000; }
+    const conflict = (S.drShifts || []).some(s => s.physId === p.id && s.date === date && s.id !== sh.id)
+                  || (S.irCalls  || []).some(c => c.physId === p.id && c.date === date && c.id !== sh.id)
+                  || (S.weekendCalls || []).some(w => w.physId === p.id && (w.satDate === date || w.sunDate === date) && w.id !== sh.id);
+    if(conflict){ factors.push({name:'Conflict', score:-1000, detail:'Already has a shift that day'}); total += -1000; }
+    // FTE utilization: lower is "deserves more shifts"
+    const dr = (S.drShifts || []).filter(s => s.physId === p.id && s.date.startsWith(ym) && s.shift !== 'Home').length;
+    const expectedDr = ((p.drFte || 0) * (S.cfg?.wdMax || 20));
+    const drRatio = expectedDr > 0 ? dr / expectedDr : 0;
+    if(expectedDr > 0){
+      const score = (1 - drRatio) * 50;  // closer to 1 if under-utilized
+      factors.push({name:'DR utilization', score, detail:`${dr}/${Math.round(expectedDr)} DR shifts this month (${Math.round(drRatio*100)}%)`});
+      total += score;
+    }
+    // Drive time
+    if(sh.site && sh.site !== 'At Home / Remote'){
+      const dt = (S.driveTimes && S.driveTimes[p.id] && S.driveTimes[p.id][sh.site]) || 0;
+      if(dt > 0){
+        const score = Math.max(-30, 30 - dt * 0.5);  // shorter drive = higher score
+        factors.push({name:'Drive time', score, detail:`${dt} min round-trip to ${sh.site}`});
+        total += score;
+      } else {
+        factors.push({name:'Drive time', score:0, detail:'No drive-time entry recorded'});
+      }
+    }
+    // Anchor site compliance
+    if(p.anchorSite && sh.site){
+      const isAnchor = sh.site === p.anchorSite;
+      const score = isAnchor ? 25 : -15;
+      factors.push({name:'Anchor site', score, detail:isAnchor ? `${sh.site} is anchor` : `Anchor is ${p.anchorSite}, this slot is ${sh.site}`});
+      total += score;
+    }
+    // Subspecialty match
+    if(sh.sub && p.drSubs?.includes(sh.sub)){
+      factors.push({name:'Subspecialty', score:20, detail:`Qualified for ${sh.sub}`});
+      total += 20;
+    } else if(sh.sub){
+      factors.push({name:'Subspecialty', score:-25, detail:`NOT qualified for ${sh.sub}`});
+      total += -25;
+    }
+    // Recent on-call (rest period burden)
+    if(typeof _checkRestPeriod === 'function'){
+      const restWarn = _checkRestPeriod(p.id, date, +(S.cfg?.rest || 1));
+      if(restWarn){ factors.push({name:'Rest period', score:-40, detail:restWarn}); total += -40; }
+    }
+    return { physId: p.id, factors, total };
+  }
+  const all = physList.map(scoreOne).sort((a, b) => b.total - a.total);
+  const primary = all.find(s => s.physId === sh.physId);
+  const alternatives = all.filter(s => s.physId !== sh.physId).slice(0, 3);
+  // Add a short "why not them" reason on each alternative.
+  alternatives.forEach(alt => {
+    const blockingFactors = alt.factors.filter(f => f.score <= -100);
+    if(blockingFactors.length){
+      alt.reason = blockingFactors[0].detail;
+    } else {
+      const drop = primary ? (primary.total - alt.total) : 0;
+      alt.reason = `Score ${alt.total.toFixed(0)} vs ${primary?.total.toFixed(0) ?? '—'} (${drop.toFixed(0)} lower)`;
+    }
+  });
+  return { date, kind, shiftId: sh.id, site: sh.site, primary, alternatives };
+}
+
+// Modal trigger from any "Why?" link on a shift chip.
+function showAssignmentRationale(kind, shiftId){
+  const r = explainShiftAssignment(kind, shiftId);
+  if(!r){ alert('Could not compute rationale.'); return; }
+  const physName = (id) => {
+    const p = (typeof _physById === 'function') ? _physById(id) : null;
+    return p ? `Dr. ${p.last}` : `Phys#${id}`;
+  };
+  const factorRow = (f) => `<tr>
+    <td style="padding:4px 8px;font-size:12px">${escHtml(f.name)}</td>
+    <td style="padding:4px 8px;font-size:12px;text-align:right;font-family:ui-monospace,monospace;color:${f.score >= 0 ? 'var(--green-t,#15803d)' : 'var(--red-t,#dc2626)'}">${f.score >= 0 ? '+' : ''}${f.score.toFixed(0)}</td>
+    <td style="padding:4px 8px;font-size:11.5px;color:var(--rs-ink-3)">${escHtml(f.detail)}</td>
+  </tr>`;
+  const primary = r.primary || { factors: [], total: 0 };
+  const altsHtml = r.alternatives.map(alt => `<div style="border:1px solid var(--rs-line);border-radius:6px;padding:8px 10px;margin-bottom:6px">
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+      <strong>${physName(alt.physId)}</strong>
+      <span style="font-family:ui-monospace,monospace;color:var(--rs-ink-3)">${alt.total.toFixed(0)}</span>
+    </div>
+    <div style="font-size:11px;color:var(--rs-ink-3)">${escHtml(alt.reason || '')}</div>
+  </div>`).join('');
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-wrap';
+  wrap.id = 'rationale-modal';
+  wrap.style.display = 'flex';
+  wrap.onclick = (e) => { if(e.target === wrap) document.getElementById('rationale-modal').remove(); };
+  wrap.innerHTML = `<div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="document.getElementById('rationale-modal').remove()">✕</button>
+    <div class="modal-title">📊 Why ${escHtml(physName(primary.physId))}?</div>
+    <div style="font-size:11.5px;color:var(--rs-ink-3);margin-bottom:10px">For ${escHtml(r.date)}${r.site ? ' at ' + escHtml(r.site) : ''}. Higher scores favor the physician for this slot. (Computed retroactively from current state — not a literal MCF replay.)</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
+      <thead><tr><th style="text-align:left;padding:4px 8px;font-size:11px;color:var(--rs-ink-3)">Factor</th><th style="text-align:right;padding:4px 8px;font-size:11px;color:var(--rs-ink-3)">Score</th><th style="text-align:left;padding:4px 8px;font-size:11px;color:var(--rs-ink-3)">Detail</th></tr></thead>
+      <tbody>${primary.factors.map(factorRow).join('')}</tbody>
+      <tfoot><tr><td style="padding:6px 8px;font-size:12px;font-weight:600">Total</td><td style="text-align:right;padding:6px 8px;font-family:ui-monospace,monospace;font-weight:700">${primary.total.toFixed(0)}</td><td></td></tr></tfoot>
+    </table>
+    <div style="font-size:11px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Top alternatives (and why not)</div>
+    ${altsHtml || '<div style="font-size:12px;color:var(--rs-ink-3)">No close alternatives.</div>'}
+  </div>`;
+  document.body.appendChild(wrap);
+}
+
 // ── Desktop widget pairing ───────────────────────────────────────────
 // Pain solved: physicians want a glanceable always-on dashboard widget
 // that shows their day's expected wRVU, current shift, and (eventually)
