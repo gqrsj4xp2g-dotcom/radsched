@@ -33942,28 +33942,64 @@ function _updateBrowserTitle(){
 // admins who prefer the existing shift-type coloring keep it.
 function _physColor(physId){
   if(physId == null) return '';
-  // Simple deterministic hash → 360° hue. Different ids land far apart
-  // because we use the golden-ratio increment (137.508°) which gives
-  // good color separation for any sequential set of ids.
+  // Prefer the physician's chosen override (set in their profile). The
+  // override is stored as a hex string like '#3b82f6'; we soften it for
+  // background use via _hexToSoftBg. If no override, derive deterministic
+  // pastel from the id via golden-ratio hue.
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(phys && phys.color){
+    return _hexToSoftBg(phys.color);
+  }
+  // Deterministic fallback: hash → 360° hue × golden ratio for good separation.
   let h = 0; const s = String(physId);
   for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   const hue = Math.abs(h * 137.508) % 360;
-  // Light mode: 35% saturation / 88% lightness (pastel background w/
-  // dark text). Dark mode: 38% sat / 22% lightness (rich background
-  // with bright text). Theme detected via the data-theme on body.
   const dark = document.body?.dataset?.theme === 'dark';
-  if(dark){
-    return `hsl(${hue},38%,22%)`;
-  }
-  return `hsl(${hue},42%,86%)`;
+  return dark ? `hsl(${hue},38%,22%)` : `hsl(${hue},42%,86%)`;
 }
 function _physColorText(physId){
   if(physId == null) return '';
+  const phys = (typeof _physById === 'function') ? _physById(physId) : null;
+  if(phys && phys.color){
+    return _hexToReadableText(phys.color);
+  }
   let h = 0; const s = String(physId);
   for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   const hue = Math.abs(h * 137.508) % 360;
   const dark = document.body?.dataset?.theme === 'dark';
   return dark ? `hsl(${hue},80%,82%)` : `hsl(${hue},65%,30%)`;
+}
+// ── Color helpers for physician color override ─────────────────────────
+// Convert a hex like #3b82f6 to a soft pastel background and a readable
+// foreground that auto-flips for dark mode. Used by _physColor /
+// _physColorText so the chosen color appears consistently everywhere.
+function _hexToSoftBg(hex){
+  if(!hex || !hex.startsWith('#')) return hex || '';
+  const h = hex.length === 4
+    ? '#' + hex[1]+hex[1] + hex[2]+hex[2] + hex[3]+hex[3]
+    : hex;
+  const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+  const dark = document.body?.dataset?.theme === 'dark';
+  if(dark){
+    // Mix toward black, alpha ~25%.
+    return `rgb(${Math.round(r*0.28)},${Math.round(g*0.28)},${Math.round(b*0.28)})`;
+  }
+  // Mix toward white for pastel, alpha ~22%.
+  return `rgb(${Math.round(r*0.22 + 200)},${Math.round(g*0.22 + 200)},${Math.round(b*0.22 + 200)})`;
+}
+function _hexToReadableText(hex){
+  if(!hex || !hex.startsWith('#')) return hex || '';
+  const h = hex.length === 4
+    ? '#' + hex[1]+hex[1] + hex[2]+hex[2] + hex[3]+hex[3]
+    : hex;
+  const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+  const dark = document.body?.dataset?.theme === 'dark';
+  if(dark){
+    // Brighten for dark backgrounds.
+    return `rgb(${Math.min(255, Math.round(r*1.4 + 60))},${Math.min(255, Math.round(g*1.4 + 60))},${Math.min(255, Math.round(b*1.4 + 60))})`;
+  }
+  // Darken for pastel backgrounds.
+  return `rgb(${Math.round(r*0.55)},${Math.round(g*0.55)},${Math.round(b*0.55)})`;
 }
 function togglePhysColors(){
   const cur = document.body.getAttribute('data-rs-phys-color') === '1';
