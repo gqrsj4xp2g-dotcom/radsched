@@ -10941,6 +10941,11 @@ function renderMySched(){
     <div class="met"><div class="met-lbl">IR Shifts</div><div class="met-val">${irSh.length}</div><div class="met-sub">this month</div></div>`:''}
     ${c&&!c.noData?`<div class="met"><div class="met-lbl">⚓ Anchor</div><div class="met-val" style="color:${c.ok?'var(--green)':'var(--red)'}">${c.pct}%</div><div class="met-sub">≥${S.cfg.anchorPct}% target</div></div>`:''}
   </div>`;
+  // Leave-type balance chips (Vacation / Sick / CME / Personal etc.).
+  // Renders nothing if the physician has no allocations and no used days.
+  try{
+    if(typeof _renderMyLeaveBalances === 'function') html += _renderMyLeaveBalances();
+  }catch(_){}
   if(c&&c.ok===false) html+=`<div class="note nw" style="margin-bottom:10px">⚓ Anchor alert: ${c.pct}% at ${c.anchor} — need ≥${S.cfg.anchorPct}%.</div>`;
 
   // ── Next 7 days (mobile-first) ────────────────────────────────────────
