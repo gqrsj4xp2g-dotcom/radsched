@@ -206,6 +206,22 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   .tb-spacer{flex:1; min-width:0}
   /* Buttons that REMAIN visible: keep them compact + non-shrinkable */
   .topbar .tb-btn{padding:6px 10px; font-size:11px; min-height:36px; flex-shrink:0}
+  /* Allowlist approach: hide all non-essential topbar children, then
+     un-hide the few we keep. The user-visible result on mobile is:
+        ☰ hamburger    RadScheduler    [spacer]    🔔   Sign Out
+     Everything else (Save File, Print, Undo/Redo, command palette,
+     keyboard shortcuts, Hold-to-reset, status badges) is hidden.
+     Power-user actions are still available by switching to desktop. */
+  .topbar > *{display:none}
+  .topbar > #mobile-nav-toggle,
+  .topbar > .tb-logo,
+  .topbar > .tb-spacer,
+  .topbar > #rs-notif-toggle,
+  .topbar > #rs-stale-save-badge,
+  .topbar > #rs-net-badge,
+  .topbar > #rs-error-badge{display:inline-flex !important; align-items:center}
+  /* Sign Out button is the LAST .tb-btn in the topbar — keep it. */
+  .topbar > .tb-btn:last-of-type{display:inline-flex !important; align-items:center}
   /* Grids collapse */
   .g2,.g3,.g4{grid-template-columns:1fr;gap:8px}
   /* Cards full-width */
