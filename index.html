@@ -380,12 +380,8 @@ tbody tr:hover{background:var(--bg3)}
 .tabs{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:14px}
 .tab{padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;color:var(--txt2);margin-bottom:-1px}
 .tab.on{border-bottom-color:var(--blue);color:var(--blue)}
-/* Tools page sub-tabs: hide cards whose data-tools-tab doesn't match the
-   active tab on #page-tools. Uses :not() so all 4 tabs share one rule. */
-#page-tools[data-active-tab="sim"]     [data-tools-tab]:not([data-tools-tab="sim"]),
-#page-tools[data-active-tab="rules"]   [data-tools-tab]:not([data-tools-tab="rules"]),
-#page-tools[data-active-tab="reports"] [data-tools-tab]:not([data-tools-tab="reports"]),
-#page-tools[data-active-tab="ops"]     [data-tools-tab]:not([data-tools-tab="ops"]) { display:none !important; }
+/* Tools sub-tab visibility is enforced by JS (toolsTab() in script).
+   Sticky strip stays visible while scrolling. */
 #tools-subnav{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:6px}
 .wktab{padding:4px 10px;font-size:11px;font-weight:700;border:1px solid var(--bdr);border-radius:20px;cursor:pointer;background:var(--bg2);color:var(--txt2);margin:2px}
 .wktab.on{background:var(--blue);color:#fff;border-color:var(--blue)}
@@ -1609,7 +1605,7 @@ tbody tr:hover{background:var(--bg3)}
 
       <div class="snav-sect admin-only">Tools &amp; Reports</div>
       <div class="snav-item admin-only" onclick="nav('tools',this)" data-pg="tools">🛠 Tools</div>
-      <div class="snav-item admin-only" onclick="nav('tools',this,'ops')" data-pg="tools" data-tools-tab="ops" style="padding-left:24px;font-size:12px">📜 Audit &amp; logs</div>
+      <div class="snav-item admin-only" onclick="nav('tools',this,'ops')" data-pg="tools" data-tools-shortcut="ops" style="padding-left:24px;font-size:12px">📜 Audit &amp; logs</div>
       <div class="snav-item admin-only" onclick="nav('fte',this)" data-pg="fte">📊 FTE Monitor</div>
       <div class="snav-item admin-only" onclick="nav('anchor-report',this)" data-pg="anchor-report">📈 Anchor Compliance</div>
       <div class="snav-item admin-only" onclick="nav('publish',this)" data-pg="publish">📤 Publish</div>
@@ -10250,7 +10246,7 @@ function _toggleMobileNav(force){
 //
 // Pair: also restores scroll on initial page show (DOMContentLoaded +
 // pageshow) so a hard reload lands the user at the same scroll position.
-const _RS_BUILD_TAG = 'rs-v3'; // bump in lockstep with sw.js CACHE_VERSION
+const _RS_BUILD_TAG = 'rs-v4'; // bump in lockstep with sw.js CACHE_VERSION
 (function _installScrollPersistence(){
   const wire = () => {
     const scroller = document.querySelector('.main');
@@ -26502,23 +26498,23 @@ function _wiToggleFields(){
 
 // ── Tools page sub-tab control ─────────────────────────────────────────
 // 18 cards split into 4 focused groups: Simulators, Rules, Reports, Ops.
-// The active group is persisted in localStorage so navigating away + back
-// lands on the same view. Each card has data-tools-tab matching one of
-// these keys; CSS hides everything not in the active set.
+// Active group persisted in localStorage so nav-away + back lands here.
 //
-// Per-tab scroll position is also tracked so jumping between sub-tabs
-// doesn't lose where you were within the previous one.
+// IMPORTANT: visibility is enforced via inline `style.display` on each
+// card, not via CSS attribute selectors. Earlier attempt used a CSS
+// rule on `#page-tools[data-active-tab="X"] [data-tools-tab]:not(...)`,
+// which works in browser dev tests but proved unreliable in the field
+// (Safari edge case + when the attribute hadn't yet been set on first
+// mount). Direct style mutation is foolproof.
 //
-// `_skipScroll` is set when called from `_initToolsTab` (page mount path)
-// so nav()'s page-level scroll restore wins; only user-driven sub-tab
-// switches reposition the scroller.
+// `_skipScroll` is set when called from `_initToolsTab` (page mount
+// path) so nav()'s page-level scroll restore wins; only user-driven
+// sub-tab switches reposition the scroller.
 function toolsTab(name, el, _skipScroll){
   const VALID = ['sim', 'rules', 'reports', 'ops'];
   if(!VALID.includes(name)) name = 'sim';
   const page = document.getElementById('page-tools');
-  // Save scroll for the OUTGOING sub-tab before swapping. Only meaningful
-  // when the user clicks a chip — on mount, prev is the default 'sim' and
-  // scroller is at 0 anyway.
+  // Save scroll for the OUTGOING sub-tab before swapping.
   if(!_skipScroll){
     try{
       const prev = page?.getAttribute('data-active-tab');
@@ -26529,6 +26525,13 @@ function toolsTab(name, el, _skipScroll){
     }catch(_){}
   }
   if(page) page.setAttribute('data-active-tab', name);
+  // Foolproof show/hide — flip every tagged card's display directly.
+  if(page){
+    page.querySelectorAll('[data-tools-tab]').forEach(card => {
+      const cardTab = card.getAttribute('data-tools-tab');
+      card.style.display = (cardTab === name) ? '' : 'none';
+    });
+  }
   // Highlight the active chip in the strip.
   document.querySelectorAll('#tools-subnav .tab').forEach(t => {
     t.classList.toggle('on', t.getAttribute('data-tt') === name);
