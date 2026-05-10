@@ -40175,6 +40175,9 @@ async function _sideShiftsSync(opts){
     _sideShiftsConsecFails = 0;
     if(upserts.length || deletes.length){
       console.log('[RS] Side-table sync: +'+upserts.length+' / -'+deletes.length+' rows');
+      // Stale caches no longer reflect the most recent writes. Drop
+      // them so the next read pulls fresh.
+      if(typeof _shiftsInvalidateReadCache === 'function') _shiftsInvalidateReadCache();
     }
   } catch(e){
     _sideShiftsConsecFails++;
