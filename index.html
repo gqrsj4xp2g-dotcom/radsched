@@ -7469,19 +7469,48 @@ async function renderBackupPicker(targetElId){
 ═══════════════════════════════════════════════════════════════════════ */
 const _AUDIT_LOG_MAX = 5000;
 function _audit(action, detail){
+  let entry = null;
   try{
     if(!Array.isArray(S.auditLog)) S.auditLog = [];
-    S.auditLog.push({
+    entry = {
       ts: new Date().toISOString(),
       who: CU?.email || CU?.first || 'unknown',
       whoId: CU?.id || null,
       role: CU?.role || null,
       action: String(action || 'unknown'),
       detail: detail == null ? null : (typeof detail === 'string' ? detail : (() => { try{ return JSON.parse(JSON.stringify(detail)); }catch(_){ return String(detail); } })()),
-    });
+    };
+    S.auditLog.push(entry);
     while(S.auditLog.length > _AUDIT_LOG_MAX) S.auditLog.shift();
   }catch(e){
     if(typeof _logError === 'function') _logError('audit', 'Audit write failed', e);
+  }
+  // ── Dual-write to public.radscheduler_audit ─────────────────────
+  // Fire-and-forget. The side table is the long-term home for audit
+  // history; the in-blob copy is being progressively shortened as
+  // we migrate readers. See docs/SCALING.md for the multi-step plan.
+  // Failures are silent (in-blob copy is the safety net):
+  //   - Code 42P01 = table doesn't exist (legacy practice that
+  //     hasn't applied docs/sql/01-audit-log-side-table.sql)
+  //   - 401/permission denied = anon session without auth, expected
+  //     during sign-out / pre-login
+  //   - Anything else = transient write failure, no user impact
+  if(entry && _supabase && _ROW_ID && CU?.id){
+    try{
+      _supabase.from('radscheduler_audit').insert({
+        practice_id: String(_ROW_ID),
+        ts: entry.ts,
+        who: entry.who,
+        who_id: String(entry.whoId || ''),
+        role: entry.role,
+        action: entry.action,
+        detail: entry.detail || {},
+      }).then(({error}) => {
+        if(error && error.code !== '42P01'){
+          console.warn('[audit] side-table insert failed:', error.code || '', error.message);
+        }
+      }).catch(() => {});
+    }catch(_){}
   }
 }
 
