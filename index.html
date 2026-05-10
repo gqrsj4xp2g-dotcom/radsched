@@ -8737,6 +8737,46 @@ function _initAuthClient(){
   if(_supabase) return _supabase;
   const url=_getUrl(), key=_getKey();
   if(!url||!key) return null;
+  // ── gzip wrapper for outbound Supabase request bodies ─────────────
+  // Only kicks in for POST/PATCH bodies > 32 KB (typical _pushToSupabase
+  // payload at 50+ phys). Below that the encoding overhead isn't worth
+  // it. Falls back to the unwrapped fetch on any error so a transient
+  // CompressionStream issue doesn't break the save path.
+  const _GZIP_MIN_BYTES = 32 * 1024;
+  async function _gzipFetch(input, init){
+    if(!init || !init.body || typeof CompressionStream === 'undefined'){
+      return fetch(input, init);
+    }
+    const method = String(init.method || 'GET').toUpperCase();
+    if(method !== 'POST' && method !== 'PATCH' && method !== 'PUT'){
+      return fetch(input, init);
+    }
+    const body = init.body;
+    let bytes;
+    if(typeof body === 'string'){
+      if(body.length < _GZIP_MIN_BYTES) return fetch(input, init);
+      bytes = new TextEncoder().encode(body);
+    } else if(body instanceof Uint8Array){
+      if(body.byteLength < _GZIP_MIN_BYTES) return fetch(input, init);
+      bytes = body;
+    } else {
+      // ArrayBuffer / Blob / FormData — skip
+      return fetch(input, init);
+    }
+    try{
+      const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+      const compressed = await new Response(stream).arrayBuffer();
+      const newInit = { ...init, body: compressed };
+      newInit.headers = new Headers(init.headers || {});
+      newInit.headers.set('Content-Encoding', 'gzip');
+      newInit.headers.set('Content-Length', String(compressed.byteLength));
+      return fetch(input, newInit);
+    }catch(e){
+      console.warn('[RS] gzip fetch fallback (uncompressed):', e.message);
+      return fetch(input, init);
+    }
+  }
+
   try{
     // Explicitly enable session persistence + auto-refresh. Defaults are usually
     // these values, but being explicit guards against future SDK changes that
