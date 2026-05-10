@@ -26829,7 +26829,7 @@ function renderDRCal(){
     let evs='';
     _shiftsOnDate('dr', c.date).filter(s=>(!fpid||s.physId===fpid)&&(!fsh||s.shift===fsh)).forEach(s=>{
       const cls=s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':s.autoHome?'e-home-auto':'ehome';
-      const p=S.physicians.find(x=>x.id===s.physId);
+      const p=_physById(s.physId);  // memoized O(1) — was O(N) .find()
       const nonAnc=p?.anchorSite&&s.site!==p.anchorSite?' eanc':'';
       const siteSh=(s.site||'').split(' ')[0];
       const subLbl=s.sub?s.sub.slice(0,6):'';
@@ -26880,7 +26880,7 @@ function renderDRCal(){
         <div style="font-size:9px;opacity:.7">${h.name.split(' ')[0]}</div>
       </div>`;
     });
-    (vm[c.date]||[]).filter(pid=>S.physicians.find(p=>p.id===pid&&p.drFte>0)).forEach(pid=>{
+    (vm[c.date]||[]).filter(pid=>{ const p=_physById(pid); return p && p.drFte>0; }).forEach(pid=>{
       evs+=`<div class="ev evac" title="${pnameHtml(pid)} — Vacation/Time Off">
         <div style="font-weight:700;font-size:11px">${pshort(pid)}</div>
         <div style="font-size:9px;opacity:.8">Time Off</div>
