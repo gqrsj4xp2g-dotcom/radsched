@@ -27504,6 +27504,15 @@ function _initPresence(){
   // Followers (non-leader tabs in the same browser) don't join. Only the
   // leader tab represents this user in the practice's presence channel.
   if(typeof _isLeader !== 'undefined' && !_isLeader) return;
+  // Realtime quota fix (SCALING.md §5 sub-option 2): only admins join
+  // the presence channel. Non-admins don't appear in the "👁 viewing"
+  // pill and don't see the pill themselves. Override per-practice
+  // with cfg.realtimeAllRoles=true if the live counter is wanted for
+  // everyone.
+  const _allRoles = S?.cfg?.realtimeAllRoles === true;
+  if(!_allRoles && CU.role && CU.role !== 'admin' && CU.role !== 'superuser'){
+    return;
+  }
   if(_presenceChannel){ try{ _presenceChannel.unsubscribe(); }catch(_){} }
   const channel = _supabase.channel('presence-' + _ROW_ID, {
     config: { presence: { key: CU.id || ('anon-' + Math.random()) } },
