@@ -10222,16 +10222,28 @@ function _subscribeRealtime(){
     return;
   }
   // Realtime quota fix (SCALING.md §5 sub-option 2): only admins keep an
-  // open realtime socket. Physicians get fresh data on next nav (the 30s
-  // poll fallback below still runs for them), which is fine for a
-  // scheduler — they don't need to see admin edits land instantly.
-  // At 200 phys × 1 admin-tab each, we go from 200 sockets to ~5-15.
+  // open realtime socket. Physicians fall back to the polling block at
+  // the END of this function, which still runs for them — see the
+  // _doSubscribe split below. Without that split, gating early-returned
+  // out of polling too, so non-admins got NO sync at all.
   // Override per-practice with cfg.realtimeAllRoles=true.
   const _allRoles = S?.cfg?.realtimeAllRoles === true;
-  if(!_allRoles && typeof CU === 'object' && CU && CU.role && CU.role !== 'admin' && CU.role !== 'superuser'){
-    console.log('[RS] Realtime gated to admins (CU.role='+CU.role+'); skipping subscribe');
-    return;
+  const _isAdmin  = !CU || !CU.role || CU.role === 'admin' || CU.role === 'superuser';
+  const _shouldOpenSocket = _allRoles || _isAdmin;
+  if(_shouldOpenSocket){
+    _doSubscribeRealtimeSocket();
+  } else {
+    console.log('[RS] Realtime socket gated to admins (CU.role='+CU.role+'); polling fallback still active');
+    // Drop any stale socket if we previously had one (e.g. role just changed).
+    if(_realtimeSub){ try{ _realtimeSub.unsubscribe(); }catch(_){} _realtimeSub=null; }
   }
+  // Polling fallback ALWAYS runs (admin or not). For admins it covers
+  // the rare case where realtime misses an event; for non-admins it's
+  // the primary sync mechanism.
+  _startPollFallback();
+}
+
+function _doSubscribeRealtimeSocket(){
   // Unsubscribe stale channel
   if(_realtimeSub){try{_realtimeSub.unsubscribe();}catch(e){}  _realtimeSub=null;}
 
