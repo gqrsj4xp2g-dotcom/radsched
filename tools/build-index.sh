@@ -49,6 +49,7 @@ fi
 declare -a REGIONS=(
   "TOKENS:css-tokens.css"
   "MOBILE:css-mobile.css"
+  "AUTH:css-auth.css"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for
