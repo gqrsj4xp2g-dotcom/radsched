@@ -8742,6 +8742,13 @@ function _initAuthClient(){
     // these values, but being explicit guards against future SDK changes that
     // might flip defaults. storageKey is scoped to this app so we don't collide
     // with any other Supabase apps the user may use in the same browser.
+    //
+    // global.fetch override: gzip request bodies > 32 KB before upload.
+    // The practice JSON blob is the dominant write payload; at 200-phys
+    // scale it's 700 KB+ uncompressed and ~150 KB gzipped. We hook the
+    // global fetch instead of intercepting individual queries because
+    // PostgREST + the Supabase JS client both pass Content-Encoding
+    // through to the server transparently.
     _supabase=supabase.createClient(url,key,{
       auth:{
         persistSession: true,
@@ -8750,6 +8757,7 @@ function _initAuthClient(){
         storage: window.localStorage,
         storageKey: 'radscheduler-auth',
       },
+      global: { fetch: _gzipFetch },
     });
   }catch(e){ console.warn('[RS] Auth client init failed:',e); }
   return _supabase;
