@@ -40078,9 +40078,10 @@ function _sideShiftsRowFor(kind, s){
 }
 async function _sideShiftsSync(opts){
   opts = opts || {};
-  // Feature flag — default off. Avoids surprise traffic on practices
-  // that haven't opted in or migrated.
-  if(!(S?.cfg?.shiftsSideTable === true)) return;
+  // Feature flag — default ON now that the table is in production.
+  // Practices that hit issues can disable with S.cfg.shiftsSideTable
+  // = false; the blob remains canonical so disabling is lossless.
+  if(S?.cfg?.shiftsSideTable === false) return;
   if(!_supabase) return;
   if(_sideShiftsSyncing) return;
   // Throttle: at most one sync every 10s. The save path may fire
