@@ -28249,6 +28249,40 @@ function runCrossCoverage(){
 }
 
 // ── Tools: Audit log viewer ──────────────────────────────────────────
+// In-memory cache of the side-table audit fetch — refreshed each
+// time renderAuditLog() runs. Capped at the most recent 1000 rows
+// since the table itself is the source of truth (we never trim it).
+let _auditSideCache = { rows: null, fetchedAt: 0 };
+
+async function _fetchAuditFromSideTable(){
+  if(!_supabase || !_ROW_ID) return null;
+  try{
+    const { data, error } = await _supabase
+      .from('radscheduler_audit')
+      .select('ts, who, who_id, role, action, detail')
+      .eq('practice_id', String(_ROW_ID))
+      .order('ts', { ascending: false })
+      .limit(1000);
+    if(error){
+      // Table doesn't exist OR RLS denied → caller falls back to S.auditLog.
+      console.warn('[audit] side-table read failed:', error.code || '', error.message);
+      return null;
+    }
+    // Normalize into the same shape the in-blob log uses (whoId vs who_id).
+    return (data || []).map(r => ({
+      ts: r.ts,
+      who: r.who || '',
+      whoId: r.who_id || null,
+      role: r.role || null,
+      action: r.action || '',
+      detail: r.detail || {},
+    }));
+  }catch(e){
+    console.warn('[audit] side-table read threw:', e);
+    return null;
+  }
+}
+
 function renderAuditLog(){
   const el = document.getElementById('al-result');
   if(!el) return;
@@ -28258,7 +28292,28 @@ function renderAuditLog(){
     try{ filterInput.value = localStorage.getItem('rs.alFilter') || ''; }catch(_){}
   }
   const filter = (filterInput?.value || '').toLowerCase().trim();
-  let rows = (S.auditLog || []).slice().reverse();
+  // ── Source selection ─────────────────────────────────────────
+  // Prefer the side table (radscheduler_audit) since it has the
+  // full history — the in-blob copy is being trimmed to the most
+  // recent 100 entries for offline fallback only. If the side-table
+  // fetch fails (table missing, RLS denied, network), fall back to
+  // S.auditLog so the panel still shows something useful.
+  let rows;
+  if(_auditSideCache.rows && (Date.now() - _auditSideCache.fetchedAt) < 10000){
+    // Cached — use the existing cache for fast filter typing.
+    rows = _auditSideCache.rows.slice();
+  } else {
+    rows = (S.auditLog || []).slice().reverse();
+    // Kick off an async refresh; re-render when it completes.
+    _fetchAuditFromSideTable().then(sideRows => {
+      if(sideRows){
+        _auditSideCache = { rows: sideRows, fetchedAt: Date.now() };
+        // Re-render with the side-table data. Avoid infinite loop by
+        // only re-rendering if we're still on this page.
+        if(document.getElementById('al-result')) renderAuditLog();
+      }
+    });
+  }
   // Full-text search across action + detail (JSON) + timestamp + any
   // physician name referenced in the detail. Previously matched only on
   // `r.action` which made it useless for finding "everything Smith did"
