@@ -38553,16 +38553,36 @@ async function runStressTest(){
   }
   // Payload size measurement.
   let payloadSize = 0;
+  let serializeMs = 0, parseMs = 0;
   try{
+    const t = performance.now();
     const payload = JSON.stringify(_buildPersistedPayload('online'));
+    serializeMs = Math.round(performance.now() - t);
     payloadSize = payload.length;
+    const t2 = performance.now();
+    JSON.parse(payload);
+    parseMs = Math.round(performance.now() - t2);
   }catch(_){}
+  // Verdict based on payload size — same thresholds as the CLI tool
+  // (tools/stress-test.js) so the in-app + offline reports stay aligned.
+  const sizeMB = payloadSize / 1024 / 1024;
+  let verdictText, verdictClass;
+  if(sizeMB < 1)      { verdictText = '✓ FINE — well under the 1 MB JSON-blob comfort zone';       verdictClass = 'ns'; }
+  else if(sizeMB < 2) { verdictText = '◐ APPROACHING LIMITS — gzip the upload (docs/SCALING.md item 1)'; verdictClass = 'nw'; }
+  else if(sizeMB < 5) { verdictText = '⚠ NEEDS MIGRATION — split auditLog out (docs/SCALING.md item 3)';  verdictClass = 'nw'; }
+  else                { verdictText = '🚨 OVER LIMITS — split shift arrays (docs/SCALING.md item 6)';     verdictClass = 'ne'; }
   // ── Render report ───────────────────────────────────────────────
   const colorFor = (ms) => ms < 50 ? '#15803d' : ms < 200 ? '#d97706' : '#dc2626';
   out.innerHTML = `
     <div class="note ns" style="margin-bottom:10px">
       ✓ Stress test complete. Synthesized ${N_PHYS} physicians + ${synth.drShifts.length + synth.weekendCalls.length + synth.irCalls.length} shifts in ${tSynth} ms.<br>
-      <span style="font-size:11px;color:var(--rs-ink-3)">Persisted payload: ${(payloadSize/1024).toFixed(1)} KB. Snapshot taken — revert via Settings → Backups & Restore.</span>
+      <span style="font-size:11px;color:var(--rs-ink-3)">Snapshot taken — revert via Settings → Backups &amp; Restore.</span>
+    </div>
+    <div class="note ${verdictClass}" style="margin-bottom:10px;font-size:12.5px">${verdictText}</div>
+    <div class="g3" style="margin-bottom:10px">
+      <div class="met"><div class="met-lbl">Payload</div><div class="met-val">${(payloadSize/1024).toFixed(0)}<span style="font-size:11px;color:var(--rs-ink-3);margin-left:2px">KB</span></div></div>
+      <div class="met"><div class="met-lbl">Serialize</div><div class="met-val">${serializeMs}<span style="font-size:11px;color:var(--rs-ink-3);margin-left:2px">ms</span></div></div>
+      <div class="met"><div class="met-lbl">Parse</div><div class="met-val">${parseMs}<span style="font-size:11px;color:var(--rs-ink-3);margin-left:2px">ms</span></div></div>
     </div>
     <table class="tbl" style="font-size:12.5px;margin-bottom:10px">
       <thead><tr><th>Render fn</th><th style="text-align:right">Runtime</th><th>Status</th></tr></thead>
@@ -38572,10 +38592,11 @@ async function runStressTest(){
         <td style="font-size:11px;color:${p.err ? 'var(--red,#dc2626)' : 'var(--rs-ink-3)'}">${p.err ? '✕ ' + escHtml(p.err) : (p.ms < 50 ? '✓ fast' : p.ms < 200 ? '◐ acceptable' : '⚠ slow — needs optimization')}</td>
       </tr>`).join('')}</tbody>
     </table>
-    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:10px">
-      Thresholds: <strong style="color:#15803d">&lt;50ms</strong> = fast (well under 1 frame); <strong style="color:#d97706">&lt;200ms</strong> = acceptable (visible-but-not-jank); <strong style="color:#dc2626">≥200ms</strong> = needs optimization (visible jank).
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:10px;line-height:1.55">
+      Thresholds: <strong style="color:#15803d">&lt;50ms</strong> = fast (well under 1 frame); <strong style="color:#d97706">&lt;200ms</strong> = acceptable (visible-but-not-jank); <strong style="color:#dc2626">≥200ms</strong> = needs optimization (visible jank).<br>
+      Run the CLI version offline: <code style="background:var(--bg2);padding:1px 6px;border-radius:3px">node tools/stress-test.js</code>
     </div>
-    <button class="bp bsm" onclick="if(confirm('Revert to the pre-stress-test snapshot? Your synthetic data will be discarded.')){ if(typeof renderRestoreFromBackups === 'function') renderRestoreFromBackups(); else location.reload(); }">↶ Revert (open Backups & Restore)</button>
+    <button class="bp bsm" onclick="if(confirm('Revert to the pre-stress-test snapshot? Your synthetic data will be discarded.')){ if(typeof renderRestoreFromBackups === 'function') renderRestoreFromBackups(); else location.reload(); }">↶ Revert (open Backups &amp; Restore)</button>
   `;
   if(typeof _audit === 'function') _audit('stressTest.complete', { physCount: N_PHYS, payloadKB: Math.round(payloadSize/1024), profile });
 }
