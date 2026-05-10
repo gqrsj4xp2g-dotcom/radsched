@@ -8763,6 +8763,25 @@ function _initAuthClient(){
       if(event==='TOKEN_REFRESHED'){
         console.log('[RS] Auth token refreshed silently');
       }
+      if(event==='PASSWORD_RECOVERY'){
+        // User clicked the reset-password email link. Supabase has
+        // already processed the recovery token from the URL fragment
+        // (detectSessionInUrl:true above) and put us in a temporary
+        // recovery session. We need to (a) NOT auto-launch the app
+        // and (b) prompt for a new password, then call updateUser.
+        // Without this, the user just lands on the dashboard with
+        // their OLD password unchanged — looks like reset failed.
+        console.log('[RS] PASSWORD_RECOVERY event — showing reset panel');
+        // Make sure we're on the auth screen, not in the app.
+        if(typeof CU !== 'undefined' && CU){ try{ CU = null; }catch(_){} }
+        const overlay = document.getElementById('session-restore-overlay');
+        if(overlay) overlay.style.display = 'none';
+        const auth = document.getElementById('auth');
+        if(auth) auth.style.display = 'flex';
+        const app = document.getElementById('app');
+        if(app) app.style.display = 'none';
+        try{ _showPasswordResetPanel(); }catch(e){ console.warn('[RS] reset panel err:', e); }
+      }
       if(event==='SIGNED_IN' && !CU && sess?.user){
         // E.g. user signed in from another tab — pick up the session here too
         console.log('[RS] Cross-tab SIGNED_IN detected, hydrating');
