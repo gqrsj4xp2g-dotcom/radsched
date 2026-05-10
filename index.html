@@ -1436,66 +1436,56 @@ tbody tr:hover{background:var(--bg3)}
     .rs-cal-day.weekend .rs-cal-day-num { color: var(--rs-ink-3); }
     .rs-cal-day.empty { opacity: 0.55; }
 
-    /* ── My Schedule — day cards (phone, tablet, AND desktop) ───────
-       The bug that motivated lifting these out of @media: the .ms-day
-       cards had NO styling at viewports > 720px — text just stacked
-       with no border, background, or padding. Now defined at base,
-       overridden inside the @media block for phone-specific tweaks. */
-    #page-my-schedule .ms-day {
-      background: var(--bg2, #fff);
-      border: 1px solid var(--rs-line);
-      border-radius: var(--rs-r-lg);
-      padding: 14px 16px;
-      margin-bottom: 8px;
-    }
-    #page-my-schedule .ms-day .day-label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--rs-ink-3);
-    }
-    #page-my-schedule .ms-day .day-num {
-      font-size: 24px;
-      font-weight: 600;
-      letter-spacing: -0.022em;
-      margin-bottom: 6px;
-    }
-    #page-my-schedule .ms-day.today {
-      background: var(--rs-accent);
-      color: #fff;
-      border-color: var(--rs-accent);
-    }
-    #page-my-schedule .ms-day.today .day-label,
-    #page-my-schedule .ms-day.today .day-num {
-      color: #fff;
-    }
-    #page-my-schedule .ms-day .ms-shift {
-      display: block;
-      padding: 8px 10px;
-      margin-top: 6px;
-      background: var(--bg3);
-      border-radius: var(--rs-r-md);
-      font-size: 13px;
-    }
-    #page-my-schedule .ms-day.today .ms-shift {
-      background: rgba(255,255,255,0.18);
-    }
-    /* Single-chip leave balance: don't let it expand to full width
-       — keep it sized to its content so the empty space isn't a
-       visual mistake. The flex container uses gap so multiple chips
-       still flow nicely. */
-    #my-content > div[style*="display:flex;flex-wrap:wrap;gap:8px"] > div {
-      flex: 0 0 auto;
-      min-width: 104px;
-    }
-
-    /* Phone-specific tweaks (≤720px): tighter title, denser ms-day. */
+    /* ── Mobile-first My Schedule ─────────────────────────────────────
+       Most-used view by far, almost always on a phone. Override the
+       desktop layout for the page when the viewport is narrow:
+       single-column, large legible type, today highlighted, weekly
+       cards with swipeable next-week navigation. */
     @media (max-width: 720px) {
       #page-my-schedule .pg-title {
         font-size: 22px;
         letter-spacing: -0.022em;
         padding: 4px 0 12px;
+      }
+      #page-my-schedule .ms-day {
+        background: var(--bg2, #fff);
+        border: 1px solid var(--rs-line);
+        border-radius: var(--rs-r-lg);
+        padding: 14px 16px;
+        margin-bottom: 8px;
+      }
+      #page-my-schedule .ms-day .day-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--rs-ink-3);
+      }
+      #page-my-schedule .ms-day .day-num {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.022em;
+        margin-bottom: 6px;
+      }
+      #page-my-schedule .ms-day.today {
+        background: var(--rs-accent);
+        color: #fff;
+        border-color: var(--rs-accent);
+      }
+      #page-my-schedule .ms-day.today .day-label,
+      #page-my-schedule .ms-day.today .day-num {
+        color: #fff;
+      }
+      #page-my-schedule .ms-day .ms-shift {
+        display: block;
+        padding: 8px 10px;
+        margin-top: 6px;
+        background: var(--bg3);
+        border-radius: var(--rs-r-md);
+        font-size: 13px;
+      }
+      #page-my-schedule .ms-day.today .ms-shift {
+        background: rgba(255,255,255,0.18);
       }
     }
 
