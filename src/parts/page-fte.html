@@ -1,0 +1,75 @@
+<div id="page-fte" class="page">
+  <div class="pg-title">📊 FTE Monitor</div>
+  <div class="pg-sub">Track assigned call and shifts against each physician's FTE targets. IR call targets use finite-slot math (actual available slots ÷ group FTE × physician FTE) over 6-month periods.</div>
+  <div class="tabs" id="fte-tabs" style="margin-bottom:10px">
+    <div class="tab on" onclick="fteTab('month',this)">Monthly</div>
+    <div class="tab" onclick="fteTab('period',this)">6-Month Period</div>
+    <div class="tab" onclick="fteTab('career',this)">📈 Career Tally</div>
+    <div class="tab" onclick="fteTab('commute',this)">🗺 Commute Times</div>
+  </div>
+  <div id="fte-month-ctrl" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Month</label><input id="fte-mo" type="month" oninput="renderFTE()"></div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTE()">↺ Refresh</button>
+  </div>
+  <div id="fte-commute-ctrl" style="display:none;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="fte-commute-grp" onchange="renderCommuteMatrix()" style="width:130px">
+        <option value="all">All Physicians</option>
+        <option value="DR">DR only</option>
+        <option value="IR">IR only</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Year</label>
+      <select id="fte-commute-yr" onchange="renderCommuteMatrix()" style="width:90px">
+        <option value="all">All Years</option>
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+        <option value="2027">2027</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Traffic Quarter</label>
+      <select id="fte-commute-qtr" onchange="renderCommuteMatrix()" style="width:120px">
+        <option value="current">Current Quarter</option>
+        <option value="Q1">Q1 — Jan–Mar</option>
+        <option value="Q2">Q2 — Apr–Jun</option>
+        <option value="Q3">Q3 — Jul–Sep</option>
+        <option value="Q4">Q4 — Oct–Dec</option>
+        <option value="all">All (avg)</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="calcAllDriveTimes()">🔄 Recalculate</button>
+    <button class="bt bsm" style="margin-bottom:2px" onclick="renderCommuteMatrix()">↺ Refresh</button>
+  </div>
+  <div id="fte-career-ctrl" style="display:none;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Group</label>
+      <select id="fte-career-grp" onchange="renderFTECareer()" style="width:110px">
+        <option value="both">Both</option>
+        <option value="North">North</option>
+        <option value="South">South</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTECareer()">↺ Refresh</button>
+    <div style="font-size:11px;color:var(--txt3);align-self:center;max-width:460px">
+      Running balance = cumulative (actual calls − FTE-proportional share). Positive = physician has done more than fair share; negative = owed calls. Used to equalize future scheduling.
+    </div>
+  </div>
+  <div id="fte-period-ctrl" style="display:none;align-items:flex-end;gap:10px;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Year</label>
+      <select id="fte-yr" onchange="renderFTEPeriod()" style="width:90px">
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+        <option value="2027">2027</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0"><label>Period</label>
+      <select id="fte-period" onchange="renderFTEPeriod()" style="width:175px">
+        <option value="H1">H1 — Jan through Jun</option>
+        <option value="H2">H2 — Jul through Dec</option>
+      </select>
+    </div>
+    <button class="bp bsm" style="margin-bottom:2px" onclick="renderFTEPeriod()">↺ Refresh</button>
+  </div>
+  <div id="fte-content"></div>
+</div>

@@ -1,0 +1,91 @@
+<div id="page-publish" class="page admin-only">
+  <div class="pg-title">📤 Publish Schedule</div>
+  <div class="ibox" style="margin-bottom:12px">
+    <div class="note ni" style="font-size:11px">
+      Send each physician a personalized digest of their assignments for a date range. Each recipient sees only their own shifts; a brief summary of who covers what is shown only when explicitly enabled below. Recipients who have opted out of "Published schedules" notifications are skipped.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Date Range &amp; Categories</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg"><label>Start date</label><input type="date" id="pub-start"></div>
+      <div class="fg"><label>End date</label><input type="date" id="pub-end"></div>
+      <div class="fg" style="min-width:140px">
+        <label>Quick range</label>
+        <select id="pub-quick" onchange="_pubApplyQuickRange(this.value)">
+          <option value="">— pick one —</option>
+          <option value="this-week">This week (Mon–Sun)</option>
+          <option value="next-week">Next week</option>
+          <option value="this-month">This month</option>
+          <option value="next-month">Next month</option>
+          <option value="next-30">Next 30 days</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-day" checked>
+        <div><div style="font-weight:600;font-size:12px">Day shifts (DR + IR)</div>
+        <div class="cp-desc">Includes 1st/2nd/3rd/Home and IR procedure shifts at any site.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-weekday" checked>
+        <div><div style="font-weight:600;font-size:12px">Weekday call (IR daily call)</div>
+        <div class="cp-desc">IR call assignments on Mon–Fri.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-weekend" checked>
+        <div><div style="font-weight:600;font-size:12px">Weekend call</div>
+        <div class="cp-desc">Saturday/Sunday DR weekend call entries and IR weekend call.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-holiday">
+        <div><div style="font-weight:600;font-size:12px">Holiday call</div>
+        <div class="cp-desc">Holiday assignments that fall in the date range.</div></div>
+      </label>
+      <label class="cp-row" style="margin:0">
+        <input type="checkbox" id="pub-kind-tb">
+        <div><div style="font-weight:600;font-size:12px">Tumor boards &amp; clinics</div>
+        <div class="cp-desc">Recurring conferences and clinics the recipient participates in (rotation-aware: only their assigned occurrences).</div></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Recipients</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:200px">
+        <label>Audience</label>
+        <select id="pub-audience" onchange="_pubAudienceChanged()">
+          <option value="all">All physicians (with linked accounts)</option>
+          <option value="dr">DR only</option>
+          <option value="ir">IR only</option>
+          <option value="ir-group">IR — specific group</option>
+          <option value="site">Specific site</option>
+          <option value="custom">Pick individuals</option>
+        </select>
+      </div>
+      <div class="fg" id="pub-aud-extra" style="min-width:180px;display:none">
+        <label id="pub-aud-extra-lbl">—</label>
+        <select id="pub-aud-extra-sel"></select>
+      </div>
+    </div>
+    <div id="pub-custom-list" style="margin-top:10px;display:none"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title">Actions</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="bsm bn" onclick="previewPublish()">👁 Preview (yourself)</button>
+      <button class="bp" onclick="sendPublish()">📤 Publish &amp; Email Recipients</button>
+      <span id="pub-status" style="font-size:11px;align-self:center"></span>
+    </div>
+    <div id="pub-preview" style="margin-top:14px;font-size:11px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recent Publishes</div>
+    <div id="pub-log"></div>
+  </div>
+</div>

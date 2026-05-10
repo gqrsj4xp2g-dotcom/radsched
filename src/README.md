@@ -107,7 +107,12 @@ solvers) is fair game for extraction.
 | Refined design layer (the big polish pass) | `src/parts/css-refined.css` | ~1016 |
 | Desktop Widget admin page | `src/parts/page-widget.html` | ~61 |
 | Broadcast Email admin page | `src/parts/page-broadcast.html` | ~61 |
-| **Total** | | **~1445 lines** |
+| Publish Schedule admin page | `src/parts/page-publish.html` | ~91 |
+| Anchor Compliance admin page | `src/parts/page-anchor-report.html` | ~10 |
+| FTE Monitor page | `src/parts/page-fte.html` | ~75 |
+| DR auto-assign (`previewAA` + `applyAA`) | `src/parts/js-dr-assign.js` | ~380 |
+| IR auto-assign (`previewIRAA` + `applyIRAA`) | `src/parts/js-ir-assign.js` | ~644 |
+| **Total** | | **~2645 lines** |
 
 ## Marker styles supported
 
