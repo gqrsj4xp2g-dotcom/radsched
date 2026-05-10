@@ -127,14 +127,19 @@ These are LOW-RISK changes that pay off at scale:
       — full history lives in `public.radscheduler_audit` since v8
 - [x] Stress-test tool: Tools → Robustness → "🧪 Stress test (200 phys)"
       + CLI version at `tools/stress-test.js`
-- [x] **Enable `Content-Encoding: gzip` in `_pushToSupabase`** ← DONE in v1.1.1
+- [x] **Enable `Content-Encoding: gzip` in `_pushToSupabase`** ← REVERTED 2026-05-10
       Implemented as `_gzipFetch` wrapper passed to the Supabase
-      client's `global.fetch` option. Compresses POST/PATCH bodies
-      > 32 KB before upload. Measured ratio at 200 phys: **7.2%**
-      (727 KB raw → 52 KB on the wire). At 500 phys × 2 years:
-      **7.0%** (1.45 MB raw → 104 KB wire). Headroom is now huge:
-      the architecture comfortably scales to **1000 physicians**
-      on the wire-bytes side without further changes.
+      client's `global.fetch` option. Compressed POST/PATCH bodies
+      > 32 KB before upload. Stress-test numbers were promising —
+      **7.2%** ratio at 200 phys × 1 year (727 KB → 52 KB).
+      **In production it didn't work**: PostgREST doesn't actually
+      decompress inbound Content-Encoding: gzip request bodies, so
+      every save above the 32 KB threshold returned `400 Bad Request`.
+      Reads worked (GETs have no body), which is how the regression
+      hid for ~24 h. The wrapper is now opt-in via
+      `S.cfg.gzipUploads = true`. Default OFF until Supabase confirms
+      decompression, or until we sit a custom edge in front that
+      does the decompression itself.
 - [x] Render hotspot fix: `renderDRCal` was doing `S.physicians.find()`
       per shift cell — N×M lookups. Switched to memoized `_physById()`
       Map lookup (O(1) per call). Same change pattern available for
