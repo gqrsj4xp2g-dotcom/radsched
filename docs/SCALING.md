@@ -89,8 +89,23 @@ realtime quota on the free tier is 200 concurrent connections.
 
 **Status**: bumps right against the free-tier limit at 200 phys.
 
-**Fix**: upgrade Supabase to the Pro plan (10,000 connections), or
-introduce a per-practice presence channel that only admins join.
+**Fix options (in order of effort):**
+
+1. **Pro plan upgrade** (~$25/mo) — raises the cap to 10,000 concurrent
+   connections. Simplest fix; no code changes needed.
+2. **Restrict realtime to admins only** — current code subscribes ALL
+   leader-tabs (admins + physicians). Most physicians don't NEED
+   realtime updates (they refresh on next nav). Gating subscription on
+   `CU.role === 'admin'` cuts the connection count by ~95% — at 200
+   phys with ~10 admins, only 10 sockets used.
+3. **Per-practice presence channel only** — keep the live-tab counter
+   working (it's the most-visible realtime feature) but skip per-row
+   data subscriptions. Admins still see fresh data on poll-refresh
+   (every 60s) which is acceptable for a scheduler.
+
+**Implementation pointer**: `_initLeaderElection` + the channel
+`.subscribe` calls in `_initSupabase` are the touchpoints. ~30 lines
+to gate by role, ~50 to split presence from data.
 
 ### 6. Widget polling
 
@@ -105,17 +120,23 @@ edge-function invocations/hour quota.
 
 These are LOW-RISK changes that pay off at scale:
 
-- [x] Bump `_TUNE.SAVE_DEBOUNCE_MS` from 500 → 1500 ms (DONE in v7 schema bump)
-- [x] Cap the in-memory `S.auditLog` to last 5000 entries (LRU) (DONE — was 500, now 5000)
+- [x] Bump `_TUNE.SAVE_DEBOUNCE_MS` from 500 → 1500 ms
+- [x] Cap the in-memory `S.auditLog` to last 100 entries (was 5000)
+      — full history lives in `public.radscheduler_audit` since v8
 - [x] Stress-test tool: Tools → Robustness → "🧪 Stress test (200 phys)"
-      synthesizes a 200-phys roster + 1 year of shifts and profiles
-      every major render path. Reverts via the auto-snapshot.
-- [ ] Enable `Content-Encoding: gzip` in `_pushToSupabase`
-      DEFERRED: Supabase JS client doesn't expose a hook to gzip the
-      request body. Would require either (a) wrapping the global
-      fetch on client construction, or (b) bypassing the client and
-      doing manual REST calls with `CompressionStream`. Defer until
-      payload exceeds 1 MB on the wire (~150 phys with full year).
+      + CLI version at `tools/stress-test.js`
+- [x] **Enable `Content-Encoding: gzip` in `_pushToSupabase`** ← DONE in v1.1.1
+      Implemented as `_gzipFetch` wrapper passed to the Supabase
+      client's `global.fetch` option. Compresses POST/PATCH bodies
+      > 32 KB before upload. Measured ratio at 200 phys: **7.2%**
+      (727 KB raw → 52 KB on the wire). At 500 phys × 2 years:
+      **7.0%** (1.45 MB raw → 104 KB wire). Headroom is now huge:
+      the architecture comfortably scales to **1000 physicians**
+      on the wire-bytes side without further changes.
+- [x] Render hotspot fix: `renderDRCal` was doing `S.physicians.find()`
+      per shift cell — N×M lookups. Switched to memoized `_physById()`
+      Map lookup (O(1) per call). Same change pattern available for
+      other render functions if they show up hot.
 - [ ] Add a "Performance" tab to Tools that shows render times +
       payload size + the largest arrays (PARTIAL — stress test gives
       most of this; still want a continuous monitor)

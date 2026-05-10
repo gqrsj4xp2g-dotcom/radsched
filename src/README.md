@@ -112,7 +112,9 @@ solvers) is fair game for extraction.
 | FTE Monitor page | `src/parts/page-fte.html` | ~75 |
 | DR auto-assign (`previewAA` + `applyAA`) | `src/parts/js-dr-assign.js` | ~380 |
 | IR auto-assign (`previewIRAA` + `applyIRAA`) | `src/parts/js-ir-assign.js` | ~644 |
-| **Total** | | **~2645 lines** |
+| Dashboard render (`renderDash`) | `src/parts/js-render-dash.js` | ~127 |
+| DR Calendar render (`renderDRCal`) | `src/parts/js-render-dr-cal.js` | ~92 |
+| **Total** | | **~2864 lines** |
 
 ## Marker styles supported
 

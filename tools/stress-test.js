@@ -114,6 +114,15 @@ const sizes = {
   total:      json.length,
 };
 
+// Gzip the payload to show what the wire bytes actually are post-
+// _gzipFetch wrapper (added in v1.1.1). Falls back to "n/a" if zlib
+// isn't available (very old Node) — but it's been builtin since v0.5.
+let gzipSize = null;
+try{
+  const { gzipSync } = require('zlib');
+  gzipSize = gzipSync(json).length;
+}catch(_){}
+
 const fmtKB = (b) => (b / 1024).toFixed(1) + ' KB';
 const fmtMB = (b) => (b / 1024 / 1024).toFixed(2) + ' MB';
 
@@ -134,10 +143,17 @@ console.log(`  weekendCalls ${weekendCalls.length.toString().padStart(6)} rows  
 console.log(`  irCalls      ${irCalls.length.toString().padStart(6)} rows  ${fmtKB(sizes.irCalls).padStart(10)}`);
 console.log(`  ─────────────────────────────────────`);
 console.log(`  Total                       ${fmtKB(sizes.total).padStart(10)}  (${fmtMB(sizes.total)})`);
+if(gzipSize != null){
+  const ratio = (gzipSize / sizes.total * 100).toFixed(1);
+  console.log(`  After gzip (wire bytes)     ${fmtKB(gzipSize).padStart(10)}  (${ratio}% of uncompressed)`);
+}
 console.log('');
 
 // ── Verdict ────────────────────────────────────────────────────────
-const sizeMB = sizes.total / 1024 / 1024;
+// Use the GZIP size for the verdict since that's what actually goes
+// over the wire (the v1.1.1 _gzipFetch wrapper compresses POST/PATCH
+// bodies > 32 KB). Falls back to uncompressed if gzip wasn't measured.
+const sizeMB = (gzipSize != null ? gzipSize : sizes.total) / 1024 / 1024;
 let verdict;
 if(sizeMB < 1) verdict = '✓ FINE — well under the 1 MB JSON-blob comfort zone';
 else if(sizeMB < 2) verdict = '◐ APPROACHING LIMITS — gzip the upload (see docs/SCALING.md item 1)';

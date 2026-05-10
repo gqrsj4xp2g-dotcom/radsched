@@ -59,6 +59,8 @@ declare -a REGIONS=(
   "PAGE_FTE:page-fte.html"
   "JS_DR_ASSIGN:js-dr-assign.js"
   "JS_IR_ASSIGN:js-ir-assign.js"
+  "JS_RENDER_DASH:js-render-dash.js"
+  "JS_RENDER_DR_CAL:js-render-dr-cal.js"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for
