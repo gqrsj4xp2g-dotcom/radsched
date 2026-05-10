@@ -10159,6 +10159,17 @@ function _subscribeRealtime(){
   if(typeof BroadcastChannel !== 'undefined' && _bc && !_isLeader){
     return;
   }
+  // Realtime quota fix (SCALING.md §5 sub-option 2): only admins keep an
+  // open realtime socket. Physicians get fresh data on next nav (the 30s
+  // poll fallback below still runs for them), which is fine for a
+  // scheduler — they don't need to see admin edits land instantly.
+  // At 200 phys × 1 admin-tab each, we go from 200 sockets to ~5-15.
+  // Override per-practice with cfg.realtimeAllRoles=true.
+  const _allRoles = S?.cfg?.realtimeAllRoles === true;
+  if(!_allRoles && typeof CU === 'object' && CU && CU.role && CU.role !== 'admin' && CU.role !== 'superuser'){
+    console.log('[RS] Realtime gated to admins (CU.role='+CU.role+'); skipping subscribe');
+    return;
+  }
   // Unsubscribe stale channel
   if(_realtimeSub){try{_realtimeSub.unsubscribe();}catch(e){}  _realtimeSub=null;}
 
