@@ -9531,6 +9531,9 @@ function _applyRemoteData(d){
     return;
   }
   _isRestoring=true;
+  // Side-table snapshot is invalid as soon as we replace S.* with the
+  // remote payload — drop it so the next sync does a full re-diff.
+  if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
   const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
     'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'];
