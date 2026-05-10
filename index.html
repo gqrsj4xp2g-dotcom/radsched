@@ -8740,8 +8740,17 @@ function _initAuthClient(){
     return;
   }
   try{
+    // Recovery-link guard: if the URL contains a Supabase recovery
+    // token (#type=recovery), DO NOT auto-launch the app. The
+    // PASSWORD_RECOVERY event handler below will surface the
+    // new-password panel instead. Without this, the user clicks the
+    // reset link, lands here with a "logged in" recovery session, and
+    // gets dropped into the dashboard before they ever see the
+    // set-new-password form — so the password change never happens.
+    const _isRecovery = /(?:^|[#?&])type=recovery(?:&|$)/.test(window.location.hash || '')
+                     || /(?:^|[#?&])type=recovery(?:&|$)/.test(window.location.search || '');
     const {data:{session}}=await sb.auth.getSession();
-    if(session?.user){
+    if(session?.user && !_isRecovery){
       _hydrateUserFromSession(session.user);
       if(CU){
         // Hide overlay just before launchApp swaps the screens, so the transition
@@ -8750,6 +8759,12 @@ function _initAuthClient(){
         launchApp();
         return;
       }
+    }
+    if(_isRecovery){
+      // Force the auth screen visible — the PASSWORD_RECOVERY event
+      // will mount the reset panel onto it.
+      const auth = document.getElementById('auth');
+      if(auth) auth.style.display='flex';
     }
     if(overlay) overlay.style.display='none';
     // Listen for cross-tab signouts and silent token refresh failures. If another tab
