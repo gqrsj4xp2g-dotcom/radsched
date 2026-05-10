@@ -8879,8 +8879,17 @@ function _hydrateUserFromSession(sbUser){
 
 // Self-service password reset. Triggers Supabase's built-in
 // resetPasswordForEmail flow — Supabase emails the user a magic link;
-// they set a new password via the URL on Supabase's side. Configure the
-// redirect URL in Supabase dashboard → Authentication → URL Configuration.
+// they click it, which redirects back here with a recovery token in
+// the URL hash. The PASSWORD_RECOVERY handler in onAuthStateChange
+// (above) catches that event and surfaces the new-password panel via
+// _showPasswordResetPanel(). On submit, _submitNewPassword() calls
+// sb.auth.updateUser({password:}) which actually sets the new pw.
+//
+// IMPORTANT: in the Supabase dashboard, **Authentication → URL
+// Configuration**, the Site URL must include the app's origin AND
+// the redirect-to URL must be in the allow-list. If it's not, the
+// recovery link will land on a generic Supabase-hosted page instead
+// of bouncing back here, and the in-app reset flow never starts.
 async function doForgotPassword(){
   const emailEl = document.getElementById('li-email');
   let email = (emailEl?.value || '').trim().toLowerCase();
@@ -8897,10 +8906,123 @@ async function doForgotPassword(){
       redirectTo: window.location.origin + window.location.pathname,
     });
     if(error) throw error;
-    alert(`If an account exists for ${email}, a password-reset email is on its way. Check your inbox (and spam folder).`);
+    alert(`If an account exists for ${email}, a password-reset email is on its way. Check your inbox (and spam folder).\n\nClick the link in the email — it will bring you back here to set a new password.`);
   }catch(e){
     showErr('Reset failed: ' + (e.message||e));
   }
+}
+
+// Swap the auth card's contents for a "Set new password" form. Called
+// when PASSWORD_RECOVERY fires (user clicked the reset email link).
+// We rewire the existing card markup rather than building a separate
+// modal so the layout/styling stays consistent with the login form.
+function _showPasswordResetPanel(){
+  const card = document.querySelector('#auth .auth-card');
+  if(!card) return;
+  // Hide the regular login + register forms + tabs.
+  const hide = ['af-login','af-reg','at-login','at-reg','auth-sb-config'];
+  hide.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+  const tabs = card.querySelector('.auth-tabs');
+  if(tabs) tabs.style.display = 'none';
+  // Already mounted? Just re-show.
+  let panel = document.getElementById('af-reset');
+  if(panel){ panel.style.display = ''; return; }
+  // Get the email if Supabase hung onto a session for us — informational
+  // only, not an editable field.
+  let userHint = '';
+  try{
+    const sb = _initAuthClient();
+    sb?.auth?.getUser()?.then(({data}) => {
+      const em = data?.user?.email;
+      const hint = document.getElementById('reset-email-hint');
+      if(hint && em) hint.textContent = em;
+    });
+  }catch(_){}
+  panel = document.createElement('div');
+  panel.id = 'af-reset';
+  panel.innerHTML = `
+    <p style="font-size:13px;color:var(--txt2);margin-bottom:14px;line-height:1.5">
+      Set a new password for <strong id="reset-email-hint">your account</strong>.
+      You're signed in via the recovery link — your old password no
+      longer works. After saving, you'll be taken to the dashboard.
+    </p>
+    <div class="afield"><label>New password</label>
+      <input id="rs-pw" type="password" autocomplete="new-password" placeholder="Min 8 characters" onkeydown="if(event.key==='Enter')document.getElementById('rs-pw2').focus()">
+    </div>
+    <div class="afield"><label>Confirm new password</label>
+      <input id="rs-pw2" type="password" autocomplete="new-password" placeholder="Repeat password" onkeydown="if(event.key==='Enter')_submitNewPassword()">
+    </div>
+    <button class="abtn" type="button" onclick="_submitNewPassword()">Save new password</button>
+    <div style="text-align:center;margin-top:10px">
+      <a href="#" onclick="event.preventDefault();_cancelPasswordReset()" style="font-size:11px;color:var(--txt3);text-decoration:none">Cancel and sign in normally</a>
+    </div>
+  `;
+  card.appendChild(panel);
+  // Focus the new-password field for one-tap typing.
+  setTimeout(() => { document.getElementById('rs-pw')?.focus(); }, 30);
+}
+
+// Actually set the new password using the recovery session. Called
+// from the panel's Save button.
+async function _submitNewPassword(){
+  const pw  = document.getElementById('rs-pw')?.value || '';
+  const pw2 = document.getElementById('rs-pw2')?.value || '';
+  if(pw.length < 8){ showErr('Password must be at least 8 characters.'); return; }
+  if(pw !== pw2){ showErr('Passwords do not match.'); return; }
+  const sb = _initAuthClient();
+  if(!sb){ showErr('Supabase not configured.'); return; }
+  const btn = document.querySelector('#af-reset .abtn');
+  if(btn) btn.textContent = 'Saving…';
+  showErr('');
+  try{
+    const { data, error } = await sb.auth.updateUser({ password: pw });
+    if(error) throw error;
+    // Success — the recovery session is now a normal authenticated
+    // session with the new password. Hydrate + launch the app.
+    if(data?.user){ _hydrateUserFromSession(data.user); }
+    // Strip the #access_token=... fragment from the URL so a manual
+    // refresh doesn't re-trigger PASSWORD_RECOVERY.
+    try{ history.replaceState({}, '', window.location.pathname + window.location.search); }catch(_){}
+    if(typeof launchApp === 'function' && CU){ launchApp(); }
+    else {
+      // Fallback if hydration didn't pick up CU — just send back to
+      // the login screen with a friendly message.
+      _cancelPasswordReset();
+      showErr('Password updated. Please sign in.');
+    }
+  }catch(e){
+    if(btn) btn.textContent = 'Save new password';
+    const msg = (e?.message || '').toLowerCase();
+    if(msg.includes('same') && msg.includes('password')){
+      showErr('New password must be different from your old password.');
+    } else if(msg.includes('weak') || msg.includes('characters')){
+      showErr('Password too weak. Use at least 8 characters with a mix of letters/numbers.');
+    } else if(msg.includes('expired') || msg.includes('invalid')){
+      showErr('The reset link has expired. Click "Forgot password?" again to get a fresh link.');
+    } else {
+      showErr('Reset failed: ' + (e?.message || e));
+    }
+  }
+}
+
+// Bail out of the recovery flow. Drops the recovery session and
+// returns the user to the login screen. They can request a fresh
+// reset link if they want to try again.
+async function _cancelPasswordReset(){
+  try{
+    const sb = _initAuthClient();
+    await sb?.auth?.signOut();
+  }catch(_){}
+  const panel = document.getElementById('af-reset');
+  if(panel) panel.remove();
+  // Re-show the regular login UI.
+  const show = ['af-login','at-login','at-reg','auth-sb-config'];
+  show.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = ''; });
+  const tabs = document.querySelector('#auth .auth-tabs');
+  if(tabs) tabs.style.display = '';
+  // Clean the URL so PASSWORD_RECOVERY doesn't fire again on refresh.
+  try{ history.replaceState({}, '', window.location.pathname + window.location.search); }catch(_){}
+  showErr('');
 }
 
 async function doLogin(){
