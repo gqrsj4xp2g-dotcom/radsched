@@ -36672,16 +36672,41 @@ function printTodaysHuddle(){
         <tbody>${rows.join('')}</tbody>
       </table>
     </body></html>`;
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(html);
-  iframe.contentDocument.close();
-  iframe.onload = () => {
-    try{ iframe.contentWindow.focus(); iframe.contentWindow.print(); }
-    finally{ setTimeout(() => { try{ iframe.remove(); }catch(_){} }, 400); }
-  };
+  // ── Print via Blob URL + popup ────────────────────────────────────
+  // The previous iframe approach (document.write + onload) was
+  // unreliable on modern browsers — onload never fired after
+  // document.write so print() was never called and the button
+  // appeared dead. Blob URL + window.open avoids both:
+  //   • Blob URL means a real navigation that fires onload reliably
+  //   • Popup window can be closed cleanly by the user after print
+  // Falls back to download if popups are blocked.
+  try{
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, 'rs-huddle', 'width=900,height=700');
+    if(!win){
+      // Popup blocked — download as a file the user can open manually.
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `huddle-${ds}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      if(typeof _toast === 'function')
+        _toast('Popup blocked — huddle sheet downloaded instead. Open from Downloads + Cmd/Ctrl-P to print.', 'warn');
+    } else {
+      // Wait for the popup to load then trigger print.
+      win.addEventListener('load', () => {
+        try{ win.focus(); win.print(); }catch(_){}
+      }, { once: true });
+      // Revoke the Blob URL after a delay so the popup stays usable.
+      setTimeout(() => { try{ URL.revokeObjectURL(url); }catch(_){} }, 30000);
+    }
+  }catch(e){
+    console.error('[huddle] print failed:', e);
+    alert('Could not open the huddle sheet: ' + (e.message || e));
+  }
   if(typeof _audit === 'function') _audit('print.todaysHuddle', { date: ds, items: rows.length });
 }
 
