@@ -61,6 +61,9 @@ declare -a REGIONS=(
   "JS_IR_ASSIGN:js-ir-assign.js"
   "JS_RENDER_DASH:js-render-dash.js"
   "JS_RENDER_DR_CAL:js-render-dr-cal.js"
+  "JS_RENDER_IR_CAL:js-render-ir-cal.js"
+  "JS_RENDER_MY_SCHED:js-render-my-sched.js"
+  "JS_RENDER_FTE:js-render-fte.js"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for

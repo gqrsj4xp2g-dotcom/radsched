@@ -36,7 +36,9 @@ This document tracks what needs to change as a practice grows from
    Schema: `radscheduler_audit (id, practice_id, ts, action, detail)`.
 4. **Big**: Split each large state array (drShifts, weekendCalls,
    irCalls, vacations, holidays) into per-table rows. Migrations for
-   each. Renders must switch to query-by-date-range.
+   each. Renders must switch to query-by-date-range. (**Phase 1
+   landed**: `public.radscheduler_shifts` table + `_sideShiftsSync()`
+   client adapter — see *Single-row split: shifts side-table* below.)
 
 ### 2. Render-loop O(N) over 200 physicians
 
@@ -196,3 +198,64 @@ between admin devices feels laggy.
 The first three should keep us fine through ~200 phys without breaking
 the single-page architecture. Step 4 is where we'd need to seriously
 consider going multi-page or building a real backend.
+
+## Single-row split: shifts side-table
+
+The shift collections (`drShifts`, `irShifts`, `weekendCalls`,
+`irCalls`) are the largest growing arrays in the practice blob after
+the audit log. At 200 phys × 1 year that's ~64,000 entries —
+typically 60-70% of the per-save round-trip bytes after gzip.
+
+**Status**: side-table exists, dual-write client adapter ships
+disabled.
+
+### Architecture
+
+- Table: `public.radscheduler_shifts` (created by
+  `docs/sql/02-shifts-side-table.sql`, applied to the live project).
+  Single normalized table with a `kind` discriminator
+  (`'dr'|'ir'|'weekend'|'ircall'`). Indexed on `(practice_id,
+  shift_date)` and `(practice_id, kind, shift_date)`.
+- RLS: same shape as `radscheduler_audit` — authenticated
+  insert/update/delete/select; the widget reads via the existing
+  service-role edge function.
+- Client adapter: `_sideShiftsSync()` in `index.html`. Snapshot-diff
+  algorithm — only sends new/changed/removed rows on each save.
+  Throttled to once per 10s, fire-and-forget, exponential backoff on
+  error. Snapshot reset on `_applyRemoteData()` so a fresh remote
+  pull triggers a full re-sync.
+- The blob remains canonical during the dual-write phase. A
+  side-table failure never affects the user's saved state.
+
+### Enabling the dual-write
+
+1. Apply `docs/sql/02-shifts-side-table.sql` (already done — confirm
+   with `select count(*) from public.radscheduler_shifts;`).
+2. In Settings or via Supabase blob edit, set
+   `S.cfg.shiftsSideTable = true` for the practice. Save once. The
+   next push runs a full sync (every shift gets UPSERTed).
+3. Verify with the sanity-check query at the bottom of the SQL file:
+   row counts per kind should match `jsonb_array_length()` of each
+   blob array.
+4. (Optional) Backfill historical entries by uncommenting +
+   running the WITH-block at the bottom of the SQL file. Idempotent
+   via the `UNIQUE (practice_id, kind, client_id)` constraint.
+
+### When to flip the read path
+
+After ~1-2 weeks of dual-write with the row counts staying in sync,
+flip per-render reads from `S.drShifts.filter(...)` to
+`supabase.from('radscheduler_shifts').select(...).eq('practice_id',
+_ROW_ID).eq('kind','dr').gte('shift_date',start).lte('shift_date',end)`.
+Renders that need a single month become O(month-rows) instead of
+O(all-shifts) for the filter scan. Once all reads are off the blob,
+the blob copies of these arrays can be trimmed (similar pattern to
+`_AUDIT_LOG_MAX`).
+
+### Reversing
+
+Setting `S.cfg.shiftsSideTable = false` stops further writes. Existing
+side-table rows are left intact. To wipe the table for a clean
+re-sync: `delete from public.radscheduler_shifts where practice_id =
+'YOUR_PRACTICE_ID';` then `_sideShiftsBackfill()` from the browser
+console.
