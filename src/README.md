@@ -79,6 +79,38 @@ modules get extracted, the build progressively takes ownership.
 - No CSS preprocessor. Plain CSS, just split into multiple files for
   readability.
 
+## Blocks that CAN'T be extracted (special-cased)
+
+A few regions in index.html are RUNTIME-MUTATED by the app itself:
+
+- **`let S = /*S_START*/ {…} /*S_END*/`** — the in-memory state
+  literal. `hardSave()` replaces this region in-place with the
+  current runtime state when the user clicks 💾 Save File or when
+  the disk-watch autopush fires. If we let `build-index.sh` also
+  manage this region, the two would race: a build would erase the
+  user's saved state, an autopush would erase the build's seed.
+  Skip this one.
+- **`let USERS = /*USERS_START*/ […] /*USERS_END*/`** — same story
+  as above; the runtime user roster gets persisted in-band.
+
+Everything else (CSS, layout HTML, page templates, render functions,
+solvers) is fair game for extraction.
+
+## Currently extracted
+
+| Region | Source file | Lines saved from index.html |
+|---|---|---|
+| CSS design tokens | `src/parts/css-tokens.css` | ~17 |
+| Mobile media queries | `src/parts/css-mobile.css` | ~111 |
+
+## Recommended next extractions (in order)
+
+1. **Auth screen CSS** (~50 lines) — completely independent of app
+2. **Component CSS** (cards, buttons, tables, modals) (~300 lines) — pure styling, no runtime coupling
+3. **Page templates** (`<div id="page-X">…</div>` blocks) — ~50 lines each, ~20 pages total
+4. **Auto-assign solver** (`_dr_assignMCF`, `_dr_assignGreedy`) — heavy logic, valuable to isolate
+5. **Render functions** — biggest single block (~10k lines), do last
+
 ## Verification before each migration step
 
 After extracting a block, the build output should match the runtime
