@@ -39916,6 +39916,13 @@ async function _pushToSupabase(){
     _consecutiveSaveFails = 0;
     _updateSaveUI('✓ Synced','var(--green-t)');
     if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge();
+    // Side-table dual-write (off by default). When enabled (via
+    // S.cfg.shiftsSideTable === true), mirror the in-blob shift arrays
+    // to public.radscheduler_shifts so renders / analytics / future
+    // reads can query date-range slices without round-tripping the
+    // whole blob. Fire-and-forget — the blob remains canonical, so a
+    // side-table failure never affects the user's saved state.
+    if(typeof _sideShiftsSync === 'function') { try { _sideShiftsSync(); } catch(_){} }
     return true;
   }catch(e){
     console.error('[RS] Push failed:',e);
