@@ -317,20 +317,19 @@ function computeDayDigest(practice, physId, dateISO){
 
   out.studyTarget = Math.max(0, Math.round(out.wRVUGoalTotal / 1.5));
 
-  // The non-PACS-dependent debulking gates (admin flag, vacation,
-  // shift presence, day-of-week). PACS-dependent gates (wRVU
-  // ≥107.5% goal, autoNext ≥90%) are added later in
-  // renderDebulkingTab() where live PACS data is available.
-  const policy = (practice.cfg && practice.cfg.debulkingPolicy) || {};
-  const adminAllowed = !phys || phys.debulkingEligible !== false;
-  const hasShiftToday = out.shifts.length > 0;
-  const dow = new Date(dateISO + 'T12:00:00').getDay();
-  const dowAllowed = policy.disabledDows ? !policy.disabledDows.includes(dow) : true;
+  // Debulking is intentionally NOT blocked by off-day / vacation /
+  // day-of-week status (per spec: "debulking shouldn't be disabled
+  // for anybody who is off or on vacation"). The only gates left are:
+  //   1. Admin-flagged eligible (per-physician opt-out via profile)
+  //   2. wRVU ≥ 107.5% of goal  (added in renderDebulkingTab)
+  //   3. Auto-next ≥ 90%        (added in renderDebulkingTab)
+  // Off/vacation physicians naturally fail #2/#3 if they're not
+  // doing studies — we let the metrics decide rather than gating
+  // on schedule status.
+  const phys2 = phys;
+  const adminAllowed = !phys2 || phys2.debulkingEligible !== false;
   out.debulkingBaseChecks = [
-    { name: 'Admin-flagged eligible', pass: adminAllowed, detail: adminAllowed ? 'Yes' : 'No (admin disabled)' },
-    { name: 'Not on vacation', pass: !out.onVacation, detail: out.onVacation ? 'On vacation today' : 'Available' },
-    { name: 'Working today', pass: hasShiftToday, detail: hasShiftToday ? `${out.shifts.length} shift${out.shifts.length===1?'':'s'} today` : 'No shift today' },
-    { name: 'Day-of-week allowed', pass: dowAllowed, detail: dowAllowed ? 'OK' : 'Practice excludes this DOW' },
+    { name: 'Admin-flagged eligible', pass: adminAllowed, detail: adminAllowed ? 'Yes' : 'No (admin disabled in physician profile)' },
   ];
 
   return out;

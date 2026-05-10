@@ -54,6 +54,7 @@ declare -a REGIONS=(
   "REFINED:css-refined.css"
   "PAGE_WIDGET:page-widget.html"
   "PAGE_BROADCAST:page-broadcast.html"
+  "JS_DR_ASSIGN:js-dr-assign.js"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for
