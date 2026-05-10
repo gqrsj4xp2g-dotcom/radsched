@@ -983,25 +983,26 @@ function bindHeader(){
 }
 
 // ─── Auto-update banner ─────────────────────────────────────────
-// Subscribed to two main-process events:
-//   • rs:update-available — a newer release exists; show the banner
-//   • rs:update-info      — interactive feedback (uptodate / no-asset / error)
-// The banner is dismissible per-version: once the user clicks "Later",
-// we remember that version in localStorage so we don't re-prompt for
-// the same release. New releases reset that.
-function _annDismissedKey(version){ return 'rs-widget-update-dismissed:' + version; }
-function _annIsDismissed(version){
-  try{ return !!localStorage.getItem(_annDismissedKey(version)); }
-  catch(_){ return false; }
-}
-function _annDismiss(version){
-  try{ localStorage.setItem(_annDismissedKey(version), '1'); }
-  catch(_){}
-}
+// Subscribed to three main-process events:
+//   • rs:update-available           — a newer release exists; show banner
+//   • rs:update-info                — interactive feedback
+//   • rs:update-download-progress   — % progress while downloading
+//
+// As of v1.1.3: the banner is **sticky** (no Later button). When a
+// new version is available, the user can either Update now (auto-
+// download + open installer) or click Notes. We removed the dismiss
+// path so updates roll out to every active widget within minutes.
+// Practices that need a frozen version can pin via the GH release
+// page itself.
+let _lastUpdatePayload = null;
+let _autoDownloadStarted = false;
 
 function showUpdateBanner(payload){
   if(!payload || !payload.latestVersion || !payload.downloadUrl) return;
-  if(_annIsDismissed(payload.latestVersion)) return;
+  // Avoid re-rendering the same banner twice on rapid re-checks.
+  if(_lastUpdatePayload && _lastUpdatePayload.latestVersion === payload.latestVersion) return;
+  _lastUpdatePayload = payload;
+  _autoDownloadStarted = false;
   const el = document.getElementById('update-banner');
   if(!el) return;
   const sizeStr = payload.assetSizeMB ? ` (${payload.assetSizeMB} MB)` : '';
@@ -1009,23 +1010,65 @@ function showUpdateBanner(payload){
     <div class="text">
       🚀 Update available: <strong>v${escHtml(payload.latestVersion)}</strong>
       <span style="color:var(--ink3)">(you have v${escHtml(payload.currentVersion)})</span>
+      <div id="upd-progress" style="display:none;margin-top:4px;font-size:11px;color:var(--ink3)">
+        Downloading… <span id="upd-pct">0%</span>
+        <div style="height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin-top:3px;overflow:hidden">
+          <div id="upd-bar" style="width:0%;height:100%;background:#3b82f6;transition:width .15s"></div>
+        </div>
+      </div>
     </div>
     <div class="actions">
-      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Download${escHtml(sizeStr)}</button>
+      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Update now${escHtml(sizeStr)}</button>
       <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
-      <button class="btn ghost" id="upd-later" title="Hide until next version">Later</button>
     </div>`;
   el.style.display = 'flex';
-  document.getElementById('upd-download').onclick = () => {
-    window.rsWidget.openExternal(payload.downloadUrl);
-  };
+  document.getElementById('upd-download').onclick = () => _startAutoUpdate(payload);
   document.getElementById('upd-notes').onclick = () => {
     window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
   };
-  document.getElementById('upd-later').onclick = () => {
-    _annDismiss(payload.latestVersion);
-    el.style.display = 'none';
-  };
+}
+
+async function _startAutoUpdate(payload){
+  if(_autoDownloadStarted) return;
+  _autoDownloadStarted = true;
+  const dl = document.getElementById('upd-download');
+  const prog = document.getElementById('upd-progress');
+  if(dl){ dl.disabled = true; dl.textContent = '⏳ Downloading…'; }
+  if(prog) prog.style.display = '';
+  try{
+    const res = await window.rsWidget.downloadAndInstall({
+      url: payload.downloadUrl, name: payload.assetName,
+    });
+    if(res?.ok){
+      if(dl){ dl.textContent = '✓ Installer opened — follow the prompt to finish'; }
+      // Hide the progress bar once the installer is open.
+      if(prog) prog.style.display = 'none';
+    } else {
+      // Download/open failed — fall back to opening the URL in browser
+      // so the user can still install manually.
+      if(dl){
+        dl.disabled = false;
+        dl.textContent = '⚠ Download failed — open in browser';
+      }
+      if(prog) prog.style.display = 'none';
+      _autoDownloadStarted = false;
+      if(dl){
+        dl.onclick = () => window.rsWidget.openExternal(payload.downloadUrl);
+      }
+    }
+  }catch(e){
+    if(dl){ dl.disabled = false; dl.textContent = '⚠ Failed — retry'; }
+    _autoDownloadStarted = false;
+    if(dl) dl.onclick = () => _startAutoUpdate(payload);
+  }
+}
+
+function showUpdateProgress(p){
+  if(!p) return;
+  const pct = document.getElementById('upd-pct');
+  const bar = document.getElementById('upd-bar');
+  if(pct) pct.textContent = (p.pct || 0) + '%';
+  if(bar) bar.style.width = (p.pct || 0) + '%';
 }
 
 function showUpdateInfo(info){
@@ -1048,6 +1091,7 @@ function showUpdateInfo(info){
 
 if(window.rsWidget.onUpdateAvailable) window.rsWidget.onUpdateAvailable(showUpdateBanner);
 if(window.rsWidget.onUpdateInfo) window.rsWidget.onUpdateInfo(showUpdateInfo);
+if(window.rsWidget.onUpdateProgress) window.rsWidget.onUpdateProgress(showUpdateProgress);
 
 // Boot
 bindHeader();

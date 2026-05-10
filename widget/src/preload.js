@@ -22,5 +22,10 @@ contextBridge.exposeInMainWorld('rsWidget', {
   getVersion:      () => ipcRenderer.invoke('rs:get-version'),
   onUpdateAvailable: (cb) => ipcRenderer.on('rs:update-available', (_, data) => cb(data)),
   onUpdateInfo:    (cb) => ipcRenderer.on('rs:update-info', (_, data) => cb(data)),
+  // Aggressive update path: download the asset to ~/Downloads and
+  // open the installer (DMG / NSIS .exe). The renderer fires this
+  // when the user clicks "Update now" on the sticky banner.
+  downloadAndInstall: ({ url, name }) => ipcRenderer.invoke('rs:download-and-install', { url, name }),
+  onUpdateProgress:   (cb) => ipcRenderer.on('rs:update-download-progress', (_, data) => cb(data)),
   onResetPairing:  (cb) => ipcRenderer.on('rs:reset-pairing', cb),
 });

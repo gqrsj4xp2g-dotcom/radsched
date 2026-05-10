@@ -38,7 +38,12 @@ let tray = null;
 // to electron-updater for in-place auto-install is a 30-line change
 // — wrap this and call appUpdater.checkForUpdates() instead.
 
-const UPDATE_CHECK_HOURS = 6;
+// Aggressive update polling — was 6h, now 15min plus on-focus +
+// on-launch. Combined with the sticky banner + auto-download in the
+// renderer, this means a new release rolls out to every active widget
+// within ~15 min of the GH tag landing (modulo the user accepting the
+// "Open installer?" macOS / Windows prompt).
+const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 // The repo + tag prefix have to match what publish-release.sh uses.
 const UPDATE_REPO = 'gqrsj4xp2g-dotcom/radsched';
 const UPDATE_TAG_PREFIX = 'widget-v';
@@ -362,6 +367,71 @@ ipcMain.handle('rs:check-updates', () => checkForUpdates({ interactive: true }))
 // "v1.0.1 → v1.0.2" deltas.
 ipcMain.handle('rs:get-version', () => app.getVersion());
 
+// ─── Auto-download + open installer ────────────────────────────────
+// "Aggressive update" path: instead of opening the GitHub release in
+// the browser and asking the user to download + drag-to-Applications,
+// we download the asset to a temp dir then `shell.openPath()` to
+// launch the installer (DMG mounts on macOS, exe runs setup on
+// Windows). The user only has to confirm the OS-level installer
+// prompt and the new binary takes over.
+//
+// We send progress back to the renderer so the banner shows a
+// determinate progress bar instead of a spinner.
+ipcMain.handle('rs:download-and-install', async (_evt, { url, name }) => {
+  if(!url || !name){ return { ok:false, error:'missing url or name' }; }
+  const downloadsDir = app.getPath('downloads');
+  const target = path.join(downloadsDir, name);
+  return new Promise((resolve) => {
+    try{
+      const file = fs.createWriteStream(target);
+      const req = net.request({ url, redirect: 'follow' });
+      let total = 0, received = 0;
+      req.on('response', (resp) => {
+        if(resp.statusCode !== 200){
+          file.close();
+          try{ fs.unlinkSync(target); }catch(_){}
+          resolve({ ok:false, error: 'HTTP ' + resp.statusCode });
+          return;
+        }
+        total = +(resp.headers['content-length'] || 0);
+        resp.on('data', (chunk) => {
+          received += chunk.length;
+          file.write(chunk);
+          if(mainWindow && total){
+            const pct = Math.min(100, Math.round((received / total) * 100));
+            mainWindow.webContents.send('rs:update-download-progress', { pct, received, total });
+          }
+        });
+        resp.on('end', () => {
+          file.end();
+          file.on('finish', async () => {
+            try{
+              // Open the installer. On macOS this mounts the DMG and
+              // opens the volume so the user can drag to Applications.
+              // On Windows this runs the NSIS installer.
+              await shell.openPath(target);
+              resolve({ ok:true, path: target });
+            }catch(e){ resolve({ ok:false, error: String(e.message || e) }); }
+          });
+        });
+        resp.on('error', (err) => {
+          file.close();
+          try{ fs.unlinkSync(target); }catch(_){}
+          resolve({ ok:false, error: String(err.message || err) });
+        });
+      });
+      req.on('error', (err) => {
+        file.close();
+        try{ fs.unlinkSync(target); }catch(_){}
+        resolve({ ok:false, error: String(err.message || err) });
+      });
+      req.end();
+    }catch(e){
+      resolve({ ok:false, error: String(e.message || e) });
+    }
+  });
+});
+
 // ─── App lifecycle ───────────────────────────────────────────────
 // Single-instance lock so a second launch focuses the existing window
 // instead of opening a duplicate.
@@ -379,12 +449,21 @@ if(!gotLock){
       if(BrowserWindow.getAllWindows().length === 0) createWindow();
     });
     // Schedule update checks. First check fires 30s after launch so
-    // the dashboard has time to settle; then every UPDATE_CHECK_HOURS.
-    // Both are silent — only fires the renderer event when an update
-    // is actually available; "Check for updates…" in the tray menu is
-    // the interactive path.
+    // the dashboard has time to settle; then every 15 min. We also
+    // re-check whenever the window regains focus — most widgets sit in
+    // the background for hours, so "user just looked at it" is a great
+    // signal to verify they're current. With the renderer's sticky
+    // banner + auto-download, this means new releases roll out to
+    // every active widget within ~15 min of the GH tag landing.
     setTimeout(() => { checkForUpdates({ _fromInterval: true }); }, 30 * 1000);
-    setInterval(() => { checkForUpdates({ _fromInterval: true }); }, UPDATE_CHECK_HOURS * 60 * 60 * 1000);
+    setInterval(() => { checkForUpdates({ _fromInterval: true }); }, UPDATE_CHECK_INTERVAL_MS);
+    if(mainWindow){
+      mainWindow.on('focus', () => {
+        // Throttle: don't check more than once a minute even on rapid focus.
+        if(Date.now() - _lastUpdateCheck < 60 * 1000) return;
+        checkForUpdates({ _fromInterval: true });
+      });
+    }
   });
   app.on('window-all-closed', () => {
     if(process.platform !== 'darwin') app.quit();
