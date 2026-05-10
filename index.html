@@ -28119,6 +28119,132 @@ function _initToolsTab(){
   if(!saved) saved = 'sim';
   toolsTab(saved, null, /* _skipScroll */ true);
 }
+
+// ── Performance Monitor (Tools → Logs & ops) ──────────────────────
+//
+// Continuous live monitor. Polls the most-likely-to-grow collections
+// in the practice blob, measures payload size, samples wall-clock
+// render times by re-running the current page's render function, and
+// surfaces the result. Updates every 5s while the card is visible.
+// All measurements happen client-side — no server round-trips.
+let _perfMonTimer = null;
+function openPerfMon(){
+  // Auto-jump to the ops tab + render once, then pin a 5s refresh.
+  toolsTab('ops');
+  runPerfSnapshot();
+  if(_perfMonTimer) clearInterval(_perfMonTimer);
+  _perfMonTimer = setInterval(() => {
+    // Stop polling if the user navigates away — saves cycles.
+    const el = document.getElementById('perfmon-result');
+    const onTools = document.getElementById('page-tools')?.style.display !== 'none';
+    if(!el || !onTools){ clearInterval(_perfMonTimer); _perfMonTimer = null; return; }
+    runPerfSnapshot();
+  }, 5000);
+}
+function _perfBytes(n){
+  if(n < 1024) return n + ' B';
+  if(n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+function _perfTimeRender(name, fn){
+  if(typeof fn !== 'function') return null;
+  let total = 0;
+  const N = 3;
+  for(let i=0; i<N; i++){
+    const t0 = performance.now();
+    try{ fn(); }catch(_){}
+    total += performance.now() - t0;
+  }
+  return { name, avgMs: total / N };
+}
+function runPerfSnapshot(){
+  const el = document.getElementById('perfmon-result');
+  if(!el) return;
+  // Payload size — what we'd send to Supabase right now (uncompressed).
+  let payloadStr = '';
+  try{
+    payloadStr = JSON.stringify(typeof _buildPersistedPayload === 'function'
+      ? _buildPersistedPayload('online')
+      : S);
+  }catch(_){ payloadStr = ''; }
+  const rawBytes = payloadStr.length;
+  // Per-array sizes (JSON-stringified). The biggest movers first.
+  const COLLECTIONS = [
+    'drShifts','irShifts','weekendCalls','irCalls','vacations','holidays',
+    'auditLog','openShifts','swapRequests','chatMessages','broadcasts',
+    'physicians','holidayBlackouts','holidayNeeds','shiftListings'
+  ];
+  const sizes = COLLECTIONS.map(k => {
+    const v = S[k];
+    let bytes = 0;
+    if(Array.isArray(v)){
+      try{ bytes = JSON.stringify(v).length; }catch(_){}
+    }
+    return { key: k, count: Array.isArray(v) ? v.length : 0, bytes };
+  }).sort((a,b) => b.bytes - a.bytes);
+  // Render-time samples — only run the renders that are cheap+safe to
+  // re-execute. Skipping heavy ones (calendars, FTE) avoids visible
+  // jank; advanced users can run the snapshot button manually.
+  const renders = [];
+  for(const [name, fnName] of [
+    ['Dashboard','renderDash'],
+    ['My Schedule','renderMySched'],
+    ['Audit log','renderAuditLog'],
+    ['Open shifts','renderOpenShifts'],
+  ]){
+    const r = _perfTimeRender(name, window[fnName]);
+    if(r) renders.push(r);
+  }
+  // Side-table state (helps debug if dual-write is keeping up).
+  const sideOn = !(S?.cfg?.shiftsSideTable === false);
+  const sideSnap = _sideShiftsSnapshot ? _sideShiftsSnapshot.size : 0;
+  // Realtime state.
+  const rtAdminOnly = !(S?.cfg?.realtimeAllRoles === true);
+  const rtConnected = !!_realtimeSub;
+  const top = sizes.slice(0, 6);
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Payload (raw, uncompressed)</div>
+        <div style="font-size:22px">${_perfBytes(rawBytes)}</div>
+        <div class="note ni" style="font-size:11px;margin-top:4px">
+          Gzip wraps ~7% of this on the wire. At 4 MB raw / 280 KB wire,
+          you're still well under the 10 MB Supabase row guideline.
+        </div>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Top collections by size</div>
+        <table style="width:100%;font-size:12px">
+          <thead><tr><th style="text-align:left">Key</th><th style="text-align:right">Rows</th><th style="text-align:right">Bytes</th></tr></thead>
+          <tbody>
+            ${top.map(s => `<tr><td>${s.key}</td><td style="text-align:right">${s.count.toLocaleString()}</td><td style="text-align:right">${_perfBytes(s.bytes)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Render times (avg of 3)</div>
+        <table style="width:100%;font-size:12px">
+          <thead><tr><th style="text-align:left">Render</th><th style="text-align:right">ms</th></tr></thead>
+          <tbody>
+            ${renders.map(r => `<tr><td>${r.name}</td><td style="text-align:right">${r.avgMs.toFixed(1)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="note ni" style="font-size:11px;margin-top:4px">
+          Frame budget is 16 ms (60 Hz). Renders &gt; 100 ms are user-perceptible.
+        </div>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Sync &amp; subscriptions</div>
+        <div style="font-size:12px;line-height:1.7">
+          Side-table dual-write: <b>${sideOn ? 'ON' : 'off'}</b> (snapshot ${sideSnap.toLocaleString()} rows)<br>
+          Realtime: <b>${rtConnected ? 'connected' : 'idle'}</b>${rtAdminOnly ? ' (admin-only mode)' : ' (all roles)'}<br>
+          Last save: ${S._lastSaved ? S._lastSaved.toLocaleTimeString() : '—'}<br>
+          Save fails (consecutive): ${typeof _consecutiveSaveFails !== 'undefined' ? _consecutiveSaveFails : 0}
+        </div>
+      </div>
+    </div>
+  `;
+}
 // Persist the audit-log filter on every keystroke so reload + nav-away
 // don't lose the user's in-progress search.
 function _alFilterChanged(el){
