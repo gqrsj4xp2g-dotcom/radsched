@@ -7459,15 +7459,17 @@ async function renderBackupPicker(targetElId){
 /* ═══════════════════════════════════════════════════════════════════════
    ADMIN AUDIT LOG
    Records who did what (manual + AI-driven mutations) for accountability.
-   Stored on S.auditLog (LRU-evicted at _AUDIT_LOG_MAX entries) so it
-   survives across sessions via the normal Supabase persistence.
-   Cap is 5000: at 200-phys scale that's ~3 weeks of typical traffic,
-   still fits inside the JSON blob comfortably (<400 KB compressed).
-   Older entries are evicted in shift order — oldest first.
-   See docs/SCALING.md for the multi-table migration plan when this
-   isn't enough.
+   AS OF v8: the canonical store is now the side table
+     public.radscheduler_audit
+   The S.auditLog in-blob copy still exists as an OFFLINE FALLBACK
+   only — capped at _AUDIT_LOG_MAX entries (100) so it doesn't bloat
+   the JSON blob. renderAuditLog() prefers the side table; falls back
+   to S.auditLog when the table fetch fails (no network, no auth, etc.)
+   so admins on a flight can still see recent history.
+   See docs/SCALING.md for the migration plan + docs/sql/01-...sql
+   for the schema.
 ═══════════════════════════════════════════════════════════════════════ */
-const _AUDIT_LOG_MAX = 5000;
+const _AUDIT_LOG_MAX = 100;
 function _audit(action, detail){
   let entry = null;
   try{
