@@ -10282,9 +10282,18 @@ function _doSubscribeRealtimeSocket(){
         setTimeout(_subscribeRealtime, 5000);
       }
     });
+}
 
-  // Polling fallback: pull from Supabase every 10s in case realtime misses an event.
-  // Same leader-only guard as the subscription above.
+function _startPollFallback(){
+  // Polling fallback: pull from Supabase every 10s. For admins this is
+  // a backup in case realtime drops an event; for non-admins (whose
+  // realtime socket is gated off) it IS the sync mechanism. We poll
+  // a bit slower for non-admins (20s) since instant sync isn't
+  // required and we don't want 200 physicians × 3 polls/min hitting
+  // the API at scale.
+  const _allRoles = S?.cfg?.realtimeAllRoles === true;
+  const _isAdmin  = !CU || !CU.role || CU.role === 'admin' || CU.role === 'superuser';
+  const intervalMs = (_allRoles || _isAdmin) ? 10000 : 20000;
   clearInterval(_pollInterval);
   _pollInterval=setInterval(async()=>{
     if(!_supabase||_isRestoring) return;
@@ -10305,7 +10314,7 @@ function _doSubscribeRealtimeSocket(){
           setTimeout(()=>{if(si)si.textContent='';},2000);}
       }
     }catch(e){/* non-fatal poll error */}
-  }, 10000); // poll every 10s as realtime fallback
+  }, intervalMs);
 }
 
 function _refreshCurrentPage(){
