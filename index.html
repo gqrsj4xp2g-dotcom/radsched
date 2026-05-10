@@ -40194,6 +40194,61 @@ function _sideShiftsBackfill(){
   return _sideShiftsSync({force:true});
 }
 
+// ── Side-table read helper ─────────────────────────────────────────
+// Renders that today do `S.drShifts.filter(s => s.date.startsWith(ym))`
+// scan the entire array on every call — fine at 30 phys, painful at
+// 500. This helper fetches the same slice from the side table with a
+// date-range index lookup (O(month) instead of O(all-shifts)).
+//
+// Cached for 30s per (kind,start,end) tuple to coalesce calendar
+// re-renders. The in-blob arrays remain canonical — if the side
+// table fetch fails, callers can fall back via getCanonicalShifts(...).
+//
+// Usage example (replace `S.drShifts.filter(...)` in heavy renders):
+//   const slice = await _loadShiftsFromSideTable({
+//     kind:'dr', start:'2026-05-01', end:'2026-05-31'
+//   });
+//   slice.forEach(s => { ... });
+//
+// Returns null on failure so callers know to fall back to the blob.
+const _shiftsReadCache = new Map();   // key → {rows, fetchedAt}
+async function _loadShiftsFromSideTable(opts){
+  if(!_supabase) return null;
+  const kind  = opts?.kind  || 'dr';
+  const start = opts?.start || '1900-01-01';
+  const end   = opts?.end   || '2100-12-31';
+  const key = kind + ':' + start + ':' + end + ':' + _ROW_ID;
+  const c = _shiftsReadCache.get(key);
+  if(c && (Date.now() - c.fetchedAt) < 30000) return c.rows;
+  try{
+    const { data, error } = await _supabase
+      .from('radscheduler_shifts')
+      .select('client_id,phys_id,shift_date,shift,site,sub,slot_label,notes,auto_home')
+      .eq('practice_id', _ROW_ID)
+      .eq('kind', kind)
+      .gte('shift_date', start)
+      .lte('shift_date', end)
+      .limit(50000);
+    if(error) throw error;
+    // Re-shape rows into the in-blob shift schema so call sites that
+    // already operate on .physId / .date / .shift / .site keep working.
+    const rows = (data || []).map(r => ({
+      id: r.client_id, physId: r.phys_id, date: r.shift_date,
+      shift: r.shift || '', site: r.site || '', sub: r.sub || '',
+      slotLabel: r.slot_label || '', notes: r.notes || '',
+      autoHome: !!r.auto_home,
+    }));
+    _shiftsReadCache.set(key, { rows, fetchedAt: Date.now() });
+    return rows;
+  } catch(e){
+    console.warn('[RS] _loadShiftsFromSideTable failed:', e?.message || e);
+    return null;
+  }
+}
+// Invalidate the read cache after a successful sync — fresh writes
+// shouldn't be hidden behind 30s of stale cache.
+function _shiftsInvalidateReadCache(){ _shiftsReadCache.clear(); }
+
 function renderSettingsSupabaseStatus(){
   const urlEl=document.getElementById('sb-url');
   const keyEl=document.getElementById('sb-key');
