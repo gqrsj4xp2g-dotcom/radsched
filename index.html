@@ -8644,12 +8644,23 @@ function _initAuthClient(){
   const url=_getUrl(), key=_getKey();
   if(!url||!key) return null;
   // ── gzip wrapper for outbound Supabase request bodies ─────────────
-  // Only kicks in for POST/PATCH bodies > 32 KB (typical _pushToSupabase
-  // payload at 50+ phys). Below that the encoding overhead isn't worth
-  // it. Falls back to the unwrapped fetch on any error so a transient
-  // CompressionStream issue doesn't break the save path.
+  // DISABLED by default (2026-05-10): every POST > 32 KB started
+  // returning 400 from PostgREST. The Supabase REST endpoint doesn't
+  // appear to decompress inbound Content-Encoding: gzip bodies — what
+  // looked like it worked at extraction time was actually only the
+  // small payloads where the wrapper was a no-op. With a 432 KB blob,
+  // every save 400's. Reads (GET, no body) still work, which is how
+  // we landed in "data syncs in but never out" hell.
+  //
+  // Set S.cfg.gzipUploads = true to opt back in once Supabase confirms
+  // they accept Content-Encoding: gzip on the rest endpoint, OR if you
+  // want to test against a self-hosted Postgres + nginx that does the
+  // decompression itself. Default OFF.
   const _GZIP_MIN_BYTES = 32 * 1024;
   async function _gzipFetch(input, init){
+    if(!(typeof S === 'object' && S?.cfg?.gzipUploads === true)){
+      return fetch(input, init);
+    }
     if(!init || !init.body || typeof CompressionStream === 'undefined'){
       return fetch(input, init);
     }
