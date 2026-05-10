@@ -48,6 +48,7 @@ fi
 # Add a new line per region as you extract more.
 declare -a REGIONS=(
   "TOKENS:css-tokens.css"
+  "MOBILE:css-mobile.css"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for

@@ -286,6 +286,51 @@ function createTray(){
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show widget', click: () => { if(mainWindow) mainWindow.show(); else createWindow(); } },
     { label: 'Re-pair…', click: () => { clearPairing(); if(mainWindow){ mainWindow.webContents.send('rs:reset-pairing'); mainWindow.show(); } } },
+    { label: 'Pairing storage info…', click: () => {
+        // Diagnostic for "the widget keeps asking for the code" reports.
+        // Shows a system dialog with the file path, exists flag, size,
+        // mtime, and the decoded practice/physician (if any). Helps
+        // distinguish "file not written" from "load logic broken" from
+        // "file fine but signature mismatched" without devtools.
+        const { dialog } = require('electron');
+        const p = STORE_PATH();
+        let info = 'Path: ' + p + '\n\n';
+        try{
+          if(!fs.existsSync(p)){
+            info += 'STATUS: NOT FOUND — the widget has nothing stored yet.\nIf you JUST paired and quit, that means savePairing failed silently. Check console with View → Toggle Developer Tools.';
+          } else {
+            const st = fs.statSync(p);
+            info += 'Exists: yes\nSize: ' + st.size + ' bytes\nLast modified: ' + st.mtime.toISOString() + '\nPermissions: ' + (st.mode & 0o777).toString(8) + '\n\n';
+            const code = loadPairing();
+            if(!code){
+              info += 'STATUS: LOAD RETURNED EMPTY — the file exists but loadPairing() returned null. Check the format / regex.';
+            } else {
+              info += 'Code length: ' + code.length + ' chars\n';
+              try{
+                const padded = code.replace(/-/g,'+').replace(/_/g,'/');
+                let p64 = padded; while(p64.length % 4) p64 += '=';
+                const decoded = JSON.parse(Buffer.from(p64, 'base64').toString('utf8'));
+                info += 'Practice: ' + (decoded.practiceId || '?') + '\n';
+                info += 'Physician: ' + (decoded.physFirst || '') + ' ' + (decoded.physLast || '') + ' (id ' + decoded.physId + ')\n';
+                info += 'Issued: ' + (decoded.issuedAt || '?') + '\n';
+                info += 'Expires: ' + (decoded.exp || 'never') + '\n';
+                if(decoded.exp && new Date(decoded.exp).getTime() < Date.now()){
+                  info += '\n⚠ THIS PAIRING IS EXPIRED — request a fresh code from your admin.';
+                } else {
+                  info += '\nSTATUS: ✓ PAIRING IS VALID — the widget should auto-load on launch. If it asks for the code again, check the dev console for errors.';
+                }
+              }catch(e){
+                info += '\nDECODE FAILED: ' + e.message + '\nThe file is present but not parseable. Re-pair to fix.';
+              }
+            }
+          }
+        }catch(e){
+          info += 'INSPECTION ERROR: ' + e.message;
+        }
+        dialog.showMessageBox(mainWindow, {
+          type: 'info', title: 'Pairing storage', message: 'Pairing storage status', detail: info, buttons: ['OK'],
+        });
+      } },
     { type: 'separator' },
     { label: 'Check for updates…', click: () => { if(mainWindow) mainWindow.show(); checkForUpdates({ interactive: true }); } },
     { label: 'About RadScheduler Widget', click: () => shell.openExternal('https://github.com/gqrsj4xp2g-dotcom/radsched') },

@@ -1,0 +1,111 @@
+   Edit the source file, not this block. The build replaces everything between
+   the BEGIN/END markers verbatim. See src/README.md for the full plan. */
+/* ── MOBILE PHONE LAYOUT (≤640px) ──
+   The site is used heavily from phones so phone gets a real layout, not
+   a squished desktop. Sidebar becomes a slide-in drawer (toggle via the
+   ☰ hamburger in the topbar). Multi-column grids collapse. Calendar
+   tiles get a list-style layout where each "day card" stacks vertically
+   with bigger touch targets. Inputs get min 44px hit areas (Apple HIG).
+*/
+@media(max-width:640px){
+  /* Drawer sidebar — hidden by default, slides in when .sidebar.open */
+  .layout{flex-direction:row;overflow:visible}
+  .sidebar{
+    position:fixed;left:0;top:0;bottom:0;width:80vw;max-width:320px;height:100vh;
+    transform:translateX(-100%);transition:transform .22s ease;z-index:300;
+    background:var(--bg2);border-right:1px solid var(--bdr);box-shadow:2px 0 20px rgba(0,0,0,.15);
+    display:flex;flex-direction:column;flex-wrap:nowrap;padding:0;
+    overflow-y:auto;overflow-x:hidden;white-space:normal;
+  }
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-overlay{
+    display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:299;
+  }
+  .sidebar.open ~ .sidebar-overlay,
+  .sidebar.open + .sidebar-overlay{display:block}
+  .snav-item{
+    display:block;font-size:14px;padding:13px 16px;line-height:1.3;border-left:3px solid transparent;
+    white-space:normal;border-bottom:1px solid var(--bdr);min-height:44px;
+  }
+  .snav-item.on{background:var(--blue-bg);color:var(--blue-t);border-left-color:var(--blue)}
+  .snav-sect{display:block;font-size:10px;padding:14px 16px 4px;background:var(--bg3);text-transform:uppercase;letter-spacing:.06em}
+  .main{min-width:0;width:100%}
+  .page{padding:12px 10px}
+  /* Topbar — show hamburger, hide non-essential elements.
+     The bar is fixed-height with overflow:hidden so a stray non-hidden
+     element can't push the layout into horizontal scroll. Anything not
+     essential on a phone is hidden by .hide-on-mobile (a class added
+     to less-frequently-used controls below). The hamburger menu is the
+     primary navigation; sidebar holds Sign Out + everything else. */
+  #mobile-nav-toggle{display:inline-flex !important}
+  .topbar{
+    height:48px; padding:0 8px; gap:6px;
+    overflow:hidden; flex-wrap:nowrap;
+    max-width:100vw;
+  }
+  /* User identity + practice name + non-critical status badges hidden */
+  .tb-divider, .tb-practice, .tb-nm, .tb-rl, .tb-av{display:none}
+  .tb-user{display:none}
+  /* Hide secondary action buttons & status indicators on mobile.
+     They're available via the sidebar drawer (Sign Out, Sign-in info)
+     or by switching to desktop for power-user actions (undo, print). */
+  .topbar .hide-on-mobile{display:none !important}
+  .tb-logo{font-size:14px; flex-shrink:0}
+  .tb-spacer{flex:1; min-width:0}
+  /* Buttons that REMAIN visible: keep them compact + non-shrinkable */
+  .topbar .tb-btn{padding:6px 10px; font-size:11px; min-height:36px; flex-shrink:0}
+  /* Allowlist approach: hide all non-essential topbar children, then
+     un-hide the few we keep. The user-visible result on mobile is:
+        ☰ hamburger    RadScheduler    [spacer]    🔔   Sign Out
+     Everything else (Save File, Print, Undo/Redo, command palette,
+     keyboard shortcuts, Hold-to-reset, status badges) is hidden.
+     Power-user actions are still available by switching to desktop. */
+  .topbar > *{display:none}
+  .topbar > #mobile-nav-toggle,
+  .topbar > .tb-logo,
+  .topbar > .tb-spacer,
+  .topbar > #rs-notif-toggle,
+  .topbar > #rs-stale-save-badge,
+  .topbar > #rs-net-badge,
+  .topbar > #rs-error-badge{display:inline-flex !important; align-items:center}
+  /* Sign Out button is the LAST .tb-btn in the topbar — keep it. */
+  .topbar > .tb-btn:last-of-type{display:inline-flex !important; align-items:center}
+  /* Grids collapse */
+  .g2,.g3,.g4{grid-template-columns:1fr;gap:8px}
+  /* Cards full-width */
+  .card{padding:12px 10px;border-radius:6px}
+  .card-title{font-size:13px}
+  /* Inputs touch-friendly */
+  input,select,textarea,button{min-height:44px;font-size:14px}
+  input[type=checkbox],input[type=radio]{min-height:0;width:20px;height:20px}
+  .bsm,.bxs{min-height:36px;font-size:11px}
+  .bxs{min-height:32px}
+  /* Tabs scroll horizontally */
+  .tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tab{flex:0 0 auto;font-size:12px;padding:8px 12px;min-height:40px}
+  /* Calendar — stack as a vertical list of day cards. Each cell becomes
+     a row with the date label on top and events listed below. */
+  .cal-head{display:none}
+  .cal-body{display:flex !important;flex-direction:column;gap:6px}
+  .cal-day{
+    min-height:0;display:flex;flex-direction:column;
+    padding:10px 12px;border-radius:8px;background:var(--bg2);border:1px solid var(--bdr);
+  }
+  .cal-day.other{display:none}
+  .cal-day .cal-date{
+    font-size:13px;font-weight:700;color:var(--txt2);margin-bottom:6px;
+    display:flex;justify-content:space-between;align-items:baseline;
+  }
+  .cal-day .cal-date::before{content:attr(data-dow);color:var(--txt3);font-weight:500;font-size:11px;margin-right:8px}
+  .cal-day .ev{padding:8px 10px;font-size:13px;margin:3px 0;border-radius:5px;min-height:40px}
+  /* Tables go horizontal-scroll instead of breaking the layout */
+  table{font-size:12px;display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  th,td{padding:8px 10px;min-height:40px}
+  /* Modals full-screen-ish */
+  .modal{max-width:100vw;width:100%;height:100%;border-radius:0;max-height:100vh}
+  .modal-wrap{padding:0}
+}
+/* Old narrow-desktop fallback — only kicks in for unusual aspect ratios. */
+@media(min-width:641px) and (max-width:520px){
+  .layout{flex-direction:column}
+}

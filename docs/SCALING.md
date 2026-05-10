@@ -129,7 +129,40 @@ Trigger: when `S.auditLog.length > 50000` OR the row payload exceeds
 - Add admin actions × 50 admins × 100 actions/yr ≈ 5,000 more
 
 So the audit-log split is the FIRST data migration we'll need at scale.
-SQL to add the side table is in `docs/SQL.md` (TODO).
+The migration SQL ships in `docs/sql/01-audit-log-side-table.sql` —
+ready to apply via the Supabase SQL editor.
+
+### Migration sequence (when ready)
+
+1. **Run the SQL** at `docs/sql/01-audit-log-side-table.sql` in the
+   Supabase dashboard → SQL editor. Creates `public.radscheduler_audit`
+   with practice-scoped indexes + RLS that mirrors the existing
+   table policy.
+
+2. **Deploy the dual-write client adapter** (TODO — not yet wired):
+   - `_audit()` writes BOTH to `S.auditLog` (in-blob, for reads) AND
+     to the side table (via service role through an edge function or
+     direct supabase-js insert). Eliminates the read-your-writes
+     consistency problem during the migration.
+   - This phase lasts ~1 week so any client still reading from the
+     blob still sees recent entries.
+
+3. **Backfill existing entries** by uncommenting + running the
+   `INSERT INTO public.radscheduler_audit ... FROM jsonb_array_elements(...)`
+   block at the bottom of the SQL file. Idempotent.
+
+4. **Switch reads to the side table**: `renderAuditLog` queries
+   `radscheduler_audit` ORDER BY ts DESC LIMIT 200 instead of
+   reading `S.auditLog`. The blob copy stops being touched.
+
+5. **Trim the blob copy**: reduce `_AUDIT_LOG_MAX` from 5000 to e.g.
+   100 (just the most recent for offline-cache use). The next save
+   to Supabase prunes the blob.
+
+Each step is reversible. Total estimated effort: ~150 lines of
+client code + 1 SQL file (already written). Pick this up when
+either the audit log starts crowding the blob OR the realtime sync
+between admin devices feels laggy.
 
 ## Migration order recommendation
 

@@ -45,6 +45,10 @@ let _lastCreditsToday = null;
 // Local edit state for the credits tab — id of the credit currently
 // being edited inline, or null.
 let _creditEditingId = null;
+// Whether we've already applied the per-physician accent tint to CSS
+// variables. Set on first dashboard load + refreshed if phys.color
+// changes between fetches.
+let _appliedAccentColor = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function fromB64Url(s){
@@ -86,6 +90,51 @@ function fmtDate(d){
 
 function escHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ─── Per-physician accent color tinting ──────────────────────────
+// If the paired physician has a custom color set in their RadScheduler
+// profile (p.color = "#rrggbb"), tint the widget's accent CSS vars.
+// Falls back to the default cyan when unset. Applied once after the
+// practice loads + re-applied if the color changes between refreshes.
+function _hexToHsl(hex){
+  if(!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if(max !== min){
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch(max){
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) * 60; break;
+      case g: h = ((b - r) / d + 2) * 60; break;
+      case b: h = ((r - g) / d + 4) * 60; break;
+    }
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+function _applyPhysicianAccent(hexColor){
+  if(_appliedAccentColor === hexColor) return;   // unchanged → no-op
+  _appliedAccentColor = hexColor;
+  const root = document.documentElement;
+  if(!hexColor){
+    // Reset to defaults defined in renderer.html.
+    root.style.removeProperty('--accent');
+    root.style.removeProperty('--accent2');
+    return;
+  }
+  const hsl = _hexToHsl(hexColor);
+  if(!hsl) return;
+  // Use the phys color as the primary accent; derive a slightly darker
+  // shade as the hover/secondary. Saturation clamped so very-pale colors
+  // still produce a usable button/ring.
+  const sat = Math.max(60, hsl.s);
+  const lightAccent = `hsl(${hsl.h}, ${sat}%, ${Math.max(40, Math.min(70, hsl.l))}%)`;
+  const darkAccent  = `hsl(${hsl.h}, ${sat}%, ${Math.max(30, Math.min(55, hsl.l - 10))}%)`;
+  root.style.setProperty('--accent', lightAccent);
+  root.style.setProperty('--accent2', darkAccent);
 }
 
 // ─── Practice-data fetch via 'widget-data' edge function ──────────
@@ -845,6 +894,12 @@ async function refresh(){
     _lastPayload = payload;
     _lastPractice = practice;
     _lastDigest = digest;
+    // Per-physician accent tint — applies once per refresh based on
+    // the paired physician's chosen color in RadScheduler.
+    try{
+      const phys = (practice.physicians || []).find(p => p.id === payload.physId);
+      _applyPhysicianAccent(phys?.color || null);
+    }catch(_){}
     renderTabs();
     renderActiveTab();
   } catch(e){
