@@ -105,14 +105,20 @@ edge-function invocations/hour quota.
 
 These are LOW-RISK changes that pay off at scale:
 
-- [ ] Bump `_TUNE.SAVE_DEBOUNCE_MS` from 500 → 1500 ms
+- [x] Bump `_TUNE.SAVE_DEBOUNCE_MS` from 500 → 1500 ms (DONE in v7 schema bump)
+- [x] Cap the in-memory `S.auditLog` to last 5000 entries (LRU) (DONE — was 500, now 5000)
+- [x] Stress-test tool: Tools → Robustness → "🧪 Stress test (200 phys)"
+      synthesizes a 200-phys roster + 1 year of shifts and profiles
+      every major render path. Reverts via the auto-snapshot.
 - [ ] Enable `Content-Encoding: gzip` in `_pushToSupabase`
-- [ ] Cap the in-memory `S.auditLog` to last 5000 entries (LRU);
-      paginate older entries from a side table
+      DEFERRED: Supabase JS client doesn't expose a hook to gzip the
+      request body. Would require either (a) wrapping the global
+      fetch on client construction, or (b) bypassing the client and
+      doing manual REST calls with `CompressionStream`. Defer until
+      payload exceeds 1 MB on the wire (~150 phys with full year).
 - [ ] Add a "Performance" tab to Tools that shows render times +
-      payload size + the largest arrays
-- [ ] Stress-test page: synthesize 200 physicians × 1y of shifts and
-      profile every render path
+      payload size + the largest arrays (PARTIAL — stress test gives
+      most of this; still want a continuous monitor)
 
 ## When to migrate the auditLog out of the JSON blob
 

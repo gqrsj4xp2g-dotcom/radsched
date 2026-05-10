@@ -577,6 +577,17 @@ function renderCreditsTab(){
   // 7-day total
   const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return fmtDate(d); })();
   const weekHours = _hoursSum(mine.filter(c => (c.ts || '').slice(0,10) >= weekStart));
+  // 30-day total
+  const monthStart = (() => { const d = new Date(); d.setDate(d.getDate() - 29); return fmtDate(d); })();
+  const monthHours = _hoursSum(mine.filter(c => (c.ts || '').slice(0,10) >= monthStart));
+  // Targets from practice config (admin-set)
+  const targets = (_lastPractice?.cfg?.creditTargets) || {};
+  const wTarget = +targets.weekly || 0;
+  const mTarget = +targets.monthly || 0;
+  const wPct = wTarget > 0 ? Math.min(100, (weekHours / wTarget) * 100) : 0;
+  const mPct = mTarget > 0 ? Math.min(100, (monthHours / mTarget) * 100) : 0;
+  const targetColor = (pct) => pct >= 100 ? 'var(--green)' : pct >= 70 ? 'var(--accent)' : pct >= 40 ? 'var(--amber)' : 'var(--red)';
+  const progressBar = (pct, target) => target > 0 ? `<div style="height:4px;background:rgba(148,163,184,0.15);border-radius:2px;margin-top:6px;overflow:hidden"><div style="height:100%;background:${targetColor(pct)};width:${pct}%;transition:width 0.4s"></div></div>` : '';
   // Default the new-credit datetime field to "now" rounded down to the
   // current minute (HTML datetime-local format).
   const nowLocal = (() => {
@@ -591,13 +602,18 @@ function renderCreditsTab(){
   body.innerHTML = `
     <div class="credits-summary">
       <div class="stat">
-        <div class="n">${todayHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs</span></div>
-        <div class="lbl">Today</div>
+        <div class="n">${weekHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs${wTarget > 0 ? ' / ' + wTarget : ''}</span></div>
+        <div class="lbl">Week ${wTarget > 0 ? '(' + Math.round(wPct) + '%)' : ''}</div>
+        ${progressBar(wPct, wTarget)}
       </div>
       <div class="stat">
-        <div class="n">${weekHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs</span></div>
-        <div class="lbl">Last 7 days</div>
+        <div class="n">${monthHours.toFixed(1)}<span style="font-size:11px;color:var(--ink2);margin-left:4px">hrs${mTarget > 0 ? ' / ' + mTarget : ''}</span></div>
+        <div class="lbl">Month ${mTarget > 0 ? '(' + Math.round(mPct) + '%)' : ''}</div>
+        ${progressBar(mPct, mTarget)}
       </div>
+    </div>
+    <div style="font-size:10.5px;color:var(--ink3);margin-bottom:10px;text-align:center">
+      Today: <strong style="color:var(--ink)">${todayHours.toFixed(1)} hrs</strong>${(wTarget === 0 && mTarget === 0) ? ' · admin can set targets in Settings → Credit targets' : ''}
     </div>
 
     <div class="credit-form">
