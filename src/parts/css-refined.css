@@ -1,0 +1,1016 @@
+    /* ═══════════════════════════════════════════════════════════════════
+       REFINED DESIGN LAYER
+       The styles above were grown alongside the app. The block below is
+       a layer of restraint applied on top — calmer typography, softer
+       hairlines, considered motion, more breathing room. Each override
+       is intentional; nothing here is decorative for its own sake.
+       ═══════════════════════════════════════════════════════════════════ */
+
+    :root {
+      /* Spacing scale (4px geometric) */
+      --rs-xs: 4px;
+      --rs-sm: 8px;
+      --rs-md: 12px;
+      --rs-base: 16px;
+      --rs-lg: 24px;
+      --rs-xl: 32px;
+      --rs-2xl: 48px;
+
+      /* Radii — slightly more generous than the originals */
+      --rs-r-sm: 6px;
+      --rs-r-md: 10px;
+      --rs-r-lg: 14px;
+      --rs-r-xl: 18px;
+
+      /* Motion */
+      --rs-ease: cubic-bezier(0.4, 0, 0.2, 1);
+      --rs-fast: 150ms;
+      --rs-base-d: 200ms;
+      --rs-slow: 300ms;
+
+      /* Refined ink scale for light surfaces. The originals stay around
+         (--txt1, --txt2, --txt3) — these are used by the new components.
+         Same rgb(60,60,67,0.13) hairline tone Apple uses across iOS. */
+      --rs-ink-1: #0a0a0c;
+      --rs-ink-2: #4a4a4f;
+      --rs-ink-3: #98989a;
+      --rs-line:  rgba(60, 60, 67, 0.12);
+      --rs-line-strong: rgba(60, 60, 67, 0.18);
+      --rs-elev-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+      --rs-elev-2: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --rs-elev-3: 0 12px 40px rgba(10, 10, 12, 0.10), 0 2px 6px rgba(10, 10, 12, 0.04);
+
+      /* Accent — keep continuity with the existing --blue, but ensure
+         AA contrast on white and AAA on dark surfaces. */
+      --rs-accent: #2563eb;
+      --rs-accent-soft: rgba(37, 99, 235, 0.10);
+      --rs-accent-ring: rgba(37, 99, 235, 0.32);
+    }
+
+    /* Dark theme tweaks. The body[data-theme="dark"] selector matches the
+       existing theme system. Slightly softened compared to true black. */
+    body[data-theme="dark"] {
+      --rs-ink-1: #fafafa;
+      --rs-ink-2: #c6c6ca;
+      --rs-ink-3: #98989a;
+      --rs-line: rgba(255, 255, 255, 0.10);
+      --rs-line-strong: rgba(255, 255, 255, 0.16);
+      --rs-elev-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+      --rs-elev-2: 0 4px 14px rgba(0, 0, 0, 0.40);
+      --rs-elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.30);
+      --rs-accent: #4d8cff;
+      --rs-accent-soft: rgba(77, 140, 255, 0.14);
+      --rs-accent-ring: rgba(77, 140, 255, 0.40);
+    }
+
+    /* ── Type ─────────────────────────────────────────────────────────── */
+    /* The system stack inherits OS-grade type rendering on every device.
+       Letter-spacing micro-tightens to mirror Apple's display tracking. */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter",
+                   "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-feature-settings: "ss01", "cv11"; /* cleaner i/l/1 in supporting fonts */
+      letter-spacing: -0.011em;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    h1, h2, h3, .pg-title, .card-title {
+      letter-spacing: -0.022em;
+    }
+
+    /* ── Focus ring ───────────────────────────────────────────────────── */
+    /* A single, calm focus indicator that doesn't compete with hover.
+       Replaces the browser default for buttons/inputs/selects globally. */
+    *:focus { outline: none; }
+    button:focus-visible, a:focus-visible,
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    [role="button"]:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--rs-accent-ring);
+      outline-offset: 2px;
+      border-radius: var(--rs-r-sm);
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────────────── */
+    /* Subtle press feedback — 0.98 scale, 200ms with the standard ease.
+       Applied broadly via the existing button classes so both old and new
+       call sites get the polish. */
+    button, .bp, .bsm, .bt, .br, .bg, .bxs, .tb-btn, .abtn {
+      transition:
+        background var(--rs-base-d) var(--rs-ease),
+        color var(--rs-base-d) var(--rs-ease),
+        border-color var(--rs-base-d) var(--rs-ease),
+        transform var(--rs-fast) var(--rs-ease),
+        box-shadow var(--rs-base-d) var(--rs-ease);
+    }
+    button:active, .bp:active, .bsm:active, .bt:active,
+    .br:active, .bg:active, .bxs:active, .tb-btn:active, .abtn:active {
+      transform: scale(0.98);
+    }
+    button[disabled], .bp[disabled], .bsm[disabled] {
+      opacity: 0.45; cursor: default;
+    }
+    button[disabled]:active { transform: none; }
+
+    /* ── Page hierarchy ──────────────────────────────────────────────── */
+    /* Consistent treatment for page titles and the optional subtitle that
+       lives directly below them. Display weight, generous tracking, soft
+       lower border on the subtitle so the rest of the page reads as a
+       quieter region. */
+    .pg-title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      color: var(--rs-ink-1);
+      margin-bottom: 6px;
+      line-height: 1.25;
+    }
+    .pg-sub {
+      font-size: 13px;
+      color: var(--rs-ink-3);
+      letter-spacing: -0.005em;
+      line-height: 1.55;
+      margin-bottom: 18px;
+      max-width: 56ch;
+    }
+    @media (max-width: 720px) {
+      .pg-title { font-size: 20px; }
+      .pg-sub { font-size: 12.5px; margin-bottom: 14px; }
+    }
+
+    /* ── Cards ────────────────────────────────────────────────────────── */
+    /* Hairline border + subtle shadow instead of heavy borders. Padding
+       generous so content has room to breathe. Backwards-compatible with
+       existing .card markup; selectors target the existing class. */
+    .card {
+      border: 1px solid var(--rs-line);
+      border-radius: var(--rs-r-lg);
+      box-shadow: var(--rs-elev-1);
+      padding: var(--rs-base);
+      transition: box-shadow var(--rs-base-d) var(--rs-ease);
+    }
+    @media (min-width: 720px) {
+      .card { padding: var(--rs-lg); }
+    }
+    .card-title {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: var(--rs-md);
+      letter-spacing: -0.011em;
+    }
+    /* Section header inside a card — a tertiary heading. */
+    .card-section {
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--rs-ink-3);
+      margin: var(--rs-md) 0 var(--rs-sm);
+    }
+
+    /* ── Inputs ───────────────────────────────────────────────────────── */
+    /* Calm hairline that goes accent on focus; no heavy 2px borders. */
+    input[type="text"], input[type="email"], input[type="password"],
+    input[type="number"], input[type="date"], input[type="month"],
+    input[type="time"], input[type="search"], input[type="tel"],
+    select, textarea {
+      transition:
+        border-color var(--rs-base-d) var(--rs-ease),
+        box-shadow var(--rs-base-d) var(--rs-ease);
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--rs-accent) !important;
+      box-shadow: 0 0 0 3px var(--rs-accent-soft) !important;
+    }
+
+    /* ── Toolbar polish ──────────────────────────────────────────────── */
+    .topbar {
+      box-shadow: 0 1px 0 var(--rs-line);
+    }
+    .tb-btn {
+      border-radius: var(--rs-r-md);
+    }
+    /* The save indicator becomes more whisper-quiet. Bold reserved for
+       errors via _updateSaveUI's color logic. */
+    #save-indicator {
+      transition: opacity var(--rs-base-d) var(--rs-ease);
+    }
+
+    /* ── Sidebar polish ──────────────────────────────────────────────── */
+    .snav-item {
+      border-radius: var(--rs-r-md);
+      padding: 7px 12px;
+      margin: 1px 6px;
+      font-size: 13px;
+      letter-spacing: -0.005em;
+      transition:
+        background var(--rs-base-d) var(--rs-ease),
+        color var(--rs-base-d) var(--rs-ease);
+    }
+    .snav-item:hover { background: var(--bg3, var(--rs-line)); }
+    .snav-item.on {
+      background: var(--rs-accent-soft);
+      color: var(--rs-accent);
+      font-weight: 600;
+    }
+    .snav-sect {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--rs-ink-3);
+      padding: 16px 18px 6px;
+      margin-top: 2px;
+    }
+    .snav-sect:first-child { margin-top: 0; padding-top: 12px; }
+
+    /* ── Tags ─────────────────────────────────────────────────────────── */
+    /* Keep the tag color system but hush saturation slightly + give them
+       proper pill shape for visual rhythm. */
+    .tag {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Modal polish ─────────────────────────────────────────────────── */
+    .modal { transition: opacity var(--rs-base-d) var(--rs-ease); }
+    .modal-content, .modal > div, .modal-body {
+      box-shadow: var(--rs-elev-3);
+      border-radius: var(--rs-r-xl);
+    }
+
+    /* ── Toast (rs-toast-host is created at runtime) ──────────────────── */
+    #rs-toast-host > div {
+      border-radius: var(--rs-r-md) !important;
+      box-shadow: var(--rs-elev-2) !important;
+      padding: 11px 16px !important;
+      font-size: 13px !important;
+      letter-spacing: -0.005em;
+      font-weight: 500;
+      transition: opacity var(--rs-base-d) var(--rs-ease),
+                  transform var(--rs-base-d) var(--rs-ease) !important;
+    }
+
+    /* ── Reduced motion ──────────────────────────────────────────────── */
+    /* Respect users who've asked the OS to dial motion back. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+
+    /* ── Splash / auth screen polish ─────────────────────────────────── */
+    /* The first thing every user sees. The original split-pane (dark
+       gradient on left, white card on right) is the tested layout — we
+       keep the structure and only refine the surfaces inside it.
+       Calm gradient, generous internal padding, OS-grade type, single
+       accent on the sign-in button. */
+
+    /* Left panel — keep the navy gradient, lift the type weight slightly
+       and tighten the tracking to feel more like display copy. */
+    .auth-side {
+      background: linear-gradient(160deg, #0f1e32 0%, #1a2e4a 60%, #243b5e 100%);
+      padding: 64px 52px;
+    }
+    @media (min-width: 720px) {
+      .auth-side h1 {
+        font-size: 36px;
+        font-weight: 700;
+        letter-spacing: -0.024em;
+        line-height: 1.08;
+        margin-bottom: 14px;
+      }
+      .auth-side p {
+        font-size: 14px;
+        line-height: 1.65;
+        color: #b6c0cf;
+        max-width: 30ch;
+        margin-bottom: 36px;
+      }
+    }
+    .auth-feat {
+      gap: 12px;
+      color: #d6dde6;
+      font-size: 12.5px;
+      margin-bottom: 11px;
+      transition: color var(--rs-base-d) var(--rs-ease);
+    }
+    .auth-feat-dot {
+      width: 5px; height: 5px; opacity: 0.8;
+    }
+
+    /* Right panel — the form card. Restraint: thin hairline, gentle
+       shadow, considered tab toggle, single accent on Sign In. */
+    .auth-card {
+      border-radius: var(--rs-r-xl) !important;
+      box-shadow: var(--rs-elev-3) !important;
+      border: 1px solid var(--rs-line);
+      padding: 40px 44px !important;
+    }
+    @media (max-width: 720px) {
+      .auth-card { padding: 28px 22px !important; }
+    }
+    .auth-logo {
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      color: var(--rs-ink-1);
+      margin-bottom: 4px;
+    }
+    .auth-tabs {
+      border-radius: var(--rs-r-md) !important;
+      padding: 4px !important;
+    }
+    .auth-tab {
+      border-radius: var(--rs-r-sm) !important;
+      font-size: 12.5px;
+      font-weight: 500 !important;
+      letter-spacing: -0.005em;
+      transition:
+        background var(--rs-base-d) var(--rs-ease),
+        color var(--rs-base-d) var(--rs-ease) !important;
+    }
+    .auth-tab.on {
+      box-shadow: var(--rs-elev-1) !important;
+    }
+    .afield label {
+      font-size: 11px;
+      font-weight: 600 !important;
+      letter-spacing: 0.04em !important;
+      color: var(--rs-ink-3) !important;
+    }
+    .afield input,
+    .afield select {
+      padding: 11px 13px !important;
+      border: 1px solid var(--rs-line-strong) !important;
+      border-radius: var(--rs-r-md) !important;
+      font-size: 14px !important;
+      transition:
+        border-color var(--rs-base-d) var(--rs-ease),
+        box-shadow var(--rs-base-d) var(--rs-ease) !important;
+    }
+    .afield input:focus,
+    .afield select:focus {
+      border-color: var(--rs-accent) !important;
+      box-shadow: 0 0 0 3px var(--rs-accent-soft) !important;
+    }
+    .abtn {
+      padding: 12px !important;
+      border-radius: var(--rs-r-md) !important;
+      background: var(--rs-accent) !important;
+      font-size: 14px !important;
+      font-weight: 500 !important;
+      letter-spacing: -0.005em !important;
+      transition:
+        background var(--rs-base-d) var(--rs-ease),
+        transform var(--rs-fast) var(--rs-ease) !important;
+    }
+    .abtn:hover {
+      background: #1d4ed8 !important;
+    }
+    .abtn:active {
+      transform: scale(0.985);
+    }
+    .aerr {
+      border-radius: var(--rs-r-md) !important;
+      padding: 10px 13px !important;
+      font-size: 12.5px !important;
+      border-color: var(--rs-line-strong) !important;
+    }
+
+    /* ── Loading-overlay polish ──────────────────────────────────────── */
+    #loading-overlay { transition: opacity var(--rs-base-d) var(--rs-ease); }
+
+    /* ── Hairline utility (not yet used everywhere; available for new UI) */
+    .rs-hairline { border-color: var(--rs-line) !important; }
+    .rs-hairline-strong { border-color: var(--rs-line-strong) !important; }
+
+    /* ── Accessibility — color audit pass ─────────────────────────────
+       Tag colors and small text need AA contrast (4.5:1) against their
+       backgrounds. The originals were designed for the lighter theme
+       and dipped below 3:1 on dark surfaces. The overrides below tighten
+       contrast in dark mode and add a colorblind-friendly variant
+       triggered by body[data-cb="1"]. */
+    body[data-theme="dark"] .tag.tb { background: #1e3a8a; color: #cfe0ff; }
+    body[data-theme="dark"] .tag.tt { background: #4c1d95; color: #ddd6fe; }
+    body[data-theme="dark"] .tag.tg { background: #14532d; color: #bbf7d0; }
+    body[data-theme="dark"] .tag.tr { background: #7f1d1d; color: #fecaca; }
+    body[data-theme="dark"] .tag.tp { background: #831843; color: #fbcfe8; }
+    body[data-theme="dark"] .tag.ta { background: #713f12; color: #fde68a; }
+    body[data-cb="1"] .tag { border: 1px solid currentColor !important; }
+    body[data-cb="1"] .tag.tb { background: #cce5ff; color: #003366; }
+    body[data-cb="1"] .tag.tt { background: #ddd6e8; color: #4b2566; }
+    body[data-cb="1"] .tag.tg { background: #c8e6c9; color: #1b5e20; }
+    body[data-cb="1"] .tag.tr { background: #ffd6cc; color: #8b1a00; }
+    body[data-cb="1"] .tag.ta { background: #fff0b3; color: #6b4900; }
+
+    /* ── Print stylesheet ─────────────────────────────────────────────
+       Practices print schedules to post in reading rooms. Strip every
+       chrome element, set hairline grid, expand cells, kill colors that
+       don't print well. Triggered by the browser's print dialog or the
+       in-app printSchedule() helper which scrolls the calendar into the
+       print region first. */
+    @media print {
+      .topbar, .sidebar, #rs-toast-host, #rs-error-badge,
+      #rs-stale-save-badge, #fs-status, #fs-toggle-btn, #gh-toolbar-status,
+      #save-indicator, #mobile-nav-toggle, .modal, .tabs, .tab-bar,
+      button, .bp, .bsm, .bt, .br, .bg, .bxs, .tb-btn, .abtn,
+      .pg-actions, .filter-bar, .note, .helptip,
+      .no-print, [data-no-print] {
+        display: none !important;
+      }
+      @page { margin: 0.5in; }
+      html, body {
+        background: #fff !important;
+        color: #000 !important;
+        font-size: 10pt;
+      }
+      .page, .page.on, #app {
+        display: block !important;
+        background: transparent !important;
+        padding: 0 !important; margin: 0 !important;
+      }
+      .pg-title {
+        font-size: 14pt !important;
+        font-weight: 700 !important;
+        margin-bottom: 6pt !important;
+        color: #000 !important;
+        border-bottom: 1pt solid #000;
+        padding-bottom: 4pt;
+      }
+      .calmo, .cal-grid, .cal-grid-ir, table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      .cal-day, td, th {
+        border: 0.5pt solid #888 !important;
+        padding: 3pt !important;
+        page-break-inside: avoid;
+      }
+      .cal-day { min-height: 0.7in !important; font-size: 8pt !important; }
+      .cal-num { font-weight: 700; font-size: 9pt; color: #000 !important; }
+      .cal-day.weekend, .cal-day.wknd {
+        background: #f0f0f0 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .ev {
+        font-size: 7pt !important;
+        padding: 1pt 3pt !important;
+        margin: 1pt 0 !important;
+        border-radius: 2pt !important;
+        page-break-inside: avoid;
+      }
+      .tag {
+        background: #fff !important;
+        color: #000 !important;
+        border: 0.5pt solid #444 !important;
+        padding: 0 3pt !important;
+      }
+      .card {
+        border: 0.5pt solid #888 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        padding: 6pt !important;
+        page-break-inside: avoid;
+      }
+      .card-title { font-size: 11pt !important; }
+      .rs-print-title {
+        display: block !important;
+        text-align: center;
+        font-size: 12pt;
+        font-weight: 600;
+        margin-bottom: 8pt;
+      }
+    }
+    .rs-print-title { display: none; }
+
+    /* ── Empty states ─────────────────────────────────────────────────
+       A composable component for "no data here yet" surfaces.
+       Replaces the gray "no entries" plaintext with an illustrated
+       panel + a primary action. */
+    .rs-empty {
+      text-align: center;
+      padding: 48px 24px;
+      max-width: 420px;
+      margin: 24px auto;
+    }
+    .rs-empty-icon {
+      width: 56px; height: 56px;
+      margin: 0 auto 18px;
+      border-radius: 14px;
+      background: var(--rs-accent-soft);
+      color: var(--rs-accent);
+      display: grid;
+      place-items: center;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+    }
+    .rs-empty-title {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      color: var(--rs-ink-1);
+      margin-bottom: 6px;
+    }
+    .rs-empty-body {
+      font-size: 13px;
+      color: var(--rs-ink-3);
+      line-height: 1.55;
+      margin-bottom: 22px;
+    }
+    .rs-empty .bp,
+    .rs-empty .bsm {
+      margin: 0 4px;
+    }
+
+    /* ── Loading skeleton ─────────────────────────────────────────────
+       A pulsing block that occupies the same footprint as the data
+       it's standing in for. Used while async ops (solver, drive-time
+       refresh, MCF solve) are running. The pulse has a single
+       low-amplitude opacity oscillation — calmer than typical
+       skeleton-loaders. */
+    @keyframes rsPulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 0.85; }
+    }
+    .rs-skel {
+      background: var(--rs-line);
+      border-radius: var(--rs-r-sm);
+      animation: rsPulse 1.4s var(--rs-ease) infinite;
+    }
+    .rs-skel-row {
+      display: flex; gap: 8px; align-items: center;
+      padding: 10px 12px;
+      border-radius: var(--rs-r-md);
+    }
+    .rs-skel-row .rs-skel { height: 12px; }
+    .rs-skel-stack {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+
+    /* Inline progress for long-running jobs (auto-assign, MCF solve).
+       Indeterminate bar that tracks a percentage when given. */
+    .rs-progress {
+      width: 100%;
+      height: 6px;
+      background: var(--rs-line);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .rs-progress-bar {
+      height: 100%;
+      background: var(--rs-accent);
+      border-radius: 999px;
+      transition: width var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-progress-bar.indeterminate {
+      width: 30% !important;
+      animation: rsIndeterminate 1.6s var(--rs-ease) infinite;
+    }
+    @keyframes rsIndeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(380%); }
+    }
+    .rs-progress-label {
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      margin-top: 6px;
+      letter-spacing: -0.005em;
+    }
+
+    /* ── Command palette ───────────────────────────────────────────────
+       Cmd/Ctrl+K opens a centered search overlay. Type to filter; up/down
+       to move; enter to select. Sources are pages, physicians, and
+       saved months. Renders into a portal node so it floats above
+       every other surface. */
+    .rs-cp-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(15, 15, 20, 0.40);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 10100;
+      display: grid;
+      place-items: start center;
+      padding-top: 12vh;
+      animation: rsCpFadeIn .15s var(--rs-ease);
+    }
+    @keyframes rsCpFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .rs-cp {
+      width: 92%;
+      max-width: 560px;
+      background: var(--bg2, #fff);
+      color: var(--rs-ink-1);
+      border-radius: var(--rs-r-xl);
+      box-shadow: var(--rs-elev-3);
+      border: 1px solid var(--rs-line);
+      overflow: hidden;
+      animation: rsCpSlideIn .18s var(--rs-ease);
+    }
+    @keyframes rsCpSlideIn {
+      from { transform: translateY(-8px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    .rs-cp-input {
+      width: 100%;
+      padding: 16px 20px;
+      font: 16px -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: -0.011em;
+      border: none;
+      background: transparent;
+      color: var(--rs-ink-1);
+      border-bottom: 1px solid var(--rs-line);
+      outline: none;
+    }
+    .rs-cp-input::placeholder { color: var(--rs-ink-3); }
+    .rs-cp-list {
+      max-height: 56vh;
+      overflow-y: auto;
+      padding: 6px;
+    }
+    .rs-cp-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: var(--rs-r-md);
+      cursor: pointer;
+      font-size: 13.5px;
+      letter-spacing: -0.005em;
+      transition: background var(--rs-fast) var(--rs-ease);
+    }
+    .rs-cp-item.on,
+    .rs-cp-item:hover {
+      background: var(--rs-accent-soft);
+    }
+    .rs-cp-icon {
+      width: 28px; height: 28px;
+      border-radius: var(--rs-r-sm);
+      background: var(--bg3, var(--rs-line));
+      display: grid; place-items: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .rs-cp-item.on .rs-cp-icon {
+      background: var(--rs-accent);
+      color: #fff;
+    }
+    .rs-cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rs-cp-cat {
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .rs-cp-empty {
+      padding: 28px 14px;
+      text-align: center;
+      color: var(--rs-ink-3);
+      font-size: 13px;
+    }
+    .rs-cp-hint {
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--rs-ink-3);
+      border-top: 1px solid var(--rs-line);
+      display: flex;
+      gap: 16px;
+      letter-spacing: 0.01em;
+    }
+    .rs-cp-hint kbd {
+      background: var(--bg3, var(--rs-line));
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: -apple-system, monospace;
+      font-size: 10px;
+      letter-spacing: 0;
+    }
+
+    /* ── Notifications panel ───────────────────────────────────────────
+       A bell-icon trigger in the toolbar opens a right-aligned drawer
+       listing recent events (assignments, swaps, mentions). Reads from
+       the existing audit log + user notification stream. */
+    #rs-notif-toggle {
+      position: relative;
+      padding: 4px 8px;
+    }
+    #rs-notif-dot {
+      position: absolute;
+      top: 4px; right: 4px;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--rs-accent);
+      display: none;
+    }
+    .rs-notif-panel {
+      position: fixed;
+      top: 56px;
+      right: 12px;
+      width: 360px;
+      max-width: calc(100vw - 24px);
+      max-height: 70vh;
+      background: var(--bg2, #fff);
+      border-radius: var(--rs-r-lg);
+      box-shadow: var(--rs-elev-3);
+      border: 1px solid var(--rs-line);
+      display: none;
+      flex-direction: column;
+      z-index: 10050;
+      overflow: hidden;
+      animation: rsCpSlideIn .15s var(--rs-ease);
+    }
+    .rs-notif-panel.on { display: flex; }
+    .rs-notif-header {
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.011em;
+      border-bottom: 1px solid var(--rs-line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .rs-notif-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+    .rs-notif-item {
+      padding: 11px 16px;
+      font-size: 12.5px;
+      line-height: 1.45;
+      border-bottom: 1px solid var(--rs-line);
+      letter-spacing: -0.005em;
+    }
+    .rs-notif-item:last-child { border-bottom: none; }
+    .rs-notif-item .when {
+      display: block;
+      font-size: 10.5px;
+      color: var(--rs-ink-3);
+      margin-top: 2px;
+      letter-spacing: 0.01em;
+    }
+    .rs-notif-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--rs-ink-3);
+      font-size: 12.5px;
+    }
+
+    /* ── First-run wizard ─────────────────────────────────────────────
+       A persistent dashboard card while any of the must-have setup
+       items are missing: at least one site, at least one sub-specialty,
+       at least one physician, basic shift caps. Each step has a
+       checkmark when satisfied; clicking it deep-links to the right
+       page. The card disappears once everything is checked. */
+    .rs-quickstart {
+      border-radius: var(--rs-r-lg);
+      border: 1px solid var(--rs-line);
+      background:
+        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 100%),
+        var(--bg2, #fff);
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: var(--rs-elev-1);
+    }
+    .rs-quickstart-title {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      margin-bottom: 4px;
+    }
+    .rs-quickstart-sub {
+      font-size: 12.5px;
+      color: var(--rs-ink-3);
+      margin-bottom: 14px;
+    }
+    .rs-quickstart-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border-radius: var(--rs-r-md);
+      cursor: pointer;
+      transition: background var(--rs-fast) var(--rs-ease);
+      font-size: 13.5px;
+      letter-spacing: -0.005em;
+    }
+    .rs-quickstart-step:hover { background: var(--rs-accent-soft); }
+    .rs-quickstart-check {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid var(--rs-line-strong);
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      transition: background var(--rs-base-d) var(--rs-ease),
+                  border-color var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-quickstart-step.done .rs-quickstart-check {
+      background: var(--rs-accent);
+      border-color: var(--rs-accent);
+      color: #fff;
+    }
+    .rs-quickstart-step.done .rs-quickstart-name {
+      color: var(--rs-ink-3);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+    .rs-quickstart-name { flex: 1; }
+    .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
+
+    /* ── Sticky calendar toolbar ──────────────────────────────────────
+       Keeps the month picker / filter chips visible as the calendar
+       scrolls. Applied to anything tagged .rs-sticky-bar by the
+       runtime watcher. */
+    .rs-sticky-bar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--bg, var(--bg1));
+      padding: 8px 0;
+      margin: -8px -2px 8px;
+      border-bottom: 1px solid transparent;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .rs-sticky-bar:has(input:focus),
+    .rs-sticky-bar.rs-stuck {
+      border-bottom-color: var(--rs-line);
+    }
+
+    /* ── Searchable combobox panel options ─────────────────────────── */
+    .rs-cb-opt {
+      transition: background var(--rs-fast) var(--rs-ease),
+                  color var(--rs-fast) var(--rs-ease);
+    }
+    .rs-cb-opt:hover {
+      background: var(--rs-accent-soft);
+      color: var(--rs-accent);
+    }
+
+    /* ── iOS safe-area + mobile native polish ──────────────────────────
+       Modern phones have notches and home indicators. The viewport-fit
+       meta + env() variables let CSS pad away from those zones so
+       primary chrome doesn't disappear under hardware. */
+    @supports (padding: env(safe-area-inset-top)) {
+      .topbar {
+        padding-top: calc(var(--rs-sm) + env(safe-area-inset-top));
+      }
+      #app {
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .sidebar {
+        padding-left: env(safe-area-inset-left);
+      }
+    }
+
+    /* ── Dark mode polish pass ────────────────────────────────────────
+       Several legacy surfaces (note classes, hover states, badges) had
+       light-mode-tuned colors that washed out in dark theme. Override
+       them so contrast stays AA across both themes. */
+    body[data-theme="dark"] .note.ni { background: rgba(77, 140, 255, 0.10); border-color: rgba(77, 140, 255, 0.25); }
+    body[data-theme="dark"] .note.ns { background: rgba(34, 197, 94, 0.10); border-color: rgba(34, 197, 94, 0.25); }
+    body[data-theme="dark"] .note.nw { background: rgba(251, 191, 36, 0.10); border-color: rgba(251, 191, 36, 0.30); }
+    body[data-theme="dark"] .note.ne { background: rgba(239, 68, 68, 0.10); border-color: rgba(239, 68, 68, 0.25); }
+    body[data-theme="dark"] .row[onclick]:hover,
+    body[data-theme="dark"] .snav-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    body[data-theme="dark"] code,
+    body[data-theme="dark"] pre {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    body[data-theme="dark"] .met,
+    body[data-theme="dark"] .av {
+      background: var(--bg2, #1c1c1e);
+    }
+
+    /* ── Skip-to-main-content link (accessibility) ────────────────────
+       Keyboard users hitting Tab on page load should be able to jump
+       past the sidebar and land on the main content. The link is
+       visually hidden until focused. */
+    .rs-skiplink {
+      position: absolute;
+      top: -100px;
+      left: 0;
+      background: var(--rs-accent);
+      color: #fff;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 0 0 10px 0;
+      z-index: 10300;
+      text-decoration: none;
+      transition: top var(--rs-base-d) var(--rs-ease);
+    }
+    .rs-skiplink:focus {
+      top: 0;
+      outline: 2px solid #fff;
+      outline-offset: -4px;
+    }
+
+    /* ── Mobile calendar list mode ─────────────────────────────────────
+       The dense month grid becomes hard to read on phones; the toolbar
+       toggle (📅 ↔ 📋) sets data-cal-mode="list" on the body which
+       collapses the grid into a vertical day-list. The grid is hidden,
+       the list shows up — desktops can still toggle for a different
+       reading style if they prefer. */
+    .rs-cal-list { display: none; }
+    body[data-cal-mode="list"] .calmo,
+    body[data-cal-mode="list"] .cal-grid,
+    body[data-cal-mode="list"] .cal-grid-ir {
+      display: none !important;
+    }
+    body[data-cal-mode="list"] .rs-cal-list { display: block; }
+    .rs-cal-day {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--rs-line);
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .rs-cal-day-num {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+      width: 38px;
+      flex-shrink: 0;
+      line-height: 1.4;
+    }
+    .rs-cal-day-num small {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--rs-ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+    .rs-cal-day-events { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .rs-cal-day.today { background: var(--rs-accent-soft); }
+    .rs-cal-day.today .rs-cal-day-num { color: var(--rs-accent); }
+    .rs-cal-day.weekend .rs-cal-day-num { color: var(--rs-ink-3); }
+    .rs-cal-day.empty { opacity: 0.55; }
+
+    /* ── Mobile-first My Schedule ─────────────────────────────────────
+       Most-used view by far, almost always on a phone. Override the
+       desktop layout for the page when the viewport is narrow:
+       single-column, large legible type, today highlighted, weekly
+       cards with swipeable next-week navigation. */
+    @media (max-width: 720px) {
+      #page-my-schedule .pg-title {
+        font-size: 22px;
+        letter-spacing: -0.022em;
+        padding: 4px 0 12px;
+      }
+      #page-my-schedule .ms-day {
+        background: var(--bg2, #fff);
+        border: 1px solid var(--rs-line);
+        border-radius: var(--rs-r-lg);
+        padding: 14px 16px;
+        margin-bottom: 8px;
+      }
+      #page-my-schedule .ms-day .day-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--rs-ink-3);
+      }
+      #page-my-schedule .ms-day .day-num {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.022em;
+        margin-bottom: 6px;
+      }
+      #page-my-schedule .ms-day.today {
+        background: var(--rs-accent);
+        color: #fff;
+        border-color: var(--rs-accent);
+      }
+      #page-my-schedule .ms-day.today .day-label,
+      #page-my-schedule .ms-day.today .day-num {
+        color: #fff;
+      }
+      #page-my-schedule .ms-day .ms-shift {
+        display: block;
+        padding: 8px 10px;
+        margin-top: 6px;
+        background: var(--bg3);
+        border-radius: var(--rs-r-md);
+        font-size: 13px;
+      }
+      #page-my-schedule .ms-day.today .ms-shift {
+        background: rgba(255,255,255,0.18);
+      }
+    }

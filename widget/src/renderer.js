@@ -216,6 +216,11 @@ async function fetchPACSStats(/* physId, dateISO */){
     pacsConnected: false,
     studiesCompletedToday: 0,
     wRVUEarnedToday: 0,
+    // Auto-next percentage = how often the physician used PACS auto-
+    // advance (versus manually picking the next study). High auto-next
+    // = good worklist hygiene + fast turn-around. Used as a debulking
+    // gate (must be ≥ 90% before backlog clearing is allowed).
+    autoNextPct: 0,
     debulkingToday: 0,
     debulkingThisWeek: 0,
     debulkingThisMonth: 0,
@@ -312,31 +317,71 @@ function computeDayDigest(practice, physId, dateISO){
 
   out.studyTarget = Math.max(0, Math.round(out.wRVUGoalTotal / 1.5));
 
-  // ── Debulking eligibility computed client-side ──────────────────
-  // A physician is eligible to "debulk" (clear backlog studies) if:
-  //   • Admin flagged them eligible (p.debulkingEligible !== false)
-  //   • Not on vacation
-  //   • Not on call (call duties take priority)
-  //   • Has a regular DR/IR shift today (so they're "at work")
-  //   • Practice's debulking policy allows for today's day-of-week
-  // Each criterion is reported individually so the widget can show a
-  // checklist explaining the eligibility decision.
+  // The non-PACS-dependent debulking gates (admin flag, vacation,
+  // shift presence, day-of-week). PACS-dependent gates (wRVU
+  // ≥107.5% goal, autoNext ≥90%) are added later in
+  // renderDebulkingTab() where live PACS data is available.
   const policy = (practice.cfg && practice.cfg.debulkingPolicy) || {};
   const adminAllowed = !phys || phys.debulkingEligible !== false;
   const hasShiftToday = out.shifts.length > 0;
   const dow = new Date(dateISO + 'T12:00:00').getDay();
   const dowAllowed = policy.disabledDows ? !policy.disabledDows.includes(dow) : true;
-  const checks = [
+  out.debulkingBaseChecks = [
     { name: 'Admin-flagged eligible', pass: adminAllowed, detail: adminAllowed ? 'Yes' : 'No (admin disabled)' },
     { name: 'Not on vacation', pass: !out.onVacation, detail: out.onVacation ? 'On vacation today' : 'Available' },
-    { name: 'Not exclusively on call', pass: !(out.onCall && out.shifts.length === 1), detail: out.onCall ? 'On call (lower priority for debulking)' : 'Not on call' },
     { name: 'Working today', pass: hasShiftToday, detail: hasShiftToday ? `${out.shifts.length} shift${out.shifts.length===1?'':'s'} today` : 'No shift today' },
     { name: 'Day-of-week allowed', pass: dowAllowed, detail: dowAllowed ? 'OK' : 'Practice excludes this DOW' },
   ];
-  out.debulkingChecks = checks;
-  out.debulkingEligibleByPolicy = checks.every(c => c.pass);
 
   return out;
+}
+
+// ─── Credits + delivered wRVU helpers ─────────────────────────────
+// "Delivered wRVU" today =
+//     pacs.wRVUEarnedToday                         (PACS-fed studies)
+//   + sum(today's credit hours) × cfg.creditHoursToWRVU rate
+// Drive-time credit is shown separately and NOT added — it's a
+// reimbursement metric, not productivity.
+function _creditWRVUToday(){
+  if(!_lastPractice) return 0;
+  const cfg = _lastPractice.cfg || {};
+  const rate = +(cfg.creditHoursToWRVU != null ? cfg.creditHoursToWRVU : 28);  // default 28 wRVU per hour
+  const hours = _hoursSum(_creditsToday());
+  return Math.round(hours * rate * 10) / 10;
+}
+function _deliveredWRVUToday(){
+  if(!_lastDigest) return 0;
+  const pacsW = +(_lastDigest._pacs?.wRVUEarnedToday || 0);
+  return pacsW + _creditWRVUToday();
+}
+function _debulkingChecks(){
+  if(!_lastDigest) return [];
+  const base = _lastDigest.debulkingBaseChecks || [];
+  const pacs = _lastDigest._pacs || {};
+  const goal = _lastDigest.wRVUGoalTotal || 0;
+  const delivered = _deliveredWRVUToday();
+  const wRVUPct = goal > 0 ? (delivered / goal) * 100 : 0;
+  const autoNext = +(pacs.autoNextPct || 0);
+  // The two PACS-gated criteria for debulking:
+  //   wRVU ≥ 107.5% of daily goal  AND  autoNext ≥ 90%
+  // Show as part of the same checklist so physicians see WHY they're
+  // (not) eligible. When PACS isn't connected both fail (auto-next
+  // is 0% and wRVU progress is just whatever credits add up to).
+  const wrvuCheck = {
+    name: 'wRVU ≥ 107.5% of goal',
+    pass: wRVUPct >= 107.5,
+    detail: goal > 0
+      ? `${delivered.toFixed(1)} / ${goal} (${wRVUPct.toFixed(1)}%)` + (pacs.pacsConnected ? '' : ' · PACS not connected')
+      : 'No goal set today',
+  };
+  const anCheck = {
+    name: 'Auto-next ≥ 90%',
+    pass: autoNext >= 90,
+    detail: pacs.pacsConnected
+      ? `${autoNext.toFixed(1)}% (PACS-fed)`
+      : 'Awaiting PACS',
+  };
+  return [...base, wrvuCheck, anCheck];
 }
 
 // ─── Renders ─────────────────────────────────────────────────────
@@ -546,12 +591,18 @@ function renderTodayTab(){
   const body = document.querySelector('.body');
   if(!body || !_lastDigest) return;
   const digest = _lastDigest;
-  const pacs = digest._pacs || { pacsConnected: false, studiesCompletedToday: 0 };
+  const pacs = digest._pacs || { pacsConnected: false, studiesCompletedToday: 0, autoNextPct: 0 };
   const studyCount = pacs.studiesCompletedToday || 0;
+  // Delivered wRVU = PACS-earned + credits (drive-time excluded).
+  const creditWRVU = _creditWRVUToday();
+  const deliveredWRVU = (pacs.wRVUEarnedToday || 0) + creditWRVU;
+  const autoNext = +(pacs.autoNextPct || 0);
   const initials = (digest.physName.split(/\s+/).map(s => s[0]).join('').slice(0,2)) || 'RS';
   const todayStr = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
   const goal = digest.wRVUGoalTotal;
-  const ringPct = goal > 0 ? studyCount / goal : 0;
+  // Ring shows DELIVERED wRVU progress (studies + credit-derived), so
+  // physicians see credits contributing immediately when they log them.
+  const ringPct = goal > 0 ? deliveredWRVU / goal : 0;
   let statusLabel = 'Off';
   let statusColor = 'var(--ink2)';
   if(digest.onVacation){ statusLabel = 'Vacation'; statusColor = 'var(--amber)'; }
@@ -586,21 +637,26 @@ function renderTodayTab(){
     <div class="ring-wrap">
       ${ringSvg(ringPct)}
       <div class="ring-label-wrap">
-        <div class="ring-num">${studyCount}<span style="color:var(--ink3);font-size:14px;font-weight:400"> / ${goal || '—'}</span></div>
-        <div class="ring-sub">studies / wRVU goal</div>
+        <div class="ring-num">${deliveredWRVU.toFixed(1)}<span style="color:var(--ink3);font-size:14px;font-weight:400"> / ${goal || '—'}</span></div>
+        <div class="ring-sub">delivered / wRVU goal</div>
+        ${creditWRVU > 0 ? `<div style="font-size:9.5px;color:var(--ink2);margin-top:2px">${pacs.wRVUEarnedToday || 0} studies + ${creditWRVU.toFixed(1)} credits</div>` : ''}
       </div>
     </div>
 
-    ${statusBarHtml(studyCount, goal, pacs.pacsConnected)}
+    ${statusBarHtml(deliveredWRVU, goal, pacs.pacsConnected)}
 
     <div class="stat-row">
+      <div class="stat">
+        <div class="stat-lbl">Auto-next</div>
+        <div class="stat-val" style="color:${autoNext >= 90 ? 'var(--green)' : autoNext >= 70 ? 'var(--amber)' : 'var(--ink2)'}">${autoNext.toFixed(1)}<span style="font-size:11px;font-weight:400;color:var(--ink3)">%</span></div>
+      </div>
       <div class="stat">
         <div class="stat-lbl">wRVU goal</div>
         <div class="stat-val">${goal || 0}</div>
       </div>
       <div class="stat">
         <div class="stat-lbl">Drive credit</div>
-        <div class="stat-val">${digest.driveTimeCredit || 0}</div>
+        <div class="stat-val">${digest.driveTimeCredit || 0}<span style="font-size:10px;color:var(--ink3);margin-left:2px">(separate)</span></div>
       </div>
     </div>
 
@@ -806,8 +862,10 @@ function renderDebulkingTab(){
   if(!body || !_lastDigest) return;
   const digest = _lastDigest;
   const pacs = digest._pacs || { pacsConnected: false, debulkingToday: 0, debulkingThisWeek: 0, debulkingThisMonth: 0 };
-  const eligible = !!digest.debulkingEligibleByPolicy;
-  const checks = digest.debulkingChecks || [];
+  // Combined checks: base (admin/vacation/shift/dow) + PACS gates
+  // (wRVU ≥107.5% goal, autoNext ≥90%). Eligibility is the AND of all.
+  const checks = _debulkingChecks();
+  const eligible = checks.length > 0 && checks.every(c => c.pass);
   body.innerHTML = `
     <div class="debulk-elig ${eligible ? 'yes' : 'no'}">
       ${eligible ? '✓ Eligible to debulk today' : '✗ Not eligible today'}

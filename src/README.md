@@ -104,7 +104,10 @@ solvers) is fair game for extraction.
 | Mobile media queries | `src/parts/css-mobile.css` | ~111 |
 | Auth screen styles | `src/parts/css-auth.css` | ~42 |
 | Component CSS (cards/btns/tables/modals) | `src/parts/css-components.css` | ~137 |
-| Desktop Widget admin page (HTML) | `src/parts/page-widget.html` | ~61 |
+| Refined design layer (the big polish pass) | `src/parts/css-refined.css` | ~1016 |
+| Desktop Widget admin page | `src/parts/page-widget.html` | ~61 |
+| Broadcast Email admin page | `src/parts/page-broadcast.html` | ~61 |
+| **Total** | | **~1445 lines** |
 
 ## Marker styles supported
 
