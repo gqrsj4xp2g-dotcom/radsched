@@ -40017,6 +40017,159 @@ async function _pushToSupabase(){
   }
 }
 
+// ── Shift side-table dual-write ────────────────────────────────────
+//
+// Mirrors S.drShifts / S.irShifts / S.weekendCalls / S.irCalls into
+// public.radscheduler_shifts. The blob remains canonical during the
+// dual-write phase; this side-table is a derived view that future
+// renders / analytics / cross-practice queries can use without
+// round-tripping the whole blob.
+//
+// Off by default. Enable per-practice with `S.cfg.shiftsSideTable=true`
+// in Settings → Tools (or via Supabase blob edit). Disabling stops
+// further writes; existing rows in the side-table are left intact.
+//
+// Strategy: snapshot-diff. We hash each in-memory shift on every sync;
+// new/changed entries get UPSERTED (UNIQUE constraint dedupes), gone
+// entries get DELETED. The snapshot is reset by _applyRemoteData so a
+// fresh remote pull triggers a full re-sync (idempotent).
+//
+// Safety:
+//   • Fire-and-forget. Never blocks save; never throws into save path.
+//   • Throttled. At most one sync per ~10s, debounced.
+//   • Backoff on error. Five failures in a row pauses for ~5 min.
+//   • Per-batch cap. UPSERT/DELETE chunks of 500 rows max so a giant
+//     reset (e.g. paste-reload) doesn't hang Supabase.
+let _sideShiftsSnapshot = null;     // Map<"kind:client_id", hashStr>
+let _sideShiftsSyncing  = false;
+let _sideShiftsLastSyncAt = 0;
+let _sideShiftsConsecFails = 0;
+let _sideShiftsTimer = null;
+const _SIDE_SHIFTS_KINDS = [
+  ['dr',     'drShifts'],
+  ['ir',     'irShifts'],
+  ['weekend','weekendCalls'],
+  ['ircall', 'irCalls'],
+];
+function _sideShiftsResetSnapshot(){ _sideShiftsSnapshot = null; }
+function _sideShiftsHash(s){
+  // Stable string-cat of mutable fields. Anything not listed here is
+  // ignored for change-detection purposes (e.g. ephemeral UI flags).
+  return [s.physId,s.date,s.shift,s.site||'',s.sub||'',s.notes||'',
+          s.slotLabel||'',s.autoHome?1:0].join('|');
+}
+function _sideShiftsRowFor(kind, s){
+  return {
+    practice_id: _ROW_ID,
+    kind,
+    client_id: s.id,
+    phys_id: s.physId,
+    shift_date: s.date,
+    shift: s.shift || null,
+    site: s.site || null,
+    sub: s.sub || null,
+    slot_label: s.slotLabel || null,
+    notes: s.notes || null,
+    auto_home: !!s.autoHome,
+  };
+}
+async function _sideShiftsSync(opts){
+  opts = opts || {};
+  // Feature flag — default off. Avoids surprise traffic on practices
+  // that haven't opted in or migrated.
+  if(!(S?.cfg?.shiftsSideTable === true)) return;
+  if(!_supabase) return;
+  if(_sideShiftsSyncing) return;
+  // Throttle: at most one sync every 10s. The save path may fire
+  // multiple times in a burst (e.g. import) — coalesce.
+  const now = Date.now();
+  if((now - _sideShiftsLastSyncAt) < 10000 && !opts.force){
+    clearTimeout(_sideShiftsTimer);
+    _sideShiftsTimer = setTimeout(()=>{ _sideShiftsSync(); }, 10000);
+    return;
+  }
+  // Backoff after repeated failures. Don't keep hammering.
+  if(_sideShiftsConsecFails >= 5){
+    if((now - _sideShiftsLastSyncAt) < 5*60*1000) return;
+  }
+  _sideShiftsSyncing = true;
+  _sideShiftsLastSyncAt = now;
+  try {
+    const isFullSync = !_sideShiftsSnapshot || opts.force;
+    const newSnap = new Map();
+    const upserts = [];
+    const deletes = []; // [{kind, client_id}]
+    for(const [kind, key] of _SIDE_SHIFTS_KINDS){
+      const arr = Array.isArray(S[key]) ? S[key] : [];
+      for(const s of arr){
+        if(!s || s.id == null || s.physId == null || !s.date) continue;
+        const k = kind+':'+s.id;
+        const h = _sideShiftsHash(s);
+        newSnap.set(k, h);
+        if(isFullSync || _sideShiftsSnapshot.get(k) !== h){
+          upserts.push(_sideShiftsRowFor(kind, s));
+        }
+      }
+    }
+    if(_sideShiftsSnapshot){
+      for(const k of _sideShiftsSnapshot.keys()){
+        if(!newSnap.has(k)){
+          const [kind, idStr] = k.split(':');
+          deletes.push({ kind, client_id: Number(idStr) });
+        }
+      }
+    }
+    // Chunked upsert. UNIQUE (practice_id, kind, client_id) makes
+    // this idempotent regardless of overlap with the previous run.
+    const CHUNK = 500;
+    for(let i=0; i<upserts.length; i+=CHUNK){
+      const slice = upserts.slice(i, i+CHUNK);
+      const { error } = await _supabase
+        .from('radscheduler_shifts')
+        .upsert(slice, { onConflict: 'practice_id,kind,client_id' });
+      if(error) throw error;
+    }
+    // Deletes — group by kind for fewer round-trips.
+    if(deletes.length){
+      const byKind = {};
+      for(const d of deletes){ (byKind[d.kind] = byKind[d.kind] || []).push(d.client_id); }
+      for(const kind of Object.keys(byKind)){
+        const ids = byKind[kind];
+        for(let i=0; i<ids.length; i+=CHUNK){
+          const slice = ids.slice(i, i+CHUNK);
+          const { error } = await _supabase
+            .from('radscheduler_shifts')
+            .delete()
+            .eq('practice_id', _ROW_ID)
+            .eq('kind', kind)
+            .in('client_id', slice);
+          if(error) throw error;
+        }
+      }
+    }
+    _sideShiftsSnapshot = newSnap;
+    _sideShiftsConsecFails = 0;
+    if(upserts.length || deletes.length){
+      console.log('[RS] Side-table sync: +'+upserts.length+' / -'+deletes.length+' rows');
+    }
+  } catch(e){
+    _sideShiftsConsecFails++;
+    // Quietly degrade — the blob remains canonical. Don't toast unless
+    // the user explicitly opted in AND it keeps failing.
+    console.warn('[RS] Side-table sync failed (#'+_sideShiftsConsecFails+'):', e?.message || e);
+  } finally {
+    _sideShiftsSyncing = false;
+  }
+}
+// Admin helper — exposed on window so it can be called from Tools UI
+// to do an explicit one-shot sync (e.g. after enabling the feature
+// flag for the first time, before paginated reads start hitting the
+// table). Safe to call repeatedly — UNIQUE constraint dedupes.
+function _sideShiftsBackfill(){
+  _sideShiftsResetSnapshot();
+  return _sideShiftsSync({force:true});
+}
+
 function renderSettingsSupabaseStatus(){
   const urlEl=document.getElementById('sb-url');
   const keyEl=document.getElementById('sb-key');
