@@ -102,14 +102,50 @@ solvers) is fair game for extraction.
 |---|---|---|
 | CSS design tokens | `src/parts/css-tokens.css` | ~17 |
 | Mobile media queries | `src/parts/css-mobile.css` | ~111 |
+| Auth screen styles | `src/parts/css-auth.css` | ~42 |
+| Component CSS (cards/btns/tables/modals) | `src/parts/css-components.css` | ~137 |
+| Desktop Widget admin page (HTML) | `src/parts/page-widget.html` | ~61 |
+
+## Marker styles supported
+
+The build script supports two comment-style markers:
+
+- **CSS / JS contexts**: `/* @MARKER_BEGIN ... */` ... `/* @MARKER_END */`
+- **HTML contexts**: `<!-- @MARKER_BEGIN ... -->` ... `<!-- @MARKER_END -->`
+
+The extractor tries CSS-style first then HTML-style. Use whichever
+matches the surrounding syntax — comments must be valid in their host
+context or the HTML/CSS parser will choke.
 
 ## Recommended next extractions (in order)
 
-1. **Auth screen CSS** (~50 lines) — completely independent of app
-2. **Component CSS** (cards, buttons, tables, modals) (~300 lines) — pure styling, no runtime coupling
+1. ~~**Auth screen CSS**~~ ✅ DONE
+2. ~~**Component CSS** (cards, buttons, tables, modals)~~ ✅ DONE
 3. **Page templates** (`<div id="page-X">…</div>` blocks) — ~50 lines each, ~20 pages total
-4. **Auto-assign solver** (`_dr_assignMCF`, `_dr_assignGreedy`) — heavy logic, valuable to isolate
-5. **Render functions** — biggest single block (~10k lines), do last
+4. **Refined design layer** (`@media`-less overrides at ~line 470+) — pure CSS, no coupling
+5. **Auto-assign solver** — DEFERRED (deeply coupled across many fns)
+6. **Render functions** — biggest single block (~10k lines), do last
+
+### Why auto-assign is deferred
+
+The MCF + greedy solvers (`_dr_assignMCF`, `_dr_assignGreedy`,
+`previewAA`, `applyAA`, plus IR equivalents and shared helpers like
+`_hasIRShiftOnDate`, `_has2ndOr3rdShift`, `drEffectiveTarget`,
+`_filterCellsByPeriod`, etc.) span lines ~28500–30500 and are NOT
+contiguous — they're interleaved with non-auto-assign helpers and
+share private state via module-level closures. A safe extraction
+needs:
+
+  1. A function-dependency analysis to find every closure relationship
+  2. Hoisting helpers to either the top or below the extracted block
+     (or moving them too)
+  3. A test pass that runs auto-assign against a fixture practice
+     to confirm output is byte-identical
+
+Estimated effort: 2-4 hours of careful work + a stress test that
+confirms the same MCF assignment for the same input. Worth doing
+when the auto-assign code becomes the primary edit target — for now
+it's stable and rarely touched.
 
 ## Verification before each migration step
 

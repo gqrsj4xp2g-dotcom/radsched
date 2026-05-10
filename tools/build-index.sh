@@ -50,6 +50,8 @@ declare -a REGIONS=(
   "TOKENS:css-tokens.css"
   "MOBILE:css-mobile.css"
   "AUTH:css-auth.css"
+  "COMPONENTS:css-components.css"
+  "PAGE_WIDGET:page-widget.html"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for
@@ -72,9 +74,20 @@ src  = open(src_path).read()
 # Strip the source's leading + trailing whitespace so it slots into
 # the marker block cleanly.
 src = src.strip('\n') + '\n'
-begin_pat = r'(/\*\s*@' + re.escape(marker) + r'_BEGIN[^*]*\*/\n)'
-end_pat   = r'(\n/\*\s*@' + re.escape(marker) + r'_END\s*\*/)'
-m = re.search(begin_pat + r'(.*?)' + end_pat, html, re.DOTALL)
+# Two marker styles supported: /* @X_BEGIN ... */ for CSS/JS contexts
+# and <!-- @X_BEGIN ... --> for HTML contexts. Try CSS first, then HTML.
+patterns = [
+    # CSS / JS block-comment style
+    (r'(/\*\s*@' + re.escape(marker) + r'_BEGIN[^*]*\*/\n)',
+     r'(\n/\*\s*@' + re.escape(marker) + r'_END\s*\*/)'),
+    # HTML comment style
+    (r'(<!--\s*@' + re.escape(marker) + r'_BEGIN[\s\S]*?-->\n)',
+     r'(\n<!--\s*@' + re.escape(marker) + r'_END\s*-->)'),
+]
+m = None
+for begin_pat, end_pat in patterns:
+    m = re.search(begin_pat + r'(.*?)' + end_pat, html, re.DOTALL)
+    if m: break
 if not m:
     print(f'✖ Could not find @{marker}_BEGIN ... @{marker}_END markers in index.html', file=sys.stderr)
     sys.exit(2)
