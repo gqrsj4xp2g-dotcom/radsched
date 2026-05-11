@@ -10479,7 +10479,12 @@ let S=/*S_START*/{
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
     // wRVU defaults per shift type. Overridden per-shift by s.wRVUGoal,
     // per-physician by p.wRVUMultiplier (1.0 = standard expectation).
-    wRVUDefaults: {'1st': 30, '2nd': 25, '3rd': 20, 'Home': 0, 'IR daily': 28, 'IR weekend': 35, 'Weekend Call': 35, 'Holiday': 30},
+    // 'IR <shift>' keys (IR 1st/2nd/3rd/Home) cover IR ROSTER shifts —
+    // these are coverage assignments, not productivity targets, so
+    // they default to 0. Admins who DO want a wRVU expectation per IR
+    // roster slot can override here. 'IR daily' / 'IR weekend' are
+    // separate, for IR on-CALL (irCalls), and still default to 28/35.
+    wRVUDefaults: {'1st': 30, '2nd': 25, '3rd': 20, 'Home': 0, 'IR 1st': 0, 'IR 2nd': 0, 'IR 3rd': 0, 'IR Home': 0, 'IR daily': 28, 'IR weekend': 35, 'Weekend Call': 35, 'Holiday': 30},
     // Drive-time credit: practice's policy on giving wRVU equivalent for
     // drive minutes. Default: 0 (no credit). Set per-practice by admin.
     driveTimeWRVUPerHour: 0,
