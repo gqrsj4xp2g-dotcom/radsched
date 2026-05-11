@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('rsWidget', {
   // open the installer (DMG / NSIS .exe). The renderer fires this
   // when the user clicks "Update now" on the sticky banner.
   downloadAndInstall: ({ url, name }) => ipcRenderer.invoke('rs:download-and-install', { url, name }),
+  // ZERO-CLICK update path: download, swap the .app/exe in place,
+  // relaunch automatically. User sees the widget restart ~3-5 sec
+  // after an update is detected. No installer prompts, no Gatekeeper
+  // re-challenge (ad-hoc signature carries through), no clicks.
+  silentUpdate:       ({ url, name }) => ipcRenderer.invoke('rs:silent-update', { url, name }),
   onUpdateProgress:   (cb) => ipcRenderer.on('rs:update-download-progress', (_, data) => cb(data)),
   onResetPairing:  (cb) => ipcRenderer.on('rs:reset-pairing', cb),
 });

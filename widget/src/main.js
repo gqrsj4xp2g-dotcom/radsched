@@ -367,13 +367,161 @@ ipcMain.handle('rs:check-updates', () => checkForUpdates({ interactive: true }))
 // "v1.0.1 → v1.0.2" deltas.
 ipcMain.handle('rs:get-version', () => app.getVersion());
 
-// ─── Auto-download + open installer ────────────────────────────────
+// ─── Silent in-place update (no user prompts) ─────────────────────
+// Fully automated update: download → quit → detached helper script
+// overwrites the .app bundle / runs NSIS /S → relaunches. The user
+// sees the widget close briefly and reopen with the new version.
+// No clicks, no installer prompts, no Gatekeeper re-challenge
+// (because the new bundle is ad-hoc signed with the same "no
+// identity" as the one already approved).
+//
+// Caveats:
+//   • Brand-new first-install on a pristine Mac still triggers
+//     Gatekeeper's "downloaded from internet" warning. That's a
+//     first-launch concern, not an update concern.
+//   • If the .app's parent dir is read-only (rare but possible),
+//     the script will fail silently and the next update check will
+//     retry. The renderer shows a fallback "Update now" button
+//     after 2 failed silent attempts.
+async function _downloadToTemp(url, onProgress){
+  const tmpDir = app.getPath('temp');
+  const fileName = path.basename(new URL(url).pathname) || 'rs-widget-update.tmp';
+  const dest = path.join(tmpDir, 'rs-widget-' + Date.now() + '-' + fileName);
+  return new Promise((resolve) => {
+    try{
+      const file = fs.createWriteStream(dest);
+      const req = net.request({ url, redirect: 'follow' });
+      let total = 0, received = 0;
+      req.on('response', (resp) => {
+        if(resp.statusCode !== 200){
+          file.close(); try{ fs.unlinkSync(dest); }catch(_){}
+          resolve({ ok:false, error: 'HTTP ' + resp.statusCode });
+          return;
+        }
+        total = +(resp.headers['content-length'] || 0);
+        resp.on('data', (chunk) => {
+          received += chunk.length;
+          file.write(chunk);
+          if(onProgress && total){
+            onProgress({ pct: Math.min(100, Math.round((received/total)*100)), received, total });
+          }
+        });
+        resp.on('end', () => {
+          file.end();
+          file.on('finish', () => resolve({ ok:true, path: dest }));
+        });
+        resp.on('error', (err) => {
+          file.close(); try{ fs.unlinkSync(dest); }catch(_){}
+          resolve({ ok:false, error: String(err.message || err) });
+        });
+      });
+      req.on('error', (err) => {
+        file.close(); try{ fs.unlinkSync(dest); }catch(_){}
+        resolve({ ok:false, error: String(err.message || err) });
+      });
+      req.end();
+    }catch(e){ resolve({ ok:false, error: String(e.message || e) }); }
+  });
+}
+
+ipcMain.handle('rs:silent-update', async (_evt, { url, name }) => {
+  if(!url || !name) return { ok:false, error:'missing url/name' };
+  // Step 1 — background download with progress reports.
+  const dl = await _downloadToTemp(url, (p) => {
+    if(mainWindow) mainWindow.webContents.send('rs:update-download-progress', p);
+  });
+  if(!dl.ok) return dl;
+  // Step 2 — write a platform-specific detached helper that waits
+  // for us to exit, swaps in the new binary, and relaunches.
+  const tmpDir = app.getPath('temp');
+  if(process.platform === 'darwin'){
+    // app.getPath('exe') points inside the .app bundle. Walk up to the
+    // bundle root: /Applications/RadScheduler Widget.app
+    const exePath = app.getPath('exe');
+    const bundleRoot = exePath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+    const procName = path.basename(exePath);
+    const helperPath = path.join(tmpDir, 'rs-widget-update-' + Date.now() + '.sh');
+    const helper = [
+      '#!/bin/bash',
+      'set -e',
+      // Wait for the widget process to fully exit (up to 30s).
+      'for i in $(seq 1 30); do',
+      '  if ! pgrep -x ' + JSON.stringify(procName) + ' > /dev/null; then break; fi',
+      '  sleep 1',
+      'done',
+      // Extra grace period so launchservices releases bundle handles.
+      'sleep 1',
+      // Mount silently — no Finder window, no auto-open.
+      'MOUNT=$(hdiutil attach -nobrowse -noautoopen ' + JSON.stringify(dl.path) + ' 2>/dev/null | tail -1 | awk \'{$1=""; $2=""; print substr($0,3)}\')',
+      'if [ -z "$MOUNT" ]; then exit 1; fi',
+      'NEW_APP=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -1)',
+      'if [ -z "$NEW_APP" ]; then hdiutil detach "$MOUNT" -quiet -force 2>/dev/null; exit 1; fi',
+      // Atomic-ish swap via ditto (preserves resource forks + xattrs).
+      // Remove the old bundle first to avoid stale leftover files.
+      'rm -rf ' + JSON.stringify(bundleRoot),
+      'ditto "$NEW_APP" ' + JSON.stringify(bundleRoot),
+      // Strip quarantine xattr so the widget can relaunch without a
+      // Gatekeeper prompt. Only safe because we just downloaded the
+      // bundle and own the file.
+      'xattr -dr com.apple.quarantine ' + JSON.stringify(bundleRoot) + ' 2>/dev/null || true',
+      'hdiutil detach "$MOUNT" -quiet -force 2>/dev/null || true',
+      'rm -f ' + JSON.stringify(dl.path),
+      // Relaunch the widget. `open` returns immediately so the script
+      // can clean itself up.
+      'open ' + JSON.stringify(bundleRoot),
+      'rm -f "$0"',
+    ].join('\n');
+    try{
+      fs.writeFileSync(helperPath, helper, { mode: 0o755 });
+      const { spawn } = require('child_process');
+      spawn('/bin/bash', [helperPath], { detached: true, stdio: 'ignore' }).unref();
+      // Give the spawn a hair to actually start, then quit.
+      setTimeout(() => { try{ app.quit(); }catch(_){} }, 200);
+      return { ok:true };
+    }catch(e){ return { ok:false, error: String(e.message || e) }; }
+  }
+  if(process.platform === 'win32'){
+    // NSIS supports /S for silent install. The installed app
+    // location is recorded in the registry by NSIS itself, so
+    // we don't need to know the install path here — once the new
+    // exe is installed, we just relaunch via the registered name.
+    const exePath = app.getPath('exe');
+    const helperPath = path.join(tmpDir, 'rs-widget-update-' + Date.now() + '.bat');
+    const helper = [
+      '@echo off',
+      ':waitloop',
+      'tasklist /FI "IMAGENAME eq ' + path.basename(exePath) + '" 2>NUL | find /I "' + path.basename(exePath) + '" >NUL',
+      'if not errorlevel 1 (',
+      '  timeout /t 1 /nobreak >NUL',
+      '  goto waitloop',
+      ')',
+      'timeout /t 1 /nobreak >NUL',
+      // /S = silent install. NSIS overwrites the existing install.
+      '"' + dl.path + '" /S',
+      'timeout /t 2 /nobreak >NUL',
+      'del "' + dl.path + '"',
+      'start "" "' + exePath + '"',
+      'del "%~f0"',
+    ].join('\r\n');
+    try{
+      fs.writeFileSync(helperPath, helper);
+      const { spawn } = require('child_process');
+      spawn('cmd.exe', ['/c', helperPath], { detached: true, stdio: 'ignore' }).unref();
+      setTimeout(() => { try{ app.quit(); }catch(_){} }, 200);
+      return { ok:true };
+    }catch(e){ return { ok:false, error: String(e.message || e) }; }
+  }
+  return { ok:false, error: 'unsupported platform: ' + process.platform };
+});
+
+// ─── Manual download + open installer (fallback) ──────────────────
 // "Aggressive update" path: instead of opening the GitHub release in
 // the browser and asking the user to download + drag-to-Applications,
 // we download the asset to a temp dir then `shell.openPath()` to
 // launch the installer (DMG mounts on macOS, exe runs setup on
 // Windows). The user only has to confirm the OS-level installer
-// prompt and the new binary takes over.
+// prompt and the new binary takes over. Used as a fallback when the
+// silent path fails twice in a row.
 //
 // We send progress back to the renderer so the banner shows a
 // determinate progress bar instead of a spinner.

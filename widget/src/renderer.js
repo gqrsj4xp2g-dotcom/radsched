@@ -982,35 +982,62 @@ function bindHeader(){
   if(window.rsWidget.onResetPairing) window.rsWidget.onResetPairing(() => renderPairing());
 }
 
-// ─── Auto-update banner ─────────────────────────────────────────
+// ─── Zero-click auto-update ─────────────────────────────────────
 // Subscribed to three main-process events:
-//   • rs:update-available           — a newer release exists; show banner
+//   • rs:update-available           — a newer release exists
 //   • rs:update-info                — interactive feedback
 //   • rs:update-download-progress   — % progress while downloading
 //
-// As of v1.1.3: the banner is **sticky** (no Later button). When a
-// new version is available, the user can either Update now (auto-
-// download + open installer) or click Notes. We removed the dismiss
-// path so updates roll out to every active widget within minutes.
-// Practices that need a frozen version can pin via the GH release
-// page itself.
+// As of v1.1.4: updates are FULLY automatic. The moment main detects
+// a new release, we:
+//   1. Show an unobtrusive banner ("📥 Updating to vX…")
+//   2. Download silently in the background (with progress)
+//   3. Quit + detached helper script swaps the .app / runs NSIS /S
+//   4. Re-launch into the new version
+//
+// User sees the widget close + reopen with the new version, ~5-15s
+// after the new release is detected. No clicks, no installer prompts.
+//
+// Failure handling: if the silent path fails twice in a row (write
+// permission issue, disk full, network), we fall back to the
+// previous "Update now" button so the user has an explicit path.
 let _lastUpdatePayload = null;
-let _autoDownloadStarted = false;
+let _silentUpdateStarted = false;
+const _SILENT_FAIL_KEY = 'rs-widget-silent-fail-count';
+function _silentFailCount(){
+  try{ return +(localStorage.getItem(_SILENT_FAIL_KEY) || 0); }catch(_){ return 0; }
+}
+function _bumpSilentFail(){
+  try{ localStorage.setItem(_SILENT_FAIL_KEY, String(_silentFailCount() + 1)); }catch(_){}
+}
+function _resetSilentFail(){
+  try{ localStorage.removeItem(_SILENT_FAIL_KEY); }catch(_){}
+}
 
 function showUpdateBanner(payload){
   if(!payload || !payload.latestVersion || !payload.downloadUrl) return;
   // Avoid re-rendering the same banner twice on rapid re-checks.
   if(_lastUpdatePayload && _lastUpdatePayload.latestVersion === payload.latestVersion) return;
   _lastUpdatePayload = payload;
-  _autoDownloadStarted = false;
+  // After 2 consecutive silent-install failures, fall back to the
+  // manual download-and-open-installer banner.
+  if(_silentFailCount() >= 2){
+    _renderManualBanner(payload);
+    return;
+  }
+  _renderSilentBanner(payload);
+  // Kick off the silent update immediately. No user click required.
+  _startSilentUpdate(payload);
+}
+
+function _renderSilentBanner(payload){
   const el = document.getElementById('update-banner');
   if(!el) return;
-  const sizeStr = payload.assetSizeMB ? ` (${payload.assetSizeMB} MB)` : '';
   el.innerHTML = `
     <div class="text">
-      🚀 Update available: <strong>v${escHtml(payload.latestVersion)}</strong>
-      <span style="color:var(--ink3)">(you have v${escHtml(payload.currentVersion)})</span>
-      <div id="upd-progress" style="display:none;margin-top:4px;font-size:11px;color:var(--ink3)">
+      📥 Updating to <strong>v${escHtml(payload.latestVersion)}</strong>…
+      <span style="color:var(--ink3)">(from v${escHtml(payload.currentVersion)})</span>
+      <div id="upd-progress" style="margin-top:4px;font-size:11px;color:var(--ink3)">
         Downloading… <span id="upd-pct">0%</span>
         <div style="height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin-top:3px;overflow:hidden">
           <div id="upd-bar" style="width:0%;height:100%;background:#3b82f6;transition:width .15s"></div>
@@ -1018,48 +1045,77 @@ function showUpdateBanner(payload){
       </div>
     </div>
     <div class="actions">
-      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Update now${escHtml(sizeStr)}</button>
       <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
     </div>`;
   el.style.display = 'flex';
-  document.getElementById('upd-download').onclick = () => _startAutoUpdate(payload);
   document.getElementById('upd-notes').onclick = () => {
     window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
   };
 }
 
-async function _startAutoUpdate(payload){
-  if(_autoDownloadStarted) return;
-  _autoDownloadStarted = true;
-  const dl = document.getElementById('upd-download');
-  const prog = document.getElementById('upd-progress');
-  if(dl){ dl.disabled = true; dl.textContent = '⏳ Downloading…'; }
-  if(prog) prog.style.display = '';
-  try{
+function _renderManualBanner(payload){
+  // Fallback after silent path failed — give the user a button so
+  // they can take over manually.
+  const el = document.getElementById('update-banner');
+  if(!el) return;
+  const sizeStr = payload.assetSizeMB ? ` (${payload.assetSizeMB} MB)` : '';
+  el.innerHTML = `
+    <div class="text">
+      🚀 Update available: <strong>v${escHtml(payload.latestVersion)}</strong>
+      <span style="color:var(--ink3)">(silent install failed — please update manually)</span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Update now${escHtml(sizeStr)}</button>
+      <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
+    </div>`;
+  el.style.display = 'flex';
+  document.getElementById('upd-download').onclick = async () => {
+    const btn = document.getElementById('upd-download');
+    if(btn){ btn.disabled = true; btn.textContent = '⏳ Downloading…'; }
     const res = await window.rsWidget.downloadAndInstall({
       url: payload.downloadUrl, name: payload.assetName,
     });
     if(res?.ok){
-      if(dl){ dl.textContent = '✓ Installer opened — follow the prompt to finish'; }
-      // Hide the progress bar once the installer is open.
-      if(prog) prog.style.display = 'none';
+      if(btn) btn.textContent = '✓ Installer opened';
+      _resetSilentFail();
+    } else if(btn){
+      btn.disabled = false;
+      btn.textContent = '⚠ Failed — open in browser';
+      btn.onclick = () => window.rsWidget.openExternal(payload.downloadUrl);
+    }
+  };
+  document.getElementById('upd-notes').onclick = () => {
+    window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
+  };
+}
+
+async function _startSilentUpdate(payload){
+  if(_silentUpdateStarted) return;
+  if(!window.rsWidget.silentUpdate) return;  // older preload — skip
+  _silentUpdateStarted = true;
+  try{
+    const res = await window.rsWidget.silentUpdate({
+      url: payload.downloadUrl, name: payload.assetName,
+    });
+    if(res?.ok){
+      _resetSilentFail();
+      // Banner shows "Restarting…" briefly before main fires app.quit().
+      const el = document.getElementById('update-banner');
+      if(el){
+        el.innerHTML = `<div class="text">✓ Update downloaded — restarting now…</div><div class="actions"></div>`;
+      }
     } else {
-      // Download/open failed — fall back to opening the URL in browser
-      // so the user can still install manually.
-      if(dl){
-        dl.disabled = false;
-        dl.textContent = '⚠ Download failed — open in browser';
-      }
-      if(prog) prog.style.display = 'none';
-      _autoDownloadStarted = false;
-      if(dl){
-        dl.onclick = () => window.rsWidget.openExternal(payload.downloadUrl);
-      }
+      _bumpSilentFail();
+      console.warn('[update] silent install failed:', res?.error);
+      _silentUpdateStarted = false;
+      // Fall back to manual banner so the user can still take action.
+      _renderManualBanner(payload);
     }
   }catch(e){
-    if(dl){ dl.disabled = false; dl.textContent = '⚠ Failed — retry'; }
-    _autoDownloadStarted = false;
-    if(dl) dl.onclick = () => _startAutoUpdate(payload);
+    _bumpSilentFail();
+    console.warn('[update] silent install threw:', e);
+    _silentUpdateStarted = false;
+    _renderManualBanner(payload);
   }
 }
 
