@@ -9391,6 +9391,26 @@ const _MIGRATIONS = [
       return d;
     }
   },
+  // v7 → v8: add 'IR <shift>' keys to cfg.wRVUDefaults so IR ROSTER
+  // shifts get a 0 wRVU default (coverage-only, not a productivity
+  // target) instead of falling through to the DR shift's wRVU. Prior
+  // behaviour multiplied DR '1st' (30) by the physician's wRVU
+  // multiplier — an IR physician with mult 2.5 was showing 75 wRVU
+  // expected on every IR 1st shift in the widget. The new keys are
+  // visible in the wRVU defaults grid so admins can override if they
+  // want a non-zero IR roster goal.
+  { from: 7, to: 8, fn: (d) => {
+      if(!d.cfg) d.cfg = {};
+      if(!d.cfg.wRVUDefaults || typeof d.cfg.wRVUDefaults !== 'object') d.cfg.wRVUDefaults = {};
+      const wd = d.cfg.wRVUDefaults;
+      // Only add the keys if they don't exist — never overwrite an
+      // admin's explicit setting, even if it's 0.
+      for(const k of ['IR 1st', 'IR 2nd', 'IR 3rd', 'IR Home']){
+        if(wd[k] == null) wd[k] = 0;
+      }
+      return d;
+    }
+  },
 ];
 
 function _runMigrations(d){
