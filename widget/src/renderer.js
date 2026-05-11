@@ -266,12 +266,26 @@ function computeDayDigest(practice, physId, dateISO){
   const wMult = phys && phys.wRVUMultiplier != null ? +phys.wRVUMultiplier : 1.0;
   function goalFor(shape, kind){
     if(shape && shape.wRVUGoal != null && +shape.wRVUGoal >= 0) return +shape.wRVUGoal;
-    let key = 'Home';
-    if(kind === 'wk') key = 'Weekend Call';
-    else if(kind === 'hol') key = 'Holiday';
-    else if(kind === 'irc') key = (shape.callType === 'weekend') ? 'IR weekend' : 'IR daily';
-    else key = (shape && shape.shift) || '1st';
-    const base = +wRVUDefaults[key] || 0;
+    let base = 0;
+    if(kind === 'wk')        base = +wRVUDefaults['Weekend Call'] || 0;
+    else if(kind === 'hol')  base = +wRVUDefaults['Holiday'] || 0;
+    else if(kind === 'irc')  base = +wRVUDefaults[(shape.callType === 'weekend') ? 'IR weekend' : 'IR daily'] || 0;
+    else if(kind === 'ir'){
+      // IR roster shifts are coverage assignments, not productivity
+      // targets — they get a 0 wRVU goal unless the admin has set an
+      // explicit 'IR <shift>' key (e.g., 'IR 1st'). Old behaviour
+      // looked up wRVUDefaults['1st'] which is the DR 1st shift goal
+      // (30) and then applied the physician's multiplier — an IR
+      // physician with mult 2.5 was getting 75 wRVU expected on every
+      // IR 1st shift. See widget v1.1.9 changelog.
+      const specific = 'IR ' + (shape && shape.shift ? shape.shift : '');
+      base = +wRVUDefaults[specific] || 0;
+    }
+    else {
+      // DR / default path.
+      const key = (shape && shape.shift) || '1st';
+      base = +wRVUDefaults[key] || 0;
+    }
     return Math.round(base * wMult);
   }
   function driveCredit(site){
