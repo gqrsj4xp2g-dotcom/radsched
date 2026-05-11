@@ -267,13 +267,25 @@ function computeDayDigest(practice, physId, dateISO){
     return dt ? +(dt / 60 * dtPerHour).toFixed(1) : 0;
   }
 
+  // Shift time-window lookup. cfg.shiftTimes is keyed by the shift's
+  // short label ('1st', '2nd', '3rd', 'Home', etc.) and holds:
+  //   { dep: 'HH:MM' (start), ret: 'HH:MM' (end) }
+  // Used downstream to compute time-of-day-proportional wRVU
+  // expectations for the debulking check.
+  const shiftTimes = (cfg && cfg.shiftTimes) || {};
+  function _winFor(shiftLabel){
+    const t = shiftTimes[shiftLabel];
+    if(!t || !t.dep || !t.ret) return null;
+    return { startHM: t.dep, endHM: t.ret };
+  }
+
   (practice.drShifts || []).forEach(s => {
     if(s.physId === physId && s.date === dateISO){
       const goal = goalFor(s, 'dr');
       out.wRVUGoalTotal += goal;
       const dt = driveCredit(s.site);
       out.driveTimeCredit += dt;
-      out.shifts.push({ kind: 'DR', label: `${s.shift} · ${s.site || '—'}${s.sub ? ' · ' + s.sub : ''}`, goal, site: s.site });
+      out.shifts.push({ kind: 'DR', code: s.shift, label: `${s.shift} · ${s.site || '—'}${s.sub ? ' · ' + s.sub : ''}`, goal, site: s.site, window: _winFor(s.shift) });
     }
   });
   (practice.irShifts || []).forEach(s => {
@@ -282,7 +294,7 @@ function computeDayDigest(practice, physId, dateISO){
       out.wRVUGoalTotal += goal;
       const dt = driveCredit(s.site);
       out.driveTimeCredit += dt;
-      out.shifts.push({ kind: 'IR', label: `IR ${s.shift} · ${s.site || '—'}`, goal, site: s.site });
+      out.shifts.push({ kind: 'IR', code: 'IR ' + (s.shift || ''), label: `IR ${s.shift} · ${s.site || '—'}`, goal, site: s.site, window: _winFor(s.shift) });
     }
   });
   (practice.irCalls || []).forEach(c => {
@@ -319,13 +331,16 @@ function computeDayDigest(practice, physId, dateISO){
 
   // Debulking is intentionally NOT blocked by off-day / vacation /
   // day-of-week status (per spec: "debulking shouldn't be disabled
-  // for anybody who is off or on vacation"). The only gates left are:
+  // for anybody who is off or on vacation"). The current gates are:
   //   1. Admin-flagged eligible (per-physician opt-out via profile)
-  //   2. wRVU ≥ 107.5% of goal  (added in renderDebulkingTab)
-  //   3. Auto-next ≥ 90%        (added in renderDebulkingTab)
-  // Off/vacation physicians naturally fail #2/#3 if they're not
-  // doing studies — we let the metrics decide rather than gating
-  // on schedule status.
+  //   2. wRVU goal hit (added in renderDebulkingTab):
+  //        • If goal=0 → automatic pass (no expectation set)
+  //        • Else: pass if delivered ≥ 107.5% of full-day goal
+  //          OR delivered ≥ proportional expectation by now (each
+  //          shift contributes goal × elapsed-fraction × 1.075).
+  //          Time-of-day correlation comes from cfg.shiftTimes.
+  //   3. Auto-next ≥ 90% in the debulking window (or daily fallback
+  //      when the PACS broker doesn't break it out separately).
   const phys2 = phys;
   const adminAllowed = !phys2 || phys2.debulkingEligible !== false;
   out.debulkingBaseChecks = [
@@ -353,34 +368,113 @@ function _deliveredWRVUToday(){
   const pacsW = +(_lastDigest._pacs?.wRVUEarnedToday || 0);
   return pacsW + _creditWRVUToday();
 }
+// Convert 'HH:MM' to fractional hours-since-midnight. '06:30' → 6.5.
+function _hmToHours(hm){
+  if(!hm || typeof hm !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm);
+  if(!m) return null;
+  return +m[1] + (+m[2]) / 60;
+}
+function _nowHours(){
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+}
+// What fraction of this shift's window has elapsed AS OF NOW?
+//   • Shift hasn't started yet → 0
+//   • Currently in shift       → (now - start) / (end - start)
+//   • Shift has ended          → 1
+//   • No window known          → 1 (treat as a "whole-day" shift)
+// Handles shifts that cross midnight (3rd shift) by adding 24 to the
+// end if it's earlier than the start.
+function _shiftElapsedFraction(shift){
+  if(!shift || !shift.window) return 1;
+  const s = _hmToHours(shift.window.startHM);
+  let   e = _hmToHours(shift.window.endHM);
+  if(s == null || e == null) return 1;
+  if(e <= s) e += 24;  // crosses midnight (e.g., 17:00 → 01:00)
+  const now = _nowHours();
+  if(now <= s) return 0;
+  if(now >= e) return 1;
+  return (now - s) / (e - s);
+}
+
+// Compute the "expected" wRVU by NOW, given shift time windows and
+// the 107.5% target. Used so a physician who's only midway through
+// their shift isn't blocked from debulking just because they haven't
+// hit 107.5% of the WHOLE day's goal yet.
+//
+//   expected_by_now = Σ shift.goal × elapsed_fraction(shift) × 1.075
+//
+// On-call / weekend / holiday shifts have no time window — they
+// count as whole-day shifts (elapsed_fraction = 1).
+function _expectedWRVUByNow(){
+  if(!_lastDigest) return 0;
+  const shifts = _lastDigest.shifts || [];
+  let expected = 0;
+  for(const s of shifts){
+    const goal = +s.goal || 0;
+    const frac = _shiftElapsedFraction(s);
+    expected += goal * frac;
+  }
+  return expected * 1.075;
+}
+
 function _debulkingChecks(){
   if(!_lastDigest) return [];
   const base = _lastDigest.debulkingBaseChecks || [];
   const pacs = _lastDigest._pacs || {};
-  const goal = _lastDigest.wRVUGoalTotal || 0;
+  const dayGoal = _lastDigest.wRVUGoalTotal || 0;
   const delivered = _deliveredWRVUToday();
-  const wRVUPct = goal > 0 ? (delivered / goal) * 100 : 0;
-  const autoNext = +(pacs.autoNextPct || 0);
-  // The two PACS-gated criteria for debulking:
-  //   wRVU ≥ 107.5% of daily goal  AND  autoNext ≥ 90%
-  // Show as part of the same checklist so physicians see WHY they're
-  // (not) eligible. When PACS isn't connected both fail (auto-next
-  // is 0% and wRVU progress is just whatever credits add up to).
-  const wrvuCheck = {
-    name: 'wRVU ≥ 107.5% of goal',
-    pass: wRVUPct >= 107.5,
-    detail: goal > 0
-      ? `${delivered.toFixed(1)} / ${goal} (${wRVUPct.toFixed(1)}%)` + (pacs.pacsConnected ? '' : ' · PACS not connected')
-      : 'No goal set today',
-  };
+  const dayThreshold = dayGoal * 1.075;
+  const proportional = _expectedWRVUByNow();
+  const expectedNow = Math.max(0, proportional);
+
+  // Rule 1: "if no goal set for debulking then debulking is eligible"
+  // — when the day has no wRVU goal at all, the wRVU check
+  // automatically passes.
+  // Rule 2 + 3: "debulking correlates with times of the shifts" and
+  // "allows shifts to be correlated with time if the radiologist
+  // didn't hit 107.5%". Implementation: compute a time-weighted
+  // expectation (each shift contributes goal × elapsed%) and check
+  // against that. The full-day 107.5% check still passes — it's just
+  // also OK to hit the proportional target before the day's done.
+  let wrvuPass, wrvuDetail;
+  if(dayGoal <= 0){
+    wrvuPass = true;
+    wrvuDetail = 'No goal set — eligible by default';
+  } else if(delivered >= dayThreshold){
+    wrvuPass = true;
+    wrvuDetail = `${delivered.toFixed(1)} / ${dayGoal} (${((delivered/dayGoal)*100).toFixed(1)}% of day) · cleared 107.5%`;
+  } else if(delivered >= expectedNow && expectedNow > 0){
+    wrvuPass = true;
+    wrvuDetail = `${delivered.toFixed(1)} delivered ≥ ${expectedNow.toFixed(1)} expected by this time (on-pace)`;
+  } else {
+    wrvuPass = false;
+    const pct = (delivered/dayGoal)*100;
+    if(expectedNow > 0){
+      wrvuDetail = `${delivered.toFixed(1)} / ${expectedNow.toFixed(1)} expected by now (need ${(expectedNow-delivered).toFixed(1)} more) · ${pct.toFixed(1)}% of day`;
+    } else {
+      wrvuDetail = `${delivered.toFixed(1)} / ${dayGoal} (${pct.toFixed(1)}%) — shifts haven't started yet`;
+    }
+    if(!pacs.pacsConnected) wrvuDetail += ' · PACS not connected';
+  }
+
+  // Rule 4: "doesn't count if the autonext in the debulking is not
+  // 90%". The PACS plugin should provide a `debulkingAutoNextPct`
+  // measured during the debulking window specifically (distinct from
+  // the day's overall auto-next). Fall back to the daily figure
+  // until the broker exposes the more granular metric.
+  const debAutoSrc = (pacs.debulkingAutoNextPct != null) ? 'debulking' : 'today';
+  const autoNext = +(pacs.debulkingAutoNextPct != null ? pacs.debulkingAutoNextPct : (pacs.autoNextPct || 0));
   const anCheck = {
-    name: 'Auto-next ≥ 90%',
+    name: 'Auto-next ≥ 90% in the debulking',
     pass: autoNext >= 90,
     detail: pacs.pacsConnected
-      ? `${autoNext.toFixed(1)}% (PACS-fed)`
+      ? `${autoNext.toFixed(1)}% (${debAutoSrc})`
       : 'Awaiting PACS',
   };
-  return [...base, wrvuCheck, anCheck];
+
+  return [...base, { name:'wRVU goal hit', pass:wrvuPass, detail:wrvuDetail }, anCheck];
 }
 
 // ─── Renders ─────────────────────────────────────────────────────
