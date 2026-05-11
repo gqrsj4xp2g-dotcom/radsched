@@ -35830,11 +35830,15 @@ function getShiftWRVUGoal(shift, physId, kind){
   // Resolve a key from the shift shape. For DR shifts we use s.shift
   // ("1st", "2nd", "3rd", "Home"); for IR daily/weekend we infer from
   // the shape; for weekend calls and holidays we use named buckets.
+  // For IR ROSTER shifts (kind='ir') we use shift-specific keys
+  // ('IR 1st', 'IR 2nd', 'IR 3rd', 'IR Home') with default 0 — IR
+  // roster shifts are coverage, not a productivity target. Admins
+  // who want a non-zero IR roster goal can set the key explicitly.
   let key = '';
   if(kind === 'wk') key = 'Weekend Call';
   else if(kind === 'hol') key = 'Holiday';
   else if(kind === 'irc') key = (shift.callType === 'weekend') ? 'IR weekend' : 'IR daily';
-  else if(kind === 'ir')  key = 'IR daily';
+  else if(kind === 'ir')  key = 'IR ' + (shift.shift || '');
   else key = shift.shift || '1st';
   let base = +defaults[key] || 0;
   const phys = (typeof _physById === 'function') ? _physById(physId) : null;
