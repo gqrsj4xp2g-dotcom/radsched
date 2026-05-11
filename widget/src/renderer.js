@@ -1072,21 +1072,143 @@ async function refresh(){
   }
 }
 
-// Header buttons
+// Header buttons.
+//
+// History note: an earlier version used window.prompt() for the
+// Settings menu. Modern Electron (22+) disables/ignores window.prompt
+// in renderers under the security-default webPreferences (sandbox +
+// contextIsolation), so the Settings button was silently no-op'ing.
+// Refresh worked but had no visible feedback, so it also looked
+// broken. Pin worked but only changed opacity slightly.
+//
+// Current version: in-app dropdown menu for Settings, transient
+// "↻ refreshing…" feedback for Refresh, clearer pinned/unpinned
+// state on Pin.
 function bindHeader(){
-  document.getElementById('btn-refresh').onclick = () => refresh();
-  document.getElementById('btn-settings').onclick = async () => {
-    const choice = prompt('Type "repair" to re-pair, "url" to open RadScheduler in your browser, "update" to check for updates, or close to cancel.');
-    if(choice === 'repair'){ await window.rsWidget.clearPairing(); renderPairing(); }
-    else if(choice === 'url'){ await window.rsWidget.openExternal('https://radsched.org'); }
-    else if(choice === 'update'){ if(window.rsWidget.checkUpdates) window.rsWidget.checkUpdates(); }
+  const btnR = document.getElementById('btn-refresh');
+  const btnP = document.getElementById('btn-pin');
+  const btnS = document.getElementById('btn-settings');
+  if(!btnR || !btnP || !btnS){
+    console.warn('[widget] header buttons not in DOM at bindHeader()');
+    return;
+  }
+
+  // Refresh — visible state so the user knows the click registered.
+  btnR.onclick = async () => {
+    if(btnR.dataset.busy === '1') return;
+    btnR.dataset.busy = '1';
+    const orig = btnR.textContent;
+    btnR.textContent = '⌛';
+    btnR.style.opacity = '0.7';
+    try{ await refresh(); }
+    catch(e){ console.warn('[widget] refresh failed:', e); }
+    btnR.textContent = orig;
+    btnR.style.opacity = '';
+    btnR.dataset.busy = '';
   };
-  document.getElementById('btn-pin').onclick = async () => {
+
+  // Pin — toggle always-on-top. Visual state via emoji + opacity.
+  btnP.style.opacity = _alwaysOnTop ? '1' : '0.45';
+  btnP.onclick = async () => {
     _alwaysOnTop = !_alwaysOnTop;
-    await window.rsWidget.setAlwaysOnTop(_alwaysOnTop);
-    document.getElementById('btn-pin').style.opacity = _alwaysOnTop ? '1' : '0.4';
+    try{
+      if(window.rsWidget.setAlwaysOnTop) await window.rsWidget.setAlwaysOnTop(_alwaysOnTop);
+    }catch(e){ console.warn('[widget] setAlwaysOnTop failed:', e); }
+    btnP.style.opacity = _alwaysOnTop ? '1' : '0.45';
+    btnP.title = _alwaysOnTop ? 'Pinned (always on top) — click to unpin' : 'Not pinned — click to pin';
   };
+
+  // Settings — in-app dropdown menu. Replaces window.prompt() which
+  // doesn't work reliably in modern Electron renderers.
+  btnS.onclick = (e) => {
+    e.stopPropagation();
+    _toggleSettingsMenu(btnS);
+  };
+
   if(window.rsWidget.onResetPairing) window.rsWidget.onResetPairing(() => renderPairing());
+}
+
+// Floating Settings menu. Appears below the Settings button. Click
+// outside (or pick an item) to dismiss.
+function _toggleSettingsMenu(anchor){
+  const existing = document.getElementById('rs-settings-menu');
+  if(existing){ existing.remove(); return; }
+  const menu = document.createElement('div');
+  menu.id = 'rs-settings-menu';
+  // Styled inline so we don't have to ship a CSS update to install
+  // this fix (older widget binaries can adopt the patch by replacing
+  // just renderer.js).
+  Object.assign(menu.style, {
+    position: 'fixed',
+    background: 'var(--bg2)',
+    border: '1px solid var(--line)',
+    borderRadius: '6px',
+    padding: '4px',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+    zIndex: '9999',
+    minWidth: '180px',
+    fontSize: '12px',
+    color: 'var(--ink)',
+    WebkitAppRegion: 'no-drag',  // belt-and-suspenders for older Electron
+  });
+  // Position relative to the anchor button.
+  const r = anchor.getBoundingClientRect();
+  menu.style.top  = (r.bottom + 4) + 'px';
+  menu.style.right = (window.innerWidth - r.right) + 'px';
+
+  const items = [
+    { label: '↻ Refresh now',      run: () => refresh() },
+    { label: '🔄 Check for updates', run: () => window.rsWidget.checkUpdates?.() },
+    { label: '🌐 Open RadScheduler', run: () => window.rsWidget.openExternal?.('https://radsched.org') },
+    { sep: true },
+    { label: '🔑 Re-pair widget…',  run: async () => {
+      if(!confirm('Clear this widget\'s pairing? You\'ll need a new code from your admin to re-pair.')) return;
+      await window.rsWidget.clearPairing?.();
+      renderPairing();
+    }, danger: true },
+    { sep: true },
+    { label: '📋 Pairing status (copy)', run: async () => {
+      // Surface storage info so users can self-diagnose pair issues.
+      try{
+        const v = await window.rsWidget.getVersion?.();
+        const code = await window.rsWidget.getPairing?.();
+        const status = code ? 'Paired (' + code.length + ' chars)' : 'Not paired';
+        const msg = 'Widget v' + (v || '?') + ' · ' + status;
+        try{ await navigator.clipboard.writeText(msg); }catch(_){}
+        alert(msg);
+      }catch(e){ alert('Could not read pairing: ' + (e?.message || e)); }
+    } },
+  ];
+  for(const it of items){
+    if(it.sep){
+      const s = document.createElement('div');
+      Object.assign(s.style, { height:'1px', background:'var(--line)', margin:'4px 2px' });
+      menu.appendChild(s);
+      continue;
+    }
+    const a = document.createElement('div');
+    a.textContent = it.label;
+    Object.assign(a.style, {
+      padding:'7px 10px', cursor:'pointer', borderRadius:'4px',
+      color: it.danger ? 'var(--red, #ef4444)' : 'var(--ink)',
+    });
+    a.onmouseenter = () => { a.style.background = 'var(--bg3)'; };
+    a.onmouseleave = () => { a.style.background = ''; };
+    a.onclick = () => { menu.remove(); try{ it.run(); }catch(e){ console.warn(e); } };
+    menu.appendChild(a);
+  }
+  document.body.appendChild(menu);
+  // Dismiss on outside click. Bind on next tick so the current click
+  // (which opened the menu) doesn't immediately close it.
+  setTimeout(() => {
+    const off = (ev) => {
+      if(!menu.contains(ev.target)){
+        menu.remove();
+        document.removeEventListener('mousedown', off, true);
+      }
+    };
+    document.addEventListener('mousedown', off, true);
+  }, 0);
 }
 
 // ─── Zero-click auto-update ─────────────────────────────────────
