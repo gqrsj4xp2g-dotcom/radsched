@@ -200,10 +200,23 @@ async function fetchPracticeData(p){
       'Response: ' + errMsg + hint
     );
   }
-  if(!parsed || !parsed.data){
+  if(!parsed || parsed.data == null){
     throw new Error('Edge function returned no data field. Body:\n' + bodyText.slice(0, 600));
   }
-  return parsed.data;
+  // The edge function should return parsed.data as a real object, but
+  // for ~2 weeks the deployed v4 was returning the raw text-column
+  // value (a JSON STRING). Every .drShifts / .physicians access on a
+  // string is undefined → empty schedule. Defensively parse here so
+  // the widget works against both old and new edge function
+  // deployments without requiring a synchronized rollout.
+  let practiceData = parsed.data;
+  if(typeof practiceData === 'string'){
+    try{ practiceData = JSON.parse(practiceData); }
+    catch(e){
+      throw new Error('Practice data string failed to parse:\n  ' + (e.message || String(e)) + '\n\nFirst 200 chars: ' + practiceData.slice(0, 200));
+    }
+  }
+  return practiceData;
 }
 
 // ─── PACS fetch (stub) ───────────────────────────────────────────

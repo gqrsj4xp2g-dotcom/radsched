@@ -90,13 +90,28 @@ Deno.serve(async (req: Request) => {
   const sb = createClient(SB_URL, SVC_KEY);
   const action = body.action || 'read';
 
+  // Helper: the radscheduler table's `data` column is text (NOT jsonb)
+  // — the main app stores JSON.stringify(...) into it. PostgREST
+  // therefore returns it as a string. We MUST parse before returning
+  // to the widget, or every array access (.drShifts, .physicians,
+  // etc.) is undefined on the widget side. Past behaviour silently
+  // returned a string and the widget rendered an empty schedule.
+  function parsePracticeData(raw: any): any {
+    if (raw == null) return {};
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw); }
+      catch (_) { return {}; }
+    }
+    return raw;
+  }
+
   // ── READ ────────────────────────────────────────────────────────
   if (action === 'read') {
     const { data, error } = await sb
       .from('radscheduler').select('data').eq('id', payload.practiceId).single();
     if (error) return jsonResp({ error: 'practice fetch failed: ' + error.message }, 500);
     if (!data) return jsonResp({ error: 'practice not found', practiceId: payload.practiceId }, 404);
-    return jsonResp({ data: data.data || {} });
+    return jsonResp({ data: parsePracticeData((data as any).data) });
   }
 
   // For all WRITE actions: read → mutate → write back. No retry on
@@ -107,8 +122,17 @@ Deno.serve(async (req: Request) => {
     .from('radscheduler').select('data').eq('id', payload.practiceId).single();
   if (rdErr) return jsonResp({ error: 'practice fetch failed: ' + rdErr.message }, 500);
   if (!row) return jsonResp({ error: 'practice not found' }, 404);
-  const practice = row.data || {};
+  const practice = parsePracticeData((row as any).data);
   if (!Array.isArray(practice.physicianCredits)) practice.physicianCredits = [];
+
+  // Stringify before writing back — the column is text. supabase-js
+  // would happily UPDATE with an object value (it auto-serializes),
+  // but explicit is safer + cheaper to reason about.
+  function writeBack() {
+    return sb.from('radscheduler')
+      .update({ data: JSON.stringify(practice) })
+      .eq('id', payload.practiceId);
+  }
 
   // Helper: bump nextId once per write so add-credit gets a fresh ID
   // even if the main app is between saves. nextId is the same field
@@ -137,8 +161,7 @@ Deno.serve(async (req: Request) => {
       createdAt: new Date().toISOString(),
     };
     practice.physicianCredits.push(credit);
-    const { error: wrErr } = await sb
-      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    const { error: wrErr } = await writeBack();
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true, credit });
   }
@@ -165,8 +188,7 @@ Deno.serve(async (req: Request) => {
     if (patch.ts != null) credit.ts = String(patch.ts);
     credit.updatedAt = new Date().toISOString();
     practice.physicianCredits[idx] = credit;
-    const { error: wrErr } = await sb
-      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    const { error: wrErr } = await writeBack();
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true, credit });
   }
@@ -181,8 +203,7 @@ Deno.serve(async (req: Request) => {
       return jsonResp({ error: 'cannot delete another physician\'s credit' }, 403);
     }
     practice.physicianCredits.splice(idx, 1);
-    const { error: wrErr } = await sb
-      .from('radscheduler').update({ data: practice }).eq('id', payload.practiceId);
+    const { error: wrErr } = await writeBack();
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true });
   }
