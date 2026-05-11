@@ -195,7 +195,29 @@ async function checkForUpdates(opts){
 // safeStorage decrypt (one final Keychain prompt for upgraders);
 // on success, immediately rewrite as plain text. From then on,
 // no more Keychain access.
+// Primary pairing store: Electron's user-data dir. Survives most
+// updates, but on rare occasions macOS clears app data when an
+// installer "replaces" a bundle, OR a productName change between
+// builds points the new widget at a different userData dir.
 const STORE_PATH = () => path.join(app.getPath('userData'), 'pairing.bin');
+
+// Backup pairing store: ~/.radscheduler-widget-pairing — a stable
+// path that does NOT depend on app.getName(), productName, or any
+// bundle metadata. Survives every update path we know about:
+//   • Manual drag-to-Applications replace
+//   • Silent in-place .app swap (our update flow)
+//   • macOS DMG installer replace
+//   • Windows NSIS silent install + reinstall
+//   • productName / appId changes between builds
+//
+// We dual-write on every savePairing(). On load, if STORE_PATH is
+// missing or corrupt, we restore from the backup. The backup is in
+// the user's home dir (chmod 0600) — same security posture as the
+// primary (only the current user can read it). It carries the same
+// PUBLIC anon key the pairing code already had, so no extra secrets
+// are at rest.
+const os = require('os');
+const BACKUP_STORE_PATH = () => path.join(os.homedir(), '.radscheduler-widget-pairing');
 
 function _isPlainPairingText(s){
   // A valid pairing code is base64url-encoded JSON of >= ~150 chars.
@@ -208,46 +230,90 @@ function _isPlainPairingText(s){
   return /^[A-Za-z0-9_\-+=\/]+$/.test(s.trim());
 }
 
-function savePairing(codeStr){
+function _writePairingFile(p, codeStr){
   try{
-    fs.writeFileSync(STORE_PATH(), codeStr, { encoding: 'utf8', mode: 0o600 });
-    // chmod again in case the file already existed with broader perms.
-    try{ fs.chmodSync(STORE_PATH(), 0o600); } catch(_){}
-  } catch(e){ console.error('savePairing failed:', e); }
+    fs.writeFileSync(p, codeStr, { encoding: 'utf8', mode: 0o600 });
+    try{ fs.chmodSync(p, 0o600); }catch(_){}
+    return true;
+  }catch(e){ console.error('[pairing] write failed for', p, e.message); return false; }
+}
+
+function savePairing(codeStr){
+  // Make sure the userData dir exists — first-launch on some platforms
+  // may not have it yet.
+  try{ fs.mkdirSync(path.dirname(STORE_PATH()), { recursive: true }); }catch(_){}
+  const primaryOk = _writePairingFile(STORE_PATH(), codeStr);
+  const backupOk  = _writePairingFile(BACKUP_STORE_PATH(), codeStr);
+  if(!primaryOk && !backupOk){
+    console.error('[pairing] BOTH primary and backup writes failed!');
+  } else if(!primaryOk){
+    console.warn('[pairing] primary write failed, backup OK — pairing will be restored on next launch');
+  }
+}
+
+function _readPairingFromFile(p){
+  // Returns the plaintext pairing code if the file contains one, or
+  // null otherwise. Handles legacy safeStorage encryption + the
+  // "trust the bytes" fallback.
+  try{
+    if(!fs.existsSync(p)) return null;
+    const buf = fs.readFileSync(p);
+    const asText = buf.toString('utf8');
+    if(_isPlainPairingText(asText)) return asText.trim();
+    // Legacy 1.0.0–1.0.2 builds wrote safeStorage-encrypted bytes.
+    if(safeStorage && safeStorage.isEncryptionAvailable()){
+      try{
+        const decrypted = safeStorage.decryptString(buf);
+        if(decrypted && _isPlainPairingText(decrypted)){
+          console.log('[pairing] migrating encrypted file → plaintext (one-time)');
+          return decrypted;
+        }
+      }catch(e){
+        console.warn('[pairing] safeStorage decrypt failed for', p, ':', e.message);
+      }
+    }
+    // Last-ditch: maybe the file is plaintext but doesn't match our
+    // shape regex (e.g., a stray newline). Return as-is so the
+    // renderer can decide; if it's truly corrupt the decode will fail
+    // and we'll prompt re-pair from the renderer side.
+    return _isPlainPairingText(asText.trim()) ? asText.trim() : null;
+  }catch(e){
+    console.error('[pairing] read failed for', p, ':', e.message);
+    return null;
+  }
 }
 
 function loadPairing(){
-  try{
-    if(!fs.existsSync(STORE_PATH())) return null;
-    const buf = fs.readFileSync(STORE_PATH());
-    // Try plaintext first — the common case post-1.0.3.
-    const asText = buf.toString('utf8');
-    if(_isPlainPairingText(asText)) return asText.trim();
-    // Otherwise the file is encrypted (legacy 1.0.0–1.0.2 install).
-    // Decrypt once via safeStorage (this triggers one Keychain
-    // prompt), then rewrite the file as plaintext so the next launch
-    // never asks again.
-    if(safeStorage.isEncryptionAvailable()){
-      try{
-        const decrypted = safeStorage.decryptString(buf);
-        if(decrypted){
-          console.log('[pairing] migrating encrypted file → plaintext (one-time)');
-          savePairing(decrypted);
-          return decrypted;
-        }
-      } catch(e){
-        console.warn('[pairing] safeStorage decrypt failed:', e.message);
-      }
+  // Try the primary store first.
+  let code = _readPairingFromFile(STORE_PATH());
+  if(code){
+    // If the backup is missing or stale, mirror the primary forward
+    // so future updates have a safety net.
+    const backup = _readPairingFromFile(BACKUP_STORE_PATH());
+    if(backup !== code){
+      _writePairingFile(BACKUP_STORE_PATH(), code);
     }
-    // Last-ditch: maybe the file IS plaintext but in a different
-    // encoding. Trust it.
-    return asText;
-  } catch(e){ console.error('loadPairing failed:', e); return null; }
+    return code;
+  }
+  // Primary missing or corrupt — restore from backup (the update
+  // recovery path).
+  code = _readPairingFromFile(BACKUP_STORE_PATH());
+  if(code){
+    console.log('[pairing] primary missing — restored from backup at ' + BACKUP_STORE_PATH());
+    // Re-populate the primary so subsequent loads use the fast path.
+    try{ fs.mkdirSync(path.dirname(STORE_PATH()), { recursive: true }); }catch(_){}
+    _writePairingFile(STORE_PATH(), code);
+    return code;
+  }
+  return null;
 }
 
 function clearPairing(){
-  try{ if(fs.existsSync(STORE_PATH())) fs.unlinkSync(STORE_PATH()); }
-  catch(e){ console.error('clearPairing failed:', e); }
+  // Clear BOTH stores. Re-pair regenerates them on save.
+  for(const p of [STORE_PATH(), BACKUP_STORE_PATH()]){
+    try{ if(fs.existsSync(p)) fs.unlinkSync(p); }
+    catch(e){ console.error('[pairing] clear failed for', p, ':', e.message); }
+  }
 }
 
 // ─── Window management ────────────────────────────────────────────
@@ -293,44 +359,44 @@ function createTray(){
     { label: 'Re-pair…', click: () => { clearPairing(); if(mainWindow){ mainWindow.webContents.send('rs:reset-pairing'); mainWindow.show(); } } },
     { label: 'Pairing storage info…', click: () => {
         // Diagnostic for "the widget keeps asking for the code" reports.
-        // Shows a system dialog with the file path, exists flag, size,
-        // mtime, and the decoded practice/physician (if any). Helps
-        // distinguish "file not written" from "load logic broken" from
-        // "file fine but signature mismatched" without devtools.
+        // Shows a system dialog with both storage paths, exists flags,
+        // sizes, and the decoded practice/physician (if any).
         const { dialog } = require('electron');
-        const p = STORE_PATH();
-        let info = 'Path: ' + p + '\n\n';
-        try{
-          if(!fs.existsSync(p)){
-            info += 'STATUS: NOT FOUND — the widget has nothing stored yet.\nIf you JUST paired and quit, that means savePairing failed silently. Check console with View → Toggle Developer Tools.';
-          } else {
-            const st = fs.statSync(p);
-            info += 'Exists: yes\nSize: ' + st.size + ' bytes\nLast modified: ' + st.mtime.toISOString() + '\nPermissions: ' + (st.mode & 0o777).toString(8) + '\n\n';
-            const code = loadPairing();
-            if(!code){
-              info += 'STATUS: LOAD RETURNED EMPTY — the file exists but loadPairing() returned null. Check the format / regex.';
+        let info = '';
+        for(const [label, p] of [['PRIMARY', STORE_PATH()], ['BACKUP ', BACKUP_STORE_PATH()]]){
+          info += label + ': ' + p + '\n';
+          try{
+            if(!fs.existsSync(p)){
+              info += '  not found\n';
             } else {
-              info += 'Code length: ' + code.length + ' chars\n';
-              try{
-                const padded = code.replace(/-/g,'+').replace(/_/g,'/');
-                let p64 = padded; while(p64.length % 4) p64 += '=';
-                const decoded = JSON.parse(Buffer.from(p64, 'base64').toString('utf8'));
-                info += 'Practice: ' + (decoded.practiceId || '?') + '\n';
-                info += 'Physician: ' + (decoded.physFirst || '') + ' ' + (decoded.physLast || '') + ' (id ' + decoded.physId + ')\n';
-                info += 'Issued: ' + (decoded.issuedAt || '?') + '\n';
-                info += 'Expires: ' + (decoded.exp || 'never') + '\n';
-                if(decoded.exp && new Date(decoded.exp).getTime() < Date.now()){
-                  info += '\n⚠ THIS PAIRING IS EXPIRED — request a fresh code from your admin.';
-                } else {
-                  info += '\nSTATUS: ✓ PAIRING IS VALID — the widget should auto-load on launch. If it asks for the code again, check the dev console for errors.';
-                }
-              }catch(e){
-                info += '\nDECODE FAILED: ' + e.message + '\nThe file is present but not parseable. Re-pair to fix.';
-              }
+              const st = fs.statSync(p);
+              info += '  size ' + st.size + ' bytes · modified ' + st.mtime.toISOString() + ' · mode ' + (st.mode & 0o777).toString(8) + '\n';
             }
+          }catch(e){ info += '  inspection error: ' + e.message + '\n'; }
+        }
+        info += '\n';
+        const code = loadPairing();
+        if(!code){
+          info += 'STATUS: NO PAIRING — both stores empty or unreadable.\n';
+          info += 'Re-pair from the main window to fix.';
+        } else {
+          info += 'Code length: ' + code.length + ' chars\n';
+          try{
+            const padded = code.replace(/-/g,'+').replace(/_/g,'/');
+            let p64 = padded; while(p64.length % 4) p64 += '=';
+            const decoded = JSON.parse(Buffer.from(p64, 'base64').toString('utf8'));
+            info += 'Practice: ' + (decoded.practiceId || '?') + '\n';
+            info += 'Physician: ' + (decoded.physFirst || '') + ' ' + (decoded.physLast || '') + ' (id ' + decoded.physId + ')\n';
+            info += 'Issued: ' + (decoded.issuedAt || '?') + '\n';
+            info += 'Expires: ' + (decoded.exp || 'never') + '\n';
+            if(decoded.exp && new Date(decoded.exp).getTime() < Date.now()){
+              info += '\n⚠ THIS PAIRING IS EXPIRED — request a fresh code from your admin.';
+            } else {
+              info += '\nSTATUS: ✓ PAIRING IS VALID — the widget should auto-load on launch.';
+            }
+          }catch(e){
+            info += '\nDECODE FAILED: ' + e.message + '\nThe code is present but not parseable. Re-pair to fix.';
           }
-        }catch(e){
-          info += 'INSPECTION ERROR: ' + e.message;
         }
         dialog.showMessageBox(mainWindow, {
           type: 'info', title: 'Pairing storage', message: 'Pairing storage status', detail: info, buttons: ['OK'],
