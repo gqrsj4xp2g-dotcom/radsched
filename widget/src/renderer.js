@@ -290,8 +290,28 @@ function computeDayDigest(practice, physId, dateISO){
   }
   function driveCredit(site){
     if(!site || site === 'At Home / Remote' || !dtPerHour) return 0;
-    const dt = (practice.driveTimes && practice.driveTimes[physId] && practice.driveTimes[physId][site]) || 0;
-    return dt ? +(dt / 60 * dtPerHour).toFixed(1) : 0;
+    // S.driveTimes in the main app is keyed by "<physId>|<site>" and
+    // the value is an OBJECT { mins, text, dist, updated } — NOT a
+    // nested object structure and NOT a raw number. Previous widget
+    // code assumed practice.driveTimes[physId][site] as a number, so
+    // every lookup was undefined → 0 minutes → 0 credit. Try both
+    // shapes (current format first, legacy fallback) so the widget
+    // also works against very old practices that may have a different
+    // shape lurking.
+    const dt = practice.driveTimes;
+    if(!dt) return 0;
+    let mins = 0;
+    const pipeKey = physId + '|' + site;
+    if(dt[pipeKey] && typeof dt[pipeKey] === 'object'){
+      mins = +(dt[pipeKey].mins || 0);
+    } else if(typeof dt[pipeKey] === 'number'){
+      mins = +dt[pipeKey];
+    } else if(dt[physId] && dt[physId][site] != null){
+      const v = dt[physId][site];
+      if(typeof v === 'object') mins = +(v.mins || 0);
+      else mins = +v || 0;
+    }
+    return mins ? +(mins / 60 * dtPerHour).toFixed(1) : 0;
   }
 
   // Shift time-window lookup. cfg.shiftTimes is keyed by the shift's
