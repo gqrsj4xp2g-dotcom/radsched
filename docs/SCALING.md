@@ -6,9 +6,11 @@ This document tracks what needs to change as a practice grows from
 
 ## Current architecture summary
 
-- One Supabase row per practice, JSONB column `data` holds everything
-- ~38k-line single-page HTML with all CSS/JS inline
-- Reactive `S` proxy → debounced 500ms save → upsert to Supabase
+- One Supabase row per practice, **text** column `data` (JSON-stringified
+  by the main app — the widget edge-function must JSON.parse on read)
+- ~38k-line single-page HTML with all CSS/JS inline (~18 modules
+  extracted to `src/parts/`, the rest still inline)
+- Reactive `S` proxy → debounced 1500ms save → upsert to Supabase
 - Render functions iterate `S.physicians × S.drShifts` etc. directly
 - Memoization via `_dateIdxVersion` for date-keyed shift lookups
 - Widget reads via `widget-data` edge function (RLS-bypassing service role)
