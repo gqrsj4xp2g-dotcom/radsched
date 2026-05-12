@@ -36161,6 +36161,11 @@ function getShiftWRVUGoal(shift, physId, kind){
 // physician driving to the given site on a given date. Returns 0 if
 // the physician is at home, the policy isn't enabled, or no drive time
 // exists for that pairing.
+// ⚠ DUAL SOURCE OF TRUTH ALERT ⚠
+// The widget at widget/src/renderer.js has its own driveCredit() that
+// must use the same pipe-key lookup ('<physId>|<site>') + byShift
+// fallback ladder + 2-decimal rounding. If the storage shape of
+// S.driveTimes ever changes, BOTH this and the widget need to update.
 function getDriveTimeWRVUCredit(physId, site, date, shiftCode){
   if(!physId || !site || site === 'At Home / Remote') return 0;
   const cfg = S.cfg || {};
