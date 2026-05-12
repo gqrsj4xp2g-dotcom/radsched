@@ -2618,11 +2618,29 @@ tbody tr:hover{background:var(--bg3)}
 
 <!-- DR CALENDAR -->
 <div id="page-dr-cal" class="page">
-  <div class="pg-title">DR Monthly Schedule</div>
-  <div class="flexe" style="margin-bottom:10px;gap:6px">
+  <div class="pg-title">DR Schedule</div>
+  <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
     <div class="fg" style="margin:0"><label>Month</label><input id="drc-mo" type="month" oninput="renderDRCal()"></div>
     <div class="fg" style="margin:0"><label>Physician</label><select id="drc-phys" onchange="renderDRCal()"><option value="">All</option></select></div>
+    <div class="fg" style="margin:0"><label>Hospital</label><select id="drc-site" onchange="renderDRCal()"><option value="">All</option></select></div>
+    <div class="fg" style="margin:0"><label>Subspecialty</label><select id="drc-sub" onchange="renderDRCal()"><option value="">All</option></select></div>
     <div class="fg" style="margin:0"><label>Shift</label><select id="drc-shift" onchange="renderDRCal()"><option value="">All</option><option>1st</option><option>2nd</option><option>3rd</option><option>Home</option><option>Weekend</option><option>Holiday</option></select></div>
+  </div>
+  <!-- View toggle + date navigator for DR Calendar -->
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="bsm" onclick="drcStepFocus(-1)" title="Previous">‹</button>
+      <button class="bsm" onclick="drcStepFocus(0)" title="Today" style="font-weight:600">Today</button>
+      <button class="bsm" onclick="drcStepFocus(1)" title="Next">›</button>
+      <input type="date" id="drc-focus" onchange="drcSetFocus(this.value)" style="font-size:12px;padding:4px 6px;margin-left:4px">
+    </div>
+    <div style="display:flex;gap:4px;align-items:center">
+      <span style="font-size:10.5px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-right:6px">View</span>
+      <button class="bsm" data-drcview="day"   onclick="drcSetView('day')">🗓 Day</button>
+      <button class="bsm" data-drcview="week"  onclick="drcSetView('week')">📆 Week</button>
+      <button class="bsm" data-drcview="month" onclick="drcSetView('month')">📅 Month</button>
+      <button class="bsm" data-drcview="list"  onclick="drcSetView('list')">📊 List</button>
+    </div>
   </div>
   <div class="flex" style="flex-wrap:wrap;gap:4px;margin-bottom:8px">
     <span class="ev e1" style="padding:2px 8px">1st</span><span class="ev e2" style="padding:2px 8px">2nd</span><span class="ev e3" style="padding:2px 8px">3rd</span>
