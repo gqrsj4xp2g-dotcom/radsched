@@ -2875,8 +2875,8 @@ tbody tr:hover{background:var(--bg3)}
 
 <!-- IR CALENDAR -->
 <div id="page-ir-cal" class="page">
-  <div class="pg-title">IR Full Schedule Calendar</div>
-  <div class="flexe" style="margin-bottom:10px;gap:6px;flex-wrap:wrap">
+  <div class="pg-title">IR Schedule</div>
+  <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
     <div class="fg" style="margin:0"><label>Month</label><input id="irc-mo" type="month" oninput="renderIRCal()"></div>
     <div class="fg" style="margin:0"><label>Group</label>
       <select id="irc-grp" onchange="renderIRCal()">
@@ -2888,12 +2888,31 @@ tbody tr:hover{background:var(--bg3)}
     <div class="fg" style="margin:0"><label>Physician</label>
       <select id="irc-phys" onchange="renderIRCal()"><option value="">All</option></select>
     </div>
-    <div class="fg" style="margin:0"><label>View</label>
+    <div class="fg" style="margin:0"><label>Hospital</label>
+      <select id="irc-site" onchange="renderIRCal()"><option value="">All</option></select>
+    </div>
+    <div class="fg" style="margin:0"><label>Type</label>
       <select id="irc-view" onchange="renderIRCal()">
         <option value="both">Call + Daily Shifts</option>
         <option value="call">Call Only</option>
         <option value="shifts">Daily Shifts Only</option>
       </select>
+    </div>
+  </div>
+  <!-- View toggle + date navigator for IR Calendar -->
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="bsm" onclick="ircStepFocus(-1)" title="Previous">‹</button>
+      <button class="bsm" onclick="ircStepFocus(0)" title="Today" style="font-weight:600">Today</button>
+      <button class="bsm" onclick="ircStepFocus(1)" title="Next">›</button>
+      <input type="date" id="irc-focus" onchange="ircSetFocus(this.value)" style="font-size:12px;padding:4px 6px;margin-left:4px">
+    </div>
+    <div style="display:flex;gap:4px;align-items:center">
+      <span style="font-size:10.5px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-right:6px">View</span>
+      <button class="bsm" data-ircview="day"   onclick="ircSetView('day')">🗓 Day</button>
+      <button class="bsm" data-ircview="week"  onclick="ircSetView('week')">📆 Week</button>
+      <button class="bsm" data-ircview="month" onclick="ircSetView('month')">📅 Month</button>
+      <button class="bsm" data-ircview="list"  onclick="ircSetView('list')">📊 List</button>
     </div>
   </div>
   <div class="flex" style="flex-wrap:wrap;gap:3px;margin-bottom:8px;font-size:10px;align-items:center">
