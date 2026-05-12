@@ -15684,11 +15684,44 @@ function downloadMyCalendar(){
 }
 
 // Build the subscription URL for a given token.
-function _calendarFeedUrlFor(token){
+// Build a long-lived, HMAC-signed calendar-feed URL for the current
+// physician. The URL points at the widget-data edge function's GET
+// ?action=ics path. The "token" param here is now ignored — kept
+// for back-compat with old USERS.calFeedToken rows so we don't break
+// existing subscribers who already gave their Apple/Google Calendar
+// the old (broken) URL. The HMAC payload is fully self-contained:
+// edge function decodes it and serves the calendar without any
+// extra round-trip to the table.
+async function _calendarFeedUrlFor(_legacyTokenIgnored){
   const base = _getUrl();
-  if(!base || !token) return '';
-  // webcal:// scheme makes most calendar apps recognize this as a subscribable feed
-  return base.replace(/^https?:\/\//,'webcal://') + '/functions/v1/calendar-feed?token=' + encodeURIComponent(token);
+  const key  = _getKey();
+  if(!base || !key) return '';
+  if(!CU?.physId){ return ''; }
+  const phys = (typeof _physById === 'function') ? _physById(CU.physId) : null;
+  if(!phys) return '';
+  // Payload mirrors the widget-data pairing-code shape so the edge
+  // function's verifyAndDecode() accepts it without changes. Marked
+  // with kind:'cal-feed' so future telemetry can distinguish widget
+  // vs calendar usage.
+  const issuedAt = new Date().toISOString();
+  // 5-year expiration. Renews on every "Generate URL" click.
+  const exp = new Date(Date.now() + 5*365*86400*1000).toISOString();
+  const body = {
+    v: 1, kind: 'cal-feed',
+    practiceId: (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'),
+    physId: phys.id,
+    physLast: phys.last || '',
+    physFirst: phys.first || '',
+    sbUrl: base,
+    sbAnonKey: key,
+    issuedAt, exp,
+  };
+  const sig = await _hmacB64Url(key, JSON.stringify(body));
+  const code = _b64url(JSON.stringify({ ...body, sig }));
+  // webcal:// makes most calendar apps recognize this as a
+  // subscribable feed. URL-encode the code so '+' / '/' that might
+  // sneak in survive the URL parsing.
+  return base.replace(/^https?:\/\//, 'webcal://') + '/functions/v1/widget-data?action=ics&code=' + encodeURIComponent(code);
 }
 
 // Generate (or rotate) the user's calendar feed token. Saves to USERS row,
