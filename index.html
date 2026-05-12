@@ -36126,6 +36126,13 @@ function renderLockedMonths(){
 //   2. p.wRVUMultiplier × cfg.wRVUDefaults[shiftKind]  — per-phys scaling
 //   3. cfg.wRVUDefaults[shiftKind]                     — practice default
 //   4. 0                                                — no goal set
+// ⚠ DUAL SOURCE OF TRUTH ALERT ⚠
+// The widget at widget/src/renderer.js has its own goalFor() — they
+// MUST agree on the resolution ladder + 'IR <shift>' key set, since
+// the widget shows the same goal the main app evaluates against.
+// If you change the rules here, mirror in widget renderer.js goalFor.
+// Sanity-check has a 'wrvu-defaults-complete' check that surfaces
+// drift in the key list.
 function getShiftWRVUGoal(shift, physId, kind){
   if(!shift) return 0;
   if(shift.wRVUGoal != null && +shift.wRVUGoal >= 0) return +shift.wRVUGoal;
