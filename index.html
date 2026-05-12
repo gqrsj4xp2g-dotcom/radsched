@@ -35875,15 +35875,40 @@ function getShiftWRVUGoal(shift, physId, kind){
 // physician driving to the given site on a given date. Returns 0 if
 // the physician is at home, the policy isn't enabled, or no drive time
 // exists for that pairing.
-function getDriveTimeWRVUCredit(physId, site, date){
+function getDriveTimeWRVUCredit(physId, site, date, shiftCode){
   if(!physId || !site || site === 'At Home / Remote') return 0;
   const cfg = S.cfg || {};
   const perHour = +(cfg.driveTimeWRVUPerHour || 0);
   if(!perHour) return 0;
-  // Drive times are stored in S.driveTimes[physId][site] = round-trip min.
-  const dt = (S.driveTimes && S.driveTimes[physId] && S.driveTimes[physId][site]) || 0;
+  // S.driveTimes is keyed by "<physId>|<site>". Old version of this
+  // function read S.driveTimes[physId][site] (wrong shape — that
+  // structure never existed) AND treated the value as a raw minutes
+  // number — so every call returned 0. Match the rest of the app:
+  // pull the record by pipe key, pull byShift[shiftCode] for
+  // shift-specific traffic-aware round-trip, fall back to top-level
+  // mins × 2 if no byShift entry.
+  const dt = S.driveTimes;
   if(!dt) return 0;
-  return +(dt / 60 * perHour).toFixed(1);
+  const pipeKey = physId + '|' + site;
+  let rec = null;
+  if(dt[pipeKey] && typeof dt[pipeKey] === 'object') rec = dt[pipeKey];
+  else if(dt[physId] && typeof dt[physId] === 'object' && dt[physId][site]) rec = dt[physId][site];
+  if(!rec) return 0;
+  let rtMins = 0;
+  const bs = rec.byShift || {};
+  const traffic = (shiftCode && bs[shiftCode]) || null;
+  if(traffic && (traffic.outMins || traffic.retMins)){
+    rtMins = (+traffic.outMins || 0) + (+traffic.retMins || 0);
+  } else if(rec.mins != null){
+    rtMins = (+rec.mins || 0) * 2;
+  } else if(typeof rec === 'number'){
+    rtMins = +rec;
+  }
+  if(!rtMins) return 0;
+  // 2 decimal places — at typical wRVU/hr rates (10-30 range) the
+  // second decimal carries meaningful information (e.g., 38 min ×
+  // 13 wRVU/hr = 8.23 vs 8.2 rounding).
+  return +(rtMins / 60 * perHour).toFixed(2);
 }
 
 // ── Schedule comparison (month vs month) ─────────────────────────────
