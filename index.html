@@ -18786,8 +18786,19 @@ function populateWRVUDefaults(){
   const host = document.getElementById('wrvu-defaults-grid');
   if(!host) return;
   if(!S.cfg) S.cfg = {};
-  if(!S.cfg.wRVUDefaults) S.cfg.wRVUDefaults = {'1st': 30, '2nd': 25, '3rd': 20, 'Home': 0, 'IR daily': 28, 'IR weekend': 35, 'Weekend Call': 35, 'Holiday': 30};
-  const order = ['1st', '2nd', '3rd', 'Home', 'IR daily', 'IR weekend', 'Weekend Call', 'Holiday'];
+  // Single source of truth for the seed wRVU defaults. Keep in sync
+  // with the seed at the top of the file + the v7→v8 migration.
+  // 'IR <shift>' keys (IR roster coverage) default to 0 — see the
+  // schema migration for the rationale.
+  const SEED = {'1st': 30, '2nd': 25, '3rd': 20, 'Home': 0, 'IR 1st': 0, 'IR 2nd': 0, 'IR 3rd': 0, 'IR Home': 0, 'IR daily': 28, 'IR weekend': 35, 'Weekend Call': 35, 'Holiday': 30};
+  if(!S.cfg.wRVUDefaults) S.cfg.wRVUDefaults = { ...SEED };
+  else {
+    // Backfill any missing keys without overwriting admin-set ones —
+    // protects against settings-grid regressions if a key disappears
+    // from S.cfg.wRVUDefaults somehow.
+    for(const k of Object.keys(SEED)) if(S.cfg.wRVUDefaults[k] == null) S.cfg.wRVUDefaults[k] = SEED[k];
+  }
+  const order = ['1st', '2nd', '3rd', 'Home', 'IR 1st', 'IR 2nd', 'IR 3rd', 'IR Home', 'IR daily', 'IR weekend', 'Weekend Call', 'Holiday'];
   host.innerHTML = order.map(k => `<div class="fg" style="margin:0">
     <label style="font-size:11.5px">${escHtml(k)} shift</label>
     <input type="number" data-wrvu-key="${escHtml(k)}" value="${+(S.cfg.wRVUDefaults[k] || 0)}" min="0" max="200" step="0.5" oninput="saveCfg()" style="width:90px;font-size:12px">
