@@ -32,7 +32,7 @@ const SVC_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
@@ -78,9 +78,208 @@ async function verifyAndDecode(code: string): Promise<any> {
   return payload;
 }
 
+// ── ICS calendar feed ────────────────────────────────────────────
+// Generates an RFC 5545 iCalendar document containing every shift
+// for the physician identified in the pairing code, from 30 days
+// ago through 365 days in the future. Calendar apps (Google,
+// Apple, Outlook) refresh this URL periodically — typically every
+// 4-24h — so schedule changes propagate without any push.
+//
+// Security: the URL contains the full HMAC-signed pairing code as
+// a query parameter. Same auth model as the rest of the function.
+// Physicians treat the URL like a password.
+function _icsEscape(s: string): string {
+  // RFC 5545: commas, semicolons, backslashes, newlines need escaping.
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;')
+    .replace(/\r?\n/g, '\\n');
+}
+function _icsDateLocal(isoDate: string): string {
+  // All-day event format: YYYYMMDD (date only, no time, no TZ).
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate || '');
+  if (!m) return '';
+  return m[1] + m[2] + m[3];
+}
+function _icsDtStamp(d?: Date): string {
+  const dd = d || new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return dd.getUTCFullYear() + pad(dd.getUTCMonth() + 1) + pad(dd.getUTCDate())
+    + 'T' + pad(dd.getUTCHours()) + pad(dd.getUTCMinutes()) + pad(dd.getUTCSeconds()) + 'Z';
+}
+function buildICSForPhysician(practice: any, physId: number, physName: string): string {
+  // Window: 30 days ago through 365 days ahead. Calendar clients
+  // can cache more, but no client needs older shifts.
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - 30);
+  const end   = new Date(today); end.setDate(end.getDate() + 365);
+  const startISO = start.toISOString().slice(0, 10);
+  const endISO   = end.toISOString().slice(0, 10);
+  const events: string[] = [];
+  const stamp = _icsDtStamp();
+  // Helper to emit one VEVENT for an all-day "block".
+  function emit(uid: string, dateISO: string, summary: string, description: string){
+    if (!dateISO || dateISO < startISO || dateISO > endISO) return;
+    // All-day event: DTSTART is the date, DTEND is the next day
+    // (exclusive). DTSTAMP is when the iCal was generated.
+    const next = new Date(dateISO + 'T00:00:00Z');
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextISO = next.toISOString().slice(0, 10);
+    events.push([
+      'BEGIN:VEVENT',
+      'UID:' + uid + '@radscheduler.app',
+      'DTSTAMP:' + stamp,
+      'DTSTART;VALUE=DATE:' + _icsDateLocal(dateISO),
+      'DTEND;VALUE=DATE:' + _icsDateLocal(nextISO),
+      'SUMMARY:' + _icsEscape(summary),
+      'DESCRIPTION:' + _icsEscape(description),
+      'CATEGORIES:RadScheduler',
+      'TRANSP:OPAQUE',
+      'END:VEVENT',
+    ].join('\r\n'));
+  }
+  // DR shifts
+  for (const s of (practice.drShifts || [])) {
+    if (s.physId !== physId) continue;
+    const summary = `🩻 ${s.shift || ''} · ${s.site || ''}`.trim();
+    const desc = [
+      s.shift ? `Shift: ${s.shift}` : '',
+      s.site ? `Site: ${s.site}` : '',
+      s.sub ? `Subspecialty: ${s.sub}` : '',
+      s.notes ? `Notes: ${s.notes}` : '',
+    ].filter(Boolean).join('\n');
+    emit(`dr-${s.id}`, s.date, summary, desc);
+  }
+  // IR shifts
+  for (const s of (practice.irShifts || [])) {
+    if (s.physId !== physId) continue;
+    const summary = `🩺 IR ${s.shift || ''} · ${s.site || ''}`.trim();
+    const desc = [
+      s.shift ? `IR shift: ${s.shift}` : '',
+      s.site ? `Site: ${s.site}` : '',
+      s.sub ? `Subspecialty: ${s.sub}` : '',
+      s.notes ? `Notes: ${s.notes}` : '',
+    ].filter(Boolean).join('\n');
+    emit(`ir-${s.id}`, s.date, summary, desc);
+  }
+  // IR calls
+  for (const c of (practice.irCalls || [])) {
+    if (c.physId !== physId) continue;
+    const summary = `📟 IR ${c.callType || 'daily'} call`;
+    const desc = [
+      `Call type: ${c.callType || 'daily'}`,
+      c.irGroup ? `IR group: ${c.irGroup}` : '',
+      c.notes ? `Notes: ${c.notes}` : '',
+    ].filter(Boolean).join('\n');
+    emit(`irc-${c.id}`, c.date, summary, desc);
+  }
+  // Weekend calls
+  for (const w of (practice.weekendCalls || [])) {
+    if (w.physId !== physId) continue;
+    const summary = '📟 Weekend call';
+    const desc = w.notes ? `Notes: ${w.notes}` : '';
+    if (w.satDate) emit(`wk-${w.id}-sat`, w.satDate, summary + ' (Sat)', desc);
+    if (w.sunDate) emit(`wk-${w.id}-sun`, w.sunDate, summary + ' (Sun)', desc);
+  }
+  // Holidays
+  for (const h of (practice.holidays || [])) {
+    if (h.physId !== physId) continue;
+    const summary = `🎉 Holiday: ${h.name || ''}`;
+    const desc = [
+      h.group ? `Group: ${h.group}` : '',
+      h.notes ? `Notes: ${h.notes}` : '',
+    ].filter(Boolean).join('\n');
+    emit(`hol-${h.id}`, h.date, summary, desc);
+  }
+  // Vacations — show as multi-day blocks.
+  for (const v of (practice.vacations || [])) {
+    if (v.physId !== physId) continue;
+    if (!v.start || !v.end || v.end < v.start) continue;
+    const summary = `🏖 Vacation${v.type ? ' · ' + v.type : ''}`;
+    const desc = v.notes ? `Notes: ${v.notes}` : '';
+    // Emit one VEVENT spanning start → end+1.
+    const startD = _icsDateLocal(v.start);
+    if (!startD) continue;
+    if (v.start > endISO || v.end < startISO) continue;
+    const endPlus = new Date(v.end + 'T00:00:00Z');
+    endPlus.setUTCDate(endPlus.getUTCDate() + 1);
+    const endPlusISO = endPlus.toISOString().slice(0, 10);
+    events.push([
+      'BEGIN:VEVENT',
+      `UID:vac-${v.id}@radscheduler.app`,
+      'DTSTAMP:' + stamp,
+      'DTSTART;VALUE=DATE:' + _icsDateLocal(v.start),
+      'DTEND;VALUE=DATE:' + _icsDateLocal(endPlusISO),
+      'SUMMARY:' + _icsEscape(summary),
+      'DESCRIPTION:' + _icsEscape(desc),
+      'CATEGORIES:RadScheduler',
+      'TRANSP:TRANSPARENT',  // vacation = not busy
+      'END:VEVENT',
+    ].join('\r\n'));
+  }
+  // Wrap in VCALENDAR. The X-WR-CALNAME header sets the calendar's
+  // display name in most clients (Google, Apple). REFRESH-INTERVAL
+  // is a hint to clients to re-fetch every 4 hours.
+  const out = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//RadScheduler//Calendar Feed//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:' + _icsEscape(`RadScheduler — ${physName}`),
+    'X-WR-TIMEZONE:UTC',
+    'X-PUBLISHED-TTL:PT4H',
+    'REFRESH-INTERVAL;VALUE=DURATION:PT4H',
+    ...events,
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+  return out;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (req.method !== 'POST') return jsonResp({ error: 'POST only' }, 405);
+
+  // ── ICS feed: GET ?code=... → text/calendar ──────────────────────
+  // Calendar clients (Google Cal, Apple Cal, Outlook) hit subscribe
+  // URLs with GET. They do NOT send custom headers, so we accept the
+  // code as a query string param. The HMAC sig in the code is still
+  // verified before any data leaves the function.
+  if (req.method === 'GET') {
+    const url = new URL(req.url);
+    const code = url.searchParams.get('code') || '';
+    const action = url.searchParams.get('action') || 'ics';
+    if (action !== 'ics') {
+      return new Response('Use POST for read/write actions; GET only supports action=ics.', { status: 405, headers: CORS });
+    }
+    let payload: any;
+    try { payload = await verifyAndDecode(code); }
+    catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
+    const sb = createClient(SB_URL, SVC_KEY);
+    const { data, error } = await sb
+      .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+    if (error) return new Response('Practice fetch failed: ' + error.message, { status: 500, headers: CORS });
+    if (!data) return new Response('Practice not found', { status: 404, headers: CORS });
+    const practice = (function parse(raw: any){
+      if (raw == null) return {};
+      if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
+      return raw;
+    })((data as any).data);
+    const physName = `${payload.physFirst || ''} ${payload.physLast || ''}`.trim() || `Physician ${payload.physId}`;
+    const ics = buildICSForPhysician(practice, payload.physId, physName);
+    return new Response(ics, {
+      status: 200,
+      headers: {
+        ...CORS,
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Disposition': `inline; filename="radscheduler-${payload.physId}.ics"`,
+        'Cache-Control': 'public, max-age=600',  // calendar clients can cache 10 min
+      },
+    });
+  }
+
+  if (req.method !== 'POST') return jsonResp({ error: 'POST or GET only' }, 405);
   let body: any;
   try { body = await req.json(); }
   catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
