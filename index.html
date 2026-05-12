@@ -15730,32 +15730,43 @@ async function _calendarFeedUrlFor(_legacyTokenIgnored){
 
 // Generate (or rotate) the user's calendar feed token. Saves to USERS row,
 // triggers a save so it persists, and updates the URL field in the UI.
-function generateCalendarFeedUrl(){
+async function generateCalendarFeedUrl(){
   if(!CU?.id){alert('No user logged in.');return;}
   if(!CU?.physId){alert('Your account is not linked to a physician profile. Contact an administrator.');return;}
   const u = USERS.find(x=>x.id===CU.id);
   if(!u){alert('Could not locate your user record.');return;}
-  const existing = u.calFeedToken;
-  if(existing && !confirm('You already have a calendar subscription URL.\n\nGenerating a new one will REVOKE the old URL — any calendar app using it will stop receiving updates. You\'ll need to update your calendar app with the new URL.\n\nContinue?')) return;
-  // Generate a random 32-char token. Crypto-strong if available.
-  const bytes = new Uint8Array(24);
-  if(window.crypto?.getRandomValues){
-    crypto.getRandomValues(bytes);
-  } else {
-    for(let i=0;i<bytes.length;i++) bytes[i]=Math.floor(Math.random()*256);
-  }
-  const token = Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join('');
-  u.calFeedToken = token;
-  if(CU) CU.calFeedToken = token;
-  triggerSave();
-  const feedEl=document.getElementById('cs-feed-url');
-  const url = _calendarFeedUrlFor(token);
-  if(feedEl) feedEl.value = url;
+  // Re-generating just creates a new code (we no longer store a
+  // server-side token — the URL itself IS the credential). The old
+  // URL keeps working until its 5-year exp because we can't revoke
+  // self-contained HMAC tokens without a server-side blacklist.
+  // Stamp the user row anyway so the "show existing on load" path
+  // knows to display the URL.
   const status = document.getElementById('cs-feed-status');
-  if(status){
-    status.textContent = '✓ Subscription URL generated. Copy it and add to your calendar app.';
-    status.style.color = 'var(--green-t)';
-    setTimeout(()=>{if(status.textContent.startsWith('✓')) status.textContent='';}, 6000);
+  const feedEl=document.getElementById('cs-feed-url');
+  if(feedEl) feedEl.value = '⏳ Generating…';
+  if(status){ status.textContent = ''; }
+  try{
+    const url = await _calendarFeedUrlFor();
+    if(!url){
+      if(feedEl) feedEl.value = '';
+      if(status){ status.textContent='✗ Could not build URL — Supabase not configured.'; status.style.color='var(--red-t)'; }
+      return;
+    }
+    // Track that we issued one (for UI display on next visit). Token
+    // value is no longer relied on by the URL; just a non-empty
+    // marker.
+    u.calFeedToken = (u.calFeedToken || '1');
+    if(CU) CU.calFeedToken = u.calFeedToken;
+    if(typeof triggerSave === 'function') triggerSave();
+    if(feedEl) feedEl.value = url;
+    if(status){
+      status.textContent = '✓ Subscription URL generated. Copy it and add to your calendar app.';
+      status.style.color = 'var(--green-t)';
+      setTimeout(()=>{if(status.textContent.startsWith('✓')) status.textContent='';}, 6000);
+    }
+  }catch(e){
+    if(feedEl) feedEl.value = '';
+    if(status){ status.textContent='✗ '+(e?.message||e); status.style.color='var(--red-t)'; }
   }
 }
 
