@@ -28651,6 +28651,185 @@ function _sanityAutoFixAll(){
     setTimeout(runSanityCheck, 200);
   }, 50);
 }
+
+// ── Year-end rollover wizard ─────────────────────────────────────
+//
+// Pain solved: every Jan 1, admins re-enter the same 8-12 holidays
+// for the new year — same names, same day-of-week patterns, slightly
+// different dates (Memorial Day moves, etc.). Manual entry is error-
+// prone (wrong date) and takes 20 minutes.
+//
+// The wizard:
+//   1. Reads last year's holidayDefs (or the most recent year with
+//      defs if 'last year' is empty)
+//   2. Computes the equivalent date in the target year for each:
+//        - "First Monday of September" style: use month + nth-DOW rule
+//          when we can infer it
+//        - Otherwise: same calendar date in the target year
+//   3. Surfaces a preview table — admin can deselect any row
+//   4. On apply: pushes the new holidayDefs (additive — never
+//      overwrites existing target-year defs).
+//
+// Idempotent: re-running the wizard after applying skips defs that
+// already exist for that (name, year). Safe to re-run.
+
+let _yrRolloverPlan = null;
+
+function _yrInit(){
+  const el = document.getElementById('yr-target');
+  if(el && !el.value){
+    el.value = String(new Date().getFullYear() + 1);
+  }
+}
+
+// Best-effort: convert a date to a "nth weekday of month" rule when
+// the date IS the nth Mon/Tue/.../Sun of its month. Returns null if
+// the date is not a "patterned" holiday (e.g., Christmas is Dec 25
+// every year — calendar-fixed).
+function _yrDateRule(isoDate){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate || '');
+  if(!m) return null;
+  const y = +m[1], mo = +m[2], da = +m[3];
+  const d = new Date(y, mo - 1, da);
+  if(d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return null;
+  const dow = d.getDay();  // 0=Sun
+  const nth = Math.ceil(da / 7);
+  // Check whether this is also the LAST occurrence of that DOW in the month.
+  const next = new Date(y, mo - 1, da + 7);
+  const isLast = next.getMonth() !== mo - 1;
+  return { month: mo, dow, nth, isLast };
+}
+
+function _yrApplyRule(targetYear, rule){
+  const { month, dow, nth, isLast } = rule;
+  if(isLast){
+    // Last Monday of month etc. — walk back from month-end.
+    const d = new Date(targetYear, month, 0);  // last day of `month`
+    while(d.getDay() !== dow) d.setDate(d.getDate() - 1);
+    return _yrIso(d);
+  }
+  // Nth Monday/etc.
+  const d = new Date(targetYear, month - 1, 1);
+  while(d.getDay() !== dow) d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() + (nth - 1) * 7);
+  return _yrIso(d);
+}
+function _yrIso(d){
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function previewYearRollover(){
+  if(!_adminOnly?.('preview year-end rollover')) return;
+  _yrInit();
+  const target = +document.getElementById('yr-target')?.value;
+  const result = document.getElementById('yr-result');
+  if(!result) return;
+  if(!target || target < 2020 || target > 2099){
+    result.innerHTML = '<div style="color:var(--red-t)">Pick a target year between 2020 and 2099.</div>';
+    return;
+  }
+  // Source: most recent year with at least one def, BELOW the target.
+  const defs = S.holidayDefs || [];
+  const years = [...new Set(defs.map(d => d.year).filter(y => y && y < target))].sort((a,b) => b - a);
+  if(!years.length){
+    result.innerHTML = `<div class="note nw">No holiday definitions found below ${target}. Add at least one year of holidays first, then re-run the wizard.</div>`;
+    _yrRolloverPlan = null;
+    return;
+  }
+  const sourceYr = years[0];
+  const sourceDefs = defs.filter(d => d.year === sourceYr);
+  const existingTargetNames = new Set(defs.filter(d => d.year === target).map(d => d.name));
+
+  // Build the plan.
+  const plan = sourceDefs.map(def => {
+    if(existingTargetNames.has(def.name)){
+      return { name: def.name, status: 'skip', reason: `Already exists for ${target}`, newDates: [] };
+    }
+    // For each date in the source def, compute the target-year date.
+    const newDates = (def.dates || []).map(srcDate => {
+      const rule = _yrDateRule(srcDate);
+      if(rule){
+        // Patterned — use the rule.
+        return { src: srcDate, dst: _yrApplyRule(target, rule), via: 'rule' };
+      }
+      // Calendar-fixed — same month/day, new year.
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(srcDate);
+      if(!m) return { src: srcDate, dst: null, via: 'unparseable' };
+      return { src: srcDate, dst: `${target}-${m[2]}-${m[3]}`, via: 'fixed' };
+    });
+    return { name: def.name, status: 'add', sourceYr, newDates, includeInApply: true };
+  });
+  _yrRolloverPlan = { target, sourceYr, items: plan };
+
+  // Render preview.
+  const adds = plan.filter(p => p.status === 'add');
+  const skips = plan.filter(p => p.status === 'skip');
+  let html = `<div style="margin-bottom:10px;font-weight:600">Rolling ${sourceYr} → ${target}: ${adds.length} new holiday def(s), ${skips.length} skipped.</div>`;
+  if(plan.length){
+    html += '<table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Include</th><th style="text-align:left">Holiday</th><th style="text-align:left">Source date(s)</th><th style="text-align:left">→ New date(s)</th><th style="text-align:left">Status</th></tr></thead><tbody>';
+    plan.forEach((p, i) => {
+      const dates = p.newDates.length
+        ? p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px">${escHtml(d.src)} → ${escHtml(d.dst || '?')}</span>`).join('<br>')
+        : '<span style="color:var(--txt3)">—</span>';
+      const checkbox = p.status === 'add'
+        ? `<input type="checkbox" id="yr-inc-${i}" checked onchange="_yrTogglePlan(${i}, this.checked)">`
+        : '';
+      const statusColor = p.status === 'add' ? 'var(--green-t)' : 'var(--txt3)';
+      html += `<tr style="border-top:1px solid var(--bdr)">
+        <td style="padding:6px 8px">${checkbox}</td>
+        <td style="padding:6px 8px;font-weight:600">${escHtml(p.name)}</td>
+        <td style="padding:6px 8px">${p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px">${escHtml(d.src)}</span>`).join('<br>') || '—'}</td>
+        <td style="padding:6px 8px">${p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px;color:${d.via==='rule'?'var(--blue-t)':'var(--txt2)'}">${escHtml(d.dst || '?')}</span>`).join('<br>') || '—'}</td>
+        <td style="padding:6px 8px;color:${statusColor}">${p.status === 'add' ? '✚ Will add' : '⏭ ' + (p.reason || 'Skip')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    html += `<div class="note ni" style="font-size:11px;margin-top:8px">Blue dates were computed via day-of-week rule (e.g., "first Monday of September"). Other dates use the same month/day in the new year. Verify each before applying.</div>`;
+  }
+  result.innerHTML = html;
+  const applyBtn = document.getElementById('yr-apply');
+  if(applyBtn) applyBtn.style.display = adds.length ? '' : 'none';
+}
+
+function _yrTogglePlan(idx, on){
+  if(!_yrRolloverPlan || !_yrRolloverPlan.items[idx]) return;
+  _yrRolloverPlan.items[idx].includeInApply = !!on;
+}
+
+function applyYearRollover(){
+  if(!_adminOnly?.('apply year-end rollover')) return;
+  if(!_yrRolloverPlan || !_yrRolloverPlan.items.length){
+    alert('Run "Preview rollover" first.');
+    return;
+  }
+  const plan = _yrRolloverPlan;
+  const adds = plan.items.filter(p => p.status === 'add' && p.includeInApply !== false);
+  if(!adds.length){
+    alert('Nothing selected to apply. Tick at least one row.');
+    return;
+  }
+  if(!confirm(`Add ${adds.length} holiday definition(s) for ${plan.target}? Already-existing defs for ${plan.target} are left alone.`)) return;
+  if(!Array.isArray(S.holidayDefs)) S.holidayDefs = [];
+  for(const p of adds){
+    const newDef = {
+      id: S.nextId++,
+      name: p.name,
+      year: plan.target,
+      dates: p.newDates.map(d => d.dst).filter(Boolean),
+    };
+    S.holidayDefs.push(newDef);
+  }
+  if(typeof _audit === 'function') _audit('rollover.year', { target: plan.target, added: adds.map(p => p.name) });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast(`Added ${adds.length} holiday def(s) for ${plan.target}.`, 'ok');
+  _yrRolloverPlan = null;
+  // Re-run preview so the table reflects new state (everything skipped now).
+  setTimeout(previewYearRollover, 300);
+}
+
 // Persist the audit-log filter on every keystroke so reload + nav-away
 // don't lose the user's in-progress search.
 function _alFilterChanged(el){
