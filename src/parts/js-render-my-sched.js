@@ -94,26 +94,55 @@ function renderMySched(){
   const vacSet=new Set();
   vacs.forEach(v=>{let d=parseDateLocal(v.start),e=parseDateLocal(v.end);while(d<=e){vacSet.add(fmtDate(d));d.setDate(d.getDate()+1);}});
 
-  // View toggle — Grid (calendar) vs List (table) vs Both. Stored per
-  // user in localStorage so it follows them across reloads.
-  // Default: 'both' (existing behaviour). Mobile may prefer 'list'.
+  // View toggle — Day / Week / Month / List. Stored per user in
+  // localStorage so the choice follows them across reloads. Default:
+  // 'month' (preserves the original behaviour for first-time users).
+  //
+  // Focus date drives day/week views (which day/week to show). It's
+  // independent of my-mo (which drives month/list views). Both are
+  // visible in the header so users can quickly jump.
   const _curView = (function(){
-    try{ return localStorage.getItem('rs.mysched.view') || 'both'; }
-    catch(_){ return 'both'; }
+    try{ return localStorage.getItem('rs.mysched.view') || 'month'; }
+    catch(_){ return 'month'; }
+  })();
+  const _focusISO = (function(){
+    let v = '';
+    try{ v = localStorage.getItem('rs.mysched.focusDate') || ''; }catch(_){}
+    return v || fmtDate(new Date());
   })();
   const _viewBtn = (v, label, icon) => {
     const on = _curView === v;
     return `<button class="bsm" data-msview="${v}" onclick="mySchedSetView('${v}')"
       style="font-weight:${on?'700':'500'};background:${on?'var(--blue-bg)':'var(--bg3)'};color:${on?'var(--blue-t)':'var(--txt2)'};border:1px solid ${on?'var(--blue-t)':'var(--bdr)'};padding:5px 11px;font-size:11.5px">${icon} ${label}</button>`;
   };
-  html += `<div style="display:flex;justify-content:flex-end;gap:4px;margin-bottom:8px">
-    <span style="align-self:center;font-size:10.5px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-right:6px">View</span>
-    ${_viewBtn('grid','Grid','📅')}
-    ${_viewBtn('both','Both','📋')}
-    ${_viewBtn('list','List','📊')}
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="bsm" onclick="mySchedStepFocus(-1)" title="Previous">‹</button>
+      <button class="bsm" onclick="mySchedStepFocus(0)" title="Today" style="font-weight:600">Today</button>
+      <button class="bsm" onclick="mySchedStepFocus(1)" title="Next">›</button>
+      <input type="date" id="my-focus" value="${escHtml(_focusISO)}" onchange="mySchedSetFocus(this.value)" style="font-size:12px;padding:4px 6px;margin-left:4px">
+    </div>
+    <div style="display:flex;gap:4px;align-items:center">
+      <span style="font-size:10.5px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-right:6px">View</span>
+      ${_viewBtn('day','Day','🗓')}
+      ${_viewBtn('week','Week','📆')}
+      ${_viewBtn('month','Month','📅')}
+      ${_viewBtn('list','List','📊')}
+    </div>
   </div>`;
 
-  html+=`<div id="mysched-grid-section" style="display:${_curView==='list'?'none':'block'}"><div class="card" style="margin-bottom:12px">
+  // ── Per-view rendering ───────────────────────────────────────────
+  // Each view renders into its own section so mySchedSetView() can
+  // toggle display without re-running data collection.
+
+  // DAY view
+  html += _renderMySchedDayView(_focusISO, p, _curView==='day');
+
+  // WEEK view (Sun–Sat anchored on _focusISO)
+  html += _renderMySchedWeekView(_focusISO, p, _curView==='week');
+
+  // MONTH view (existing calendar grid — preserved exactly)
+  html+=`<div id="mysched-grid-section" style="display:${_curView==='month'?'block':'none'}"><div class="card" style="margin-bottom:12px">
     <div class="card-title">${monthLabel}</div>
     <div class="cal-grid" style="margin-bottom:4px">${DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('')}</div>
     <div class="cal-grid">`;
@@ -208,7 +237,8 @@ function renderMySched(){
   });
   html+=`</div></div></div>`;  // close mysched-grid-section
 
-  html += `<div id="mysched-list-section" style="display:${_curView==='grid'?'none':'block'}">`;
+  // LIST view
+  html += `<div id="mysched-list-section" style="display:${_curView==='list'?'block':'none'}">`;
   const allEvts=[
     ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:[s.sub||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tb'})),
     ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
@@ -225,18 +255,136 @@ function renderMySched(){
   document.getElementById('my-content').innerHTML=html;
 }
 
-// Persist + apply the My-Schedule view toggle (Grid | Both | List).
-// Doesn't re-fetch — just flips the two sections' display. Re-renders
-// the next time My Schedule is opened (button styling rebinds).
+// ── My-Schedule per-view renders ─────────────────────────────────
+// Helper: gather every event (DR/IR shifts, IR calls, weekend calls,
+// holidays, vacations) that touches a given date for the current
+// physician. Used by Day + Week views.
+function _mySchedDayEvents(physId, dateISO){
+  const out = { shifts:[], irShifts:[], irCalls:[], weekendCalls:[], holidays:[], vacation:false };
+  (S.drShifts||[]).forEach(s => { if(s.physId===physId && s.date===dateISO) out.shifts.push(s); });
+  (S.irShifts||[]).forEach(s => { if(s.physId===physId && s.date===dateISO) out.irShifts.push(s); });
+  (S.irCalls||[]).forEach(c => {
+    if(c.physId !== physId) return;
+    if(c.callType==='daily' && c.date===dateISO) out.irCalls.push(c);
+    else if(c.callType==='weekend'){
+      // Weekend call spans Fri→Mon (4 days from c.date).
+      if(dateISO === c.date || dateISO === addDays(c.date,1) || dateISO === addDays(c.date,2) || dateISO === addDays(c.date,3)){
+        out.irCalls.push(c);
+      }
+    }
+  });
+  (S.weekendCalls||[]).forEach(w => {
+    if(w.physId===physId && (w.satDate===dateISO || w.sunDate===dateISO)) out.weekendCalls.push(w);
+  });
+  (S.holidays||[]).forEach(h => { if(h.physId===physId && h.date===dateISO) out.holidays.push(h); });
+  (S.vacations||[]).forEach(v => {
+    if(v.physId===physId && v.start<=dateISO && v.end>=dateISO) out.vacation = true;
+  });
+  return out;
+}
+
+function _renderMySchedDayView(focusISO, phys, visible){
+  const today = fmtDate(new Date());
+  const d = parseDateLocal(focusISO);
+  const dayLabel = d.toLocaleString('default', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  const e = _mySchedDayEvents(phys.id, focusISO);
+  const isToday = focusISO === today;
+  const isWknd = d.getDay() === 0 || d.getDay() === 6;
+  const _shiftTimes = (S.cfg && S.cfg.shiftTimes) || {};
+  function timeLabelFor(code){
+    const t = _shiftTimes[code];
+    if(!t) return '';
+    if(!t.dep && !t.ret) return '';
+    return ' · ' + (t.dep || '?') + '→' + (t.ret || '?');
+  }
+  const rows = [];
+  e.shifts.forEach(s => {
+    const t = timeLabelFor(s.shift);
+    rows.push({icon: s.shift==='Home'?'🏠':'🩻', kind:'DR ' + (s.shift||''), site: s.site||'—', detail: [s.sub||'', s.slotLabel?'🏷 '+s.slotLabel:'', s.notes||''].filter(Boolean).join(' · '), color:'tb', time: t});
+  });
+  e.irShifts.forEach(s => {
+    const t = timeLabelFor('IR ' + (s.shift||''));
+    rows.push({icon: s.shift==='Home'?'🏠':'🩺', kind:'IR ' + (s.shift||''), site: s.site||'—', detail: [s.sub||'', s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '), color:'tt', time: t});
+  });
+  e.irCalls.forEach(c => rows.push({icon:'📟', kind:`IR ${c.callType||'daily'} call`, site: c.site||'—', detail: c.irGroup||'—', color:'tt'}));
+  e.weekendCalls.forEach(_ => rows.push({icon:'📟', kind:'DR Weekend call', site:'—', detail:'—', color:'tg'}));
+  e.holidays.forEach(h => rows.push({icon:'🎉', kind:'Holiday', site:'—', detail: h.name||'—', color:'tp'}));
+  if(e.vacation) rows.push({icon:'🏖', kind:'Vacation / Off', site:'—', detail:'—', color:'tr'});
+  const card = `<div id="mysched-day-section" style="display:${visible?'block':'none'}">
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>${escHtml(dayLabel)}</span>
+        ${isToday ? '<span class="tag tb" style="font-size:10px">TODAY</span>' : ''}
+        ${isWknd ? '<span class="tag tg" style="font-size:10px">Weekend</span>' : ''}
+      </div>
+      ${rows.length === 0
+        ? '<div class="note ni" style="font-size:12px">No assignments. Day off.</div>'
+        : `<div style="display:flex;flex-direction:column;gap:8px">${rows.map(r => `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:var(--r);border-left:3px solid var(--blue-t)">
+              <div style="font-size:18px">${r.icon}</div>
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:13px"><span class="tag ${r.color}" style="font-size:10px;margin-right:6px">${escHtml(r.kind)}</span>${escHtml(r.site)}${r.time?'<span style="font-size:11px;color:var(--txt3);margin-left:6px">'+escHtml(r.time)+'</span>':''}</div>
+                ${r.detail ? `<div style="font-size:11px;color:var(--txt2);margin-top:2px">${escHtml(r.detail)}</div>` : ''}
+              </div>
+            </div>`).join('')}</div>`
+      }
+    </div>
+  </div>`;
+  return card;
+}
+
+function _renderMySchedWeekView(focusISO, phys, visible){
+  // Week is Sun → Sat anchored on the week containing focusISO.
+  const d = parseDateLocal(focusISO);
+  const dow = d.getDay();   // 0 = Sun
+  const sunISO = addDays(focusISO, -dow);
+  const today = fmtDate(new Date());
+  let html = `<div id="mysched-week-section" style="display:${visible?'block':'none'}">
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Week of ${escHtml(parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'}))} – ${escHtml(parseDateLocal(addDays(sunISO,6)).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'}))}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((dn,i) => {
+          const ds = addDays(sunISO, i);
+          const dd = parseDateLocal(ds);
+          const isToday = ds === today;
+          const isWknd = i === 0 || i === 6;
+          const ev = _mySchedDayEvents(phys.id, ds);
+          const items = [];
+          ev.shifts.forEach(s => items.push({txt: (s.shift==='Home'?'🏠 ':'') + (s.shift||'') + (s.site?' · '+s.site.split(' ')[0]:''), cls: s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':'ehome'}));
+          ev.irShifts.forEach(s => items.push({txt:'IR ' + (s.shift==='Home'?'🏠':s.shift||'') + (s.site?' · '+s.site.split(' ')[0]:''), cls:'eir'}));
+          ev.irCalls.forEach(c => items.push({txt:'📟 ' + (c.callType==='weekend'?'Wknd':'Daily') + ' call', cls:'ewk'}));
+          ev.weekendCalls.forEach(_ => items.push({txt:'📟 DR Wknd', cls:'ewk'}));
+          ev.holidays.forEach(h => items.push({txt:'🎉 ' + (h.name||'').slice(0,10), cls:'ehol'}));
+          if(ev.vacation) items.push({txt:'🏖 Off', cls:'evac'});
+          return `<div class="cal-day${isToday?' today':''}${isWknd?' wknd':''}" style="min-height:96px;padding:6px;cursor:pointer" onclick="mySchedSetFocus('${ds}'); mySchedSetView('day')">
+            <div style="font-size:10px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.04em">${dn}</div>
+            <div style="font-size:18px;font-weight:700;line-height:1">${dd.getDate()}</div>
+            <div style="margin-top:4px;display:flex;flex-direction:column;gap:2px">
+              ${items.length ? items.slice(0,5).map(it => `<div class="ev ${it.cls}" style="font-size:9px;padding:2px 4px;font-weight:600">${escHtml(it.txt)}</div>`).join('') : '<div style="font-size:9px;color:var(--rs-ink-3);font-style:italic;margin-top:6px">Off</div>'}
+              ${items.length > 5 ? `<div style="font-size:9px;color:var(--rs-ink-3)">+${items.length-5} more</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="note ni" style="font-size:10.5px;margin-top:8px">Click any day to drill in to Day view.</div>
+    </div>
+  </div>`;
+  return html;
+}
+
+// Persist + apply the My-Schedule view toggle (Day | Week | Month | List).
+// Doesn't re-fetch — just flips the four sections' display. Updates
+// button styling in place so scroll position survives the switch.
 function mySchedSetView(v){
-  if(v !== 'grid' && v !== 'list' && v !== 'both') v = 'both';
+  if(!['day','week','month','list'].includes(v)) v = 'month';
   try{ localStorage.setItem('rs.mysched.view', v); }catch(_){}
-  const grid = document.getElementById('mysched-grid-section');
-  const list = document.getElementById('mysched-list-section');
-  if(grid) grid.style.display = (v === 'list') ? 'none' : 'block';
-  if(list) list.style.display = (v === 'grid') ? 'none' : 'block';
-  // Rebind button styles inline (avoids a full re-render which would
-  // wipe any scroll position).
+  const map = {
+    day:   document.getElementById('mysched-day-section'),
+    week:  document.getElementById('mysched-week-section'),
+    month: document.getElementById('mysched-grid-section'),
+    list:  document.getElementById('mysched-list-section'),
+  };
+  Object.keys(map).forEach(k => { if(map[k]) map[k].style.display = (k === v) ? 'block' : 'none'; });
   document.querySelectorAll('button[data-msview]').forEach(b => {
     const on = b.getAttribute('data-msview') === v;
     b.style.fontWeight = on ? '700' : '500';
@@ -244,4 +392,39 @@ function mySchedSetView(v){
     b.style.color      = on ? 'var(--blue-t)'  : 'var(--txt2)';
     b.style.border     = '1px solid ' + (on ? 'var(--blue-t)' : 'var(--bdr)');
   });
+}
+
+// Set the focus date (used by Day + Week views) and re-render.
+function mySchedSetFocus(iso){
+  if(!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+  try{ localStorage.setItem('rs.mysched.focusDate', iso); }catch(_){}
+  // Also sync my-mo so month/list views align if user switches.
+  const moEl = document.getElementById('my-mo');
+  if(moEl) moEl.value = iso.slice(0, 7);
+  if(typeof renderMySched === 'function') renderMySched();
+}
+
+// Step prev/next by the unit appropriate to the current view.
+//   step === -1  →  prev unit
+//   step ===  0  →  jump to today
+//   step ===  1  →  next unit
+function mySchedStepFocus(step){
+  const view = (function(){ try{ return localStorage.getItem('rs.mysched.view') || 'month'; }catch(_){ return 'month'; } })();
+  if(step === 0){ mySchedSetFocus(fmtDate(new Date())); return; }
+  const cur = (function(){
+    let v = ''; try{ v = localStorage.getItem('rs.mysched.focusDate') || ''; }catch(_){}
+    return v || fmtDate(new Date());
+  })();
+  let next = cur;
+  if(view === 'day'){
+    next = addDays(cur, step);
+  } else if(view === 'week'){
+    next = addDays(cur, 7 * step);
+  } else {
+    // month/list: advance by a month
+    const d = parseDateLocal(cur);
+    d.setMonth(d.getMonth() + step);
+    next = fmtDate(d);
+  }
+  mySchedSetFocus(next);
 }
