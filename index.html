@@ -28392,6 +28392,242 @@ function runPerfSnapshot(){
     </div>
   `;
 }
+
+// ── Sanity Check — invariant scanner ─────────────────────────────────
+//
+// Each check is a small isolated function that returns:
+//   { name, status: 'ok'|'warn'|'fail', count?, detail?, fix?: fn }
+//
+// To add a new check: append to _SANITY_CHECKS. Aim for cheap O(N) or
+// O(N log N) scans — runs synchronously on click, must finish under
+// ~100ms on a 1000-physician practice. If a check needs more than
+// that, gate it behind opts.deep.
+//
+// Centralized so every check shares the same status reporting, fix
+// dispatch, and audit-log integration. Sanity failures are written
+// to _logError so they appear in the existing Error log card too —
+// admins on Tools → Logs & ops see them in two places.
+let _lastSanityReport = null;
+
+function _physIdSet(){
+  return new Set((S.physicians || []).map(p => p.id));
+}
+
+const _SANITY_CHECKS = [
+  // ── Data-integrity: orphan references ──────────────────────────
+  { id:'orphan-drShifts', name:'DR shifts reference live physicians', fn: () => {
+      const ids = _physIdSet();
+      const orphans = (S.drShifts || []).filter(s => !ids.has(s.physId));
+      if(!orphans.length) return {status:'ok'};
+      return {
+        status:'fail', count: orphans.length,
+        detail: `${orphans.length} DR shift(s) point to a physician that no longer exists. Earliest: ${orphans[0]?.date}`,
+        fix: () => { S.drShifts = (S.drShifts || []).filter(s => ids.has(s.physId)); triggerSave?.(); _afterMutation?.(); },
+        fixLabel: 'Remove orphan shifts',
+      };
+    }
+  },
+  { id:'orphan-irShifts', name:'IR shifts reference live physicians', fn: () => {
+      const ids = _physIdSet();
+      const orphans = (S.irShifts || []).filter(s => !ids.has(s.physId));
+      if(!orphans.length) return {status:'ok'};
+      return {
+        status:'fail', count: orphans.length,
+        detail: `${orphans.length} IR shift(s) point to a deleted physician.`,
+        fix: () => { S.irShifts = (S.irShifts || []).filter(s => ids.has(s.physId)); triggerSave?.(); _afterMutation?.(); },
+        fixLabel: 'Remove orphan IR shifts',
+      };
+    }
+  },
+  { id:'orphan-vacations', name:'Vacations reference live physicians', fn: () => {
+      const ids = _physIdSet();
+      const orphans = (S.vacations || []).filter(v => !ids.has(v.physId));
+      if(!orphans.length) return {status:'ok'};
+      return {
+        status:'fail', count: orphans.length,
+        detail: `${orphans.length} vacation entry(ies) for deleted physicians.`,
+        fix: () => { S.vacations = (S.vacations || []).filter(v => ids.has(v.physId)); triggerSave?.(); _afterMutation?.(); },
+        fixLabel: 'Remove orphan vacations',
+      };
+    }
+  },
+  { id:'orphan-holidays', name:'Holidays reference live physicians', fn: () => {
+      const ids = _physIdSet();
+      const orphans = (S.holidays || []).filter(h => !ids.has(h.physId));
+      if(!orphans.length) return {status:'ok'};
+      return {
+        status:'warn', count: orphans.length,
+        detail: `${orphans.length} holiday assignment(s) for deleted physicians.`,
+        fix: () => { S.holidays = (S.holidays || []).filter(h => ids.has(h.physId)); triggerSave?.(); _afterMutation?.(); },
+        fixLabel: 'Remove orphan holidays',
+      };
+    }
+  },
+  // ── Vacation date-range sanity ─────────────────────────────────
+  { id:'vacation-date-order', name:'Vacation end ≥ start', fn: () => {
+      const bad = (S.vacations || []).filter(v => v.start && v.end && v.end < v.start);
+      if(!bad.length) return {status:'ok'};
+      return {
+        status:'fail', count: bad.length,
+        detail: `${bad.length} vacation(s) with end-date before start-date. First: phys=${bad[0].physId} ${bad[0].start} → ${bad[0].end}`,
+        // No auto-fix — admin should review.
+      };
+    }
+  },
+  // ── Duplicate IDs (would corrupt edits) ─────────────────────────
+  { id:'dup-phys-ids', name:'Physician IDs are unique', fn: () => {
+      const seen = new Map();
+      for(const p of (S.physicians || [])){
+        if(seen.has(p.id)) seen.set(p.id, (seen.get(p.id) || 1) + 1);
+        else seen.set(p.id, 1);
+      }
+      const dups = [...seen.entries()].filter(([,n]) => n > 1);
+      if(!dups.length) return {status:'ok'};
+      return {status:'fail', count: dups.length, detail: `Duplicate physician ID(s): ${dups.map(([id,n])=>`${id}×${n}`).join(', ')}. Edit conflict possible.`};
+    }
+  },
+  // ── Drive-time shape ────────────────────────────────────────────
+  { id:'drive-times-shape', name:'Drive-time records use pipe-key shape', fn: () => {
+      const dt = S.driveTimes || {};
+      const keys = Object.keys(dt);
+      if(!keys.length) return {status:'ok'};
+      const nested = keys.filter(k => !k.includes('|') && typeof dt[k] === 'object');
+      if(!nested.length) return {status:'ok'};
+      return {
+        status:'warn', count: nested.length,
+        detail: `${nested.length} legacy nested driveTimes key(s) (e.g., "${nested[0]}"). Will not be read by current code — use the pipe-key shape "<physId>|<site>".`,
+      };
+    }
+  },
+  // ── wRVU defaults completeness ──────────────────────────────────
+  { id:'wrvu-defaults-complete', name:'wRVU defaults grid has all expected keys', fn: () => {
+      const required = ['1st','2nd','3rd','Home','IR 1st','IR 2nd','IR 3rd','IR Home','IR daily','IR weekend','Weekend Call','Holiday'];
+      const wd = (S.cfg && S.cfg.wRVUDefaults) || {};
+      const missing = required.filter(k => wd[k] == null);
+      if(!missing.length) return {status:'ok'};
+      return {
+        status:'warn', count: missing.length,
+        detail: `${missing.length} missing key(s): ${missing.join(', ')}. Settings → Schedule → wRVU defaults grid won't show them.`,
+        fix: () => {
+          const seed = {'1st':30,'2nd':25,'3rd':20,'Home':0,'IR 1st':0,'IR 2nd':0,'IR 3rd':0,'IR Home':0,'IR daily':28,'IR weekend':35,'Weekend Call':35,'Holiday':30};
+          if(!S.cfg) S.cfg = {};
+          if(!S.cfg.wRVUDefaults) S.cfg.wRVUDefaults = {};
+          for(const k of missing){ S.cfg.wRVUDefaults[k] = seed[k]; }
+          triggerSave?.();
+        },
+        fixLabel: 'Add missing keys (with default values)',
+      };
+    }
+  },
+  // ── Schema version ──────────────────────────────────────────────
+  { id:'schema-version', name:`Schema version is v${typeof _SCHEMA_VERSION !== 'undefined' ? _SCHEMA_VERSION : '?'}`, fn: () => {
+      const target = (typeof _SCHEMA_VERSION !== 'undefined') ? _SCHEMA_VERSION : null;
+      const cur = +(S._schemaVersion || 0);
+      if(target == null) return {status:'warn', detail:'Cannot read _SCHEMA_VERSION constant.'};
+      if(cur === target) return {status:'ok'};
+      if(cur < target) return {status:'warn', detail:`Practice on v${cur}, client on v${target}. Migration runs on next pull; usually self-heals.`};
+      return {status:'warn', detail:`Practice on v${cur} is NEWER than client v${target}. Probably reading an older deploy.`};
+    }
+  },
+  // ── Audit log not bloated in-blob ───────────────────────────────
+  { id:'audit-log-size', name:'In-blob audit log within LRU cap', fn: () => {
+      const cap = (typeof _AUDIT_LOG_MAX !== 'undefined') ? _AUDIT_LOG_MAX : 100;
+      const n = (S.auditLog || []).length;
+      if(n <= cap) return {status:'ok'};
+      return {
+        status:'warn', count: n - cap,
+        detail: `${n} entries exceeds LRU cap of ${cap}. Side table (radscheduler_audit) is canonical, but blob bloat will slow saves until trimmed.`,
+        fix: () => { while(S.auditLog.length > cap) S.auditLog.shift(); triggerSave?.(); },
+        fixLabel: 'Trim to cap',
+      };
+    }
+  },
+  // ── Practice-config sanity ──────────────────────────────────────
+  { id:'shift-caps-positive', name:'Shift caps are positive', fn: () => {
+      const cfg = S.cfg || {};
+      const bad = [];
+      for(const k of ['wdMax','wkMax','irMax','irDailyMax','irWkndMax']){
+        const v = +cfg[k];
+        if(v <= 0 || !Number.isFinite(v)) bad.push(`${k}=${cfg[k]}`);
+      }
+      if(!bad.length) return {status:'ok'};
+      return {status:'fail', count: bad.length, detail: `Invalid shift cap(s): ${bad.join(', ')}. Auto-assign will refuse to run.`};
+    }
+  },
+];
+
+function runSanityCheck(){
+  const host = document.getElementById('sanity-result');
+  if(!host) return;
+  host.innerHTML = '<div style="color:var(--txt3)">Running…</div>';
+  const t0 = performance.now();
+  const results = _SANITY_CHECKS.map(c => {
+    try{ return { ...c, result: c.fn() }; }
+    catch(e){ return { ...c, result: { status:'fail', detail: 'Check threw: ' + (e?.message || e) } }; }
+  });
+  const elapsed = performance.now() - t0;
+  _lastSanityReport = results;
+  const counts = { ok:0, warn:0, fail:0 };
+  for(const r of results){ counts[r.result.status] = (counts[r.result.status] || 0) + 1; }
+  // Centrally log failures to the existing error log so admins
+  // viewing the Error log card see them too (no duplicate UI).
+  if(counts.fail > 0 && typeof _logError === 'function'){
+    const failNames = results.filter(r => r.result.status === 'fail').map(r => r.name);
+    _logError('sanity-check', `${counts.fail} check(s) failed`, { names: failNames });
+  }
+  const headerColor = counts.fail ? 'var(--red-t)' : counts.warn ? 'var(--amber,#d97706)' : 'var(--green-t)';
+  let html = `<div style="margin-bottom:10px;font-weight:600;color:${headerColor}">
+    ${counts.fail ? '✗' : counts.warn ? '⚠' : '✓'} ${counts.fail} failed · ${counts.warn} warnings · ${counts.ok} passed
+    <span style="font-weight:400;color:var(--txt3);margin-left:8px">${elapsed.toFixed(1)} ms</span>
+  </div>`;
+  html += '<table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Check</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>';
+  for(const r of results){
+    const icon = r.result.status === 'ok' ? '✓' : r.result.status === 'warn' ? '⚠' : '✗';
+    const color = r.result.status === 'ok' ? 'var(--green-t)' : r.result.status === 'warn' ? 'var(--amber,#d97706)' : 'var(--red-t)';
+    const detail = r.result.detail || (r.result.status === 'ok' ? '—' : '');
+    const fixBtn = r.result.fix
+      ? `<button class="bxs" onclick="_sanityRunFix('${escHtml(r.id)}')">${escHtml(r.result.fixLabel || 'Auto-fix')}</button>`
+      : '';
+    html += `<tr style="border-top:1px solid var(--bdr)">
+      <td style="padding:6px 8px"><span style="color:${color};font-weight:700">${icon}</span> ${escHtml(r.name)}</td>
+      <td style="padding:6px 8px;color:var(--txt2)">${escHtml(detail)}</td>
+      <td style="padding:6px 8px;text-align:right">${fixBtn}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  host.innerHTML = html;
+}
+
+function _sanityRunFix(checkId){
+  if(!_lastSanityReport) return;
+  const r = _lastSanityReport.find(x => x.id === checkId);
+  if(!r || !r.result || !r.result.fix){ return; }
+  try{
+    r.result.fix();
+    if(typeof _audit === 'function') _audit('sanity.fix', { check: checkId, name: r.name });
+    if(typeof _toast === 'function') _toast(`Applied fix: ${r.name}`, 'ok');
+    setTimeout(runSanityCheck, 200);  // re-run so the row updates
+  }catch(e){
+    if(typeof _toast === 'function') _toast(`Fix failed: ${e?.message || e}`, 'err');
+    if(typeof _logError === 'function') _logError('sanity-fix', `Fix threw on ${checkId}`, e);
+  }
+}
+
+function _sanityAutoFixAll(){
+  if(!_lastSanityReport){ runSanityCheck(); }
+  setTimeout(() => {
+    if(!_lastSanityReport) return;
+    const fixable = _lastSanityReport.filter(r => r.result.fix);
+    if(!fixable.length){ if(typeof _toast === 'function') _toast('Nothing to fix automatically.', 'info'); return; }
+    if(!confirm(`Apply ${fixable.length} auto-fix(es)? Affected: ${fixable.map(r=>r.name).join(', ')}.`)) return;
+    for(const r of fixable){
+      try{ r.result.fix(); if(typeof _audit === 'function') _audit('sanity.fix', { check: r.id }); }
+      catch(e){ if(typeof _logError === 'function') _logError('sanity-fix', `Bulk fix threw on ${r.id}`, e); }
+    }
+    if(typeof _toast === 'function') _toast(`Applied ${fixable.length} fix(es).`, 'ok');
+    setTimeout(runSanityCheck, 200);
+  }, 50);
+}
 // Persist the audit-log filter on every keystroke so reload + nav-away
 // don't lose the user's in-progress search.
 function _alFilterChanged(el){
