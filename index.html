@@ -26917,10 +26917,24 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
  * Used in IR list table rows. Returns '' if no data available.
  */
 function _driveTimeCell(physId, site){
-  const dt = S.driveTimes?.[physId]?.[site];
-  if(!dt) return '';
-  const mins = dt.byShift?.['1st']?.trafficMins || dt.baseMins || null;
-  if(mins==null) return '';
+  // S.driveTimes is keyed by "<physId>|<site>" (pipe), NOT a nested
+  // object. Value shape: { mins, text, dist, byShift:{...},
+  // daily:{...} }. Old code read .trafficMins / .baseMins — neither
+  // ever existed in the stored shape, so this badge has been
+  // silently rendering nothing for every IR-list-row drive cue.
+  if(!site || site === 'At Home / Remote') return '';
+  const rec = S.driveTimes?.[physId + '|' + site] || S.driveTimes?.[physId]?.[site];
+  if(!rec || typeof rec !== 'object') return '';
+  // Prefer shift-specific traffic-aware figures (sum of out + return)
+  // when present; fall back to the top-level one-way avg.
+  const bs = rec.byShift?.['1st'] || rec.byShift?.['IR 1st'];
+  let mins = null;
+  if(bs && (bs.outMins != null || bs.retMins != null)){
+    mins = (+bs.outMins || 0) + (+bs.retMins || 0);
+  } else if(rec.mins != null){
+    mins = +rec.mins;
+  }
+  if(mins == null || !mins) return '';
   const color = mins<=20?'var(--green-t)':mins<=40?'var(--amber,#d97706)':'var(--red-t)';
   return `<span style="font-size:9px;color:${color};margin-left:4px" title="Drive time to ${site}">🚗 ${mins}m</span>`;
 }
