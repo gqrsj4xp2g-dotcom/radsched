@@ -36103,9 +36103,17 @@ function explainShiftAssignment(kind, shiftId){
       factors.push({name:'DR utilization', score, detail:`${dr}/${Math.round(expectedDr)} DR shifts this month (${Math.round(drRatio*100)}%)`});
       total += score;
     }
-    // Drive time
+    // Drive time. Same shape fix as getDriveTimeWRVUCredit — keyed
+    // by "<physId>|<site>" with an object value, not the wrong
+    // nested-then-number shape the old code assumed (always returning 0).
     if(sh.site && sh.site !== 'At Home / Remote'){
-      const dt = (S.driveTimes && S.driveTimes[p.id] && S.driveTimes[p.id][sh.site]) || 0;
+      const rec = S.driveTimes?.[p.id + '|' + sh.site];
+      let dt = 0;
+      if(rec && typeof rec === 'object'){
+        const bs = rec.byShift?.[sh.shift] || rec.byShift?.['1st'];
+        if(bs && (bs.outMins || bs.retMins)) dt = (+bs.outMins || 0) + (+bs.retMins || 0);
+        else if(rec.mins != null) dt = (+rec.mins || 0) * 2;
+      }
       if(dt > 0){
         const score = Math.max(-30, 30 - dt * 0.5);  // shorter drive = higher score
         factors.push({name:'Drive time', score, detail:`${dt} min round-trip to ${sh.site}`});
