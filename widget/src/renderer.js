@@ -288,30 +288,42 @@ function computeDayDigest(practice, physId, dateISO){
     }
     return Math.round(base * wMult);
   }
-  function driveCredit(site){
+  function driveCredit(site, shiftCode){
     if(!site || site === 'At Home / Remote' || !dtPerHour) return 0;
-    // S.driveTimes in the main app is keyed by "<physId>|<site>" and
-    // the value is an OBJECT { mins, text, dist, updated } — NOT a
-    // nested object structure and NOT a raw number. Previous widget
-    // code assumed practice.driveTimes[physId][site] as a number, so
-    // every lookup was undefined → 0 minutes → 0 credit. Try both
-    // shapes (current format first, legacy fallback) so the widget
-    // also works against very old practices that may have a different
-    // shape lurking.
+    // S.driveTimes in the main app is keyed by "<physId>|<site>".
+    // Value shape:
+    //   { mins, text, dist, updated,             // one-way average
+    //     byShift: { '1st': {outMins, retMins},  // shift-specific
+    //                'IR 1st': {outMins, retMins}, ... },
+    //     daily: { 'YYYY-MM-DD': {outMins, retMins, ...} }
+    //   }
+    // ROUND-TRIP total = outMins + retMins (preferred — uses
+    // shift-specific traffic-aware figures). Fall back to mins * 2
+    // when byShift data is missing (e.g., practices that haven't run
+    // the traffic-aware lookup yet).
     const dt = practice.driveTimes;
     if(!dt) return 0;
-    let mins = 0;
     const pipeKey = physId + '|' + site;
-    if(dt[pipeKey] && typeof dt[pipeKey] === 'object'){
-      mins = +(dt[pipeKey].mins || 0);
-    } else if(typeof dt[pipeKey] === 'number'){
-      mins = +dt[pipeKey];
-    } else if(dt[physId] && dt[physId][site] != null){
-      const v = dt[physId][site];
-      if(typeof v === 'object') mins = +(v.mins || 0);
-      else mins = +v || 0;
+    let rec = null;
+    if(dt[pipeKey] && typeof dt[pipeKey] === 'object') rec = dt[pipeKey];
+    else if(dt[physId] && typeof dt[physId] === 'object' && dt[physId][site]) rec = dt[physId][site];
+    if(!rec) return 0;
+    let rtMins = 0;
+    const bs = rec.byShift || {};
+    const traffic = (shiftCode && bs[shiftCode]) || null;
+    if(traffic && (traffic.outMins || traffic.retMins)){
+      rtMins = (+traffic.outMins || 0) + (+traffic.retMins || 0);
+    } else if(rec.mins != null){
+      // One-way figure × 2 for round-trip.
+      rtMins = (+rec.mins || 0) * 2;
+    } else if(typeof rec === 'number'){
+      rtMins = +rec;
     }
-    return mins ? +(mins / 60 * dtPerHour).toFixed(1) : 0;
+    if(!rtMins) return 0;
+    // 2-decimal precision — practices using ~$/hr rates between 1
+    // and 50 wRVU/hr can see meaningful differences at the second
+    // decimal (e.g., 38 min × 13/hr = 8.23, not 8.2).
+    return +(rtMins / 60 * dtPerHour).toFixed(2);
   }
 
   // Shift time-window lookup. cfg.shiftTimes is keyed by the shift's
@@ -330,7 +342,7 @@ function computeDayDigest(practice, physId, dateISO){
     if(s.physId === physId && s.date === dateISO){
       const goal = goalFor(s, 'dr');
       out.wRVUGoalTotal += goal;
-      const dt = driveCredit(s.site);
+      const dt = driveCredit(s.site, s.shift);  // 'DR' shifts: byShift['1st'/'2nd'/...]
       out.driveTimeCredit += dt;
       out.shifts.push({ kind: 'DR', code: s.shift, label: `${s.shift} · ${s.site || '—'}${s.sub ? ' · ' + s.sub : ''}`, goal, site: s.site, window: _winFor(s.shift) });
     }
@@ -339,7 +351,7 @@ function computeDayDigest(practice, physId, dateISO){
     if(s.physId === physId && s.date === dateISO){
       const goal = goalFor(s, 'ir');
       out.wRVUGoalTotal += goal;
-      const dt = driveCredit(s.site);
+      const dt = driveCredit(s.site, 'IR ' + (s.shift || ''));  // IR: byShift['IR 1st'/...]
       out.driveTimeCredit += dt;
       out.shifts.push({ kind: 'IR', code: 'IR ' + (s.shift || ''), label: `IR ${s.shift} · ${s.site || '—'}`, goal, site: s.site, window: _winFor(s.shift) });
     }
