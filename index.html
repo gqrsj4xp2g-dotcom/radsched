@@ -11704,7 +11704,26 @@ function renderMySched(){
   const vacSet=new Set();
   vacs.forEach(v=>{let d=parseDateLocal(v.start),e=parseDateLocal(v.end);while(d<=e){vacSet.add(fmtDate(d));d.setDate(d.getDate()+1);}});
 
-  html+=`<div class="card" style="margin-bottom:12px">
+  // View toggle — Grid (calendar) vs List (table) vs Both. Stored per
+  // user in localStorage so it follows them across reloads.
+  // Default: 'both' (existing behaviour). Mobile may prefer 'list'.
+  const _curView = (function(){
+    try{ return localStorage.getItem('rs.mysched.view') || 'both'; }
+    catch(_){ return 'both'; }
+  })();
+  const _viewBtn = (v, label, icon) => {
+    const on = _curView === v;
+    return `<button class="bsm" data-msview="${v}" onclick="mySchedSetView('${v}')"
+      style="font-weight:${on?'700':'500'};background:${on?'var(--blue-bg)':'var(--bg3)'};color:${on?'var(--blue-t)':'var(--txt2)'};border:1px solid ${on?'var(--blue-t)':'var(--bdr)'};padding:5px 11px;font-size:11.5px">${icon} ${label}</button>`;
+  };
+  html += `<div style="display:flex;justify-content:flex-end;gap:4px;margin-bottom:8px">
+    <span style="align-self:center;font-size:10.5px;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em;margin-right:6px">View</span>
+    ${_viewBtn('grid','Grid','📅')}
+    ${_viewBtn('both','Both','📋')}
+    ${_viewBtn('list','List','📊')}
+  </div>`;
+
+  html+=`<div id="mysched-grid-section" style="display:${_curView==='list'?'none':'block'}"><div class="card" style="margin-bottom:12px">
     <div class="card-title">${monthLabel}</div>
     <div class="cal-grid" style="margin-bottom:4px">${DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('')}</div>
     <div class="cal-grid">`;
@@ -11797,8 +11816,9 @@ function renderMySched(){
     const isSB=S.vacations.some(v=>v.physId===p.id&&v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
     html+=`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${isSB?' sold-back':''}" style="min-height:58px"><div class="cal-num">${c.day}</div>${evs}</div>`;
   });
-  html+=`</div></div>`;
+  html+=`</div></div></div>`;  // close mysched-grid-section
 
+  html += `<div id="mysched-list-section" style="display:${_curView==='grid'?'none':'block'}">`;
   const allEvts=[
     ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:[s.sub||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tb'})),
     ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
@@ -11811,7 +11831,29 @@ function renderMySched(){
     html+=allEvts.map(a=>`<tr><td>${a.date}</td><td><span class="tag ${a.col}">${a.type}</span></td><td>${a.site}</td><td>${a.detail}</td></tr>`).join('');
     html+='</tbody></table></div></div>';
   } else html+='<div class="note ni">No shifts assigned for '+monthLabel+'.</div>';
+  html += `</div>`;  // close mysched-list-section
   document.getElementById('my-content').innerHTML=html;
+}
+
+// Persist + apply the My-Schedule view toggle (Grid | Both | List).
+// Doesn't re-fetch — just flips the two sections' display. Re-renders
+// the next time My Schedule is opened (button styling rebinds).
+function mySchedSetView(v){
+  if(v !== 'grid' && v !== 'list' && v !== 'both') v = 'both';
+  try{ localStorage.setItem('rs.mysched.view', v); }catch(_){}
+  const grid = document.getElementById('mysched-grid-section');
+  const list = document.getElementById('mysched-list-section');
+  if(grid) grid.style.display = (v === 'list') ? 'none' : 'block';
+  if(list) list.style.display = (v === 'grid') ? 'none' : 'block';
+  // Rebind button styles inline (avoids a full re-render which would
+  // wipe any scroll position).
+  document.querySelectorAll('button[data-msview]').forEach(b => {
+    const on = b.getAttribute('data-msview') === v;
+    b.style.fontWeight = on ? '700' : '500';
+    b.style.background = on ? 'var(--blue-bg)' : 'var(--bg3)';
+    b.style.color      = on ? 'var(--blue-t)'  : 'var(--txt2)';
+    b.style.border     = '1px solid ' + (on ? 'var(--blue-t)' : 'var(--bdr)');
+  });
 }
 
 /* @JS_RENDER_MY_SCHED_END */
