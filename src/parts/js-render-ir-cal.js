@@ -67,7 +67,9 @@ function renderIRCal(){
   if(focusEl && focusEl.value !== ircFocus) focusEl.value = ircFocus;
   if(ircView === 'day')       _renderIRCalDayView(ircFocus,  _matchIRCall, _matchIRShift, view);
   else if(ircView === 'week') _renderIRCalWeekView(ircFocus, _matchIRCall, _matchIRShift, view);
-  else if(ircView === 'list') _renderIRCalListView(ym,       _matchIRCall, _matchIRShift, view);
+  // List is scoped to the focus WEEK so it stays short. Step ‹ ›
+  // moves by week (see ircStepFocus).
+  else if(ircView === 'list') _renderIRCalListView(ircFocus, _matchIRCall, _matchIRShift, view);
   // Month view always populates (the existing render runs below).
 
   const vm=vacMap();
@@ -410,36 +412,52 @@ function _renderIRCalWeekView(focusISO, matchCall, matchShift, view){
   el.innerHTML = html;
 }
 
-function _renderIRCalListView(ym, matchCall, matchShift, view){
+function _renderIRCalListView(focusISO, matchCall, matchShift, view){
   const el = document.getElementById('irc-list-section');
   if(!el) return;
+  // Scope to focus week (Sun → Sat) so list never balloons.
+  const d = parseDateLocal(focusISO);
+  const dow = d.getDay();
+  const sunISO = addDays(focusISO, -dow);
+  const satISO = addDays(sunISO, 6);
+  const wkLabel = `${parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'})} – ${parseDateLocal(satISO).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'})}`;
   const rows = [];
   if(view==='both'||view==='shifts'){
     (S.irShifts || []).forEach(s => {
-      if(s.date && s.date.startsWith(ym) && matchShift(s)){
+      if(s.date && s.date >= sunISO && s.date <= satISO && matchShift(s)){
         rows.push({ kind:'IR shift', date:s.date, shift:s.shift||'', physId:s.physId, site:s.site||'', sub:s.sub||'', slot:s.slotLabel||'', notes:s.notes||'', sortKey:s.date+'A' });
       }
     });
   }
   if(view==='both'||view==='call'){
     (S.irCalls || []).forEach(c => {
-      if(c.date && c.date.startsWith(ym) && matchCall(c)){
-        rows.push({ kind:`IR ${c.callType||'daily'} call`, date:c.date, shift:'', physId:c.physId, site:c.site||'', sub:c.irGroup||'', slot:'', notes:c.notes||'', sortKey:c.date+'B' });
-      }
+      // Daily calls include only c.date itself; weekend calls span Fri→Mon
+      // (c.date through +3). Filter to whether ANY day in the week is
+      // covered by the call.
+      if(!matchCall(c)) return;
+      let touches = false;
+      if(c.callType === 'daily'){
+        if(c.date >= sunISO && c.date <= satISO) touches = true;
+      } else if(c.callType === 'weekend'){
+        const cEnd = addDays(c.date, 3);
+        if(!(cEnd < sunISO || c.date > satISO)) touches = true;
+      } else if(c.date >= sunISO && c.date <= satISO) touches = true;
+      if(!touches) return;
+      rows.push({ kind:`IR ${c.callType||'daily'} call`, date:c.date, shift:'', physId:c.physId, site:c.site||'', sub:c.irGroup||'', slot:'', notes:c.notes||'', sortKey:c.date+'B' });
     });
   }
   rows.sort((a,b) => a.sortKey.localeCompare(b.sortKey));
   if(!rows.length){
-    el.innerHTML = '<div class="note ni">No IR assignments match the current filters for this month.</div>';
+    el.innerHTML = `<div class="card"><div class="card-title">IR Assignments — Week of ${escHtml(wkLabel)}</div><div class="note ni">No IR assignments match the current filters for this week. Step ‹ › to browse other weeks.</div></div>`;
     return;
   }
-  let html = '<div class="card"><div class="card-title">All IR Assignments — ' + escHtml(ym) + '</div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Kind</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Group/Sub</th><th>Slot</th><th>Notes</th></tr></thead><tbody>';
+  let html = `<div class="card"><div class="card-title">IR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Kind</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Group/Sub</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
   rows.forEach(r => {
     const p = _physById(r.physId);
     const pn = p ? `${p.last}, ${p.first}` : `Phys#${r.physId}`;
-    const dow = parseDateLocal(r.date).toLocaleString('default', {weekday:'short'});
+    const dowName = parseDateLocal(r.date).toLocaleString('default', {weekday:'short'});
     const cls = r.shift==='1st'?'tb':r.shift==='2nd'?'tg':r.shift==='3rd'?'ta':r.kind.includes('call')?'tt':'tpk';
-    html += `<tr><td>${escHtml(r.date)}</td><td>${escHtml(dow)}</td><td>${escHtml(r.kind)}</td><td>${r.shift?'<span class="tag '+cls+'">'+escHtml(r.shift)+'</span>':''}</td><td>${escHtml(pn)}</td><td>${escHtml(r.site)}</td><td>${escHtml(r.sub)}</td><td>${escHtml(r.slot)}</td><td style="color:var(--txt2);font-size:11px">${escHtml(r.notes)}</td></tr>`;
+    html += `<tr><td>${escHtml(r.date)}</td><td>${escHtml(dowName)}</td><td>${escHtml(r.kind)}</td><td>${r.shift?'<span class="tag '+cls+'">'+escHtml(r.shift)+'</span>':''}</td><td>${escHtml(pn)}</td><td>${escHtml(r.site)}</td><td>${escHtml(r.sub)}</td><td>${escHtml(r.slot)}</td><td style="color:var(--txt2);font-size:11px">${escHtml(r.notes)}</td></tr>`;
   });
   html += '</tbody></table></div></div>';
   el.innerHTML = html;
@@ -463,8 +481,9 @@ function ircStepFocus(step){
   if(step === 0){ ircSetFocus(fmtDate(new Date())); return; }
   const cur = (function(){ let v=''; try{v=localStorage.getItem('rs.irc.focusDate')||''}catch(_){} return v || fmtDate(new Date()); })();
   let next = cur;
-  if(view === 'day')       next = addDays(cur, step);
-  else if(view === 'week') next = addDays(cur, 7 * step);
+  if(view === 'day')        next = addDays(cur, step);
+  else if(view === 'week')  next = addDays(cur, 7 * step);
+  else if(view === 'list')  next = addDays(cur, 7 * step);   // list is week-scoped → step by week
   else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
   ircSetFocus(next);
 }

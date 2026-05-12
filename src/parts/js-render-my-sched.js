@@ -237,20 +237,27 @@ function renderMySched(){
   });
   html+=`</div></div></div>`;  // close mysched-grid-section
 
-  // LIST view
+  // LIST view — scoped to focus week (Sun → Sat) so it stays short.
+  // Step ‹ › advances by week when in list mode (mySchedStepFocus
+  // handles that).
   html += `<div id="mysched-list-section" style="display:${_curView==='list'?'block':'none'}">`;
+  const _listFocusDow = parseDateLocal(_focusISO).getDay();
+  const _listSunISO = addDays(_focusISO, -_listFocusDow);
+  const _listSatISO = addDays(_listSunISO, 6);
+  const _listWkLabel = `${parseDateLocal(_listSunISO).toLocaleString('default',{month:'short',day:'numeric'})} – ${parseDateLocal(_listSatISO).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'})}`;
+  const _wkRange = ds => ds >= _listSunISO && ds <= _listSatISO;
   const allEvts=[
-    ...shifts.filter(s=>s.shift!=='Home').map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:[s.sub||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tb'})),
-    ...wk.map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
-    ...ir.map(i=>({date:i.date,type:'IR '+i.callType+(i.callType==='weekend'?' (Fri→Mon)':''),site:i.site,detail:i.irGroup||'—',col:'tt'})),
-    ...irSh.map(s=>({date:s.date,type:'IR '+(s.shift==='1st'?'Day':s.shift)+' Shift',site:s.site,detail:[s.sub||s.irGroup||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tt'})),
-    ...hols.map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
+    ...(S.drShifts||[]).filter(s => s.physId===p.id && _wkRange(s.date) && s.shift!=='Home' && !s.autoHome).map(s=>({date:s.date,type:s.shift+' Shift',site:s.site,detail:[s.sub||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tb'})),
+    ...(S.weekendCalls||[]).filter(w => w.physId===p.id && (_wkRange(w.satDate||'') || _wkRange(w.sunDate||''))).map(w=>({date:w.satDate||w.date,type:'Weekend Call',site:w.site,detail:w.sub||'—',col:'tg'})),
+    ...(S.irCalls||[]).filter(i => i.physId===p.id && _wkRange(i.date) && !_isHolidaySyncedCall(i)).map(i=>({date:i.date,type:'IR '+i.callType+(i.callType==='weekend'?' (Fri→Mon)':''),site:i.site,detail:i.irGroup||'—',col:'tt'})),
+    ...(S.irShifts||[]).filter(s => s.physId===p.id && _wkRange(s.date)).map(s=>({date:s.date,type:'IR '+(s.shift==='1st'?'Day':s.shift)+' Shift',site:s.site,detail:[s.sub||s.irGroup||'—',s.slotLabel?'🏷 '+s.slotLabel:''].filter(Boolean).join(' · '),col:'tt'})),
+    ...(S.holidays||[]).filter(h => h.physId===p.id && _wkRange(h.date)).map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
-    html+='<div class="card"><div class="card-title">All Assignments</div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>';
+    html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${allEvts.length} item${allEvts.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>`;
     html+=allEvts.map(a=>`<tr><td>${a.date}</td><td><span class="tag ${a.col}">${a.type}</span></td><td>${a.site}</td><td>${a.detail}</td></tr>`).join('');
     html+='</tbody></table></div></div>';
-  } else html+='<div class="note ni">No shifts assigned for '+monthLabel+'.</div>';
+  } else html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)}</div><div class="note ni">No shifts assigned this week. Step ‹ › to browse other weeks.</div></div>`;
   html += `</div>`;  // close mysched-list-section
   document.getElementById('my-content').innerHTML=html;
 }
@@ -418,10 +425,12 @@ function mySchedStepFocus(step){
   let next = cur;
   if(view === 'day'){
     next = addDays(cur, step);
-  } else if(view === 'week'){
+  } else if(view === 'week' || view === 'list'){
+    // List view is week-scoped (per user feedback — full-month list was
+    // too long), so step by week too.
     next = addDays(cur, 7 * step);
   } else {
-    // month/list: advance by a month
+    // month: advance by a month
     const d = parseDateLocal(cur);
     d.setMonth(d.getMonth() + step);
     next = fmtDate(d);

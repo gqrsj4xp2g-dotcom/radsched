@@ -86,7 +86,9 @@ function renderDRCal(){
   } else if(drcView === 'week'){
     _renderDRCalWeekView(drcFocus, _matchDRShift);
   } else if(drcView === 'list'){
-    _renderDRCalListView(ym, _matchDRShift);
+    // List is scoped to the focus week (Sun–Sat) so it's never a
+    // 200+ row dump. Step by week (handled in drcStepFocus).
+    _renderDRCalListView(drcFocus, _matchDRShift);
   }
   // Month view always populates so switching to it is instant — the
   // existing rendering below runs unconditionally.
@@ -257,23 +259,30 @@ function _renderDRCalWeekView(focusISO, match){
   el.innerHTML = html;
 }
 
-function _renderDRCalListView(ym, match){
+function _renderDRCalListView(focusISO, match){
   const el = document.getElementById('drc-list-section');
   if(!el) return;
+  // Scope to focus week (Sun → Sat). Step by week using ‹ › so the
+  // list never balloons into a full-month dump.
+  const d = parseDateLocal(focusISO);
+  const dow = d.getDay();
+  const sunISO = addDays(focusISO, -dow);
+  const satISO = addDays(sunISO, 6);
+  const wkLabel = `${parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'})} – ${parseDateLocal(satISO).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'})}`;
   const rows = (S.drShifts || [])
-    .filter(s => s.date && s.date.startsWith(ym) && match(s))
+    .filter(s => s.date && s.date >= sunISO && s.date <= satISO && match(s))
     .sort((a,b) => a.date.localeCompare(b.date) || (a.shift||'').localeCompare(b.shift||''));
   if(!rows.length){
-    el.innerHTML = '<div class="note ni">No DR assignments match the current filters for this month.</div>';
+    el.innerHTML = `<div class="card"><div class="card-title">DR Assignments — Week of ${escHtml(wkLabel)}</div><div class="note ni">No DR assignments match the current filters for this week. Step ‹ › to browse other weeks.</div></div>`;
     return;
   }
-  let html = '<div class="card"><div class="card-title">All DR Assignments — ' + escHtml(ym) + '</div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Subspecialty</th><th>Slot</th><th>Notes</th></tr></thead><tbody>';
+  let html = `<div class="card"><div class="card-title">DR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Subspecialty</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
   rows.forEach(s => {
     const p = _physById(s.physId);
     const pn = p ? `${p.last}, ${p.first}` : `Phys#${s.physId}`;
-    const dow = parseDateLocal(s.date).toLocaleString('default', {weekday:'short'});
+    const dowName = parseDateLocal(s.date).toLocaleString('default', {weekday:'short'});
     const cls = s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
-    html += `<tr><td>${escHtml(s.date)}</td><td>${escHtml(dow)}</td><td><span class="tag ${cls}">${escHtml(s.shift||'')}</span></td><td>${escHtml(pn)}</td><td>${escHtml(s.site||'')}</td><td>${escHtml(s.sub||'')}</td><td>${escHtml(s.slotLabel||'')}</td><td style="color:var(--txt2);font-size:11px">${escHtml(s.notes||'')}</td></tr>`;
+    html += `<tr><td>${escHtml(s.date)}</td><td>${escHtml(dowName)}</td><td><span class="tag ${cls}">${escHtml(s.shift||'')}</span></td><td>${escHtml(pn)}</td><td>${escHtml(s.site||'')}</td><td>${escHtml(s.sub||'')}</td><td>${escHtml(s.slotLabel||'')}</td><td style="color:var(--txt2);font-size:11px">${escHtml(s.notes||'')}</td></tr>`;
   });
   html += '</tbody></table></div></div>';
   el.innerHTML = html;
@@ -297,8 +306,9 @@ function drcStepFocus(step){
   if(step === 0){ drcSetFocus(fmtDate(new Date())); return; }
   const cur = (function(){ let v=''; try{v=localStorage.getItem('rs.drc.focusDate')||''}catch(_){} return v || fmtDate(new Date()); })();
   let next = cur;
-  if(view === 'day')       next = addDays(cur, step);
-  else if(view === 'week') next = addDays(cur, 7 * step);
+  if(view === 'day')        next = addDays(cur, step);
+  else if(view === 'week')  next = addDays(cur, 7 * step);
+  else if(view === 'list')  next = addDays(cur, 7 * step);   // list is week-scoped → step by week
   else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
   drcSetFocus(next);
 }
