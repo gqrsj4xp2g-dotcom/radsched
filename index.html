@@ -15386,11 +15386,15 @@ function renderCalendarSync(){
     const d=new Date(); d.setMonth(d.getMonth()+2); d.setDate(0);
     endEl.value = fmtDate(d);
   }
-  // Show existing feed URL if user already generated one
+  // Surface the live URL on tab open if the user previously generated
+  // one (presence of calFeedToken on USERS row, even though the new
+  // URL doesn't actually depend on the token). Async because the
+  // HMAC-sign step is async.
   const u = USERS.find(x=>x.id===CU?.id);
   const feedEl=document.getElementById('cs-feed-url');
   if(feedEl && u?.calFeedToken){
-    feedEl.value = _calendarFeedUrlFor(u.calFeedToken);
+    feedEl.value = '⏳ Loading…';
+    _calendarFeedUrlFor(u.calFeedToken).then(url => { if(feedEl) feedEl.value = url || ''; });
   }
 }
 
