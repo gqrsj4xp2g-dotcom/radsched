@@ -15126,8 +15126,8 @@ function renderCommuteMatrix(){
   // Missing address warnings
   const noAddrP=physicians.filter(p=>!p.address?.trim());
   const noAddrS=S.sites.filter(s=>!s.address?.trim()&&s.name!=='At Home / Remote');
-  if(noAddrP.length) html+=`<div class="note nw" style="font-size:12px">${noAddrP.length} physician(s) have no address: ${noAddrP.map(p=>p.last).join(', ')}. Edit in Physician Roster.</div>`;
-  if(noAddrS.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrS.length} hospital(s) have no address: ${noAddrS.map(s=>s.name).join(', ')}. Edit in Settings \u2192 Hospital Sites.</div>`;
+  if(noAddrP.length) html+=`<div class="note nw" style="font-size:12px">${noAddrP.length} physician(s) have no address: ${noAddrP.map(p=>escHtml(p.last||'')).join(', ')}. Edit in Physician Roster.</div>`;
+  if(noAddrS.length) html+=`<div class="note nw" style="font-size:12px;margin-top:4px">${noAddrS.length} hospital(s) have no address: ${noAddrS.map(s=>escHtml(s.name||'')).join(', ')}. Edit in Settings \u2192 Hospital Sites.</div>`;
 
   const lastCalc=[...new Set(Object.values(dt).map(d=>d.updated).filter(Boolean))].sort().pop();
   const lastTraffic=[...new Set(Object.values(dt).flatMap(d=>Object.values(d.byShift||{}).map(v=>v.updated||'')))].filter(Boolean).sort().pop();
