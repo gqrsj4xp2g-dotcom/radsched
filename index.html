@@ -29191,6 +29191,44 @@ const _SANITY_CHECKS = [
       return {status:'fail', count: bad.length, detail: `Invalid shift cap(s): ${bad.join(', ')}. Auto-assign will refuse to run.`};
     }
   },
+  // J: physician assigned to a shift on a date they're on vacation.
+  // Auto-assign would have refused, but a manual add or a partial
+  // revert can produce this — admins typically don't notice until
+  // day-of. Catching it preemptively saves a coverage scramble.
+  { id:'shift-vacation-conflict', name:'No shift on a vacation day', fn: () => {
+      const conflicts = [];
+      const arrs = [
+        ['DR',           S.drShifts,       s => s.date],
+        ['IR',           S.irShifts,       s => s.date],
+        ['IR call',      S.irCalls,        c => c.date],   // weekend-call tail covered by raw date
+        ['Weekend call', S.weekendCalls,   w => w.satDate || w.sunDate || w.date],
+        ['Holiday',      S.holidays,       h => h.date],
+      ];
+      for(const v of (S.vacations || [])){
+        if(!v.physId || !v.start || !v.end) continue;
+        for(const [label, arr, getDate] of arrs){
+          for(const s of (arr || [])){
+            if(s.physId !== v.physId) continue;
+            const d = getDate(s);
+            if(d && d >= v.start && d <= v.end){
+              conflicts.push(`${label} on ${d} for phys=${v.physId}`);
+              if(conflicts.length >= 50) break;  // cap detail string size
+            }
+          }
+          if(conflicts.length >= 50) break;
+        }
+        if(conflicts.length >= 50) break;
+      }
+      if(!conflicts.length) return {status:'ok'};
+      return {
+        status:'fail',
+        count: conflicts.length,
+        detail: `${conflicts.length} shift(s)/call(s) overlap a vacation. First: ${conflicts[0]}${conflicts.length>1?` (+${conflicts.length-1} more)`:''}.`,
+        // No auto-fix — admin must decide whether to cancel the
+        // vacation or reassign the shift. Surfacing only.
+      };
+    }
+  },
 ];
 
 function runSanityCheck(){
