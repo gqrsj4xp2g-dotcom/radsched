@@ -16071,9 +16071,18 @@ async function generateCalendarFeedUrl(){
     if(typeof triggerSave === 'function') triggerSave();
     if(feedEl) feedEl.value = url;
     if(status){
-      status.textContent = '✓ Subscription URL generated. Copy it and add to your calendar app.';
-      status.style.color = 'var(--green-t)';
-      setTimeout(()=>{if(status.textContent.startsWith('✓')) status.textContent='';}, 6000);
+      // Surface a warning if the URL is approaching the practical
+      // max URL length (~2000 chars) — some legacy iOS/Outlook
+      // subscribe paths truncate longer URLs. Currently the encoded
+      // URL at ~200 phys runs ~900-1100 chars, well within margin.
+      if(url.length > 1800){
+        status.textContent = `⚠ Subscription URL is long (${url.length} chars) — some older calendar clients may truncate it. Test before sharing.`;
+        status.style.color = 'var(--amber-t,#d97706)';
+      } else {
+        status.textContent = '✓ Subscription URL generated. Copy it and add to your calendar app.';
+        status.style.color = 'var(--green-t)';
+      }
+      setTimeout(()=>{if(status.textContent.startsWith('✓')||status.textContent.startsWith('⚠')) status.textContent='';}, 7000);
     }
   }catch(e){
     if(feedEl) feedEl.value = '';
