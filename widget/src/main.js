@@ -417,7 +417,19 @@ function createTray(){
 ipcMain.handle('rs:get-pairing', () => loadPairing());
 ipcMain.handle('rs:save-pairing', (_, code) => { savePairing(code); return true; });
 ipcMain.handle('rs:clear-pairing', () => { clearPairing(); return true; });
-ipcMain.handle('rs:open-external', (_, url) => shell.openExternal(url));
+ipcMain.handle('rs:open-external', (_, url) => {
+  // Defense in depth: only allow http(s) URLs. Without this, a future
+  // renderer-side bug that funneled user-controlled text into
+  // openExternal would happily hand `file:///`, `javascript:`, or
+  // `data:` URLs to the user's default browser. Hardcoded callers are
+  // already https; this guard catches future regressions.
+  if(typeof url !== 'string' || !/^https?:\/\//i.test(url)){
+    console.warn('[security] refusing openExternal for non-http(s) URL:', url);
+    return false;
+  }
+  shell.openExternal(url);
+  return true;
+});
 // Read the OS clipboard for the auto-pair flow on first launch.
 ipcMain.handle('rs:read-clipboard', () => {
   try{ return clipboard.readText(); } catch(_){ return ''; }

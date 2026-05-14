@@ -61,7 +61,24 @@ function jsonResp(body: unknown, status = 200): Response {
   });
 }
 
-async function verifyAndDecode(code: string): Promise<any> {
+// `purpose` differentiates two issuing flows that share the same
+// HMAC envelope: 'widget' (read+write — credits) vs 'cal-feed'
+// (read-only — ICS). The verifier enforces that the caller's
+// requested action matches the code's purpose, so a leaked
+// cal-feed URL CAN'T be pasted into the widget to add credits,
+// and a leaked widget pairing CAN'T be turned into an ICS URL
+// (which would otherwise leak read access for 30+ days even if
+// the admin revokes the widget pairing).
+//
+// Backward compat: codes issued before the kind discriminator
+// landed have neither `kind` nor `purpose` and default to
+// 'widget' so existing pairings keep working.
+function payloadPurpose(payload: any): 'widget' | 'cal-feed' {
+  if (payload?.kind === 'cal-feed' || payload?.purpose === 'cal-feed') return 'cal-feed';
+  return 'widget';
+}
+
+async function verifyAndDecode(code: string, requiredPurpose: 'widget' | 'cal-feed' | 'any'): Promise<any> {
   if (!code || typeof code !== 'string') throw new Error('missing code');
   let payload: any;
   try { payload = JSON.parse(fromB64Url(code.trim())); }
@@ -74,6 +91,10 @@ async function verifyAndDecode(code: string): Promise<any> {
   if (expected !== sig) throw new Error('signature mismatch');
   if (payload.exp && new Date(payload.exp).getTime() < Date.now()) {
     throw new Error('pairing expired');
+  }
+  const actual = payloadPurpose(payload);
+  if (requiredPurpose !== 'any' && actual !== requiredPurpose) {
+    throw new Error(`token purpose mismatch (got '${actual}', need '${requiredPurpose}')`);
   }
   return payload;
 }
@@ -254,7 +275,11 @@ Deno.serve(async (req: Request) => {
       return new Response('Use POST for read/write actions; GET only supports action=ics.', { status: 405, headers: CORS });
     }
     let payload: any;
-    try { payload = await verifyAndDecode(code); }
+    // ICS GET path: only accept tokens issued for cal-feed purpose
+    // (or legacy untyped tokens — backwards compat). Reject widget
+    // pairing codes here so a leaked widget pairing can't be reused
+    // as an ICS URL.
+    try { payload = await verifyAndDecode(code, 'cal-feed'); }
     catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const sb = createClient(SB_URL, SVC_KEY);
     const { data, error } = await sb
@@ -284,7 +309,11 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); }
   catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
   let payload: any;
-  try { payload = await verifyAndDecode(body.code); }
+  // POST path: widget operations (read practice / add+edit+delete
+  // credit). Only accept widget-purpose or legacy untyped tokens.
+  // Reject cal-feed tokens here so a leaked ICS URL can't be used
+  // to mutate physician credits.
+  try { payload = await verifyAndDecode(body.code, 'widget'); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   const sb = createClient(SB_URL, SVC_KEY);
   const action = body.action || 'read';

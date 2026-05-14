@@ -596,6 +596,15 @@ async function onPairSubmit(){
     errEl.textContent = 'This code expired ' + payload.exp.slice(0,10) + '. Request a new one.';
     return;
   }
+  // Defense in depth: a calendar-feed URL is HMAC-equivalent to a
+  // widget pairing (same envelope + key), but it grants read-only
+  // ICS access — NOT widget write access. Reject so a leaked cal-
+  // feed code can't be re-used to pair a widget (which would grant
+  // add/edit/delete-credit on the physician's behalf).
+  if(payload.kind === 'cal-feed' || payload.purpose === 'cal-feed'){
+    errEl.textContent = 'This is a calendar-feed URL, not a widget pairing code. Ask your admin for a pairing code.';
+    return;
+  }
   await window.rsWidget.savePairing(code);
   await refresh();
 }
