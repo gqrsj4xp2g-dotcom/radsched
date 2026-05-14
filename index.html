@@ -35688,6 +35688,23 @@ function openCommandPalette(){
       }
     });
   });
+  // Curated admin actions — bring the day's diagnostic & power-user
+  // tools one keystroke away. Admin-gated where relevant.
+  const _actions = [
+    { admin:true,  name:'Run sanity check',           icon:'🧪', sub:'Tools → Logs & ops', run:() => { nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops'); setTimeout(() => { if(typeof runSanityCheck==='function') runSanityCheck(); }, 80); } },
+    { admin:true,  name:'Performance monitor',        icon:'📈', sub:'Live render+payload',  run:() => { nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops'); setTimeout(() => { if(typeof openPerfMon==='function') openPerfMon(); }, 80); } },
+    { admin:true,  name:'Year-end rollover wizard',   icon:'🎆', sub:'Roll holidays forward', run:() => { nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'reports'); setTimeout(() => document.getElementById('yr-target')?.scrollIntoView({behavior:'smooth', block:'center'}), 150); } },
+    { admin:true,  name:'Generate widget pairing',    icon:'🔑', sub:'Pair desktop widget',  run:() => nav('widget', document.querySelector('.snav-item[data-pg="widget"]')) },
+    { admin:true,  name:'Force save now',             icon:'💾', sub:'Push to Supabase',     run:() => { if(typeof _pushToSupabase === 'function') _pushToSupabase(); if(typeof _toast==='function') _toast('Save triggered','ok'); } },
+    { admin:false, name:'Subscribe to calendar',      icon:'📅', sub:'iCal / Google Cal',    run:() => { nav('my-schedule', document.querySelector('.snav-item[data-pg="my-schedule"]')); setTimeout(() => { const el=document.querySelector('[onclick*="mySchedTab(\'sync\'"]'); if(el) el.click(); }, 120); } },
+    { admin:false, name:'My Schedule — Day view',     icon:'🗓', sub:'Today',                run:() => { nav('my-schedule', document.querySelector('.snav-item[data-pg="my-schedule"]')); setTimeout(() => mySchedSetView?.('day'), 80); } },
+    { admin:false, name:'My Schedule — Week view',    icon:'📆', sub:'This week',            run:() => { nav('my-schedule', document.querySelector('.snav-item[data-pg="my-schedule"]')); setTimeout(() => mySchedSetView?.('week'), 80); } },
+    { admin:false, name:'Sign out',                   icon:'🚪', sub:'End session',          run:() => { if(typeof doLogout === 'function') doLogout(); } },
+  ];
+  _actions.forEach(a => {
+    if(a.admin && !isAdm) return;
+    items.push({ kind:'action', icon:a.icon, name:a.name, sub:a.sub, run:a.run });
+  });
   _cpItems = items;
   _cpFilter = '';
   _cpCursor = 0;
