@@ -9300,6 +9300,32 @@ async function doLogout(){
     clearTimeout(_ghDeployTimer); _ghDeployTimer=null;
   }
   _isSaving=false; _hasUnsavedChanges=false;
+  // A1 fix (security audit): leader-election heartbeats and the
+  // BroadcastChannel survive logout otherwise. Stale heartbeats on
+  // a per-practice channel name would race with a NEW session if the
+  // same browser logs in to a different practice next.
+  if(typeof _leaderHbTimer !== 'undefined' && _leaderHbTimer){
+    clearInterval(_leaderHbTimer); _leaderHbTimer = null;
+  }
+  if(typeof _leaderCheckTimer !== 'undefined' && _leaderCheckTimer){
+    clearInterval(_leaderCheckTimer); _leaderCheckTimer = null;
+  }
+  if(typeof _perfMonTimer !== 'undefined' && _perfMonTimer){
+    clearInterval(_perfMonTimer); _perfMonTimer = null;
+  }
+  if(typeof _bc !== 'undefined' && _bc){
+    try{ _bc.close(); }catch(_){}
+    _bc = null;
+  }
+  if(typeof _knownTabs !== 'undefined' && _knownTabs && _knownTabs.clear){ _knownTabs.clear(); }
+  if(typeof _isLeader !== 'undefined') _isLeader = false;
+  if(typeof _presenceChannel !== 'undefined' && _presenceChannel){
+    try{ _presenceChannel.unsubscribe(); }catch(_){}
+    _presenceChannel = null;
+  }
+  // Side-table sync snapshot is per-practice — invalidate so the
+  // next login starts fresh.
+  if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
   // Supabase auth signOut
   const sb=_initAuthClient();
   if(sb) try{ await sb.auth.signOut(); }catch(e){}
