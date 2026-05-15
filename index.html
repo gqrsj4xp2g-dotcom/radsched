@@ -18360,6 +18360,7 @@ function deleteDRShift(id){
   if(!_adminOnly('delete DR shift')) return;
   const s = S.drShifts.find(x => x.id === id);
   if(!s) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(s.date)) return;
   const snapshot = {...s};
   S.drShifts = S.drShifts.filter(x => x.id !== id);
   if(typeof _audit === 'function') _audit('drShift.delete', {id, physId:s.physId, date:s.date, site:s.site, shift:s.shift});
