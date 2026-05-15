@@ -33256,6 +33256,7 @@ function addIRCallManual(){
 function removeIRCall(id){
   if(!_adminOnly('remove IR call')) return;
   const ic = (S.irCalls||[]).find(x=>x.id===id);
+  if(ic && typeof _canEditDate==='function' && !_canEditDate(ic.date)) return;
   S.irCalls=S.irCalls.filter(x=>x.id!==id);
   if(ic && typeof _audit==='function') _audit('irCall.remove', {id, physId:ic.physId, date:ic.date, callType:ic.callType});
   triggerSave();
