@@ -27,6 +27,14 @@ function renderIRCal(){
       const o = document.createElement('option'); o.value = name; o.text = name; siteSel.appendChild(o);
     });
   }
+  // Persist IR Calendar filters so navigating away + back doesn't
+  // wipe the admin's filter selections.
+  if(typeof _rsHydrateFilter === 'function'){
+    _rsHydrateFilter(document.getElementById('irc-grp'),  'rs.irc.f.group');
+    _rsHydrateFilter(physSel,                              'rs.irc.f.phys');
+    _rsHydrateFilter(siteSel,                              'rs.irc.f.site');
+    _rsHydrateFilter(document.getElementById('irc-view'), 'rs.irc.f.view');
+  }
   // Predicates (one per record-kind, applied by the multi-view renders).
   function _matchIRCall(c){
     if(fg && c.irGroup !== fg) return false;

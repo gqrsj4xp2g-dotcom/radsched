@@ -40,6 +40,17 @@ function renderDRCal(){
       const o = document.createElement('option'); o.value = name; o.text = name; fsubSel.appendChild(o);
     });
   }
+  // Persist filter selections per-page so they survive nav-away.
+  // Without this admins lose their physician/site/sub filter every
+  // time they bounce out to fix a shift and come back. Stored in
+  // localStorage; restored once on first render after options are
+  // populated; written on every change.
+  if(typeof _rsHydrateFilter === 'function'){
+    _rsHydrateFilter(fp,       'rs.drc.f.phys');
+    _rsHydrateFilter(fsiteSel, 'rs.drc.f.site');
+    _rsHydrateFilter(fsubSel,  'rs.drc.f.sub');
+    _rsHydrateFilter(document.getElementById('drc-shift'), 'rs.drc.f.shift');
+  }
   const fpid=fp?.value?+fp.value:null;
   const fsh=document.getElementById('drc-shift')?.value||'';
   const fsite=fsiteSel?.value||'';
