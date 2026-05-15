@@ -42910,6 +42910,26 @@ function _parsePickWorkbook(rows, prev, sheetName){
   // a single date in the middle of a pickers list). Also accept SINGLE
   // dated rows IF the column they sit in is otherwise mostly empty —
   // this catches sheets with one-header-per-month layouts.
+  // Two-pass year detection: pass 1 finds explicit-year date cells
+  // to learn the file's default year; pass 2 re-parses ambiguous
+  // year-less cells ("Jan 5") using that default. This catches sheets
+  // where most headers are full dates but one or two slipped through
+  // as month-day-only.
+  let _detectedYear = 0;
+  for(const row of rows){
+    if(!row) continue;
+    for(const cell of row){
+      const iso = _xlsxDateToISO(cell);
+      if(iso){
+        const yr = +iso.slice(0,4);
+        if(yr >= 2020 && yr <= 2099){ _detectedYear = yr; break; }
+      }
+    }
+    if(_detectedYear) break;
+  }
+  // The admin's Target year input wins over file detection when set.
+  const _adminYr = +(document.getElementById('xl-pick-target-year')?.value || 0);
+  const _defaultYr = _adminYr || _detectedYear || new Date().getFullYear();
   const headerRows = [];
   // Diagnostic: track rows that LOOKED like headers but were rejected,
   // and the reason. Surfaces if we end up with zero matches so the
@@ -42920,7 +42940,7 @@ function _parsePickWorkbook(rows, prev, sheetName){
     const row = rows[r] || [];
     const datedCols = [];
     for(let c = 0; c < row.length; c++){
-      const iso = _xlsxDateToISO(row[c]);
+      const iso = _xlsxDateToISO(row[c], _defaultYr);
       if(iso) datedCols.push({col: c, date: iso});
     }
     if(datedCols.length === 0) continue;
@@ -42975,12 +42995,20 @@ function _parsePickWorkbook(rows, prev, sheetName){
     const hdr = headerRows[h];
     const startR = hdr.row + 1;
     const endR = (h + 1 < headerRows.length) ? headerRows[h + 1].row : rows.length;
-    hdr.weeks.forEach(w => {
+    hdr.weeks.forEach((w, wIdx) => {
       const mainCol = w.col;
-      // Secondary column = the next non-date-bearing column to the right.
-      // For most sheets that's mainCol+1; we walk forward to skip any
-      // accidental column gap.
-      const sideCol = mainCol + 1;
+      // Boundary: how far right does THIS week's data extend? Look at
+      // the next header's column; if there's a next date-column in the
+      // same row, that's our right edge. Otherwise we scan to row width.
+      const nextW = hdr.weeks[wIdx + 1];
+      const rightEdge = nextW ? nextW.col : (rows[hdr.row]?.length || (mainCol + 6));
+      // Build the list of columns to scan: mainCol, mainCol+1 (side),
+      // and any additional columns between sideCol and rightEdge. This
+      // catches sheets that put shifts in mainCol+2 rather than
+      // mainCol+1 (some pick sheets have a "BB" column then a "Shift"
+      // column to the right of the main pick column).
+      const scanCols = [];
+      for(let c = mainCol; c < rightEdge; c++) scanCols.push(c);
       const week = {
         weekStart: w.date,
         vacation: [],   // pick numbers like "Fisher - 1"
@@ -42992,8 +43020,20 @@ function _parsePickWorkbook(rows, prev, sheetName){
       };
       for(let r = startR; r < endR; r++){
         const row = rows[r] || [];
-        _xlsxClassifyCell(row[mainCol], week, 'main');
-        _xlsxClassifyCell(row[sideCol], week, 'side');
+        // Newline-separated cells: a single Excel cell may hold
+        // "2nd shift - Smith\n3rd shift - Jones" when admins use
+        // line breaks to fit multiple assignments in one cell.
+        // Classify each line independently.
+        scanCols.forEach((c, ci) => {
+          const v = row[c];
+          if(v == null) return;
+          const side = (c === mainCol) ? 'main' : 'side';
+          if(typeof v === 'string' && v.includes('\n')){
+            v.split(/\r?\n/).forEach(line => _xlsxClassifyCell(line, week, side));
+          } else {
+            _xlsxClassifyCell(v, week, side);
+          }
+        });
       }
       weeks.push(week);
     });
