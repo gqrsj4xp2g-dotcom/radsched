@@ -7959,8 +7959,201 @@ function _updateErrorBadge(){
   el.title = `${recent} recent error${recent===1?'':'s'} — click to view`;
 }
 
+// ── Unified modal helper ─────────────────────────────────────────
+//
+// Replaces five-plus ad-hoc modal patterns scattered through the
+// codebase (some closed on outside-click, some didn't; some had Esc
+// handlers, some didn't; backdrops varied between rgba(0,0,0,.45)
+// and rgba(15,23,42,.85); none had focus traps). _modalOpen mounts
+// a single shared overlay with consistent backdrop, Esc-to-close,
+// outside-click-to-close, focus trap, and focus restore on close.
+//
+// Usage:
+//   _modalOpen({
+//     title: 'Confirm delete',
+//     body:  'This removes the physician permanently.',  // string OR HTML element OR HTML string with `bodyHtml:true`
+//     bodyHtml: false,         // when true, body is treated as raw HTML
+//     actions: [
+//       { label:'Cancel', kind:'ghost' },                // closes; no callback
+//       { label:'Delete', kind:'danger', run:() => {…} } // runs then closes
+//     ],
+//     width: '480px',          // optional; defaults to 480
+//     onClose: () => {…},      // optional, fired after teardown
+//   });
+//
+// Returns the modal element (mostly for testing). Each open replaces
+// the previous one (no stacking — one modal on screen at a time).
+let _modalActive = null;
+let _modalLastFocus = null;
+let _modalKeyHandler = null;
+
+function _modalOpen(opts){
+  opts = opts || {};
+  // Tear down any previous modal (no stacking).
+  _modalClose();
+  _modalLastFocus = document.activeElement;
+  const overlay = document.createElement('div');
+  overlay.className = 'rs-modal-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  if(opts.title) overlay.setAttribute('aria-label', opts.title);
+  Object.assign(overlay.style, {
+    position:'fixed', inset:'0', zIndex:'9500',
+    background:'rgba(15,23,42,0.55)', backdropFilter:'blur(2px)',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    padding:'5vh 4vw',
+  });
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    background:'var(--bg2)', border:'1px solid var(--bdr)', borderRadius:'10px',
+    boxShadow:'0 20px 60px rgba(0,0,0,0.4)', maxWidth: opts.width || '480px',
+    width:'100%', maxHeight:'90vh', overflow:'hidden',
+    display:'flex', flexDirection:'column', font:'inherit',
+  });
+  // Title bar
+  if(opts.title){
+    const head = document.createElement('div');
+    Object.assign(head.style, {
+      padding:'14px 18px', borderBottom:'1px solid var(--bdr)',
+      display:'flex', justifyContent:'space-between', alignItems:'center',
+      flexShrink:'0', font:'inherit',
+    });
+    const titleEl = document.createElement('div');
+    titleEl.textContent = opts.title;
+    Object.assign(titleEl.style, { fontSize:'14px', fontWeight:'700', color:'var(--ink)' });
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.setAttribute('aria-label', 'Close');
+    Object.assign(closeBtn.style, {
+      background:'transparent', border:'none', color:'var(--rs-ink-3)',
+      fontSize:'18px', lineHeight:'1', cursor:'pointer', padding:'4px 8px',
+    });
+    closeBtn.onclick = () => _modalClose();
+    head.appendChild(titleEl);
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+  }
+  // Body
+  const bodyHost = document.createElement('div');
+  Object.assign(bodyHost.style, { padding:'16px 18px', overflowY:'auto', flex:'1', font:'inherit', color:'var(--ink)' });
+  if(opts.body instanceof HTMLElement){
+    bodyHost.appendChild(opts.body);
+  } else if(opts.bodyHtml){
+    bodyHost.innerHTML = opts.body || '';
+  } else {
+    // Plain text — preserve newlines, escape HTML.
+    const txt = String(opts.body == null ? '' : opts.body);
+    bodyHost.textContent = txt;
+    bodyHost.style.whiteSpace = 'pre-wrap';
+    bodyHost.style.fontSize = '13px';
+    bodyHost.style.lineHeight = '1.55';
+  }
+  card.appendChild(bodyHost);
+  // Actions
+  if(Array.isArray(opts.actions) && opts.actions.length){
+    const foot = document.createElement('div');
+    Object.assign(foot.style, {
+      padding:'12px 18px', borderTop:'1px solid var(--bdr)',
+      display:'flex', justifyContent:'flex-end', gap:'8px', flexShrink:'0',
+    });
+    opts.actions.forEach((a, i) => {
+      const b = document.createElement('button');
+      b.textContent = a.label || (a.kind === 'danger' ? 'Delete' : 'OK');
+      b.className = 'tb-btn';
+      // Style by kind.
+      if(a.kind === 'danger'){
+        Object.assign(b.style, { background:'var(--red,#dc2626)', color:'#fff', border:'none', padding:'8px 14px' });
+      } else if(a.kind === 'primary' || (i === opts.actions.length - 1 && a.kind !== 'ghost')){
+        Object.assign(b.style, { background:'var(--blue,#2563eb)', color:'#fff', border:'none', padding:'8px 14px', fontWeight:'600' });
+      } else {
+        Object.assign(b.style, { padding:'8px 14px' });
+      }
+      b.onclick = async () => {
+        try{ if(typeof a.run === 'function') await a.run(); }
+        catch(e){ console.warn('[_modalOpen] action threw:', e); }
+        if(a.keepOpen !== true) _modalClose();
+      };
+      foot.appendChild(b);
+    });
+    card.appendChild(foot);
+  }
+  overlay.appendChild(card);
+  // Outside-click to close.
+  overlay.addEventListener('mousedown', (e) => { if(e.target === overlay) _modalClose(); });
+  document.body.appendChild(overlay);
+  _modalActive = { overlay, card, onClose: opts.onClose };
+  // Focus management. Find the first focusable inside the body / actions.
+  setTimeout(() => {
+    const focusable = card.querySelector('input,select,textarea,button,[tabindex]:not([tabindex="-1"])');
+    (focusable || card).focus?.();
+  }, 30);
+  // Esc + focus trap.
+  _modalKeyHandler = (ev) => {
+    if(!_modalActive) return;
+    if(ev.key === 'Escape'){ ev.preventDefault(); _modalClose(); return; }
+    if(ev.key === 'Tab'){
+      const focusables = card.querySelectorAll('button,input,select,textarea,a[href],[tabindex]:not([tabindex="-1"])');
+      if(!focusables.length) return;
+      const first = focusables[0];
+      const last  = focusables[focusables.length - 1];
+      if(ev.shiftKey && document.activeElement === first){ ev.preventDefault(); last.focus(); }
+      else if(!ev.shiftKey && document.activeElement === last){ ev.preventDefault(); first.focus(); }
+    }
+  };
+  document.addEventListener('keydown', _modalKeyHandler, true);
+  return overlay;
+}
+
+function _modalClose(){
+  if(!_modalActive) return;
+  const { overlay, onClose } = _modalActive;
+  if(_modalKeyHandler){ document.removeEventListener('keydown', _modalKeyHandler, true); _modalKeyHandler = null; }
+  try{ overlay.parentElement?.removeChild(overlay); }catch(_){}
+  _modalActive = null;
+  if(typeof onClose === 'function'){ try{ onClose(); }catch(_){} }
+  // Restore focus to the element that opened the modal.
+  if(_modalLastFocus && typeof _modalLastFocus.focus === 'function'){
+    try{ _modalLastFocus.focus(); }catch(_){}
+    _modalLastFocus = null;
+  }
+}
+
+// Convenience wrappers — these were referenced in legacy code via
+// `if(typeof _modalAlert === 'function')` but never defined. Now they
+// route through the canonical helper.
+function _modalAlert(title, body, opts){
+  opts = opts || {};
+  return _modalOpen({
+    title, body, bodyHtml: opts.bodyHtml === true,
+    width: opts.width,
+    actions: [{ label: opts.okLabel || 'OK', kind:'primary' }],
+  });
+}
+function _modalConfirm(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    _modalOpen({
+      title: opts.title || 'Confirm',
+      body:  opts.body  || opts.message || '',
+      bodyHtml: opts.bodyHtml === true,
+      width: opts.width,
+      actions: [
+        { label: opts.cancelLabel || 'Cancel',  kind:'ghost',  run: () => resolve(false) },
+        { label: opts.okLabel     || (opts.danger ? 'Delete' : 'Confirm'),
+          kind: opts.danger ? 'danger' : 'primary',
+          run:  () => resolve(true) },
+      ],
+      onClose: () => resolve(false),  // ESC / outside click
+    });
+  });
+}
+
 function showErrorLog(){
-  if(!_errorLog.length){ alert('No recent errors logged.'); return; }
+  if(!_errorLog.length){
+    if(typeof _toast === 'function') _toast('No recent errors logged.', 'info');
+    else alert('No recent errors logged.');
+    return;
+  }
   const lines = _errorLog.slice().reverse().map(e => {
     const d = e.detail ? '\n    detail: ' + (typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail).slice(0, 300)) : '';
     const s = e.stack ? '\n    stack: ' + e.stack.split('\n').slice(0, 4).join(' | ') : '';
