@@ -41921,6 +41921,54 @@ setInterval(() => {
   try{ _updateStaleSaveBadge(); }catch(_){}
 }, 60000);
 
+// ── Filter persistence helper ────────────────────────────────────
+// Used by calendars + admin lists to remember filter selections
+// across nav-away/back. Stored per-element in localStorage. The
+// element MUST have its <option>s already populated before this is
+// called (otherwise the stored value can't be re-applied).
+//
+// Idempotent: calling it again later just re-binds the change
+// listener (multiple .onchange calls on the same element overwrite,
+// so no leak). The first call also fires onchange on the element
+// so any consumers that re-render on change get triggered with the
+// restored value.
+function _rsHydrateFilter(el, lsKey){
+  if(!el || !lsKey) return;
+  let stored = null;
+  try{ stored = localStorage.getItem(lsKey); }catch(_){}
+  // Apply stored value if it matches an existing option (otherwise
+  // skip — the option set may have changed since last persist).
+  if(stored != null && stored !== ''){
+    const hasOpt = [...el.options].some(o => o.value === stored);
+    if(hasOpt && el.value !== stored){
+      el.value = stored;
+      // Don't re-fire onchange here — the caller (e.g., renderDRCal)
+      // is in the middle of running and will read the value itself.
+    }
+  }
+  // Persist on change. We bind a fresh listener every render, but
+  // since onchange (not addEventListener) overwrites, no leak.
+  el.onchange = function(){
+    try{ localStorage.setItem(lsKey, el.value || ''); }catch(_){}
+    // Bubble the original render() call — most calendar dropdowns
+    // already have onchange="renderDRCal()" inline; that fires AFTER
+    // this assignment because the onchange attribute is preserved in
+    // the inline handler — actually NO, this property assignment
+    // REPLACES the inline attribute. So we have to manually call
+    // the inline handler. Look it up via the attribute string and
+    // eval; safer: a tiny lookup table on the element's data-onchange.
+    const inline = el.getAttribute('data-onchange') || el.dataset.onchange || '';
+    if(inline){ try{ new Function(inline).call(el); }catch(_){} }
+    else {
+      // Fallback: try a render function based on the element's id prefix.
+      const idPrefix = (el.id || '').split('-')[0];
+      const fnMap = { drc:'renderDRCal', irc:'renderIRCal', os:'renderOpenShifts', anc:'renderAnchorReport' };
+      const fnName = fnMap[idPrefix];
+      if(fnName && typeof window[fnName] === 'function'){ try{ window[fnName](); }catch(_){} }
+    }
+  };
+}
+
 // ── Tab visibility awareness ──────────────────────────────────────
 // Pollers that don't HAVE to run while the tab is backgrounded check
 // document.visibilityState before doing work. When the tab comes
