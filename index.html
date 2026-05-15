@@ -18381,6 +18381,8 @@ function deleteWkCall(id){
   if(!_adminOnly('delete weekend call')) return;
   const w = (S.weekendCalls||[]).find(x => x.id === id);
   if(!w) return;
+  const _wdate = w.satDate || w.date;
+  if(_wdate && typeof _canEditDate==='function' && !_canEditDate(_wdate)) return;
   const snapshot = {...w};
   S.weekendCalls = S.weekendCalls.filter(x => x.id !== id);
   if(typeof _audit === 'function') _audit('weekendCall.delete', {id, physId:w.physId, date:w.satDate||w.date, site:w.site});
