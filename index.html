@@ -8159,32 +8159,32 @@ function showErrorLog(){
     const s = e.stack ? '\n    stack: ' + e.stack.split('\n').slice(0, 4).join(' | ') : '';
     return `[${e.ts.replace(/T/,' ').replace(/\..+/,'')}] ${e.area}: ${e.message}${d}${s}`;
   }).join('\n\n');
-  // Show in a simple modal-ish prompt. The user can copy from there.
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px';
-  modal.innerHTML = `<div style="background:var(--bg2);border-radius:8px;max-width:min(900px,95vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4)">
-    <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:center">
-      <strong style="font-size:14px">⚠ Recent Errors (${_errorLog.length})</strong>
-      <span>
-        <button class="bt bsm" id="rs-err-copy" style="margin-right:6px">Copy</button>
-        <button class="bt bsm" id="rs-err-clear" style="margin-right:6px">Clear</button>
-        <button class="br bsm" id="rs-err-close">Close</button>
-      </span>
-    </div>
-    <pre id="rs-err-pre" style="margin:0;padding:14px 16px;overflow:auto;font:11px ui-monospace,monospace;background:var(--bg3);color:var(--txt);flex:1;white-space:pre-wrap"></pre>
-  </div>`;
-  document.body.appendChild(modal);
-  modal.querySelector('#rs-err-pre').textContent = lines;
-  modal.querySelector('#rs-err-close').onclick = () => modal.remove();
-  modal.querySelector('#rs-err-copy').onclick = () => {
-    navigator.clipboard?.writeText(lines).then(() => {
-      modal.querySelector('#rs-err-copy').textContent = 'Copied!';
-      setTimeout(() => modal.querySelector('#rs-err-copy').textContent = 'Copy', 1200);
-    });
-  };
-  modal.querySelector('#rs-err-clear').onclick = () => {
-    if(confirm('Clear the error log?')){ _errorLog = []; _errorLogVersion++; _updateErrorBadge(); modal.remove(); }
-  };
+  // Build the body element (a <pre>) instead of an HTML string —
+  // textContent on the pre handles arbitrary stack-trace content
+  // safely without an XSS surface.
+  const pre = document.createElement('pre');
+  Object.assign(pre.style, {
+    margin:'0', padding:'12px', font:'11px ui-monospace,monospace',
+    background:'var(--bg3)', color:'var(--txt)', whiteSpace:'pre-wrap',
+    borderRadius:'6px', maxHeight:'70vh', overflowY:'auto',
+  });
+  pre.textContent = lines;
+  _modalOpen({
+    title: `Developer log — ${_errorLog.length} entr${_errorLog.length===1?'y':'ies'}`,
+    body: pre,
+    width: '900px',
+    actions: [
+      { label:'Copy', kind:'ghost', keepOpen:true, run: async () => {
+        try{ await navigator.clipboard.writeText(lines); if(typeof _toast === 'function') _toast('Copied to clipboard.', 'ok'); }
+        catch(_){ if(typeof _toast === 'function') _toast('Copy failed — select + ⌘C from the dialog.', 'err'); }
+      }},
+      { label:'Clear log', kind:'ghost', run: async () => {
+        const ok = await _modalConfirm({ title:'Clear developer log?', body:'This removes all logged errors. Cannot be undone.', okLabel:'Clear', danger:true });
+        if(ok){ _errorLog = []; _errorLogVersion++; _updateErrorBadge(); if(typeof _toast === 'function') _toast('Log cleared.', 'ok'); }
+      }},
+      { label:'Close' },
+    ],
+  });
 }
 
 // Global catch-all listeners. Fire AFTER local try/catch — they're a backstop
