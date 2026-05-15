@@ -42840,6 +42840,12 @@ function _parsePickWorkbook(rows, prev, sheetName){
         end: blockEnd,
         type: vacType,
         notes: `Imported: ${label} ${e.raw}`,
+        // Carry the classifier's reason through so the preview's
+        // audit panel can show admins exactly which regex matched.
+        // This is the key to debugging "why did Smith land on 2nd
+        // shift instead of vacation?" without re-running the import.
+        sourceRaw: e.raw,
+        sourceReason: e.reason || label,
       });
     });
     if(wantVac) mkVac(w.vacation, 'pick');
@@ -42860,6 +42866,8 @@ function _parsePickWorkbook(rows, prev, sheetName){
           site: 'At Home / Remote',
           sub: '',
           notes: `Imported: ${e.raw}`,
+          sourceRaw: e.raw,
+          sourceReason: e.reason || `${shiftKind} shift`,
         });
       }
     });
