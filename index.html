@@ -16456,10 +16456,12 @@ async function _calendarFeedUrlFor(_legacyTokenIgnored){
   // with kind:'cal-feed' so future telemetry can distinguish widget
   // vs calendar usage.
   const issuedAt = new Date().toISOString();
-  // 5-year expiration. Renews on every "Generate URL" click.
-  const exp = new Date(Date.now() + 5*365*86400*1000).toISOString();
+  // 1-year expiration (calendar clients re-fetch; the URL itself is
+  // long-lived but a leaked token shouldn't be valid forever). Renews
+  // on every "Generate URL" click.
+  const exp = new Date(Date.now() + 365*86400*1000).toISOString();
   const body = {
-    v: 1, kind: 'cal-feed',
+    v: 2, kind: 'cal-feed',           // v2 — signed with practice secret, not anon key
     practiceId: (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'),
     physId: phys.id,
     physLast: phys.last || '',
@@ -16468,7 +16470,12 @@ async function _calendarFeedUrlFor(_legacyTokenIgnored){
     sbAnonKey: key,
     issuedAt, exp,
   };
-  const sig = await _hmacB64Url(key, JSON.stringify(body));
+  // Sign with the per-practice secret (NOT the public anon key). See
+  // generateWidgetPairing() for the threat-model rationale.
+  const secret = (typeof _getOrCreateWidgetSecret === 'function')
+    ? _getOrCreateWidgetSecret()
+    : key; // fallback for boot-order edge case
+  const sig = await _hmacB64Url(secret, JSON.stringify(body));
   const code = _b64url(JSON.stringify({ ...body, sig }));
   // webcal:// makes most calendar apps recognize this as a
   // subscribable feed. URL-encode the code so '+' / '/' that might
