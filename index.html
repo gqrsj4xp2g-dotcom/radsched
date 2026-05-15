@@ -89,7 +89,12 @@
   --teal:#0d9488;--teal-bg:#f0fdfa;--teal-t:#134e4a;
   --pink:#db2777;--pink-bg:#fdf2f8;
   --bg:#f5f4f0;--bg2:#fff;--bg3:#eeece8;--bg4:#e8e5df;
-  --txt:#18181b;--txt2:#52525b;--txt3:#a1a1aa;
+  /* --txt3 darkened from #a1a1aa (2.99:1) to #6b7280 (4.61:1) to
+     meet WCAG AA contrast on body text (4.5:1). Affects page subtitles,
+     metric meta labels, modal close icons, "Saved Xs ago" timestamps,
+     and ~13 other body-text uses. Low-vision and Chrome contrast
+     inspector were flagging these. */
+  --txt:#18181b;--txt2:#52525b;--txt3:#6b7280;
   --bdr:#e4e4e7;--bdr2:#d4d4d8;
   --r:6px;--rl:10px;--rxl:14px;
   --sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
@@ -36423,7 +36428,7 @@ function toggleNotificationsPanel(){
 }
 
 // Periodic dot refresh (cheap; reads existing arrays).
-setInterval(() => { try{ _updateNotifDot(); }catch(_){} }, 60000);
+setInterval(() => { if(document.visibilityState === 'hidden') return; try{ _updateNotifDot(); }catch(_){} }, 60000);
 
 // ── Empty-state renderer ─────────────────────────────────────────────────
 // Composable "no data yet" panel. Pass a target element id and a config:
@@ -39248,7 +39253,7 @@ function _injectQuickFilters(){
     page._rsQuickFilters = bar;
   });
 }
-setInterval(() => { try{ _injectQuickFilters(); }catch(_){} }, 4000);
+setInterval(() => { if(document.visibilityState === 'hidden') return; try{ _injectQuickFilters(); }catch(_){} }, 4000);
 
 // ── Hold-to-confirm destructive button ────────────────────────────────
 // Wraps any button with `data-rs-hold` so a destructive action requires
@@ -39750,7 +39755,7 @@ function _renderLastSavedAge(){
   si.style.color = 'var(--rs-ink-3)';
   si.style.fontWeight = '500';
 }
-setInterval(() => { try{ _renderLastSavedAge(); }catch(_){} }, 30000);
+setInterval(() => { if(document.visibilityState === 'hidden') return; try{ _renderLastSavedAge(); }catch(_){} }, 30000);
 
 // ── Recently-used physicians/sites/subs (LRU on dropdowns) ─────────────
 // Admins assign the same handful of people repeatedly. Tracking the last
@@ -41903,7 +41908,7 @@ if(typeof window !== 'undefined'){
   // Initial check + periodic re-check (covers cases where the events
   // fire before our listener is registered, e.g., refresh while offline).
   setTimeout(_updateNetBadge, 500);
-  setInterval(_updateNetBadge, 30000);
+  setInterval(() => { if(document.visibilityState === 'hidden') return; _updateNetBadge(); }, 30000);
 }
 
 // ── Stale-save monitor ────────────────────────────────────────────────────
