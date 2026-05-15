@@ -28303,6 +28303,10 @@ function cancelEditDRShift(){ _editingDRShiftId = null; _renderDRTable(); }
 function saveEditDRShift(id){
   if(!_adminOnly('edit DR shift')) return;
   const s = S.drShifts.find(x => x.id === id); if(!s) return;
+  // Schedule-lock: check BOTH the old date (we're mutating that row) and
+  // the new date (it's being moved INTO that month). Either being locked
+  // blocks the edit.
+  if(typeof _canEditDate==='function' && !_canEditDate(s.date)) return;
   const physEl  = document.getElementById(`dre-phys-${id}`);
   const dateEl  = document.getElementById(`dre-date-${id}`);
   const shiftEl = document.getElementById(`dre-shift-${id}`);
@@ -28310,6 +28314,7 @@ function saveEditDRShift(id){
   const subEl   = document.getElementById(`dre-sub-${id}`);
   const notesEl = document.getElementById(`dre-notes-${id}`);
   if(!dateEl?.value){ alert('Date required.'); return; }
+  if(typeof _canEditDate==='function' && !_canEditDate(dateEl.value)) return;
   // Validate: don't let the edit create a conflict (shift on holiday, vacation day, etc.)
   const newShift = shiftEl?.value || s.shift;
   const newDate  = dateEl.value;
