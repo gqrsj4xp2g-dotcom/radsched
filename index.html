@@ -7975,10 +7975,16 @@ function _updateErrorBadge(){
   const el = document.getElementById('rs-error-badge');
   if(!el) return;
   if(!_errorLog.length){ el.style.display = 'none'; return; }
+  // UX audit: gate the developer-log badge on admin/superuser. Non-
+  // admins seeing "⚠ 5" with a raw stack trace behind it caused
+  // confusion and pings to support. Errors still get logged for them
+  // (so admin-side telemetry is intact); just no UI bait.
+  const isAdm = (typeof CU !== 'undefined') && CU && (CU.role === 'admin' || CU.role === 'superuser');
+  if(!isAdm){ el.style.display = 'none'; return; }
   const recent = _errorLog.length;
   el.style.display = 'inline-flex';
   el.textContent = `⚠ ${recent}`;
-  el.title = `${recent} recent error${recent===1?'':'s'} — click to view`;
+  el.title = `Developer log — ${recent} recent error${recent===1?'':'s'}. Click to view.`;
 }
 
 // ── Unified modal helper ─────────────────────────────────────────
