@@ -43495,18 +43495,26 @@ function _renderPickPreview(prev){
       else shByCell.get(key).days++;
     });
     const cells = [...shByCell.values()].sort((a,b) => (a.physId||0)-(b.physId||0) || (a.shift||'').localeCompare(b.shift||''));
-    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ 2nd / 3rd shift classifier audit (${cells.length} source cell${cells.length===1?'':'s'} → ${sh.length} day-rows)</summary>
+    html += `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ 2nd / 3rd shift classifier audit (${cells.length} source cell${cells.length===1?'':'s'} → ${sh.length} day-rows)</summary>
       <div style="font-size:11px;color:var(--rs-ink-3);margin:6px 0 4px">
-        Each row is one cell from the spreadsheet that the classifier identified as a 2nd/3rd shift assignment. The <strong>Why</strong> column shows which regex matched — useful for diagnosing misclassifications. If a row here SHOULD have been a vacation, the source cell needs reformatting (see import help).
+        Each row is one cell the classifier identified as a 2nd/3rd shift assignment. <strong>Override</strong> lets you reclassify a row before applying — if a cell that should be vacation got labeled as a shift (or vice versa), pick "Vacation" in the dropdown and the import will move it.
       </div>
-      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;margin-top:6px">
-      <table class="tbl"><thead><tr><th>Physician</th><th>Shift</th><th>Source cell</th><th>Why classified</th><th>Days</th></tr></thead><tbody>
-      ${cells.slice(0,120).map(s => `<tr>
+      <div style="overflow-x:auto;max-height:320px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Shift</th><th>Source cell</th><th>Why classified</th><th>Days</th><th>Override</th></tr></thead><tbody>
+      ${cells.slice(0,120).map((s, idx) => `<tr>
         <td>${pnameHtml(s.physId)}</td>
         <td><span class="tag ${s.shift==='2nd'?'tb':'tt'}">${escHtml(s.shift)}</span></td>
         <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(s.sourceRaw||'—')}</td>
         <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(s.sourceReason||'—')}</td>
         <td style="text-align:center;color:var(--rs-ink-3)">${s.days}</td>
+        <td>
+          <select onchange="_xlPickOverrideCell('shift','${escHtml(s.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
+            <option value="">— keep as ${escHtml(s.shift)} —</option>
+            <option value="vacation">Move to vacation</option>
+            <option value="off">Move to Off</option>
+            <option value="ignore">Ignore (drop)</option>
+          </select>
+        </td>
       </tr>`).join('')}
       ${cells.length > 120 ? `<tr><td colspan="5" style="color:var(--rs-ink-3)">… and ${cells.length - 120} more</td></tr>` : ''}
       </tbody></table></div></details>`;
