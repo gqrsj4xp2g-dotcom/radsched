@@ -10813,6 +10813,16 @@ function _refreshCurrentPage(){
   // Re-render whichever page is currently visible
   const pg=document.querySelector('.page.on')?.id?.replace('page-','');
   if(!pg)return;
+  // Preserve scroll position across the re-render. _refreshCurrentPage
+  // is called when a remote update arrives via realtime/polling — the
+  // user's scroll position would otherwise reset to top, which is
+  // jarring when they were mid-page. The active focused element also
+  // gets restored where possible.
+  const _scroller = document.querySelector('.main') || document.documentElement;
+  const _savedScroll = _scroller?.scrollTop || 0;
+  const _activeId = document.activeElement?.id || null;
+  const _selStart = document.activeElement?.selectionStart;
+  const _selEnd   = document.activeElement?.selectionEnd;
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
@@ -10829,7 +10839,24 @@ function _refreshCurrentPage(){
     'clinics':renderClinics,
     'tools':renderTools,
   };
-  try{if(fns[pg]) fns[pg]();}catch(e){
+  try{
+    if(fns[pg]) fns[pg]();
+    // Restore scroll on the next animation frame so DOM has settled.
+    requestAnimationFrame(() => {
+      try{ if(_scroller && _savedScroll) _scroller.scrollTop = _savedScroll; }catch(_){}
+      if(_activeId){
+        const el = document.getElementById(_activeId);
+        if(el && typeof el.focus === 'function'){
+          try{
+            el.focus({ preventScroll: true });
+            if(_selStart != null && typeof el.setSelectionRange === 'function'){
+              try{ el.setSelectionRange(_selStart, _selEnd ?? _selStart); }catch(_){}
+            }
+          }catch(_){}
+        }
+      }
+    });
+  }catch(e){
     // Surface render failures via the error log so they aren't truly silent.
     // Pages that throw on remote-refresh have historically been the worst
     // class of bug — user sees stale UI with no clue why. Logged → user
