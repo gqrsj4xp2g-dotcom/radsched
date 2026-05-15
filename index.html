@@ -16460,8 +16460,14 @@ async function _calendarFeedUrlFor(_legacyTokenIgnored){
   // long-lived but a leaked token shouldn't be valid forever). Renews
   // on every "Generate URL" click.
   const exp = new Date(Date.now() + 365*86400*1000).toISOString();
+  // v=2 if we have the secret helper available, v=1 legacy otherwise.
+  // The verifier rejects v=2 unless signed with the practice secret,
+  // so version is set IN LOCKSTEP with the signing key choice.
+  const hasSecretFn = (typeof _getOrCreateWidgetSecret === 'function');
+  const tokenVersion = hasSecretFn ? 2 : 1;
+  const signingKey = hasSecretFn ? _getOrCreateWidgetSecret() : key;
   const body = {
-    v: 2, kind: 'cal-feed',           // v2 — signed with practice secret, not anon key
+    v: tokenVersion, kind: 'cal-feed',
     practiceId: (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'),
     physId: phys.id,
     physLast: phys.last || '',
@@ -16472,10 +16478,7 @@ async function _calendarFeedUrlFor(_legacyTokenIgnored){
   };
   // Sign with the per-practice secret (NOT the public anon key). See
   // generateWidgetPairing() for the threat-model rationale.
-  const secret = (typeof _getOrCreateWidgetSecret === 'function')
-    ? _getOrCreateWidgetSecret()
-    : key; // fallback for boot-order edge case
-  const sig = await _hmacB64Url(secret, JSON.stringify(body));
+  const sig = await _hmacB64Url(signingKey, JSON.stringify(body));
   const code = _b64url(JSON.stringify({ ...body, sig }));
   // webcal:// makes most calendar apps recognize this as a
   // subscribable feed. URL-encode the code so '+' / '/' that might
