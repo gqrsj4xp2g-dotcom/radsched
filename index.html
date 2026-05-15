@@ -12696,6 +12696,13 @@ function populateSel(id,opts,blank){
   if(cur) el.value=cur;
 }
 function renderPhysicians(){
+  // Show skeleton rows while we build the roster HTML. For a 200-phys
+  // practice the build takes ~80ms; previously the panel flashed
+  // empty during that window. Cheap to skip when there's nothing
+  // to render (rendered into below anyway).
+  if(typeof _showSkeleton === 'function' && (S.physicians||[]).length > 0){
+    try{ _showSkeleton('phys-list', Math.min(8, (S.physicians||[]).length)); }catch(_){}
+  }
   renderSubChk('sub-dr',S.drSubs,'drs');renderSubChk('sub-ir',S.irSubs,'irs');
   const siteNames=S.sites.map(s=>s.name);
   populateSel('p-anchor',siteNames,'No anchor site');
@@ -30280,6 +30287,13 @@ async function _fetchAuditFromSideTable(){
 function renderAuditLog(){
   const el = document.getElementById('al-result');
   if(!el) return;
+  // Skeleton placeholder while the side-table fetch runs. The first
+  // open of the Audit Log card otherwise shows nothing for ~200-500ms
+  // while the network round-trip completes — long enough that users
+  // double-click thinking nothing happened.
+  if(typeof _showSkeleton === 'function' && (!_auditSideCache.rows || _auditSideCache.rows.length === 0)){
+    try{ _showSkeleton('al-result', 8); }catch(_){}
+  }
   // Restore persisted filter (set on every keystroke via _alFilterChanged).
   const filterInput = document.getElementById('al-filter');
   if(filterInput && !filterInput.value){
