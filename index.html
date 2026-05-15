@@ -31407,6 +31407,11 @@ function addDRShift(){
   const date=document.getElementById('sb-date').value;
   const shift=document.getElementById('sb-shift').value;
   let site=document.getElementById('sb-site').value;
+  // Schedule lock guard — admins can lock a month to prevent accidental
+  // edits after the schedule is published. The auto-assigner bypasses
+  // this (it's a bulk op that callers explicitly invoke), but single-edit
+  // entry points respect it.
+  if(date && typeof _canEditDate==='function' && !_canEditDate(date)) return;
   // Home / 2nd / 3rd are read-from-home shifts per practice policy — they
   // never have a hospital commute, so the site is silently redirected to
   // the At Home / Remote pseudo-site. Prevents confusing records like
