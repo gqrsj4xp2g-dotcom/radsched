@@ -10756,6 +10756,10 @@ function _startPollFallback(){
   _pollInterval=setInterval(async()=>{
     if(!_supabase||_isRestoring) return;
     if(S._lastSaved&&(new Date()-S._lastSaved)<5000) return; // skip if we just saved
+    // Skip when the tab isn't visible — saves a Supabase round-trip
+    // every 10-20s on every background tab. The visibilitychange
+    // handler will fire a manual refresh when the user returns.
+    if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     try{
       const d=await _pullFromSupabase();
       const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
@@ -29374,6 +29378,10 @@ function openPerfMon(){
     const el = document.getElementById('perfmon-result');
     const onTools = document.getElementById('page-tools')?.style.display !== 'none';
     if(!el || !onTools){ clearInterval(_perfMonTimer); _perfMonTimer = null; return; }
+    // Also skip work when the tab isn't visible. The snapshot involves
+    // re-running render functions which is ~10ms wasted CPU per tick
+    // on a hidden tab.
+    if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     runPerfSnapshot();
   }, 5000);
 }
@@ -41926,6 +41934,25 @@ if(typeof document !== 'undefined' && !window._rsVisibilityWired){
     try{ if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge(); }catch(_){}
     try{ if(typeof _renderLastSavedAge === 'function') _renderLastSavedAge(); }catch(_){}
     try{ if(typeof _updateNotifDot === 'function') _updateNotifDot(); }catch(_){}
+    // Also fire one immediate pull-from-Supabase so the user sees
+    // fresh data without waiting 10-20s for the next polling tick.
+    // Guard with the same in-flight checks the polling loop uses.
+    try{
+      if(_supabase && !_isRestoring && (!S._lastSaved || (Date.now() - S._lastSaved.getTime()) > 5000)){
+        (async () => {
+          const d = await _pullFromSupabase();
+          const remoteSaved = d?.savedAt ? new Date(d.savedAt).getTime() : 0;
+          const knownSaved = S._remoteSavedAt ? new Date(S._remoteSavedAt).getTime() : 0;
+          const localSaved = S._lastSaved ? S._lastSaved.getTime() : 0;
+          const baseline = Math.max(knownSaved, localSaved);
+          if(d && remoteSaved > baseline + 500){
+            _applyRemoteData(d);
+            _refreshCurrentPage();
+            _bcSend?.({ type:'remote-update', tabId:_TAB_ID, payload:d, ts:Date.now() });
+          }
+        })().catch(() => {});
+      }
+    }catch(_){}
   });
 }
 
