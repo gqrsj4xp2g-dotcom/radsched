@@ -31654,6 +31654,9 @@ function addWkCall(){
   if(!_adminOnly('assign weekend call'))return;
   const pid=+document.getElementById('wk-phys').value;const satDate=document.getElementById('wk-date').value;
   if(!satDate){_toast('Select Saturday date', 'err');return;}
+  // Schedule-lock guard (advisory). Saturday's month is what controls it,
+  // because a Sat→Sun weekend that spans months will rarely matter for lock.
+  if(typeof _canEditDate==='function' && !_canEditDate(satDate)) return;
   if(parseDateLocal(satDate).getDay()!==6&&!confirm('Not a Saturday. Continue?'))return;
   const sunDate=addDays(satDate,1);
   const p=S.physicians.find(x=>x.id===pid);
