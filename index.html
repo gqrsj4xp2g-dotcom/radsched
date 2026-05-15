@@ -12744,6 +12744,13 @@ function addPhys(){
   renderPhysicians();
   // Refresh user mgmt so physician link dropdowns reflect the new physician
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
+  // Success feedback — previously absent. Audit found admins were
+  // unsure whether the add succeeded.
+  if(typeof _toast === 'function') _toast(`✓ Added ${first} ${last}.`, 'ok');
+  if(typeof _audit === 'function') _audit('phys.add', { first, last, role });
+  // Return focus to the first-name field so admins can chain-add
+  // multiple physicians without click-pointing.
+  document.getElementById('p-first')?.focus();
 }
 function removePhys(id){
   if(!_adminOnly('remove physicians'))return;
