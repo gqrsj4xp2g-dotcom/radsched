@@ -8,7 +8,10 @@ function renderDash(){
   const ml=document.getElementById('dash-month-label');if(ml)ml.textContent=monthName;
   document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
-  ['dash-quicknav','dash-admin-section'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'block':'none';});
+  // The "More analytics" details wrapper is what gets toggled now —
+  // dash-admin-section lives INSIDE it. Setting block on the inner
+  // section would override <details> open/closed behavior.
+  ['dash-more-details'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'':'none';});
   // Practice-wide announcements (banners). Each user can dismiss them
   // independently — dismissals stored in localStorage so they persist
   // across reloads but don't bloat the shared S state.
