@@ -43710,7 +43710,12 @@ function rematchPickImport(){
     const end = addDays(start, BLOCK - 1);
     const mk = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
-      vacRecs.push({ physId: m.physId, start, end, type: vacType, notes: `Imported: ${label} ${e.raw}` });
+      vacRecs.push({
+        physId: m.physId, start, end, type: vacType,
+        notes: `Imported: ${label} ${e.raw}`,
+        sourceRaw: e.raw,
+        sourceReason: e.reason || label,
+      });
     });
     if(wantVac) mk(w.vacation, 'pick');
     if(wantOff) mk(w.off,      'Off');
@@ -43719,7 +43724,13 @@ function rematchPickImport(){
       const m = nameMap[e.name]; if(!m || !m.physId) return;
       for(let i = 0; i < BLOCK; i++){
         const ds = addDays(start, i);
-        shiftRecs.push({ physId: m.physId, date: ds, shift: sk, site: 'At Home / Remote', sub: '', notes: `Imported: ${e.raw}` });
+        shiftRecs.push({
+          physId: m.physId, date: ds, shift: sk,
+          site: 'At Home / Remote', sub: '',
+          notes: `Imported: ${e.raw}`,
+          sourceRaw: e.raw,
+          sourceReason: e.reason || `${sk} shift`,
+        });
       }
     });
     if(wantS2) mkS(w.shift2, '2nd');
