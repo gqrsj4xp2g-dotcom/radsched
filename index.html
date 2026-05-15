@@ -43302,6 +43302,31 @@ function _xlsxClassifyCell(v, week, side){
   if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'implicit "Name 2nd shift"'}); return; } }
   m = /^(.+?)\s+3rd\s+shift\s*$/i.exec(s);
   if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'implicit "Name 3rd shift"'}); return; } }
+  // Pattern H: short ordinal-only reverse "Smith 2nd" / "Smith 3rd"
+  //            (no "shift" word, no separator). Common in tight
+  //            spreadsheets. Requires the ordinal SUFFIX so it
+  //            doesn't catch "Smith 2" (vacation pick).
+  m = /^(.+?)\s+2nd\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'implicit "Name 2nd"'}); return; } }
+  m = /^(.+?)\s+3rd\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'implicit "Name 3rd"'}); return; } }
+  // Pattern I: "S2 Smith" / "S3 Smith" / "2S - Smith" — shorthand
+  //            abbreviations admins use to save cell space.
+  m = /^s2\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'shorthand "S2 Name"'}); return; } }
+  m = /^s3\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'shorthand "S3 Name"'}); return; } }
+  m = /^(.+?)\s*[-–—:]\s*s2\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'shorthand "Name - S2"'}); return; } }
+  m = /^(.+?)\s*[-–—:]\s*s3\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'shorthand "Name - S3"'}); return; } }
+  // Pattern J: section-header row + name on next line. Indirect — if
+  //            the cell is JUST "2nd shift" / "2nd shifts" / "Second
+  //            shift" with no name, we can't classify it as a per-
+  //            physician shift, so it falls through to unrecognized.
+  //            But we DO want to skip it silently as a section header.
+  if(/^(?:second|2nd)\s+shifts?\s*[:]?$/i.test(s)) return;
+  if(/^(?:third|3rd)\s+shifts?\s*[:]?$/i.test(s)) return;
   // ── Off / vacation-overflow ──────────────────────────────────
   m = /^off\s*[-–—]\s*(.*)$/i.exec(s);
   if(m){ const name = cleanName(m[1]); if(name){ week.off.push({raw:s, name, reason:'"Off - Name"'}); return; } }
