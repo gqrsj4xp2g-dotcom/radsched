@@ -22435,6 +22435,7 @@ function addHoliday(){
   if(!pid)   { _toast('Select a physician.', 'err'); return; }
   if(!date)  { _toast('Select a date.', 'err'); return; }
   if(!name)  { _toast('Enter a holiday name.', 'err'); return; }
+  if(typeof _canEditDate==='function' && !_canEditDate(date)) return;
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
   if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
