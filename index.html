@@ -41765,6 +41765,12 @@ function printSchedule(){
   }, 50);
 }
 
+// Toast types: 'ok' (default, green), 'info' (blue), 'warn' (amber),
+// 'err' (red). Each carries an explicit dismiss × button. The host
+// stacks vertically with a max-height equal to viewport so a burst
+// of toasts can't push older ones off-screen — the host scrolls
+// internally instead. Older toasts also expire faster when the
+// stack grows so the screen self-cleans.
 function _toast(msg, type){
   if(!msg) return;
   let host = document.getElementById('rs-toast-host');
@@ -41773,31 +41779,56 @@ function _toast(msg, type){
     host.id = 'rs-toast-host';
     host.setAttribute('role','status');
     host.setAttribute('aria-live','polite');
-    host.style.cssText = 'position:fixed;top:60px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:340px';
+    host.style.cssText = 'position:fixed;top:60px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:360px;max-height:calc(100vh - 80px);overflow-y:auto;scroll-behavior:smooth';
     document.body.appendChild(host);
+  }
+  // Hard cap: never more than 8 toasts at once. Older ones get
+  // dropped so the visible queue stays scannable.
+  while(host.children.length >= 8){
+    try{ host.removeChild(host.firstElementChild); }catch(_){ break; }
   }
   const t = document.createElement('div');
   const bg = type==='warn' ? 'var(--amber,#d97706)'
+          : type==='err'  ? 'var(--red,#dc2626)'
           : type==='info' ? 'var(--blue-t,#2563eb)'
           : 'var(--green-t,#059669)';
-  t.style.cssText = `background:${bg};color:#fff;padding:9px 13px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.18);pointer-events:auto;cursor:pointer;line-height:1.35;animation:rsToastIn .25s ease`;
+  t.style.cssText = `background:${bg};color:#fff;padding:9px 13px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.18);pointer-events:auto;line-height:1.35;animation:rsToastIn .25s ease;display:flex;align-items:flex-start;gap:8px`;
   // Render plain text — escape via textContent so a message containing
   // HTML metacharacters can't inject into the toast surface.
-  t.textContent = String(msg);
+  const txt = document.createElement('span');
+  txt.style.flex = '1';
+  txt.style.cursor = 'pointer';
+  txt.textContent = String(msg);
+  txt.onclick = () => _dismissToast(t);
+  const x = document.createElement('button');
+  x.textContent = '×';
+  x.setAttribute('aria-label', 'Dismiss notification');
+  x.style.cssText = 'background:transparent;border:none;color:#fff;font-size:16px;line-height:1;padding:0 0 0 4px;cursor:pointer;opacity:.85;flex-shrink:0';
+  x.onclick = () => _dismissToast(t);
+  t.appendChild(txt);
+  t.appendChild(x);
   t.title = 'Click to dismiss';
-  t.onclick = () => t.remove();
   host.appendChild(t);
   // Inject the keyframes once so the in-animation works without a
   // global stylesheet edit.
   if(!document.getElementById('rs-toast-style')){
     const st = document.createElement('style');
     st.id = 'rs-toast-style';
-    st.textContent = '@keyframes rsToastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}';
+    st.textContent = '@keyframes rsToastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}#rs-toast-host::-webkit-scrollbar{display:none}';
     document.head.appendChild(st);
   }
-  setTimeout(()=>{
-    if(t.isConnected){ t.style.transition='opacity .2s'; t.style.opacity='0'; setTimeout(()=>t.remove(), 220); }
-  }, type==='warn'?5000:3000);
+  // Auto-dismiss: errors 7s, warnings 5s, info/ok 3s. If the stack is
+  // getting tall (>4 visible), shrink to 2s so the screen self-cleans.
+  const baseTtl = type==='err' ? 7000 : type==='warn' ? 5000 : 3000;
+  const ttl = host.children.length > 4 ? Math.min(baseTtl, 2200) : baseTtl;
+  setTimeout(() => _dismissToast(t), ttl);
+}
+function _dismissToast(t){
+  if(!t || !t.isConnected) return;
+  t.style.transition = 'opacity .2s, transform .2s';
+  t.style.opacity = '0';
+  t.style.transform = 'translateX(10px)';
+  setTimeout(() => { try{ t.remove(); }catch(_){} }, 220);
 }
 
 // ── Network status indicator ───────────────────────────────────────────
