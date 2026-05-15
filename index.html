@@ -36015,6 +36015,7 @@ function cancelEditHoliday(){ _editingHolId=null; renderHolTable(); }
 function saveEditHoliday(id){
   if(!_adminOnly('edit holidays')) return;
   const h=S.holidays.find(x=>x.id===id); if(!h) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(h.date)) return;
   const nameEl=document.getElementById(`hol-edit-name-${id}`);
   const dateEl=document.getElementById(`hol-edit-date-${id}`);
   const yrEl  =document.getElementById(`hol-edit-yr-${id}`);
@@ -36022,6 +36023,7 @@ function saveEditHoliday(id){
   const grpEl =document.getElementById(`hol-edit-grp-${id}`);
   const notEl =document.getElementById(`hol-edit-notes-${id}`);
   if(!dateEl?.value){alert('Date required.');return;}
+  if(typeof _canEditDate==='function' && !_canEditDate(dateEl.value)) return;
   const wasIR = (h.group==='IR' || /^IR-/.test(h.group||''));
   if(wasIR) _removeHolidayIRCall(h.physId, h.date);
   h.name  =nameEl?.value||h.name;
