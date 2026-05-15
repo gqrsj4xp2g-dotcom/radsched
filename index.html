@@ -18333,6 +18333,7 @@ function deleteIRShift(id){
   if(!_adminOnly('delete IR shift')) return;
   const s = (S.irShifts||[]).find(x => x.id === id);
   if(!s) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(s.date)) return;
   // Snapshot for undo BEFORE we remove
   const snapshot = {...s};
   S.irShifts = (S.irShifts||[]).filter(s => s.id !== id);
