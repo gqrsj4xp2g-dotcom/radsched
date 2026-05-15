@@ -28061,6 +28061,35 @@ const _SHORTCUTS = [
   ['Esc', 'Close drawer / modal / palette'],
 ];
 
+// ── Sidebar section open/closed persistence ───────────────────────
+// HTML5 <details> sections in the sidebar collapse by default to
+// reduce visual density (UX audit). Persist user choices in
+// localStorage so once they expand a section it stays expanded
+// across reloads. Default closed: build, people, tools.
+function _initSidebarSections(){
+  const sections = document.querySelectorAll('.snav-section[data-section]');
+  sections.forEach(s => {
+    const key = 'rs.snav.' + s.getAttribute('data-section');
+    let stored = null;
+    try{ stored = localStorage.getItem(key); }catch(_){}
+    if(stored === '1') s.setAttribute('open','');
+    else if(stored === '0') s.removeAttribute('open');
+    // (else: HTML default — closed)
+    s.addEventListener('toggle', () => {
+      try{ localStorage.setItem(key, s.open ? '1' : '0'); }catch(_){}
+    });
+  });
+}
+// Wire on DOM ready (the sidebar is already in the DOM by then).
+if(typeof window !== 'undefined' && !window._rsSnavInit){
+  window._rsSnavInit = true;
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', _initSidebarSections, { once:true });
+  } else {
+    _initSidebarSections();
+  }
+}
+
 // ── Topbar overflow menu (⋯) ────────────────────────────────────────
 // Routes the secondary actions previously crowding the topbar:
 //   Undo / Redo / Cal mode toggle / Print / Shortcuts cheat-sheet /
