@@ -3967,11 +3967,16 @@ WHERE email = 'your-admin@example.com';</pre>
   </div>
 
   <!-- ── 6. Schedule-constraints config ───────────────────────────────── -->
+  <!-- Schedule constraints split into Recovery & Anchor + Burnout
+       (UX audit). Each card now has a focused purpose; admins can
+       scan recovery rules without parsing burnout thresholds in the
+       same field row. Both share saveConstraintSettings() so a save
+       on either card persists everything. -->
   <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
-    <div class="card-title">⚙️ Schedule constraint settings</div>
+    <div class="card-title">⚙️ Recovery &amp; anchor rules</div>
     <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
-      Practice-level tunables for the constraint engine. These apply to
-      auto-assign AND manual rule violations.
+      Practice-level tunables that gate the constraint engine. Apply
+      to auto-assign AND manual rule violations.
     </div>
     <div class="g3" style="gap:14px;margin-bottom:14px">
       <div class="fg" style="margin:0">
@@ -3990,7 +3995,15 @@ WHERE email = 'your-admin@example.com';</pre>
         <div style="font-size:10.5px;color:var(--rs-ink-3);margin-top:3px">Hard reject below this; soft penalty between this and the soft target. Default = soft - 15.</div>
       </div>
     </div>
-    <div style="font-size:11.5px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Burnout thresholds</div>
+    <button class="bp" onclick="saveConstraintSettings()">Save</button>
+  </div>
+
+  <div class="card" data-tools-tab="rules" style="margin-bottom:14px">
+    <div class="card-title">🔥 Burnout thresholds</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      Caps that protect physicians from over-assignment. Auto-assign
+      penalizes assignments that would push a physician past these.
+    </div>
     <div class="g3" style="gap:14px;margin-bottom:14px">
       <div class="fg" style="margin:0">
         <label>Max consecutive days</label>
@@ -4005,7 +4018,7 @@ WHERE email = 'your-admin@example.com';</pre>
         <input id="cs-bo-hol" type="number" min="0" max="12">
       </div>
     </div>
-    <button class="bp" onclick="saveConstraintSettings()">Save settings</button>
+    <button class="bp" onclick="saveConstraintSettings()">Save</button>
   </div>
 
   <!-- ── 7. Cross-coverage finder ─────────────────────────────────────── -->
