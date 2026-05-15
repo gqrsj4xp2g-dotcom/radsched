@@ -28045,6 +28045,108 @@ const _SHORTCUTS = [
   ['Esc', 'Close drawer / modal / palette'],
 ];
 
+// ── Topbar overflow menu (⋯) ────────────────────────────────────────
+// Routes the secondary actions previously crowding the topbar:
+//   Undo / Redo / Cal mode toggle / Print / Shortcuts cheat-sheet /
+//   Auto-save-to-file / Hold-to-reset.
+// Open via the ⋯ button next to ⌕. Outside-click + Esc to close.
+// FS/GH status text mirror into the menu lazily — _updateFsStatus
+// and the GH deploy poller both write to the original element IDs
+// (the hidden compat shims in the topbar); we mirror their text
+// into the menu items at toggle time.
+function _tbMoreToggle(ev){
+  if(ev) ev.stopPropagation();
+  const m = document.getElementById('rs-tb-more-menu');
+  const btn = document.getElementById('rs-tb-more');
+  if(!m) return;
+  const open = m.style.display !== 'none';
+  if(open){
+    m.style.display = 'none';
+    btn?.setAttribute('aria-expanded','false');
+    return;
+  }
+  // Reflect undo/redo state.
+  ['undo','redo'].forEach(k => {
+    const itm = m.querySelector(`.rs-tb-more-item[data-act="${k}"]`);
+    const src = document.getElementById(k === 'undo' ? 'rs-undo-btn' : 'rs-redo-btn');
+    if(itm){
+      const disabled = !!src?.disabled;
+      itm.style.opacity = disabled ? '0.45' : '1';
+      itm.style.pointerEvents = disabled ? 'none' : '';
+      itm.title = src?.title || '';
+    }
+  });
+  // Mirror FS button visibility + status text from the (hidden)
+  // shim elements where the rest of the app continues to read/write
+  // them. _initFsStatus() shows fs-toggle-btn when supported.
+  const fsBtn = document.getElementById('fs-toggle-btn');
+  const fsItem = document.getElementById('rs-tb-more-fs');
+  const fsSep  = document.getElementById('rs-tb-more-fs-sep');
+  if(fsItem) fsItem.style.display = (fsBtn && fsBtn.style.display !== 'none') ? '' : 'none';
+  const fsStatus = document.getElementById('fs-status');
+  const fsItemStatus = document.getElementById('rs-tb-more-fs-status');
+  if(fsItemStatus){
+    const txt = (fsStatus?.textContent || '').trim();
+    if(txt){ fsItemStatus.textContent = txt; fsItemStatus.style.display = ''; }
+    else fsItemStatus.style.display = 'none';
+  }
+  const ghStatus = document.getElementById('gh-toolbar-status');
+  const ghItem = document.getElementById('rs-tb-more-gh-status');
+  if(ghItem){
+    const txt = (ghStatus?.textContent || '').trim();
+    if(txt){ ghItem.textContent = '🚀 ' + txt; ghItem.style.display = ''; }
+    else ghItem.style.display = 'none';
+  }
+  if(fsSep){
+    // Show separator only if at least one of FS button / FS status / GH status is visible.
+    const anyFsGh = (fsItem && fsItem.style.display !== 'none')
+                 || (fsItemStatus && fsItemStatus.style.display !== 'none')
+                 || (ghItem && ghItem.style.display !== 'none');
+    fsSep.style.display = anyFsGh ? '' : 'none';
+  }
+  m.style.display = '';
+  btn?.setAttribute('aria-expanded','true');
+  // Hover style.
+  m.querySelectorAll('.rs-tb-more-item').forEach(item => {
+    if(item._rsTbHoverBound) return; item._rsTbHoverBound = true;
+    item.addEventListener('mouseenter', () => { if(item.style.pointerEvents !== 'none') item.style.background = 'var(--bg3)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = ''; });
+  });
+}
+function _tbMoreClose(){
+  const m = document.getElementById('rs-tb-more-menu');
+  const btn = document.getElementById('rs-tb-more');
+  if(m) m.style.display = 'none';
+  if(btn) btn.setAttribute('aria-expanded','false');
+}
+function _tbMoreRun(act){
+  _tbMoreClose();
+  switch(act){
+    case 'undo':      if(typeof undoLastEdit === 'function') undoLastEdit(); break;
+    case 'redo':      if(typeof redoLastEdit === 'function') redoLastEdit(); break;
+    case 'calmode':   if(typeof toggleCalendarMode === 'function') toggleCalendarMode(); break;
+    case 'print':     if(typeof printSchedule === 'function') printSchedule(); break;
+    case 'shortcuts': if(typeof openShortcutsHelp === 'function') openShortcutsHelp(); break;
+    case 'fs':        document.getElementById('fs-toggle-btn')?.click(); break;
+  }
+}
+// Outside-click + Esc dismiss. Bind once.
+if(typeof window !== 'undefined' && !window._rsTbMoreInstalled){
+  window._rsTbMoreInstalled = true;
+  document.addEventListener('click', (e) => {
+    const m = document.getElementById('rs-tb-more-menu');
+    const btn = document.getElementById('rs-tb-more');
+    if(!m || m.style.display === 'none') return;
+    if(m.contains(e.target) || (btn && btn.contains(e.target))) return;
+    _tbMoreClose();
+  });
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== 'Escape') return;
+    const m = document.getElementById('rs-tb-more-menu');
+    if(m && m.style.display !== 'none') _tbMoreClose();
+  });
+}
+
 function openShortcutsHelp(){
   let host = document.getElementById('rs-help-host');
   if(host && host.querySelector('.rs-help-modal')){ closeShortcutsHelp(); return; }
