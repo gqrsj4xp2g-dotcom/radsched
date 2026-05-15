@@ -1720,37 +1720,44 @@ tbody tr:hover{background:var(--bg3)}
     <div class="card"><div class="card-title">Upcoming Time Off</div><div id="dash-vac"></div></div>
   </div>
 
-  <!-- Admin: DR Schedule snapshot -->
-  <div id="dash-admin-section" class="admin-only" style="display:none;margin-top:8px">
-    <div class="g2">
-      <div class="card">
-        <div class="card-title" style="display:flex;justify-content:space-between">
-          Recent DR Shifts <button class="bsm" onclick="nav('dr-builder',document.querySelector('[onclick*=dr-builder]'))">Builder →</button>
-        </div>
-        <div id="dash-dr-recent"></div>
-      </div>
-      <div class="card">
-        <div class="card-title" style="display:flex;justify-content:space-between">
-          Recent IR Calls <button class="bsm" onclick="nav('ir-cal',document.querySelector('[onclick*=ir-cal]'))">Calendar →</button>
-        </div>
-        <div id="dash-ir-recent"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Workload Fairness Scoreboard — populated by _renderFairnessScoreboard -->
-  <div id="dash-fairness" style="margin-top:12px"></div>
-
   <!-- On-Call Confirmation widget — populated by _renderOnCallConfirmation.
        Shows tonight's on-call physicians and whether each has acknowledged
-       the reminder push. Hidden when there is no on-call coverage tonight. -->
+       the reminder push. Hidden when there is no on-call coverage tonight.
+       Kept above the More-Analytics fold because tonight's coverage is
+       always actionable. -->
   <div id="dash-oncall-confirm" style="margin-top:12px"></div>
 
-  <!-- Equity Heatmap — populated by _renderEquityHeatmap. Forward-looking
-       view of who's getting more or less than their FTE-adjusted share of
-       upcoming work over the next 90 days. Spots imbalances forming
-       BEFORE they become disputes. -->
-  <div id="dash-equity-heatmap" style="margin-top:12px"></div>
+  <!-- Above-fold ends here. The cards below are useful but rarely
+       glanced at every visit — collapsed in a <details> so the dashboard
+       starts compact for daily admin use. State persists per-user. -->
+  <details class="rs-dash-more admin-only" id="dash-more-details" style="display:none;margin-top:14px">
+    <summary style="cursor:pointer;padding:10px 14px;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center;list-style:none;outline:none">
+      <span>📊 More analytics</span>
+      <span style="font-size:11px;color:var(--rs-ink-3);font-weight:400">Recent shifts · Fairness · Equity heatmap</span>
+    </summary>
+    <div style="padding-top:12px">
+      <!-- Admin: DR / IR snapshot. Only renders into innerHTML when
+           the section is open (see js-render-dash.js). -->
+      <div id="dash-admin-section" class="admin-only">
+        <div class="g2">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between">
+              Recent DR Shifts <button class="bsm" onclick="nav('dr-builder',document.querySelector('[onclick*=dr-builder]'))">Builder →</button>
+            </div>
+            <div id="dash-dr-recent"></div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between">
+              Recent IR Calls <button class="bsm" onclick="nav('ir-cal',document.querySelector('[onclick*=ir-cal]'))">Calendar →</button>
+            </div>
+            <div id="dash-ir-recent"></div>
+          </div>
+        </div>
+      </div>
+      <div id="dash-fairness" style="margin-top:12px"></div>
+      <div id="dash-equity-heatmap" style="margin-top:12px"></div>
+    </div>
+  </details>
 </div>
 
 <!-- MY SCHEDULE -->
