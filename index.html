@@ -43246,14 +43246,21 @@ function _renderPickPreview(prev){
   if(allUnrecog.length){
     html += `<details open style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--amber,#d97706)">⚠ Unrecognized cells (${allUnrecog.length}) — these were skipped, check format</summary>
       <div style="font-size:11.5px;color:var(--rs-ink-2);margin-top:6px;line-height:1.55">
-        These cells didn't match any known pattern (vacation pick, BB, off, 2nd/3rd shift, or bare last name). If they're 2nd or 3rd shift entries, they may use a format the parser doesn't yet recognize. Supported shift formats are:
-        <code style="display:block;background:var(--bg2);padding:6px 8px;border-radius:4px;margin:6px 0;font-size:11px">
-          • "2nd shift - Smith"  (forward)<br>
-          • "Smith - 2nd shift"  (reverse)<br>
-          • "Smith - 2nd"        (short reverse)<br>
-          • "Smith (2nd)"        (parens)<br>
+        These cells didn't match any known pattern (vacation pick, BB, off, 2nd/3rd shift, or bare last name).
+        <strong style="color:var(--ink)">Important — the classifier was tightened in 2025</strong> so vacation pick numbers like "Smith - 2" are no longer misread as 2nd shift. Shift cells now require an explicit signal:
+        <code style="display:block;background:var(--bg2);padding:6px 8px;border-radius:4px;margin:6px 0;font-size:11px;line-height:1.6">
+          ✓ "2nd shift - Smith"   ← forward, with "shift"<br>
+          ✓ "2nd: Smith"           ← forward, with ordinal<br>
+          ✓ "2: Smith"             ← forward, colon-only (admin convention)<br>
+          ✓ "Smith - 2nd"          ← reverse, with ordinal<br>
+          ✓ "Smith - 2 shift"      ← reverse, with "shift"<br>
+          ✓ "Smith (2nd)"          ← bracketed<br>
+          ✓ "Smith [2]"            ← bracketed<br>
+          ✗ "Smith - 2"            ← treated as VACATION pick #2 now (not shift)<br>
+          ✗ "2 - Smith"            ← treated as vacation now (use "2: Smith" if shift)<br>
           (same shapes for 3rd)
         </code>
+        Open the "2nd / 3rd shift classifier audit" section above to see exactly which regex matched each shift cell — the <strong>Why classified</strong> column makes mismatches obvious.
       </div>
       <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
       <table class="tbl"><thead><tr><th>Week</th><th>Cell content</th><th>Column</th></tr></thead><tbody>
