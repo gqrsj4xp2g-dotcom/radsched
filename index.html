@@ -13244,6 +13244,13 @@ function addVac(){
   const pid=+document.getElementById('v-phys').value;
   const s=document.getElementById('v-start').value,e=document.getElementById('v-end').value;
   if(!s||!e||e<s){alert('Check dates');return;}
+  // Schedule lock: block if EITHER endpoint falls in a locked month.
+  // Vacation often spans month boundaries — if any locked month is touched,
+  // the admin must unlock first.
+  if(typeof _canEditDate==='function'){
+    if(!_canEditDate(s)) return;
+    if(s.slice(0,7)!==e.slice(0,7) && !_canEditDate(e)) return;
+  }
   const vType=document.getElementById('v-type').value;
   const vNotes=document.getElementById('v-notes').value;
   S.vacations.push({id:S.nextId++,physId:pid,start:s,end:e,type:vType,notes:vNotes});
