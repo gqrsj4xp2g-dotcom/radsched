@@ -43177,16 +43177,33 @@ function _renderPickPreview(prev){
       </tbody></table></div></details>`;
   }
   if(sh.length){
-    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ 2nd / 3rd shift preview (${sh.length})</summary>
-      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
-      <table class="tbl"><thead><tr><th>Physician</th><th>Date</th><th>Shift</th><th>Site</th></tr></thead><tbody>
-      ${sh.slice(0,80).map(s => `<tr>
+    // Classifier audit summary: collapses the per-day shift records
+    // back to one row per (physician, sourceRaw, reason) so admins
+    // see the unique source-cell decisions, not 9 duplicate rows for
+    // the 9-day block. Critical for "why did Smith get 2nd shift
+    // instead of vacation?" debugging — the reason field shows
+    // exactly which regex matched.
+    const shByCell = new Map();
+    sh.forEach(s => {
+      const key = `${s.physId}|${s.shift}|${s.sourceRaw || ''}`;
+      if(!shByCell.has(key)) shByCell.set(key, { ...s, days: 1 });
+      else shByCell.get(key).days++;
+    });
+    const cells = [...shByCell.values()].sort((a,b) => (a.physId||0)-(b.physId||0) || (a.shift||'').localeCompare(b.shift||''));
+    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ 2nd / 3rd shift classifier audit (${cells.length} source cell${cells.length===1?'':'s'} → ${sh.length} day-rows)</summary>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin:6px 0 4px">
+        Each row is one cell from the spreadsheet that the classifier identified as a 2nd/3rd shift assignment. The <strong>Why</strong> column shows which regex matched — useful for diagnosing misclassifications. If a row here SHOULD have been a vacation, the source cell needs reformatting (see import help).
+      </div>
+      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Shift</th><th>Source cell</th><th>Why classified</th><th>Days</th></tr></thead><tbody>
+      ${cells.slice(0,120).map(s => `<tr>
         <td>${pnameHtml(s.physId)}</td>
-        <td>${escHtml(s.date)}</td>
         <td><span class="tag ${s.shift==='2nd'?'tb':'tt'}">${escHtml(s.shift)}</span></td>
-        <td style="color:var(--rs-ink-2)">${escHtml(s.site)}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(s.sourceRaw||'—')}</td>
+        <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(s.sourceReason||'—')}</td>
+        <td style="text-align:center;color:var(--rs-ink-3)">${s.days}</td>
       </tr>`).join('')}
-      ${sh.length > 80 ? `<tr><td colspan="4" style="color:var(--rs-ink-3)">… and ${sh.length - 80} more</td></tr>` : ''}
+      ${cells.length > 120 ? `<tr><td colspan="5" style="color:var(--rs-ink-3)">… and ${cells.length - 120} more</td></tr>` : ''}
       </tbody></table></div></details>`;
   }
   if(low.length){
