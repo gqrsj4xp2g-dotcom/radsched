@@ -11515,6 +11515,14 @@ function _pageGuardSweep(){
 function nav(pg, el, subTab){
   // Tapping a nav item on mobile auto-closes the drawer. No-op on desktop.
   _toggleMobileNav(false);
+  // Auto-expand the sidebar section containing the target page so the
+  // user sees the active item highlighted. Without this, a Cmd+K jump
+  // to a page in a collapsed section gives no sidebar feedback.
+  try{
+    const target = document.querySelector('.snav-item[data-pg="' + pg + '"]');
+    const section = target?.closest('.snav-section');
+    if(section && !section.open) section.open = true;
+  }catch(_){}
   // Role gate: admin-only pages are inaccessible to non-admins (UI defense in depth; DB access
   // should still be controlled at the auth layer for a true guarantee).
   // Superusers pass the admin gate; superuser-only pages are further restricted below.
