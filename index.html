@@ -11692,7 +11692,26 @@ function _toggleMobileNav(force){
 //
 // Pair: also restores scroll on initial page show (DOMContentLoaded +
 // pageshow) so a hard reload lands the user at the same scroll position.
-const _RS_BUILD_TAG = 'rs-v7'; // bump in lockstep with sw.js CACHE_VERSION
+// Resolves the deployed SW's CACHE_VERSION at runtime so the bottom-
+// right build pill never drifts from sw.js again (this used to be
+// hardcoded and silently fell 26 bumps behind). One fetch of /sw.js on
+// boot; the response is HTTP-cached by the browser. The result is
+// written into _RS_BUILD_TAG and the pill's textContent is updated in
+// place if the pill has already mounted.
+let _RS_BUILD_TAG = '…';
+(async () => {
+  try{
+    const r = await fetch('/sw.js', { cache: 'no-cache' });
+    if(!r.ok) return;
+    const t = await r.text();
+    const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(t);
+    if(m){
+      _RS_BUILD_TAG = m[1];
+      const pill = document.getElementById('rs-build-pill');
+      if(pill) pill.textContent = _RS_BUILD_TAG;
+    }
+  }catch(_){ /* offline / no SW — pill stays as '…' */ }
+})();
 // ── Boot-time page hide guard ──────────────────────────────────────────
 // Force every .page that doesn't have .on class to inline display:none.
 // The CSS rule `.page { display:none }` SHOULD do this, but a screenshot
