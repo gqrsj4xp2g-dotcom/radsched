@@ -18144,6 +18144,7 @@ function cancelEditIRShift(){ _editingIRShiftId = null; renderIRShiftTable(); }
 function saveEditIRShift(id){
   if(!_adminOnly('edit IR shift')) return;
   const s = (S.irShifts||[]).find(x => x.id === id); if(!s) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(s.date)) return;
   const physEl = document.getElementById(`ire-phys-${id}`);
   const dateEl = document.getElementById(`ire-date-${id}`);
   const shiftEl= document.getElementById(`ire-shift-${id}`);
@@ -18151,6 +18152,7 @@ function saveEditIRShift(id){
   const subEl  = document.getElementById(`ire-sub-${id}`);
   const notesEl= document.getElementById(`ire-notes-${id}`);
   if(!dateEl?.value){ alert('Date required.'); return; }
+  if(typeof _canEditDate==='function' && !_canEditDate(dateEl.value)) return;
   const newPid   = +physEl?.value || s.physId;
   const newDate  = dateEl.value;
   const newShift = shiftEl?.value || s.shift;
