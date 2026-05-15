@@ -42906,6 +42906,30 @@ function _parsePickWorkbook(rows, prev, sheetName){
 // so the import preview can surface them — useful when an admin's
 // pick sheet uses a non-standard format and 2nd/3rd shift entries are
 // silently dropped (the original failure mode that surfaced this code).
+// ── Excel cell classifier ────────────────────────────────────────
+//
+// Reads one cell value and routes it into the right bucket on
+// `week`: vacation / off / bbPicks / shift2 / shift3 / unrecognized.
+//
+// **2025 rewrite — strict shift detection**
+// The previous classifier matched "Smith - 2" (vacation pick #2) as
+// 2nd shift because the `(?:nd)?` and `(?:shift)?` groups in the
+// shift regexes were both OPTIONAL. Result: every physician with a
+// vacation pick numbered 2 or 3 ended up scheduled on 2nd/3rd
+// shift instead of vacation.
+//
+// Fix: shift detection now REQUIRES explicit disambiguation from a
+// vacation-pick number — at minimum one of:
+//   • the literal ordinal suffix "nd"/"rd"          ("Smith - 2nd")
+//   • the literal word "shift"                       ("Smith - 2 shift")
+//   • the bracket grouping pattern (parens/brackets) ("Smith (2nd)")
+//   • a colon separator (admins write "2: Smith" exclusively for shifts)
+//
+// Without one of these signals, "Lastname - N" / "N - Lastname"
+// falls through to the vacation-pick path. The classifier also
+// stamps a `reason` on each entry so the preview can show admins
+// EXACTLY which regex matched and why — full transparency for
+// import-debugging.
 function _xlsxClassifyCell(v, week, side){
   if(v == null) return;
   if(typeof v !== 'string'){
@@ -42913,7 +42937,7 @@ function _xlsxClassifyCell(v, week, side){
     // Skip silently.
     return;
   }
-  const s = v.trim();
+  const s = v.trim().replace(/\s{2,}/g, ' ');  // collapse internal runs of spaces
   if(!s) return;
   const lower = s.toLowerCase();
   // Junk strings to ignore outright
@@ -42928,63 +42952,96 @@ function _xlsxClassifyCell(v, week, side){
   if(/\bclosed\b/i.test(lower)) return;
   // Common header / annotation strings that aren't physician entries.
   if(/^(week|day|date|holiday|note[s]?|comment[s]?)\s*[:\-]/i.test(lower)) return;
-  // ── 2nd / 3rd shift — multiple accepted formats ───────────────────
-  // Forward forms ("2nd shift - Lastname"):
-  //   "2nd shift - Smith"   "2 shift: Smith"   "2nd: Smith"
-  //   "2nd shift Smith"     "2nd-Smith"        "2: Smith"
-  // Reverse forms ("Lastname - 2nd shift"):
-  //   "Smith - 2nd shift"   "Smith - 2nd"      "Smith 2nd shift"
-  //   "Smith (2nd shift)"   "Smith (2nd)"      "Smith [2nd]"
-  // The separator can be hyphen, en-dash, em-dash, colon, or whitespace.
+  // ── Helper: clean a captured name ─────────────────────────────
+  // The regexes capture the name half of a "Name - shift" or
+  // "shift - Name" pattern. Strip leading/trailing whitespace and
+  // any leftover separators, then validate it actually starts with
+  // a letter (so "21" or "-Smith" don't sneak through).
+  const cleanName = (str) => {
+    if(!str) return '';
+    const cleaned = String(str).trim().replace(/^[-–—:(\[\s]+/, '').replace(/[)\]\s]+$/, '');
+    return /^[A-Za-z]/.test(cleaned) ? cleaned : '';
+  };
   let m;
-  // Forward 2nd shift
-  m = /^2(?:nd)?\s*(?:shift)?\s*[-–—:]\s*(.+)$/i.exec(s);
-  if(m && /shift|[a-z]{2,}/i.test(s)){
-    const name = m[1].trim().replace(/^[-–—:]\s*/, '');
-    // Disambiguate: "2nd Smith" matches but "21 Smith" should not
-    if(name && /^[A-Za-z]/.test(name)){ week.shift2.push({raw:s, name}); return; }
-  }
-  // Forward 3rd shift
-  m = /^3(?:rd)?\s*(?:shift)?\s*[-–—:]\s*(.+)$/i.exec(s);
-  if(m){
-    const name = m[1].trim().replace(/^[-–—:]\s*/, '');
-    if(name && /^[A-Za-z]/.test(name)){ week.shift3.push({raw:s, name}); return; }
-  }
-  // Reverse 2nd shift: "Smith - 2nd shift" / "Smith - 2nd" / "Smith (2nd)"
-  m = /^(.+?)\s*[-–—:(\[]\s*2(?:nd)?(?:\s*shift)?\s*[)\]]?\s*$/i.exec(s);
-  if(m){
-    const name = m[1].trim();
-    if(name && /^[A-Za-z]/.test(name)){ week.shift2.push({raw:s, name}); return; }
-  }
-  // Reverse 3rd shift: "Smith - 3rd shift" / "Smith - 3rd" / "Smith (3rd)"
-  m = /^(.+?)\s*[-–—:(\[]\s*3(?:rd)?(?:\s*shift)?\s*[)\]]?\s*$/i.exec(s);
-  if(m){
-    const name = m[1].trim();
-    if(name && /^[A-Za-z]/.test(name)){ week.shift3.push({raw:s, name}); return; }
-  }
-  // Off - Lastname (vacation overflow / non-pick absence)
+  // ── Shift detection (STRICT — requires explicit signal) ────────
+  // Each pattern below carries one of the disambiguators that
+  // distinguishes a shift assignment from a vacation pick number.
+  //
+  // Pattern A: forward "2nd …" / "3rd …" — REQUIRES the ordinal
+  //            suffix. Matches "2nd shift - Smith", "2nd: Smith",
+  //            "2nd-Smith", "2nd Smith".
+  m = /^2nd\s*(?:shift)?\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'forward "2nd …"'}); return; } }
+  m = /^3rd\s*(?:shift)?\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'forward "3rd …"'}); return; } }
+  // Pattern B: forward "2 shift …" / "3 shift …" — REQUIRES the
+  //            literal "shift" word. Matches "2 shift: Smith".
+  m = /^2\s*shift\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'forward "2 shift …"'}); return; } }
+  m = /^3\s*shift\s*[-–—:\s]\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'forward "3 shift …"'}); return; } }
+  // Pattern C: forward "2: …" / "3: …" — colon separator is the
+  //            only thing distinguishing it from a vacation pick.
+  //            By practice convention admins write "2: Smith"
+  //            EXCLUSIVELY for shifts (vacation picks always use
+  //            "Smith - 2" hyphen-and-trailing-number).
+  m = /^2\s*:\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'forward "2: …" (colon)'}); return; } }
+  m = /^3\s*:\s*(.+)$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'forward "3: …" (colon)'}); return; } }
+  // Pattern D: reverse "Smith - 2nd …" / "Smith - 3rd …" — REQUIRES
+  //            ordinal suffix.
+  m = /^(.+?)\s*[-–—]\s*2nd(?:\s*shift)?\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'reverse "… - 2nd"'}); return; } }
+  m = /^(.+?)\s*[-–—]\s*3rd(?:\s*shift)?\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'reverse "… - 3rd"'}); return; } }
+  // Pattern E: reverse "Smith - 2 shift" / "Smith - 3 shift" —
+  //            REQUIRES literal "shift" word.
+  m = /^(.+?)\s*[-–—]\s*2\s*shift\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'reverse "… - 2 shift"'}); return; } }
+  m = /^(.+?)\s*[-–—]\s*3\s*shift\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'reverse "… - 3 shift"'}); return; } }
+  // Pattern F: bracket-wrapped "Smith (2)" / "Smith (2nd)" /
+  //            "Smith [2nd shift]" — the parens/brackets ARE the
+  //            disambiguator; no ordinal/shift word required.
+  m = /^(.+?)\s*[(\[]\s*2(?:nd)?(?:\s*shift)?\s*[)\]]\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'bracketed "(2)" / "[2nd]"'}); return; } }
+  m = /^(.+?)\s*[(\[]\s*3(?:rd)?(?:\s*shift)?\s*[)\]]\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'bracketed "(3)" / "[3rd]"'}); return; } }
+  // Pattern G: implicit-separator forms "Smith 2nd shift" — no
+  //            hyphen/colon between name and ordinal. REQUIRES the
+  //            ordinal AND the word "shift" together to avoid
+  //            grabbing "Building 2 shift" or similar.
+  m = /^(.+?)\s+2nd\s+shift\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift2.push({raw:s, name, reason:'implicit "Name 2nd shift"'}); return; } }
+  m = /^(.+?)\s+3rd\s+shift\s*$/i.exec(s);
+  if(m){ const name = cleanName(m[1]); if(name){ week.shift3.push({raw:s, name, reason:'implicit "Name 3rd shift"'}); return; } }
+  // ── Off / vacation-overflow ──────────────────────────────────
   m = /^off\s*[-–—]\s*(.*)$/i.exec(s);
-  if(m){ const name = m[1].trim(); if(name) week.off.push({raw:s, name}); return; }
-  // Backup pick: "Lastname- BB N" / "Lastname - BB Extra"
+  if(m){ const name = cleanName(m[1]); if(name){ week.off.push({raw:s, name, reason:'"Off - Name"'}); return; } }
+  // ── Backup pick: "Lastname- BB N" / "Lastname - BB Extra" ────
   m = /^(.+?)\s*[-–—]\s*BB\s*(?:\d+|Extra)\b/i.exec(s);
-  if(m){ const name = m[1].trim(); if(name) week.bbPicks.push({raw:s, name}); return; }
-  // Plain vacation pick: "Lastname - Number" / "Mossa-Basha- 9" (note the
-  // hyphen INSIDE the last name). We require the SUFFIX to be a number,
-  // and we strip from the LAST hyphen-followed-by-number, not the first.
-  m = /^(.+?)\s*[-–—]\s*\d+\s*$/.exec(s);
-  if(m){ const name = m[1].trim(); if(name) week.vacation.push({raw:s, name}); return; }
-  // Last-resort: a bare last-name token. Some calendar cells have just
-  // "Fisher" with no pick number. Treat as a vacation pick.
+  if(m){ const name = cleanName(m[1]); if(name){ week.bbPicks.push({raw:s, name, reason:'BB pick'}); return; } }
+  // ── Vacation pick: "Lastname - Number" ───────────────────────
+  // This is the fallback for "Smith - 2", "Mossa-Basha- 9" etc.
+  // The shift patterns above all required ordinal/shift/bracket/
+  // colon disambiguation, so anything reaching this point that
+  // ends in a bare "- N" is genuinely a vacation pick (where N
+  // is the pick rank).
+  m = /^(.+?)\s*[-–—]\s*(\d+)\s*$/.exec(s);
+  if(m){
+    const name = cleanName(m[1]);
+    if(name){ week.vacation.push({raw:s, name, reason:`vacation pick #${m[2]}`}); return; }
+  }
+  // Last-resort: a bare last-name token. Some calendar cells have
+  // just "Fisher" with no pick number. Treat as a vacation pick.
   if(/^[A-Za-z][A-Za-z\-\s']{1,40}$/.test(s)){
-    week.vacation.push({raw:s, name:s});
+    week.vacation.push({raw:s, name:s, reason:'bare lastname'});
     return;
   }
-  // Anything else didn't match any known pattern. Track it so the import
-  // preview can surface "12 cells weren't recognized — check format".
-  // This is the fix for the original bug where 2nd/3rd shift entries in
-  // a non-standard format were silently dropped.
+  // Anything else didn't match any known pattern. Track it so the
+  // preview can surface "N cells weren't recognized — check format".
   if(!week.unrecognized) week.unrecognized = [];
-  // Cap the list so we don't blow up the preview HTML on a giant sheet.
   if(week.unrecognized.length < 50){
     week.unrecognized.push({raw:s, side});
   }
