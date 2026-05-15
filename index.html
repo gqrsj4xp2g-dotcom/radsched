@@ -12684,7 +12684,16 @@ function cancelEditPhys(){
 function addPhys(){
   if(!_adminOnly('add physicians'))return;
   const first=sanitizeNameInput(document.getElementById('p-first').value),last=sanitizeNameInput(document.getElementById('p-last').value);
-  if(!first||!last){alert('Enter name');return;}
+  if(!first||!last){
+    if(typeof _toast === 'function') _toast('First and last name are required.', 'err');
+    else alert('Enter name');
+    // Focus the first empty field so the user can immediately retype.
+    const firstEl = document.getElementById('p-first');
+    const lastEl  = document.getElementById('p-last');
+    if(firstEl && !first) firstEl.focus();
+    else if(lastEl) lastEl.focus();
+    return;
+  }
   const degree=sanitizeNameInput(document.getElementById('p-deg').value)||'MD';
   const role=document.getElementById('p-role').value;
   // Only read DR FTE when the role actually uses it; otherwise the input
