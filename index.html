@@ -9616,6 +9616,22 @@ async function doLogout(){
   // Side-table sync snapshot is per-practice — invalidate so the
   // next login starts fresh.
   if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
+  // Cross-tenant localStorage purge on logout (same set as switchPractice).
+  // Prevents practice A's filters / view modes from bleeding into a B login
+  // in the same browser. Keep the truly-user-scoped keys: theme, font
+  // scale, SB config, auth token, dismissed announcements, scroll positions.
+  try{
+    const _keep = new Set(['rs.theme.v1', 'rs.theme', 'rs.fontScale', 'radscheduler-auth', 'rs.toolsTab']);
+    const drop = [];
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(!k || !/^rs\./.test(k)) continue;
+      if(_keep.has(k)) continue;
+      if(k.startsWith('rs.ann-dismissed:') || k.startsWith('rs.scroll.')) continue;
+      drop.push(k);
+    }
+    drop.forEach(k => { try{ localStorage.removeItem(k); }catch(_){} });
+  }catch(_){}
   // Supabase auth signOut
   const sb=_initAuthClient();
   if(sb) try{ await sb.auth.signOut(); }catch(e){}
@@ -11472,6 +11488,27 @@ async function switchPractice(id,name){
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
     S.nextId=1;
+    // Cross-tenant localStorage isolation. The previous practice's
+    // filter selections / view modes / audit cache / side-table snap
+    // shouldn't leak into the new practice's session. Wipe every
+    // rs.* key except those genuinely user-scoped (theme, font scale,
+    // SB config, auth token, dismissed announcements). Done BEFORE
+    // we reassign _ROW_ID so any storage listeners that fire don't
+    // see a mixed-practice state.
+    const _keepKeys = new Set(['rs.theme.v1', 'rs.theme', 'rs.fontScale', 'radscheduler-auth', 'rs.toolsTab']);
+    try{
+      const drop = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(!k) continue;
+        if(!/^rs\./.test(k)) continue;
+        if(_keepKeys.has(k)) continue;
+        if(k.startsWith('rs.ann-dismissed:')) continue;  // per-user dismissals
+        if(k.startsWith('rs.scroll.')) continue;          // page scroll positions
+        drop.push(k);
+      }
+      drop.forEach(k => { try{ localStorage.removeItem(k); }catch(_){} });
+    }catch(_){}
     // 6. Update row + UI label immediately
     _ROW_ID=id; _PRACTICE_ID=id;
     const tbPrac=document.getElementById('tb-practice');
