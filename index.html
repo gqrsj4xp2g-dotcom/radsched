@@ -11378,7 +11378,7 @@ async function createPractice(){
   if(!_adminOnly('create a practice'))return;
   const name=(document.getElementById('np-name')||{}).value?.trim();
   const id=(document.getElementById('np-id')||{}).value?.trim().toLowerCase().replace(/[^a-z0-9-]/g,'-');
-  if(!name||!id){alert('Enter both a name and an ID.');return;}
+  if(!name||!id){_toast('Enter both a name and an ID.', 'err');return;}
   const sb=_initSupabase();
   if(!sb){alert('Supabase not configured.');return;}
   // Create in practices table
@@ -12906,7 +12906,7 @@ function addPhys(){
   const first=sanitizeNameInput(document.getElementById('p-first').value),last=sanitizeNameInput(document.getElementById('p-last').value);
   if(!first||!last){
     if(typeof _toast === 'function') _toast('First and last name are required.', 'err');
-    else alert('Enter name');
+    else _toast('Enter name', 'err');
     // Focus the first empty field so the user can immediately retype.
     const firstEl = document.getElementById('p-first');
     const lastEl  = document.getElementById('p-last');
@@ -13171,7 +13171,7 @@ function clearIRShifts(mode){
     desc=(parts.length?parts.join(' · ')+' IR shifts':'all IR shifts');
   } else if(mode==='month'){
     const momo=document.getElementById('irsa-mo')?.value||fmo;
-    if(!momo){alert('Select a month first.');return;}
+    if(!momo){_toast('Select a month first.', 'err');return;}
     targets=S.irShifts.filter(s=>s.date.startsWith(momo)&&s.shift!=='Home');
     desc=`non-Home IR shifts for ${momo}`;
   }
@@ -13264,13 +13264,13 @@ function bulkAssignMultiWeek(shift){
   if(!_adminOnly('bulk assign shifts'))return;
   const start=document.getElementById(`drb-${shift}-start`)?.value;
   const end=document.getElementById(`drb-${shift}-end`)?.value;
-  if(!start||!end||end<start){alert('Select a valid start and end date.');return;}
+  if(!start||!end||end<start){_toast('Select a valid start and end date.', 'err');return;}
   const pid=parseInt(document.getElementById(`drb-${shift}-phys`).value);
   const site=document.getElementById(`drb-${shift}-site`).value;
   const sub=document.getElementById(`drb-${shift}-sub`).value;
   const notes=document.getElementById(`drb-${shift}-notes`).value;
   const p=S.physicians.find(x=>x.id===pid);
-  if(!p){alert('Select a physician.');return;}
+  if(!p){_toast('Select a physician.', 'err');return;}
   const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
   if(!dates.length){alert('No days match the selected day-of-week filters in that date range.');return;}
 
@@ -13468,7 +13468,7 @@ function _pgCommitPick(gid){
   const g = (S.shiftPickGroups||[]).find(x => x.id === gid); if(!g) return;
   const weekStart = document.getElementById(`pg-${gid}-wk`)?.value;
   const overrideId = +document.getElementById(`pg-${gid}-who`)?.value || 0;
-  if(!weekStart){ alert('Pick a week.'); return; }
+  if(!weekStart){ _toast('Pick a week.', 'err'); return; }
   // Validate still available
   if((g.picks||[]).some(p => p.weekStart === weekStart)){
     alert('That week has already been picked by someone in this group.'); return;
@@ -17915,7 +17915,7 @@ function addIRShift(){
   const site   = document.getElementById('irs-site')?.value;
   const sub    = document.getElementById('irs-sub')?.value || '';
   const notes  = document.getElementById('irs-notes')?.value || '';
-  if(!physId || !date){ alert('Select physician and date.'); return; }
+  if(!physId || !date){ _toast('Select physician and date.', 'err'); return; }
   const p = S.physicians.find(x => x.id === physId);
   if(!p) return;
 
@@ -18832,7 +18832,7 @@ function reassignHoliday(id){
 
 function doReassignHoliday(id){
   const newPhysId = +document.getElementById('hol-reassign-sel')?.value;
-  if(!newPhysId){ alert('Select a physician.'); return; }
+  if(!newPhysId){ _toast('Select a physician.', 'err'); return; }
   const h = S.holidays.find(x => x.id === id);
   if(!h) return;
   const isIR = h.group === 'IR' || /^IR-/.test(h.group||'');
@@ -19003,7 +19003,7 @@ function addOpenShift(){
   if(!_adminOnly('add open shift'))return;
   const date=document.getElementById('osm-date')?.value;const type=document.getElementById('osm-type')?.value||'1st Shift';
   const grp=document.getElementById('osm-grp')?.value||'DR';const site=document.getElementById('osm-site')?.value||'';
-  if(!date){alert('Select date');return;}
+  if(!date){_toast('Select date', 'err');return;}
   // Reject malformed dates up front rather than letting them propagate into
   // S.openShifts and break later renders / claim flow.
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
@@ -20193,7 +20193,7 @@ function addSite(){
   const name=String(rawName).replace(/[<>&"|]/g,'').trim();
   const grp=document.getElementById('new-site-irg')?.value||null;
   const addr=(document.getElementById('new-site-address')?.value||'').trim();
-  if(!name){alert('Enter a site name.');return;}
+  if(!name){_toast('Enter a site name.', 'err');return;}
   if((S.sites||[]).find(s=>s.name===name)){alert('A site with that name already exists.');return;}
   const newSite = {name, irGroup:grp||null, irAnchors:[], irFillins:[]};
   if(addr) newSite.address = addr;
@@ -20244,7 +20244,7 @@ function addSiteFromSlots(){
   const name    = String(rawName).replace(/[<>&"|]/g,'').trim();
   const grp     = document.getElementById('new-site-irg-ssl')?.value || null;
   const addr    = (document.getElementById('new-site-address-ssl')?.value || '').trim();
-  if(!name){ alert('Enter a site name.'); return; }
+  if(!name){ _toast('Enter a site name.', 'err'); return; }
   if((S.sites||[]).find(s => s.name === name)){ alert('A site with that name already exists.'); return; }
   const newSite = {name, irGroup:grp||null, irAnchors:[], irFillins:[]};
   if(addr) newSite.address = addr;
@@ -20570,7 +20570,7 @@ function addIRGroup(){
   if(!_adminOnly('add IR group')) return;
   const raw = document.getElementById('new-ir-group')?.value || '';
   const name = String(raw).replace(/[<>&"|]/g, '').trim();
-  if(!name){ alert('Enter a group name.'); return; }
+  if(!name){ _toast('Enter a group name.', 'err'); return; }
   if(getIRGroups().includes(name)){
     alert(`"${name}" already exists as an IR group.`); return;
   }
@@ -20652,11 +20652,11 @@ function removeIRGroup(name){
 // and dispatches to _doRemoveIRGroup.
 function _confirmRemoveIRGroup(name){
   const action = document.querySelector('input[name="irg-remove-action"]:checked')?.value;
-  if(!action){ alert('Pick reassign or clear first.'); return; }
+  if(!action){ _toast('Pick reassign or clear first.', 'err'); return; }
   let target = null;
   if(action === 'reassign'){
     target = document.getElementById('irg-remove-target')?.value || '';
-    if(!target){ alert('Pick a target group to reassign to.'); return; }
+    if(!target){ _toast('Pick a target group to reassign to.', 'err'); return; }
     if(target === name){ alert('Target group must differ from the one being removed.'); return; }
   }
   closeModal('ir-group-remove-modal');
@@ -21468,8 +21468,8 @@ function submitSwapRequest(){
   const toId=+document.getElementById('sw-their-phys')?.value;
   const theirKey=document.getElementById('sw-their-shift')?.value||'';
   const message=document.getElementById('sw-msg')?.value.trim()||'';
-  if(!myKey){alert('Select your shift first.');return;}
-  if(!toId){alert('Select a colleague.');return;}
+  if(!myKey){_toast('Select your shift first.', 'err');return;}
+  if(!toId){_toast('Select a colleague.', 'err');return;}
   // Parse keyed shift values: format is "kind:id" (dr|ir|irc|wk).
   // Lookup helper to resolve the actual shift row across all four collections.
   const resolveShift = (key) => {
@@ -21796,7 +21796,7 @@ function saveCustomRule(){
   if(!_adminOnly('save custom rule')) return;
   const p=S.physicians.find(x=>x.id===_srPhysId); if(!p) return;
   const text=(document.getElementById('sr-custom-text')?.value||'').trim();
-  if(!text){ alert('Enter rule text.'); return; }
+  if(!text){ _toast('Enter rule text.', 'err'); return; }
   const severity=document.getElementById('sr-custom-severity')?.value||'warn';
   const active=document.getElementById('sr-custom-active')?.checked!==false;
   if(!Array.isArray(p.customRules)) p.customRules=[];
@@ -22111,7 +22111,7 @@ function startEditCallSiteRule(idx){
 function addSiteRule(){
   if(!_srPhysId)return;
   const site=document.getElementById('sr-site')?.value;
-  if(!site){alert('Select a site');return;}
+  if(!site){_toast('Select a site', 'err');return;}
   const maxPerMonth=+document.getElementById('sr-max-mo')?.value||null;
   const maxPerWeek=+document.getElementById('sr-max-wk')?.value||null;
   const blocked=document.getElementById('sr-blocked')?.checked||false;
@@ -22186,7 +22186,7 @@ function addSiteSeqRule(){
   const p = S.physicians.find(x => x.id === _srPhysId);
   if(!p){ alert('No physician selected.'); return; }
   const site = document.getElementById('sr-ss-site')?.value;
-  if(!site){ alert('Pick a site.'); return; }
+  if(!site){ _toast('Pick a site.', 'err'); return; }
   if(!(S.sites||[]).some(s => s.name === site)){
     _srRefreshSiteSeqOpts();
     alert(`Site "${site}" no longer exists. The dropdown has been refreshed.`);
@@ -22196,7 +22196,7 @@ function addSiteSeqRule(){
   const maxConsec = +document.getElementById('sr-ss-maxconsec')?.value || null;
   const minRest   = +document.getElementById('sr-ss-minrest')?.value || null;
   const notes     = (document.getElementById('sr-ss-notes')?.value || '').trim();
-  if(!maxConsec && !minRest){ alert('Enter at least one of: max consecutive days, min days off.'); return; }
+  if(!maxConsec && !minRest){ _toast('Enter at least one of: max consecutive days, min days off.', 'err'); return; }
   if(!Array.isArray(p.siteSeqRules)) p.siteSeqRules = [];
   // De-dup by (site, slotLabel) — overwrite if exists so admins can adjust.
   const existing = p.siteSeqRules.findIndex(r =>
@@ -22249,7 +22249,7 @@ function addDayCondition(){
 function addShiftTypeRule(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
   const site=document.getElementById('sr-st-site')?.value;
-  if(!site){alert('Select a site');return;}
+  if(!site){_toast('Select a site', 'err');return;}
   const allowed=[];
   if(document.getElementById('sr-st-1st')?.checked) allowed.push('1st');
   if(document.getElementById('sr-st-2nd')?.checked) allowed.push('2nd');
@@ -22281,9 +22281,9 @@ function addHoliday(){
   const name  = document.getElementById('hol-name')?.value.trim();
   const yr    = +document.getElementById('hol-yr')?.value||new Date().getFullYear();
   const notes = document.getElementById('hol-notes')?.value.trim()||'';
-  if(!pid)   { alert('Select a physician.'); return; }
-  if(!date)  { alert('Select a date.'); return; }
-  if(!name)  { alert('Enter a holiday name.'); return; }
+  if(!pid)   { _toast('Select a physician.', 'err'); return; }
+  if(!date)  { _toast('Select a date.', 'err'); return; }
+  if(!name)  { _toast('Enter a holiday name.', 'err'); return; }
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
   if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
@@ -24654,8 +24654,8 @@ async function sendBroadcast(){
   const body   =document.getElementById('bc-body')?.value.trim();
   const audience=document.getElementById('bc-audience')?.value||'all';
   const statusEl=document.getElementById('bc-status');
-  if(!subject){alert('Enter a subject.');return;}
-  if(!body){alert('Enter a message body.');return;}
+  if(!subject){_toast('Enter a subject.', 'err');return;}
+  if(!body){_toast('Enter a message body.', 'err');return;}
 
   const allTargets=_broadcastAudience();
   const recipients=allTargets.filter(u=>{
@@ -25145,7 +25145,7 @@ function _renderTBEditCard(tb, siteNames, allSubs){ return _renderRecurringEditC
 function addTumorBoard(){
   if(!_adminOnly('add tumor board')) return;
   const name = (document.getElementById('tb-new-name')?.value || '').trim().replace(/[<>&"|]/g,'');
-  if(!name){ alert('Enter a board name.'); return; }
+  if(!name){ _toast('Enter a board name.', 'err'); return; }
   if(!Array.isArray(S.tumorBoards)) S.tumorBoards = [];
   if(S.tumorBoards.some(t => t.name.toLowerCase() === name.toLowerCase())){
     alert(`A board named "${name}" already exists.`); return;
@@ -25296,7 +25296,7 @@ function _readRecurrenceFromForm(id){
   const kind = document.getElementById(`tbe-reckind-${id}`)?.value || 'weekly';
   if(kind === 'weekly'){
     const days = [...document.querySelectorAll(`.tbe-recday-${id}:checked`)].map(c=>+c.value);
-    if(!days.length){ alert('Pick at least one day of the week.'); return null; }
+    if(!days.length){ _toast('Pick at least one day of the week.', 'err'); return null; }
     const interval = Math.max(1, +document.getElementById(`tbe-recint-${id}`)?.value || 1);
     const rec = {kind:'weekly', days, interval};
     if(interval > 1){
@@ -25307,7 +25307,7 @@ function _readRecurrenceFromForm(id){
   }
   if(kind === 'biweekly'){
     const days = [...document.querySelectorAll(`.tbe-recday-${id}:checked`)].map(c=>+c.value);
-    if(!days.length){ alert('Pick at least one day of the week.'); return null; }
+    if(!days.length){ _toast('Pick at least one day of the week.', 'err'); return null; }
     const anchor = document.getElementById(`tbe-recanchor-${id}`)?.value || fmtDate(new Date());
     return {kind:'biweekly', days, anchorDate:anchor};
   }
@@ -25323,7 +25323,7 @@ function _readRecurrenceFromForm(id){
   }
   if(kind === 'monthly-multi'){
     const weeks = [...document.querySelectorAll(`.tbe-recwks-${id}:checked`)].map(c => c.value === '-1' ? -1 : +c.value);
-    if(!weeks.length){ alert('Pick at least one week of the month.'); return null; }
+    if(!weeks.length){ _toast('Pick at least one week of the month.', 'err'); return null; }
     const day = +document.getElementById(`tbe-recday-${id}`)?.value || 0;
     return {kind:'monthly-multi', weeks, day};
   }
@@ -25341,7 +25341,7 @@ function _readRecurrenceFromForm(id){
       }
       if(!dates.includes(piece)) dates.push(piece);
     }
-    if(!dates.length){ alert('Enter at least one date.'); return null; }
+    if(!dates.length){ _toast('Enter at least one date.', 'err'); return null; }
     return {kind:'specific-dates', dates:dates.sort()};
   }
   alert('Unknown recurrence pattern: '+kind);
@@ -25609,7 +25609,7 @@ function deleteTumorBoard(id){
 function addClinic(){
   if(!_adminOnly('add clinic')) return;
   const name = (document.getElementById('cl-new-name')?.value || '').trim().replace(/[<>&"|]/g,'');
-  if(!name){ alert('Enter a clinic name.'); return; }
+  if(!name){ _toast('Enter a clinic name.', 'err'); return; }
   if(!Array.isArray(S.clinics)) S.clinics = [];
   if(S.clinics.some(c => c.name.toLowerCase() === name.toLowerCase())){
     alert(`A clinic named "${name}" already exists.`); return;
@@ -27301,7 +27301,7 @@ function saveTBRule(){
     }
   }
   const action = document.getElementById('sr-tb-action')?.value;
-  if(!action){ alert('Pick a rule type.'); return; }
+  if(!action){ _toast('Pick a rule type.', 'err'); return; }
 
   const rule = {
     eventId,
@@ -27320,7 +27320,7 @@ function saveTBRule(){
   }
   if(action === 'must-be-at-site-on-day'){
     rule.requiredSite = document.getElementById('sr-tb-site')?.value || '';
-    if(!rule.requiredSite){ alert('Pick a required site.'); return; }
+    if(!rule.requiredSite){ _toast('Pick a required site.', 'err'); return; }
     const sh = document.getElementById('sr-tb-shift')?.value || '';
     if(sh) rule.shift = sh;
   }
@@ -27394,7 +27394,7 @@ function addCallSiteRule(){
   if(!p){ alert('No physician selected.'); return; }
   const callType = document.getElementById('sr-cs-calltype')?.value;
   const requiredSite = document.getElementById('sr-cs-site')?.value;
-  if(!callType || !requiredSite){ alert('Pick call type and required site.'); return; }
+  if(!callType || !requiredSite){ _toast('Pick call type and required site.', 'err'); return; }
   // Validate the site is still in S.sites — admin may have deleted it from
   // another window since the modal opened.
   if(!(S.sites||[]).some(s => s.name === requiredSite)){
@@ -29998,8 +29998,8 @@ function addPairConflict(){
   if(!_adminOnly('add pair-conflict rule')) return;
   const a = +document.getElementById('pcr-a')?.value || 0;
   const b = +document.getElementById('pcr-b')?.value || 0;
-  if(!a || !b){ alert('Pick both physicians.'); return; }
-  if(a === b){ alert('Pick two different physicians.'); return; }
+  if(!a || !b){ _toast('Pick both physicians.', 'err'); return; }
+  if(a === b){ _toast('Pick two different physicians.', 'err'); return; }
   const scope = document.getElementById('pcr-scope')?.value || 'same-day';
   const site = document.getElementById('pcr-site')?.value || '';
   const sev = document.getElementById('pcr-sev')?.value || 'warn';
@@ -30051,7 +30051,7 @@ function addSiteCap(){
   const site = document.getElementById('sc-site')?.value;
   const shift = document.getElementById('sc-shift')?.value;
   const cap = +document.getElementById('sc-cap')?.value || 0;
-  if(!site){ alert('Pick a site.'); return; }
+  if(!site){ _toast('Pick a site.', 'err'); return; }
   S.siteCaps = S.siteCaps || {};
   const key = `${site}|${shift}`;
   if(cap <= 0){
@@ -30102,7 +30102,7 @@ function addSubNeed(){
   const shift = document.getElementById('ssn-shift')?.value;
   const sub = document.getElementById('ssn-sub')?.value;
   const min = +document.getElementById('ssn-min')?.value || 1;
-  if(!site || !sub){ alert('Pick a site and sub-specialty.'); return; }
+  if(!site || !sub){ _toast('Pick a site and sub-specialty.', 'err'); return; }
   S.shiftSubNeeds = S.shiftSubNeeds || {};
   const key = `${site}|${shift}`;
   if(!S.shiftSubNeeds[key]) S.shiftSubNeeds[key] = {};
@@ -31193,7 +31193,7 @@ function addDRShift(){
     }
     site = 'At Home / Remote';
   }
-  if(!date){alert('Select date');return;}
+  if(!date){_toast('Select date', 'err');return;}
   // Block regular shift assignment on defined holidays — those days are reserved
   // for Holiday Call coverage, not day shifts. Home shifts on holidays are
   // allowed (physician is off that day; home is not a work assignment per se).
@@ -31260,7 +31260,7 @@ function addDRShift(){
 function fillDRHomeShifts(){
   if(!_adminOnly('bulk add home shifts')) return;
   const date=document.getElementById('sb-date').value;
-  if(!date){alert('Select a date in the DR builder first.');return;}
+  if(!date){_toast('Select a date in the DR builder first.', 'err');return;}
   const vm=vacMap();const vacOnDate=new Set(vm[date]||[]);
   let added=0, skippedRules=0;
   const _fdow=parseDateLocal(date).getDay();
@@ -31422,7 +31422,7 @@ function _wkeRefreshSub(id){
 function addWkCall(){
   if(!_adminOnly('assign weekend call'))return;
   const pid=+document.getElementById('wk-phys').value;const satDate=document.getElementById('wk-date').value;
-  if(!satDate){alert('Select Saturday date');return;}
+  if(!satDate){_toast('Select Saturday date', 'err');return;}
   if(parseDateLocal(satDate).getDay()!==6&&!confirm('Not a Saturday. Continue?'))return;
   const sunDate=addDays(satDate,1);
   const p=S.physicians.find(x=>x.id===pid);
@@ -32901,7 +32901,7 @@ function addIRWeekend(group,fridayDate){
   if(!_adminOnly('assign IR weekend call'))return;
   const physId=+document.getElementById(`irwk-phys-${group}`)?.value;
   const site=document.getElementById(`irwk-site-${group}`)?.value||'';
-  if(!physId){alert('Select physician');return;}
+  if(!physId){_toast('Select physician', 'err');return;}
   // Defensive: snap non-Friday dates to Friday. If the Week Builder input was
   // a non-Monday, weekDates[4] would resolve to some other day and the button
   // passes that through as fridayDate. Silently correcting prevents a weekend
@@ -32943,7 +32943,7 @@ function addIRCallManual(){
   if(!_adminOnly('add IR call'))return;
   const physId=+document.getElementById('ird-phys').value;
   let date=document.getElementById('ird-date').value;
-  if(!date){alert('Select date');return;}
+  if(!date){_toast('Select date', 'err');return;}
   const callType=document.getElementById('ird-ctype').value;
   // Defensive: for weekend call, snap the admin-entered date to the Friday
   // of that week. Without this, a user who picks any day could produce a
@@ -33796,7 +33796,7 @@ function addIRCallBlackout(){
   const start=document.getElementById('irblk-start')?.value;
   const end=document.getElementById('irblk-end')?.value;
   const reason=document.getElementById('irblk-reason')?.value.trim()||'';
-  if(!start||!end){alert('Select start and end dates.');return;}
+  if(!start||!end){_toast('Select start and end dates.', 'err');return;}
   if(end<start){alert('End date must be on or after start date.');return;}
   const p=S.physicians.find(x=>x.id===_srPhysId);
   if(!p) return;
@@ -35518,7 +35518,7 @@ function renderHolDefList(){
 
 function holdefAddDate(){
   const dt = document.getElementById('holdef-add-date')?.value;
-  if(!dt){ alert('Select a date first.'); return; }
+  if(!dt){ _toast('Select a date first.', 'err'); return; }
   if(_holdefDates.includes(dt)){ alert('Date already added.'); return; }
   _holdefDates.push(dt);
   _holdefDates.sort();
@@ -35562,7 +35562,7 @@ function submitHolDef(){
   const irNorthSlots = irSlotsByGroup['North'] || 0;
   const irSouthSlots = irSlotsByGroup['South'] || 0;
   const notes = document.getElementById('holdef-notes')?.value.trim()||'';
-  if(!name){ alert('Enter a holiday name.'); return; }
+  if(!name){ _toast('Enter a holiday name.', 'err'); return; }
   if(!_holdefDates.length){ alert('Add at least one date.'); return; }
   const hasAnyIRSlots = Object.values(irSlotsByGroup).some(v => v > 0);
   if(!drSlots && !hasAnyIRSlots){
@@ -36912,7 +36912,7 @@ function _doQuickAssign(date){
   const shift = document.getElementById('rs-qa-shift')?.value || '1st';
   const physId = +document.getElementById('rs-qa-phys')?.value || 0;
   const site = document.getElementById('rs-qa-site')?.value || '';
-  if(!physId){ alert('Pick a physician.'); return; }
+  if(!physId){ _toast('Pick a physician.', 'err'); return; }
   const phys = _physById(physId);
   if(!phys){ alert('Physician not found.'); return; }
   const newId = S.nextId++;
@@ -37760,7 +37760,7 @@ function compareMonths(){
   if(!_adminOnly('compare schedules')) return;
   const ymA = (document.getElementById('cmp-month-a')?.value || '').trim();
   const ymB = (document.getElementById('cmp-month-b')?.value || '').trim();
-  if(!ymA || !ymB){ alert('Pick both months.'); return; }
+  if(!ymA || !ymB){ _toast('Pick both months.', 'err'); return; }
   // Build a per-(date, shift, site, slotLabel) → physId map for each month.
   const buildKey = (s) => `${s.date}|${s.shift}|${s.site || ''}|${s.slotLabel || ''}`;
   const indexBy = (ym) => {
@@ -38067,7 +38067,7 @@ async function generateWidgetPairing(){
   if(!_adminOnly('generate widget pairing')) return;
   const physId = +document.getElementById('wpair-phys')?.value || 0;
   const days = +document.getElementById('wpair-days')?.value || 30;
-  if(!physId){ alert('Pick a physician first.'); return; }
+  if(!physId){ _toast('Pick a physician first.', 'err'); return; }
   const phys = (typeof _physById === 'function') ? _physById(physId) : null;
   if(!phys){ alert('Physician not found.'); return; }
   const sbUrl = (typeof _getUrl === 'function') ? _getUrl() : '';
@@ -38315,7 +38315,7 @@ async function fetchLatestWidgetReleaseUrls(opts){
 async function generateWidgetInstallKit(){
   if(!_adminOnly('generate widget install kit')) return;
   const physId = +document.getElementById('wpair-phys')?.value || 0;
-  if(!physId){ alert('Pick a physician first.'); return; }
+  if(!physId){ _toast('Pick a physician first.', 'err'); return; }
   const phys = (typeof _physById === 'function') ? _physById(physId) : null;
   if(!phys){ alert('Physician not found.'); return; }
   const macUrl = (S.cfg && S.cfg.widgetMacUrl) || '';
@@ -40046,7 +40046,7 @@ function addWebhook(){
     document.getElementById('wh-ev-' + ev.replace(/\./g, '-'))?.checked
   );
   if(!url || !/^https?:\/\//i.test(url)){ alert('Provide a valid http(s) URL.'); return; }
-  if(!events.length){ alert('Pick at least one event to subscribe to.'); return; }
+  if(!events.length){ _toast('Pick at least one event to subscribe to.', 'err'); return; }
   // Soft sanity-check on flavor URL host. Warn but don't block — admins
   // sometimes route through proxies or custom hostnames.
   if(flavor === 'slack' && !/hooks\.slack\.com/i.test(url)){
@@ -40109,7 +40109,7 @@ function renderWebhooks(){
 async function testSMSDelivery(){
   if(!_adminOnly('test SMS delivery')) return;
   const phone = (document.getElementById('sms-phone')?.value || '').trim();
-  if(!phone){ alert('Enter a phone number to test.'); return; }
+  if(!phone){ _toast('Enter a phone number to test.', 'err'); return; }
   if(!_supabase){ alert('Supabase required for SMS delivery.'); return; }
   if(!/^\+\d{10,15}$/.test(phone)){
     alert('Phone must be in E.164 format (e.g. +15551234567).');
