@@ -19084,6 +19084,9 @@ function claimShift(oid,pid){
     renderOpenShifts();
     return;
   }
+  // Schedule-lock check on the open-shift date. Locked months should not
+  // accept new claims either — admin must unlock first.
+  if(typeof _canEditDate==='function' && !_canEditDate(o.date)) return;
   const p=_physById(pid);
   if(!p){alert('Physician not found.');return;}
   if(o.group==='DR'&&p.role==='IR'){alert('IR-only physicians cannot claim DR shifts.');return;}
