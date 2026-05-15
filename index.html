@@ -38341,6 +38341,28 @@ async function _hmacB64Url(secret, msg){
   return _b64url(s);
 }
 
+// Generate (or read) a per-practice widget HMAC secret. The original
+// design used the public anon key as the HMAC secret — but that key
+// is in the published page source, so anyone could forge pairing
+// codes with it (cross-tenant data exposure). The fix: each practice
+// has its own random secret stored only in the DB. The main app reads
+// it (RLS-gated) when generating codes; the edge function reads it
+// (service role) when verifying. Outsiders cannot forge codes without
+// first compromising practice-level access.
+function _getOrCreateWidgetSecret(){
+  if(!S.cfg) S.cfg = {};
+  if(typeof S.cfg._widgetSecret !== 'string' || S.cfg._widgetSecret.length < 24){
+    // 32 random bytes → 43 base64url chars. Plenty for HMAC-SHA256.
+    const buf = new Uint8Array(32);
+    crypto.getRandomValues(buf);
+    let s = ''; for(let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
+    S.cfg._widgetSecret = btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    if(typeof _audit === 'function') _audit('widget.secret.created', {});
+    if(typeof triggerSave === 'function') triggerSave();
+  }
+  return S.cfg._widgetSecret;
+}
+
 async function generateWidgetPairing(){
   if(!_adminOnly('generate widget pairing')) return;
   const physId = +document.getElementById('wpair-phys')?.value || 0;
@@ -38359,10 +38381,13 @@ async function generateWidgetPairing(){
     alert('Practice ID is not set. Make sure you are signed in to a practice.');
     return;
   }
+  // Clamp pairing-code lifetime. 30d is default; 365d hard ceiling so
+  // even an unsupervised admin can't issue 10-year tokens.
+  const clampedDays = Math.max(1, Math.min(days, 365));
   const issuedAt = new Date().toISOString();
-  const exp = new Date(Date.now() + days * 86400000).toISOString();
+  const exp = new Date(Date.now() + clampedDays * 86400000).toISOString();
   const payload = {
-    v: 1,
+    v: 2,                          // bumped — v2 signs with practice secret, not anon key
     practiceId,
     physId,
     physLast: phys.last || '',
@@ -38372,12 +38397,15 @@ async function generateWidgetPairing(){
     issuedAt,
     exp,
   };
-  // Sign with HMAC-SHA256 using the anon key as the shared secret. This
-  // doesn't authenticate Supabase — it only proves the code was issued
-  // by someone with admin access to this practice (since they had the
-  // anon key in S.cfg). The widget validates the sig before trusting.
+  // Sign with the per-practice secret (server-only). Previously we
+  // signed with `sbKey` (the PUBLIC anon key), which let anyone with
+  // the URL+anon key forge a code for any practiceId/physId. The
+  // edge function fetches the practice row by practiceId, reads the
+  // secret, and verifies. An attacker without practice access can't
+  // read the secret → can't forge a valid signature.
+  const secret = _getOrCreateWidgetSecret();
   const body = JSON.stringify(payload);
-  payload.sig = await _hmacB64Url(sbKey, body);
+  payload.sig = await _hmacB64Url(secret, body);
   const code = _b64url(JSON.stringify(payload));
   // Store the active pairing record so admins can revoke + audit.
   if(!Array.isArray(S.widgetPairings)) S.widgetPairings = [];
