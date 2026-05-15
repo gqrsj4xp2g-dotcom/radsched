@@ -41647,6 +41647,19 @@ function _updateSaveUI(text,color){
   const si=document.getElementById('save-indicator');
   if(!si)return;
   const myToken = ++_saveUiToken;
+  // UX cleanup: skip the brief "✓ Synced" flash. The persistent
+  // "Saved Xs ago" text from _renderLastSavedAge already tells the
+  // user their data is current. Only flash for in-flight saves and
+  // for errors / warnings — the cases where the user actually wants
+  // attention drawn to the topbar.
+  const isQuietSuccess = (text === '✓ Synced' || (text || '').startsWith('✓'));
+  if(isQuietSuccess){
+    si.textContent = '';
+    si.style.fontWeight = '';
+    si.dataset.transient = '0';
+    if(typeof _renderLastSavedAge === 'function') _renderLastSavedAge();
+    return;
+  }
   si.textContent=text;
   si.style.color=color;
   si.style.fontWeight='700';
