@@ -1507,23 +1507,55 @@ tbody tr:hover{background:var(--bg3)}
       <div class="tb-av" id="tb-av">--</div>
       <div><div class="tb-name" id="tb-nm">—</div><div class="tb-role" id="tb-rl">—</div></div>
     </div>
+    <!-- Topbar status pills (conditional — only show when relevant).
+         These were previously stacked unconditionally even when
+         healthy, contributing to visual noise. The save-indicator
+         renders a tiny dot-status; the stale-save / net / error
+         badges only appear when there's something to flag. -->
     <span id="save-indicator" style="font-size:10px;color:var(--txt3);margin-right:4px"></span>
     <span id="rs-stale-save-badge" style="display:none;font-size:11px;font-weight:700;background:var(--red,#dc2626);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" onclick="(function(){ if(typeof _pushToSupabase==='function') _pushToSupabase(); })()" title="Click to retry save now"></span>
     <span id="rs-net-badge" style="display:none;font-size:11px;font-weight:600;background:var(--amber,#d97706);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;align-items:center" title="Network status">⚠ Offline</span>
-    <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
-    <button id="fs-toggle-btn" class="tb-btn" style="margin-right:4px;display:none" title="Auto-save updates to your local index.html (Chrome / Edge only)">📁 Auto-save to file…</button>
-    <span id="fs-status" style="font-size:10px;color:var(--txt3);margin-right:6px"></span>
-    <span id="gh-toolbar-status" style="font-size:10px;color:var(--txt3);margin-right:6px;display:none" title="GitHub auto-deploy status"></span>
     <span id="rs-error-badge" onclick="showErrorLog()" style="display:none;font-size:11px;font-weight:700;background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;margin-right:6px;cursor:pointer;align-items:center" title="Recent errors — click to view"></span>
+    <span id="rs-presence" style="display:none;font-size:11px;font-weight:500;background:var(--rs-accent-soft);color:var(--rs-accent);border-radius:10px;padding:2px 8px;margin-right:6px;align-items:center;cursor:default" title="Other people viewing this practice"></span>
+
+    <!-- Primary actions: stay visible. These are the few users
+         genuinely interact with daily. -->
+    <button class="tb-btn" onclick="hardSave()" style="background:var(--green);color:#fff;border:none;margin-right:4px" title="Download updated copy of this file with all current data saved">💾 Save File</button>
     <button id="rs-notif-toggle" class="tb-btn" onclick="toggleNotificationsPanel()" title="Notifications" aria-label="Notifications" style="margin-right:4px;font-size:14px"><span aria-hidden="true">🔔</span><span id="rs-notif-dot"></span></button>
     <button class="tb-btn" onclick="openCommandPalette()" title="Command palette (Cmd/Ctrl+K)" aria-label="Search" style="margin-right:4px;padding:6px 10px">⌕</button>
-    <button class="tb-btn" onclick="openShortcutsHelp()" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" style="margin-right:4px;padding:6px 10px;font-size:13px">?</button>
-    <span id="rs-presence" style="display:none;font-size:11px;font-weight:500;background:var(--rs-accent-soft);color:var(--rs-accent);border-radius:10px;padding:2px 8px;margin-right:6px;align-items:center;cursor:default" title="Other people viewing this practice"></span>
-    <button id="rs-undo-btn" class="tb-btn" onclick="undoLastEdit()" disabled style="margin-right:2px;padding:6px 8px" title="Undo (Cmd/Ctrl+Z)">↶</button>
-    <button id="rs-redo-btn" class="tb-btn" onclick="redoLastEdit()" disabled style="margin-right:4px;padding:6px 8px" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
-    <button id="rs-calmode-btn" class="tb-btn" onclick="toggleCalendarMode()" style="margin-right:4px;padding:6px 10px" title="Switch between grid and list view">📅</button>
-    <button class="tb-btn" onclick="printSchedule()" style="margin-right:4px;padding:6px 10px" title="Print the active schedule view (Cmd/Ctrl+P)">🖨 Print</button>
-    <button class="tb-btn" data-rs-hold="clearAllData" style="background:var(--red,#dc2626);color:#fff;border:none;margin-right:4px" title="Hold to reset to original default data (1.5s)">🗑 Hold to reset</button>
+
+    <!-- Overflow menu (⋯) — collapses rarely-used buttons. Replaces
+         the previous wall of icon buttons (undo / redo / calmode /
+         print / shortcuts / fs-toggle / hold-to-reset / gh status /
+         fs status). All still accessible, just one click away. -->
+    <button class="tb-btn" id="rs-tb-more" onclick="_tbMoreToggle(event)" title="More options"
+      style="margin-right:4px;padding:6px 10px;font-size:14px" aria-haspopup="true" aria-expanded="false">⋯</button>
+    <div id="rs-tb-more-menu" style="display:none;position:absolute;top:46px;right:12px;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.35);padding:4px;min-width:240px;z-index:9000;font-size:13px">
+      <div class="rs-tb-more-item" data-act="undo"  onclick="_tbMoreRun('undo')"  style="padding:8px 12px;border-radius:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>↶ Undo</span><kbd style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--rs-ink-3);font-family:ui-monospace,monospace">⌘Z</kbd></div>
+      <div class="rs-tb-more-item" data-act="redo"  onclick="_tbMoreRun('redo')"  style="padding:8px 12px;border-radius:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>↷ Redo</span><kbd style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--rs-ink-3);font-family:ui-monospace,monospace">⌘⇧Z</kbd></div>
+      <div style="height:1px;background:var(--bdr);margin:4px 2px"></div>
+      <div class="rs-tb-more-item" onclick="_tbMoreRun('calmode')" style="padding:8px 12px;border-radius:4px;cursor:pointer">📅 Toggle calendar grid / list</div>
+      <div class="rs-tb-more-item" onclick="_tbMoreRun('print')"   style="padding:8px 12px;border-radius:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>🖨 Print schedule</span><kbd style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--rs-ink-3);font-family:ui-monospace,monospace">⌘P</kbd></div>
+      <div class="rs-tb-more-item" onclick="_tbMoreRun('shortcuts')" style="padding:8px 12px;border-radius:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>⌨ Keyboard shortcuts</span><kbd style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--rs-ink-3);font-family:ui-monospace,monospace">?</kbd></div>
+      <div style="height:1px;background:var(--bdr);margin:4px 2px" id="rs-tb-more-fs-sep"></div>
+      <div class="rs-tb-more-item" id="rs-tb-more-fs" onclick="_tbMoreRun('fs')" style="padding:8px 12px;border-radius:4px;cursor:pointer;display:none">📁 Auto-save to file…</div>
+      <div class="rs-tb-more-item" id="rs-tb-more-fs-status" style="padding:6px 12px;font-size:10.5px;color:var(--rs-ink-3);display:none"></div>
+      <div class="rs-tb-more-item" id="rs-tb-more-gh-status"  style="padding:6px 12px;font-size:10.5px;color:var(--rs-ink-3);display:none"></div>
+      <div style="height:1px;background:var(--bdr);margin:4px 2px"></div>
+      <div class="rs-tb-more-item" data-rs-hold="clearAllData" style="padding:8px 12px;border-radius:4px;cursor:pointer;color:var(--red-t,#dc2626);font-weight:600" title="Hold 1.5s to reset all data">🗑 Hold to reset all data</div>
+    </div>
+    <!-- Hidden compat shims so legacy code that reads these IDs still
+         works after the consolidation. The old buttons / status text
+         move into the overflow menu; their ID's stay so undoRedo
+         disabled-state, fs-status updates, and GH status updates
+         still find their elements. -->
+    <button id="rs-undo-btn" onclick="undoLastEdit()" disabled style="display:none">↶</button>
+    <button id="rs-redo-btn" onclick="redoLastEdit()" disabled style="display:none">↷</button>
+    <button id="rs-calmode-btn" onclick="toggleCalendarMode()" style="display:none">📅</button>
+    <button id="fs-toggle-btn" style="display:none">📁</button>
+    <span id="fs-status" style="display:none"></span>
+    <span id="gh-toolbar-status" style="display:none"></span>
+
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
 
