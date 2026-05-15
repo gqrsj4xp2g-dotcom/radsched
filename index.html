@@ -33273,12 +33273,14 @@ function cancelEditIRCall(){ _editingIRCallId = null; renderIRList(); }
 function saveEditIRCall(id){
   if(!_adminOnly('edit IR call')) return;
   const ic = S.irCalls.find(x => x.id === id); if(!ic) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(ic.date)) return;
   const physEl = document.getElementById(`irle-phys-${id}`);
   const dateEl = document.getElementById(`irle-date-${id}`);
   const typeEl = document.getElementById(`irle-type-${id}`);
   const siteEl = document.getElementById(`irle-site-${id}`);
   const notesEl= document.getElementById(`irle-notes-${id}`);
   if(!dateEl?.value){ alert('Date required.'); return; }
+  if(typeof _canEditDate==='function' && !_canEditDate(dateEl.value)) return;
   const newPid = +physEl?.value || ic.physId;
   const p = S.physicians.find(x => x.id === newPid);
   if(!p){ alert('Physician not found.'); return; }
