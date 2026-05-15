@@ -42811,7 +42811,7 @@ function _rePickWithTargetYear(){
 // Used by every importer; preserves intent ("read what the human meant")
 // without depending on SheetJS's auto-formatting (which silently fails on
 // cells with non-date number styles).
-function _xlsxDateToISO(v){
+function _xlsxDateToISO(v, defaultYear){
   if(v == null) return null;
   // Already a Date
   if(v instanceof Date && !isNaN(v.getTime())){
@@ -42827,7 +42827,12 @@ function _xlsxDateToISO(v){
   }
   if(typeof v !== 'string') return null;
   const s = v.trim();
-  // ISO
+  if(!s) return null;
+  // Expand: many pick sheets carry "Jan 5", "1/5", "Sep 10" with no year.
+  // We parse them and fall back to defaultYear (passed by the caller from
+  // surrounding context — typically the file's most-common year or the
+  // admin's Target-year input).
+  // ISO YYYY-MM-DD
   let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
   if(m) return `${m[1]}-${m[2]}-${m[3]}`;
   // US-style M/D/YYYY (with optional 4-digit year)
@@ -42835,6 +42840,40 @@ function _xlsxDateToISO(v){
   if(m){
     let yr = +m[3]; if(yr < 100) yr += 2000;
     return `${yr}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  }
+  // US-style without year — "1/5" / "12/31"
+  m = /^(\d{1,2})\/(\d{1,2})$/.exec(s);
+  if(m && defaultYear){
+    return `${defaultYear}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  }
+  // ISO-with-hyphen MM-DD (no year) — "01-05"
+  m = /^(\d{1,2})-(\d{1,2})$/.exec(s);
+  if(m && defaultYear){
+    return `${defaultYear}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  }
+  // Month-name + day(+year): "Jan 5", "January 5", "Sep 10 2026", "Jan 5, 2026"
+  const monthMap = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12,
+                     january:1, february:2, march:3, april:4, june:6, july:7, august:8, september:9, october:10, november:11, december:12 };
+  m = /^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:[,\s]+(\d{2,4}))?\s*$/.exec(s);
+  if(m){
+    const monKey = m[1].toLowerCase();
+    const month = monthMap[monKey];
+    if(month){
+      let yr = m[3] ? +m[3] : (defaultYear || 0);
+      if(yr && yr < 100) yr += 2000;
+      if(yr) return `${yr}-${String(month).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+    }
+  }
+  // Day-Month-name: "5 Jan 2026", "5 January", "5-Jan-2026"
+  m = /^(\d{1,2})[-\s]+([A-Za-z]{3,9})\.?(?:[-,\s]+(\d{2,4}))?\s*$/.exec(s);
+  if(m){
+    const monKey = m[2].toLowerCase();
+    const month = monthMap[monKey];
+    if(month){
+      let yr = m[3] ? +m[3] : (defaultYear || 0);
+      if(yr && yr < 100) yr += 2000;
+      if(yr) return `${yr}-${String(month).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`;
+    }
   }
   // String that's just an Excel serial (rare but seen with raw:false)
   if(/^\d+(\.\d+)?$/.test(s)){
