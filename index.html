@@ -20229,14 +20229,27 @@ function addSite(){
   const name=String(rawName).replace(/[<>&"|]/g,'').trim();
   const grp=document.getElementById('new-site-irg')?.value||null;
   const addr=(document.getElementById('new-site-address')?.value||'').trim();
-  if(!name){_toast('Enter a site name.', 'err');return;}
-  if((S.sites||[]).find(s=>s.name===name)){alert('A site with that name already exists.');return;}
+  const nameEl = document.getElementById('new-site');
+  if(!name){
+    if(typeof _invalidField === 'function' && nameEl) _invalidField(nameEl, 'Site name is required.');
+    _toast('Site name is required.', 'err');
+    return;
+  }
+  if((S.sites||[]).find(s=>s.name===name)){
+    if(typeof _invalidField === 'function' && nameEl) _invalidField(nameEl, `A site named "${name}" already exists.`);
+    _toast('That site name is already taken.', 'err');
+    return;
+  }
   const newSite = {name, irGroup:grp||null, irAnchors:[], irFillins:[]};
   if(addr) newSite.address = addr;
   S.sites.push(newSite);
   document.getElementById('new-site').value='';
   const addrEl = document.getElementById('new-site-address'); if(addrEl) addrEl.value='';
   triggerSave();renderSitesList();
+  if(typeof _toast === 'function') _toast(`✓ Added site "${name}".`, 'ok');
+  if(typeof _audit === 'function') _audit('site.add', { name, irGroup: grp || null });
+  // Return focus to the name field so admins can chain-add sites.
+  document.getElementById('new-site')?.focus();
   // Seed default slot keys. Hospital sites only get 1st/2nd/3rd entries;
   // only the "At Home / Remote" pseudo-site gets a Home key. (2nd/3rd are
   // kept for legacy/back-compat even though auto-assign currently only
