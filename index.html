@@ -18404,6 +18404,11 @@ function deleteVacation(id){
   if(!_adminOnly('delete vacation')) return;
   const v = (S.vacations||[]).find(x => x.id === id);
   if(!v) return;
+  // Schedule lock — block if either endpoint falls in a locked month.
+  if(typeof _canEditDate==='function'){
+    if(!_canEditDate(v.start)) return;
+    if(v.start.slice(0,7)!==v.end.slice(0,7) && !_canEditDate(v.end)) return;
+  }
   const snapshot = {...v};
   S.vacations = S.vacations.filter(x => x.id !== id);
   triggerSave();
