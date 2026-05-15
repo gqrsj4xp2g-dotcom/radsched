@@ -33109,6 +33109,7 @@ function fillDRHomeRemainingIR(){ return fillDRHomeForIR('dr-home'); }
 function addIRCallFromGrid(sel,date,callType,group){
   if(!_adminOnly('assign IR call')){sel.value='';return;}
   const physId=+sel.value;if(!physId){return;}
+  if(typeof _canEditDate==='function' && !_canEditDate(date)){sel.value='';return;}
   const p=S.physicians.find(x=>x.id===physId);
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===group&&ic.callType==='daily')){
     alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
