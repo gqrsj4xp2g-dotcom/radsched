@@ -43165,15 +43165,17 @@ function _renderPickPreview(prev){
     </div>`;
   if(vac.length){
     html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Vacations preview (${vac.length})</summary>
-      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
-      <table class="tbl"><thead><tr><th>Physician</th><th>Start</th><th>End</th><th>Type</th></tr></thead><tbody>
+      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Start</th><th>End</th><th>Type</th><th>Source cell</th><th>Why</th></tr></thead><tbody>
       ${vac.slice(0,80).map(m => `<tr>
         <td>${pnameHtml(m.physId)}</td>
         <td>${escHtml(m.start)}</td>
         <td>${escHtml(m.end)}</td>
         <td><span class="tag ta">${escHtml(m.type)}</span></td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(m.sourceRaw||'—')}</td>
+        <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(m.sourceReason||'—')}</td>
       </tr>`).join('')}
-      ${vac.length > 80 ? `<tr><td colspan="4" style="color:var(--rs-ink-3)">… and ${vac.length - 80} more</td></tr>` : ''}
+      ${vac.length > 80 ? `<tr><td colspan="6" style="color:var(--rs-ink-3)">… and ${vac.length - 80} more</td></tr>` : ''}
       </tbody></table></div></details>`;
   }
   if(sh.length){
