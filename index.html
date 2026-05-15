@@ -36040,8 +36040,9 @@ function saveEditHoliday(id){
 
 function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
-  if(!confirm('Delete this assignment?'))return;
   const h=S.holidays.find(x=>x.id===id);
+  if(h && typeof _canEditDate==='function' && !_canEditDate(h.date)) return;
+  if(!confirm('Delete this assignment?'))return;
   if(h&&((h.group==='IR' || /^IR-/.test(h.group||'')))) _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
   triggerSave();
