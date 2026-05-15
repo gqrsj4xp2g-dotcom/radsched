@@ -12934,13 +12934,14 @@ function addPhys(){
   if(!_adminOnly('add physicians'))return;
   const first=sanitizeNameInput(document.getElementById('p-first').value),last=sanitizeNameInput(document.getElementById('p-last').value);
   if(!first||!last){
-    if(typeof _toast === 'function') _toast('First and last name are required.', 'err');
-    else alert('First and last name are required.');
-    // Focus the first empty field so the user can immediately retype.
+    // Inline-validate: red border + helper text on whichever field
+    // is empty. Toasts still fire for power users who prefer the
+    // top-right cue, but the inline cue is the primary signal now.
     const firstEl = document.getElementById('p-first');
     const lastEl  = document.getElementById('p-last');
-    if(firstEl && !first) firstEl.focus();
-    else if(lastEl) lastEl.focus();
+    if(!first && firstEl){ _invalidField(firstEl, 'First name is required.'); }
+    else if(!last && lastEl){ _invalidField(lastEl, 'Last name is required.'); }
+    if(typeof _toast === 'function') _toast('Fill the highlighted fields.', 'err');
     return;
   }
   const degree=sanitizeNameInput(document.getElementById('p-deg').value)||'MD';
@@ -41944,6 +41945,43 @@ setInterval(() => {
   if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
   try{ _updateStaleSaveBadge(); }catch(_){}
 }, 60000);
+
+// ── Inline form-field validation helper ──────────────────────────
+// Pattern: instead of a toast appearing in the top-right corner
+// when the user submits an empty required field, mark the field
+// red inline + a tiny helper message below + focus it. The user's
+// eye is already on the form, so they see the cue immediately.
+//
+//   _invalidField(el, 'First name is required.');
+//
+// Clears automatically when the user types into the field. The
+// helper message element is auto-created with class rs-field-error
+// so a future global stylesheet pass can re-skin all of them at
+// once.
+function _invalidField(el, message){
+  if(!el) return;
+  el.style.borderColor = 'var(--red, #dc2626)';
+  el.style.outline = '0';
+  el.setAttribute('aria-invalid', 'true');
+  let helper = el.nextElementSibling;
+  if(!helper || !helper.classList || !helper.classList.contains('rs-field-error')){
+    helper = document.createElement('small');
+    helper.className = 'rs-field-error';
+    helper.style.cssText = 'color:var(--red,#dc2626);font-size:11px;display:block;margin-top:4px';
+    el.parentElement?.insertBefore(helper, el.nextSibling);
+  }
+  helper.textContent = message || 'This field is required.';
+  const clear = () => {
+    el.style.borderColor = '';
+    el.removeAttribute('aria-invalid');
+    if(helper && helper.isConnected) helper.remove();
+    el.removeEventListener('input',  clear);
+    el.removeEventListener('change', clear);
+  };
+  el.addEventListener('input',  clear, { once:true });
+  el.addEventListener('change', clear, { once:true });
+  try{ el.focus(); }catch(_){}
+}
 
 // ── Filter persistence helper ────────────────────────────────────
 // Used by calendars + admin lists to remember filter selections
