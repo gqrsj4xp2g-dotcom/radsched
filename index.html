@@ -43467,18 +43467,38 @@ function _renderPickPreview(prev){
       ${low.length ? `<span style="color:var(--amber,#d97706)"><strong>${low.length}</strong> low-confidence match${low.length===1?'':'es'}</span>` : ''}
     </div>`;
   if(vac.length){
-    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Vacations preview (${vac.length})</summary>
-      <div style="overflow-x:auto;max-height:280px;overflow-y:auto;margin-top:6px">
-      <table class="tbl"><thead><tr><th>Physician</th><th>Start</th><th>End</th><th>Type</th><th>Source cell</th><th>Why</th></tr></thead><tbody>
-      ${vac.slice(0,80).map(m => `<tr>
+    // Dedupe by source cell so the preview shows one row per cell
+    // rather than N rows for an N-day vacation block.
+    const vacByCell = new Map();
+    vac.forEach(m => {
+      const key = `${m.physId}|${m.sourceRaw || ''}|${m.start}`;
+      if(!vacByCell.has(key)) vacByCell.set(key, { ...m, count: 1 });
+      else vacByCell.get(key).count++;
+    });
+    const uniqVac = [...vacByCell.values()];
+    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer">▶ Vacations preview (${uniqVac.length} pick${uniqVac.length===1?'':'s'} → ${vac.length} row${vac.length===1?'':'s'})</summary>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin:6px 0 4px">
+        <strong>Override</strong> lets you move a vacation pick to 2nd or 3rd shift if the classifier got it wrong.
+      </div>
+      <div style="overflow-x:auto;max-height:320px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Start</th><th>End</th><th>Type</th><th>Source cell</th><th>Why</th><th>Override</th></tr></thead><tbody>
+      ${uniqVac.slice(0,80).map(m => `<tr>
         <td>${pnameHtml(m.physId)}</td>
         <td>${escHtml(m.start)}</td>
         <td>${escHtml(m.end)}</td>
         <td><span class="tag ta">${escHtml(m.type)}</span></td>
         <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(m.sourceRaw||'—')}</td>
         <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(m.sourceReason||'—')}</td>
+        <td>
+          <select onchange="_xlPickOverrideCell('vacation','${escHtml(m.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
+            <option value="">— keep as vacation —</option>
+            <option value="shift2">Move to 2nd shift</option>
+            <option value="shift3">Move to 3rd shift</option>
+            <option value="ignore">Ignore (drop)</option>
+          </select>
+        </td>
       </tr>`).join('')}
-      ${vac.length > 80 ? `<tr><td colspan="6" style="color:var(--rs-ink-3)">… and ${vac.length - 80} more</td></tr>` : ''}
+      ${uniqVac.length > 80 ? `<tr><td colspan="7" style="color:var(--rs-ink-3)">… and ${uniqVac.length - 80} more</td></tr>` : ''}
       </tbody></table></div></details>`;
   }
   if(sh.length){
@@ -43605,6 +43625,61 @@ function _pickSetMapping(rawName, physIdStr){
   if(!_xlPickData.nameMap) return;
   const physId = parseInt(physIdStr, 10) || null;
   _xlPickData.nameMap[rawName] = { physId, score: physId ? 1.0 : 0, status: physId ? 'manual' : 'unmatched' };
+}
+
+// ── Per-cell classification override ──────────────────────────────
+// Admin clicks a dropdown in the preview to reclassify a cell.
+//   currentKind ∈ 'vacation' | 'shift' (where the row came from)
+//   sourceRaw   = the original Excel cell text (used to identify
+//                  all records derived from that cell)
+//   target      = 'vacation' | 'shift2' | 'shift3' | 'off' | 'ignore'
+//                  or '' to revert to default.
+//
+// Strategy: re-tag the underlying cell's bucket in _xlPickData.allWeeks
+// and re-run rematchPickImport() to regenerate vacRecs / shiftRecs.
+// This keeps the override path self-consistent with the rematch path
+// for unmatched-name mappings, and dedupes naturally.
+function _xlPickOverrideCell(currentKind, sourceRaw, target){
+  if(!_xlPickData || !_xlPickData.allWeeks) return;
+  if(!sourceRaw){ if(typeof _toast === 'function') _toast('Can\'t reclassify a cell with no source text.', 'err'); return; }
+  // Find every week-entry that came from this exact source cell and
+  // remove it from its current bucket; then push it into the target
+  // bucket (or omit entirely for 'ignore').
+  _xlPickData.allWeeks.forEach(w => {
+    const buckets = ['vacation', 'off', 'bbPicks', 'shift2', 'shift3'];
+    buckets.forEach(b => {
+      if(!Array.isArray(w[b])) return;
+      const moved = [];
+      w[b] = w[b].filter(e => {
+        if(e.raw !== sourceRaw) return true;
+        moved.push(e);
+        return false;
+      });
+      if(moved.length){
+        if(target === '' || target === undefined){
+          // Revert: put back where they came from (no-op since we
+          // just removed them — re-add).
+          w[b].push(...moved);
+        } else if(target === 'ignore'){
+          // Drop entirely — don't re-add anywhere.
+        } else {
+          // Map to the new bucket.
+          const dst = target === 'shift2' ? 'shift2'
+                    : target === 'shift3' ? 'shift3'
+                    : target === 'vacation' ? 'vacation'
+                    : target === 'off' ? 'off'
+                    : null;
+          if(dst){
+            if(!Array.isArray(w[dst])) w[dst] = [];
+            moved.forEach(e => w[dst].push({ ...e, reason: `manual override → ${dst}` }));
+          }
+        }
+      }
+    });
+  });
+  if(typeof _toast === 'function') _toast(`Reclassified "${sourceRaw}" → ${target || 'unchanged'}`, 'info');
+  // Regenerate records + re-render preview.
+  if(typeof rematchPickImport === 'function') rematchPickImport();
 }
 
 function rematchPickImport(){
