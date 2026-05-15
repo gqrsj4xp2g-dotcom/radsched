@@ -41905,7 +41905,29 @@ function _updateStaleSaveBadge(){
   }
 }
 // Re-check every 60s. Cheap; doesn't fight the actual save plumbing.
-setInterval(() => { try{ _updateStaleSaveBadge(); }catch(_){} }, 60000);
+// Skip when the tab is hidden — no point recomputing for a tab the
+// user isn't looking at. The check resumes on focus via the existing
+// 'visibilitychange' listener below.
+setInterval(() => {
+  if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  try{ _updateStaleSaveBadge(); }catch(_){}
+}, 60000);
+
+// ── Tab visibility awareness ──────────────────────────────────────
+// Pollers that don't HAVE to run while the tab is backgrounded check
+// document.visibilityState before doing work. When the tab comes
+// back to the foreground, we fire a single sync pulse so the user
+// sees fresh data instantly instead of waiting for the next tick.
+if(typeof document !== 'undefined' && !window._rsVisibilityWired){
+  window._rsVisibilityWired = true;
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    // Tab regained focus — refresh the most user-visible status pills.
+    try{ if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge(); }catch(_){}
+    try{ if(typeof _renderLastSavedAge === 'function') _renderLastSavedAge(); }catch(_){}
+    try{ if(typeof _updateNotifDot === 'function') _updateNotifDot(); }catch(_){}
+  });
+}
 
 // Each call to _updateSaveUI starts its own 3-second auto-clear timer. If a
 // success message arrives just before an error, the error gets wiped at the
