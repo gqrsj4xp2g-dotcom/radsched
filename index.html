@@ -12345,7 +12345,10 @@ function renderMySched(){
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
     html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${allEvts.length} item${allEvts.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>`;
-    html+=allEvts.map(a=>`<tr><td>${a.date}</td><td><span class="tag ${a.col}">${a.type}</span></td><td>${a.site}</td><td>${a.detail}</td></tr>`).join('');
+    // Escape every cell — type/site/detail are concatenated from
+    // admin-editable strings (h.name, s.sub, s.slotLabel, etc.) and
+    // can contain HTML metacharacters or worse.
+    html+=allEvts.map(a=>`<tr><td>${escHtml(a.date)}</td><td><span class="tag ${a.col}">${escHtml(a.type)}</span></td><td>${escHtml(a.site)}</td><td>${escHtml(a.detail)}</td></tr>`).join('');
     html+='</tbody></table></div></div>';
   } else html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)}</div><div class="note ni">No shifts assigned this week. Step ‹ › to browse other weeks.</div></div>`;
   html += `</div>`;  // close mysched-list-section
