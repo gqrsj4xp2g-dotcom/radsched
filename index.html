@@ -35882,6 +35882,340 @@ async function applyIRRebalance(){
 }
 
 
+/* ─── UNFILLED SLOTS — consolidated gap view ───────────────────────────
+   Scans the CURRENT state of the schedule (S.drShifts, S.irShifts,
+   S.irCalls, S.weekendCalls, S.holidays) against the practice's
+   configured needs (S.siteSlots, S.irShiftSlots, S.wkndNeeds,
+   S.holidayDefs). Returns one entry per uncovered position. Run from
+   the admin sidebar "⚠ Unfilled Slots" link AND automatically after
+   any auto-assign Apply. Read-only: just identifies gaps so admins
+   can drill into the calendar to fill them manually.
+*/
+function _scanUnfilled(opts){
+  opts = opts || {};
+  const fromYM = opts.fromYM || (new Date().toISOString().slice(0,7));
+  const monthsN = +opts.months || 3;
+  const cat = opts.cat || 'all';
+  const grp = opts.group || '';
+  // Build the date set we'll scan: every day across `monthsN` months
+  // starting at `fromYM`. We use buildCal for each month so we get
+  // dow + correct calendar bounds, then concat all cells.
+  const [y0, m0] = fromYM.split('-').map(Number);
+  const cells = [];
+  for(let i = 0; i < monthsN; i++){
+    const d = new Date(y0, (m0 - 1) + i, 1);
+    const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    (buildCal(ym)||[]).forEach(c => { if(c.day) cells.push(c); });
+  }
+  const sites = S.sites || [];
+  const out = [];
+  const wantDR    = cat === 'all' || cat === 'dr';
+  const wantIR    = cat === 'all' || cat === 'ir';
+  const wantIRC   = cat === 'all' || cat === 'ircall';
+  const wantIRW   = cat === 'all' || cat === 'irwknd';
+  const wantWknd  = cat === 'all' || cat === 'wknd';
+  const wantHol   = cat === 'all' || cat === 'holiday';
+  // Pre-build maps for O(1) lookups: (site|date) → DR 1st count etc.
+  const drCount = {};
+  (S.drShifts||[]).forEach(s => {
+    if(s.shift !== '1st') return;
+    const k = s.site + '|' + s.date;
+    drCount[k] = (drCount[k]||0) + 1;
+  });
+  const irCount = {};
+  (S.irShifts||[]).forEach(s => {
+    if(s.shift !== '1st') return;
+    const k = s.site + '|' + s.date;
+    irCount[k] = (irCount[k]||0) + 1;
+  });
+  const irCallDaily = new Set();   // 'date|group' for daily call covered
+  const irCallWknd  = new Set();   // 'fri|group' for weekend call covered
+  (S.irCalls||[]).forEach(c => {
+    if(c.callType === 'daily') irCallDaily.add(c.date + '|' + (c.irGroup||''));
+    else if(c.callType === 'weekend') irCallWknd.add(c.date + '|' + (c.irGroup||''));
+  });
+  const wkndCovered = new Set();
+  (S.weekendCalls||[]).forEach(w => {
+    const sat = w.satDate || w.date;
+    if(sat) wkndCovered.add(sat + '|' + (w.sub||'') + '|' + (w.site||''));
+  });
+  // ── DR 1st-shift gaps ────────────────────────────────────────────
+  // For each (site, weekday, date) where slot capacity > assignments.
+  if(wantDR){
+    const siteSlots = S.siteSlots || {};
+    sites.forEach(st => {
+      if(grp && grp === 'DR' && false) return;       // group filter is IR-specific
+      // skip the pseudo-site for at-home work
+      if(st.name === 'At Home / Remote') return;
+      cells.forEach(c => {
+        if(c.isWknd) return; // weekend coverage is a different category
+        if(isHolidayBlackout(c.date)) return;
+        const cap = +(siteSlots[st.name + '|' + c.dow + '|1st'] || 0);
+        if(!cap) return;
+        const have = drCount[st.name + '|' + c.date] || 0;
+        const missing = cap - have;
+        if(missing <= 0) return;
+        // Also pull the sub-specialty need so admins see the demand.
+        const subNeeds = (S.siteSlotsSubs||{})[st.name + '|' + c.dow + '|1st'] || {};
+        const subList = Object.keys(subNeeds).join(', ');
+        for(let i = 0; i < missing; i++){
+          out.push({
+            cat: 'dr', date: c.date, site: st.name, dow: c.dow,
+            shift: '1st', detail: subList || '—',
+            group: 'DR', slotIndex: have + i,
+          });
+        }
+      });
+    });
+  }
+  // ── IR 1st-shift gaps ────────────────────────────────────────────
+  if(wantIR){
+    const irShiftSlots = S.irShiftSlots || {};
+    sites.forEach(st => {
+      if(st.name === 'At Home / Remote') return;
+      // Group ownership for IR — only count sites that belong to this group
+      // (or 'Both'). Skip if group filter doesn't match.
+      const ownGrp = st.irGroup || '';
+      if(grp && grp !== ownGrp && ownGrp !== 'Both') return;
+      cells.forEach(c => {
+        if(c.dow === 0 || c.dow === 6) return; // IR shifts are weekday-only
+        if(isHolidayBlackout(c.date)) return;
+        const cap = +(irShiftSlots[st.name + '|' + c.dow + '|1st'] || 0);
+        if(!cap) return;
+        const have = irCount[st.name + '|' + c.date] || 0;
+        const missing = cap - have;
+        if(missing <= 0) return;
+        for(let i = 0; i < missing; i++){
+          out.push({
+            cat: 'ir', date: c.date, site: st.name, dow: c.dow,
+            shift: '1st', detail: ownGrp || '—',
+            group: ownGrp || 'IR', slotIndex: have + i,
+          });
+        }
+      });
+    });
+  }
+  // ── IR daily call gaps ──────────────────────────────────────────
+  if(wantIRC){
+    const irGroups = getIRGroups ? getIRGroups() : [];
+    cells.forEach(c => {
+      if(c.dow === 0 || c.dow === 6 || c.dow === 5) return; // Mon-Thu only
+      if(isHolidayBlackout(c.date)) return;
+      irGroups.forEach(g => {
+        if(grp && grp !== g) return;
+        if(irCallDaily.has(c.date + '|' + g)) return;
+        out.push({
+          cat: 'ircall', date: c.date, site: '', dow: c.dow,
+          shift: 'daily call', detail: g, group: g, slotIndex: 0,
+        });
+      });
+    });
+  }
+  // ── IR weekend call gaps (Fridays) ───────────────────────────────
+  if(wantIRW){
+    const irGroups = getIRGroups ? getIRGroups() : [];
+    cells.forEach(c => {
+      if(c.dow !== 5) return; // Friday
+      // Skip if the whole span is holiday (IR weekend AA does this too)
+      const span = [c.date, addDays(c.date,1), addDays(c.date,2), addDays(c.date,3)];
+      if(span.every(d => isHolidayBlackout(d))) return;
+      irGroups.forEach(g => {
+        if(grp && grp !== g) return;
+        if(irCallWknd.has(c.date + '|' + g)) return;
+        out.push({
+          cat: 'irwknd', date: c.date, site: '', dow: 5,
+          shift: 'weekend call (Fri→Mon)', detail: g, group: g, slotIndex: 0,
+        });
+      });
+    });
+  }
+  // ── DR weekend call gaps ─────────────────────────────────────────
+  if(wantWknd){
+    const wkndNeeds = S.wkndNeeds || {};
+    cells.forEach(c => {
+      if(c.dow !== 6) return; // Sat
+      if(isHolidayBlackout(c.date)) return;
+      // wkndNeeds is keyed by sub-specialty (or 'general'). Each entry
+      // specifies a count. Match by sub for the weekend that starts on
+      // this Sat.
+      Object.entries(wkndNeeds).forEach(([sub, n]) => {
+        const need = +n || 0;
+        if(!need) return;
+        // Count assigned for this Sat+sub
+        const have = (S.weekendCalls||[]).filter(w =>
+          (w.satDate||w.date) === c.date && (w.sub||'') === sub
+        ).length;
+        const missing = need - have;
+        for(let i = 0; i < missing; i++){
+          out.push({
+            cat: 'wknd', date: c.date, site: '—', dow: 6,
+            shift: 'weekend call', detail: sub || '—',
+            group: 'DR', slotIndex: have + i,
+          });
+        }
+      });
+    });
+  }
+  // ── Holiday-call gaps ────────────────────────────────────────────
+  if(wantHol){
+    const fromISO = cells[0]?.date || '';
+    const toISO = cells[cells.length-1]?.date || '';
+    (S.holidayDefs||[]).forEach(h => {
+      (h.dates||[]).forEach(date => {
+        if(fromISO && date < fromISO) return;
+        if(toISO && date > toISO) return;
+        // Each holiday-def + date pair should have at least one phys
+        // assigned for its group (DR or IR-N or IR-S).
+        const targetGroup = h.group || 'DR';
+        if(grp && grp !== targetGroup && grp !== 'DR') return;
+        const have = (S.holidays||[]).some(a =>
+          a.date === date && a.name === h.name && (a.group||'') === targetGroup
+        );
+        if(have) return;
+        out.push({
+          cat: 'holiday', date, site: '',
+          dow: parseDateLocal(date).getDay(),
+          shift: 'holiday: ' + (h.name||'?'),
+          detail: targetGroup, group: targetGroup, slotIndex: 0,
+        });
+      });
+    });
+  }
+  // Sort by date asc, then category, then site.
+  out.sort((a,b) =>
+    a.date.localeCompare(b.date) ||
+    (a.cat||'').localeCompare(b.cat||'') ||
+    (a.site||'').localeCompare(b.site||'')
+  );
+  return out;
+}
+
+function renderUnfilled(){
+  if(!_adminOnly('view unfilled-slots report')) return;
+  const moEl = document.getElementById('uf-mo');
+  if(!moEl) return;
+  // Default the month picker to current month + populate group filter.
+  if(!moEl.value){
+    moEl.value = new Date().toISOString().slice(0,7);
+  }
+  const grpEl = document.getElementById('uf-grp');
+  if(grpEl){
+    const irGroups = (typeof getIRGroups === 'function') ? getIRGroups() : [];
+    const seen = new Set([...grpEl.options].map(o => o.value));
+    ['DR', ...irGroups].forEach(g => {
+      if(!seen.has(g)){
+        const opt = document.createElement('option');
+        opt.value = g; opt.textContent = g;
+        grpEl.appendChild(opt);
+      }
+    });
+  }
+  const fromYM = moEl.value;
+  const months = +(document.getElementById('uf-range')?.value || 3);
+  const cat    = document.getElementById('uf-cat')?.value || 'all';
+  const group  = document.getElementById('uf-grp')?.value || '';
+  const gaps = _scanUnfilled({ fromYM, months, cat, group });
+  _UF_LAST_SCAN = gaps;   // cached for CSV export
+  // Summary header — total + per-category breakdown.
+  const sumEl = document.getElementById('uf-summary');
+  if(sumEl){
+    const byCat = {};
+    gaps.forEach(g => { byCat[g.cat] = (byCat[g.cat]||0) + 1; });
+    const catLabels = { dr:'DR 1st', ir:'IR 1st', ircall:'IR daily call', irwknd:'IR weekend call', wknd:'DR weekend call', holiday:'Holiday call' };
+    const chips = Object.entries(byCat).sort((a,b)=>b[1]-a[1])
+      .map(([c,n]) => `<span class="tag" style="font-size:11px;margin-right:6px;background:${c==='holiday'?'var(--purple-bg,#f3e8ff)':'var(--amber-bg,#fef3c7)'};color:var(--amber-t,#854d0e)">${escHtml(catLabels[c]||c)}: ${n}</span>`)
+      .join('');
+    if(gaps.length === 0){
+      sumEl.innerHTML = '<div class="note ns" style="font-size:13px">✓ No unfilled slots in this window. Every configured position has at least one physician assigned.</div>';
+    } else {
+      sumEl.innerHTML = `<div class="card" style="margin-bottom:8px"><div class="card-title">${gaps.length} unfilled slot${gaps.length===1?'':'s'} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px;margin-left:6px">${escHtml(fromYM)} + ${months-1} month${months===1?'':'s'}</span></div><div style="font-size:12px;margin-top:6px">${chips}</div></div>`;
+    }
+  }
+  // Per-gap table.
+  const listEl = document.getElementById('uf-list');
+  if(!listEl) return;
+  if(!gaps.length){ listEl.innerHTML = ''; return; }
+  // Group by date for a denser table.
+  const byDate = new Map();
+  gaps.forEach(g => {
+    if(!byDate.has(g.date)) byDate.set(g.date, []);
+    byDate.get(g.date).push(g);
+  });
+  const catBadge = c => {
+    const m = { dr:'tb', ir:'tt', ircall:'ta', irwknd:'ta', wknd:'tg', holiday:'tpk' };
+    return m[c] || '';
+  };
+  const catLabel = c => ({ dr:'DR', ir:'IR', ircall:'IR call', irwknd:'IR wknd', wknd:'Wknd call', holiday:'Holiday' })[c] || c;
+  let html = '<div style="overflow-x:auto"><table><thead><tr>' +
+    '<th>Date</th><th>DOW</th><th>Type</th><th>Site</th><th>Detail</th><th>Group</th><th></th>' +
+    '</tr></thead><tbody>';
+  const dowName = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d] || '';
+  for(const [date, items] of byDate){
+    items.forEach((g, idx) => {
+      const jumpFn = g.cat === 'dr' || g.cat === 'wknd' ? 'dr-cal'
+                   : (g.cat === 'ir' || g.cat === 'ircall' || g.cat === 'irwknd') ? 'ir-cal'
+                   : 'holidays';
+      const ym = (g.date||'').slice(0,7);
+      const jumpBtn = `<button class="bsm" style="font-size:10.5px;padding:3px 8px" onclick="_jumpToCalendar('${jumpFn}','${escHtml(ym)}')" title="Open ${jumpFn} at ${escHtml(ym)}">→</button>`;
+      html += `<tr${idx === 0 ? ' style="border-top:1px solid var(--rs-line)"' : ''}>` +
+        `<td${idx === 0 ? ' style="font-weight:600"' : ' style="color:var(--rs-ink-3)"'}>${idx === 0 ? escHtml(date) : ''}</td>` +
+        `<td style="color:var(--rs-ink-3);font-size:11px">${idx === 0 ? dowName(g.dow) : ''}</td>` +
+        `<td><span class="tag ${catBadge(g.cat)}" style="font-size:10px">${escHtml(catLabel(g.cat))}</span> <span style="font-size:11px;color:var(--rs-ink-3)">${escHtml(g.shift||'')}</span></td>` +
+        `<td>${escHtml(g.site||'—')}</td>` +
+        `<td style="font-size:11px;color:var(--rs-ink-2)">${escHtml(g.detail||'—')}</td>` +
+        `<td>${escHtml(g.group||'—')}</td>` +
+        `<td style="text-align:right">${jumpBtn}</td>` +
+      `</tr>`;
+    });
+  }
+  html += '</tbody></table></div>';
+  listEl.innerHTML = html;
+}
+
+// Cached so the CSV export sees the same scan the table shows.
+let _UF_LAST_SCAN = [];
+
+function _exportUnfilledCSV(){
+  const rows = _UF_LAST_SCAN || [];
+  if(!rows.length){
+    if(typeof _toast === 'function') _toast('No unfilled slots to export.', 'info');
+    return;
+  }
+  const head = ['Date','DOW','Category','Shift','Site','Detail','Group'];
+  const dowName = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d] || '';
+  const lines = [head.join(',')];
+  rows.forEach(r => {
+    const cols = [r.date, dowName(r.dow), r.cat, r.shift, r.site, r.detail, r.group]
+      .map(v => {
+        const s = String(v == null ? '' : v);
+        // CSV-escape: wrap in quotes if it contains , " or newline; escape internal "
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+      });
+    lines.push(cols.join(','));
+  });
+  const csv = lines.join('\n');
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(csv).then(() => {
+      if(typeof _toast === 'function') _toast(`✓ Copied ${rows.length} unfilled slot${rows.length===1?'':'s'} to clipboard.`, 'ok');
+    }).catch(() => {
+      // Fallback for clipboard-blocked contexts: download as file.
+      _downloadUnfilledCSV(csv);
+    });
+  } else {
+    _downloadUnfilledCSV(csv);
+  }
+}
+
+function _downloadUnfilledCSV(csv){
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `unfilled-slots-${fmtDate(new Date())}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 /* ─── ANCHOR REPORT ─── */
 function renderAnchorReport(){
   const moEl = document.getElementById('anc-mo');
