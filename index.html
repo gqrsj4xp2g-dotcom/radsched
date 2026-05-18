@@ -6548,6 +6548,49 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       </summary>
       <div style="margin-top:6px;font-size:11px">
         ${histoLine ? '<div style="margin-bottom:6px">' + histoLine + '</div>' : ''}`;
+    // ── PRIMARY ROOT-CAUSE BANNER ────────────────────────────────────
+    // Cluster the common confusion into a single explicit banner so
+    // admins don't have to scan a table of reasons to understand WHY
+    // this slot is unfilled.
+    //
+    // Priority order:
+    //   1. Universal holiday — expected; just informational.
+    //   2. All in-group physicians placed elsewhere today — the
+    //      single most common "phantom" unfillable, where in-group
+    //      head-count < slot count for the day. Over-quota DOESN'T
+    //      help because one phys can only do one shift/day.
+    //   3. Over-quota IS the only block — Pass 4 will fire for these
+    //      in greedy; MCF's over-quota edge handles it.
+    //   4. Cross-coverage exists — admin can promote with override.
+    //   5. Everyone in group blocked by hard rules — admin needs to
+    //      relax a rule or expand the eligible roster.
+    if(_uh){
+      html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--red,#dc2626);border-radius:4px;font-size:11px">
+        <div style="font-weight:700;color:var(--red-t);margin-bottom:2px">🎉 Universal holiday — ${escHtml(_uh)}</div>
+        <div style="color:var(--txt2)">Auto-assign correctly skipped this date. Use the Holiday Call tab to assign coverage if the practice operates on this holiday. Set <code>S.cfg.skipUniversalHolidays = false</code> to disable the universal-holiday block entirely.</div>
+      </div>`;
+    } else {
+      const inGroupTotal = diag.filter(d => d.group === slot._group).length;
+      const inGroupPlaced = placedElsewhere.length;
+      // If EVERY in-group phys is placed elsewhere today (and no in-
+      // quota/over-quota candidates remain), this is a head-count
+      // shortage — over-quota CANNOT help because one phys = one
+      // shift per day. Surface that explicitly so admins don't try
+      // to "fix" it by raising quota.
+      if(inGroupTotal > 0 && inGroupPlaced === inGroupTotal){
+        html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--amber,#d97706);border-radius:4px;font-size:11px">
+          <div style="font-weight:700;color:var(--amber-t);margin-bottom:2px">🗓 Group head-count shortage</div>
+          <div style="color:var(--txt2)">All ${inGroupTotal} in-group physicians are already placed at other slots today (one physician = one shift per day). Over-quota assignment cannot help here — the constraint is calendar capacity, not period quota. Options: pull from the cross-coverage pool below, hire/transfer to grow the group, or reduce the slot count for this date.</div>
+        </div>`;
+      } else if(overQuota.length && overQuota.length === inGroupTotal - inGroupPlaced){
+        // Every in-group phys not-placed-elsewhere is over quota.
+        // Greedy Pass 4 / MCF's over-quota edge should pick one.
+        html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--amber,#d97706);border-radius:4px;font-size:11px">
+          <div style="font-weight:700;color:var(--amber-t);margin-bottom:2px">⚖ Over-quota pool will be used (Pass 4)</div>
+          <div style="color:var(--txt2)">${overQuota.length} in-group physician${overQuota.length===1?' is':'s are'} at/over their period quota. Greedy Pass 4 will pick one and label the assignment "Auto (over-quota)". If you see this slot still unfilled in the preview, one of them is also blocked by call-day-site rule / conference / pre-existing shift — check the per-physician table below.</div>
+        </div>`;
+      }
+    }
     // Cross-coverage pool — ALWAYS rendered when there's an other-group
     // pool to draw from, so admins see the complete picture even when no
     // phys is "clean" enough to drop in without an override.
