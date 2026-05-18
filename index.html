@@ -43572,6 +43572,16 @@ let _xlPickOverrides = {};
 function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
   const file = input.files[0]; if(!file) return;
+  // If the admin picked a DIFFERENT file (different name+size), clear
+  // any in-memory cell overrides — they were specific to the previous
+  // file's cell text and wouldn't make sense applied to a fresh one.
+  // Same-file re-pick (e.g. via Replace) keeps overrides so admin
+  // doesn't have to re-mark the same exclusions every time.
+  const sig = file.name + '|' + file.size;
+  if(_xlPickLastFileSig && _xlPickLastFileSig !== sig){
+    _xlPickOverrides = {};
+  }
+  _xlPickLastFileSig = sig;
   const prev = document.getElementById('xl-pick-preview');
   // Stage 1 — visible "reading" state with progress bar so the user knows
   // the long synchronous SheetJS read is in flight.
