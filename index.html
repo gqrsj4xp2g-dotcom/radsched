@@ -37978,6 +37978,46 @@ async function unlockMonth(ym){
   if(typeof renderLockedMonths === 'function') renderLockedMonths();
 }
 
+// Bulk-lock every month that has fully ended. Skips already-locked
+// months. Useful right after migration / first-time setup, when the
+// practice wants to freeze historical schedules in one click.
+async function lockAllCompletedMonths(){
+  if(!_adminOnly('lock months')) return;
+  if(!Array.isArray(S.lockedMonths)) S.lockedMonths = [];
+  const todayYm = new Date().toISOString().slice(0,7);
+  // Collect every month that has at least one stored shift/call/vacation
+  // AND has fully ended (i.e. month-prefix is strictly less than current
+  // month). This avoids locking empty future months — there's nothing
+  // to lock — but does NOT require continuous coverage.
+  const months = new Set();
+  const addYm = ds => { if(ds && /^\d{4}-\d{2}/.test(ds)) months.add(ds.slice(0,7)); };
+  (S.drShifts||[]).forEach(s => addYm(s.date));
+  (S.irShifts||[]).forEach(s => addYm(s.date));
+  (S.irCalls||[]).forEach(c => addYm(c.date));
+  (S.weekendCalls||[]).forEach(w => addYm(w.satDate || w.date));
+  (S.holidays||[]).forEach(h => addYm(h.date));
+  (S.vacations||[]).forEach(v => addYm(v.start));
+  const toLock = [...months].filter(ym => ym < todayYm && !S.lockedMonths.includes(ym)).sort();
+  if(!toLock.length){
+    if(typeof _toast === 'function') _toast('No completed months to lock.', 'info');
+    return;
+  }
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Lock ${toLock.length} completed month${toLock.length===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">This will lock:<br><br>${toLock.map(m=>'<code>'+escHtml(m)+'</code>').join(', ')}<br><br>Each lock is logged. You can unlock individual months below.</div>`,
+        confirmLabel: 'Lock all',
+        destructive: false,
+      })
+    : confirm(`Lock ${toLock.length} completed months?`);
+  if(!ok) return;
+  toLock.forEach(ym => S.lockedMonths.push(ym));
+  if(typeof _audit === 'function') _audit('schedule.lock.bulk', { months: toLock });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _toast === 'function') _toast(`🔒 Locked ${toLock.length} month${toLock.length===1?'':'s'}.`, 'ok');
+  renderLockedMonths();
+}
+
 // Render the list of locked months in the Settings panel.
 function renderLockedMonths(){
   const host = document.getElementById('locked-months-list');
