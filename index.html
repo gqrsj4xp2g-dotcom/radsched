@@ -14410,9 +14410,17 @@ function saveShiftTimes(){
   if(!_adminOnly('change shift times')) return;
   if(!S.cfg) S.cfg={};
   if(!S.cfg.shiftTimes) S.cfg.shiftTimes={};
+  // Strict HH:MM 24-hour validation. Previously, an arbitrary string
+  // (or an empty input that fell through to the fallback default)
+  // could land in S.cfg.shiftTimes[m.key].dep/ret and silently break
+  // every downstream drive-time / wRVU-eligibility calculation that
+  // parsed the value as time-of-day.
+  const isHHMM = s => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s||'').trim());
   _SHIFT_TIME_MAP.forEach(m=>{
-    const dep = document.getElementById(m.dep)?.value || m.defDep;
-    const ret = document.getElementById(m.ret)?.value || m.defRet;
+    const depRaw = document.getElementById(m.dep)?.value || '';
+    const retRaw = document.getElementById(m.ret)?.value || '';
+    const dep = isHHMM(depRaw) ? depRaw : m.defDep;
+    const ret = isHHMM(retRaw) ? retRaw : m.defRet;
     S.cfg.shiftTimes[m.key] = {dep, ret};
   });
   // Clean up legacy keys (incl. the recently-added 2nd/3rd that were
