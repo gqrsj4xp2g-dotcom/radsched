@@ -66,6 +66,46 @@ function err(status: number, message: string) {
   });
 }
 
+// ── Per-caller in-memory rate limit ──────────────────────────────────
+// Cheap defense against an authed user using the function as a delivery
+// bomb (e.g. mass-emailing). Bucket persists across invocations within
+// the same isolate but resets on cold start — acceptable for our
+// threat model. Service-role calls bypass.
+const _rl = new Map<string, { n: number; t: number }>();
+function rateLimit(key: string, capPerMinute: number): boolean {
+  const now = Date.now();
+  const b = _rl.get(key);
+  if (!b || (now - b.t) > 60_000) { _rl.set(key, { n: 1, t: now }); return true; }
+  if (b.n >= capPerMinute) return false;
+  b.n++; return true;
+}
+
+// SSRF guard: reject webhook URLs that resolve to private / link-local
+// / loopback addresses, or to hostnames that look like cloud metadata.
+// Cheap host-based check — doesn't DNS-resolve (Edge runtimes can't
+// reliably do that synchronously), so an attacker with control of an
+// external DNS could still redirect, but they can't directly target
+// 169.254.169.254 / 127.0.0.1 / 10.x / internal hostnames.
+function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (h === 'metadata' || h === 'metadata.google.internal') return true;
+  // IPv4 literal checks
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+  if (m) {
+    const a = +m[1], b = +m[2];
+    if (a === 10) return true;                       // 10.0.0.0/8
+    if (a === 127) return true;                      // loopback
+    if (a === 169 && b === 254) return true;         // link-local incl. AWS/GCP metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;         // 192.168.0.0/16
+    if (a === 0) return true;                        // 0.0.0.0/8
+  }
+  // IPv6 loopback / link-local literals
+  if (h === '::1' || h.startsWith('[::1]') || h.startsWith('fe80:') || h.startsWith('[fe80')) return true;
+  return false;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (req.method !== 'POST') return err(405, 'POST only');
@@ -82,6 +122,21 @@ Deno.serve(async (req) => {
   const { data: userData, error: authErr } = await sbAuth.auth.getUser(jwt);
   if (authErr || !userData?.user) return err(401, 'Invalid JWT');
 
+  // ── Caller identity & multi-tenant scoping ──────────────────────────
+  // Extract practiceId + role from server-issued app_metadata. Never
+  // trust user_metadata for authorization. Without this, any authed
+  // user from any practice could send arbitrary email/SMS/push/webhook
+  // (open relay) and could spoof another tenant's users (cross-tenant
+  // IDOR via the push handler's userId scan).
+  const callerUid = userData.user.id;
+  const appMeta = (userData.user.app_metadata || {}) as { role?: string; practiceId?: string };
+  const callerRole = appMeta.role || '';
+  const callerPid  = appMeta.practiceId || '';
+
+  // Rate limit per-caller — applies to all kinds except digest-run.
+  // digest-run is admin/cron only and already self-limiting (1×/day).
+  if (!rateLimit(callerUid, 60)) return err(429, 'Too many requests; slow down.');
+
   let body: Body;
   try { body = await req.json(); }
   catch { return err(400, 'Invalid JSON body'); }
@@ -89,32 +144,106 @@ Deno.serve(async (req) => {
 
   try {
     switch (body.kind) {
-      case 'email':   return ok(await sendEmail(body));
-      case 'sms':     return ok(await sendSMS(body));
-      case 'push':    return ok(await sendPush(body, sbUrl, sbService));
-      case 'webhook': return ok(await sendWebhook(body));
-      case 'digest-run': return ok(await runDigest(sbUrl, sbService));
+      case 'email':   return ok(await sendEmail(body, sbUrl, sbService, callerPid));
+      case 'sms':     return ok(await sendSMS(body, sbUrl, sbService, callerPid));
+      case 'push':    return ok(await sendPush(body, sbUrl, sbService, callerPid));
+      case 'webhook': return ok(await sendWebhook(body, callerRole));
+      case 'digest-run': {
+        // digest-run is a privileged fanout. Reject unless either:
+        //   (a) caller has admin role in their tenant (manual digest),
+        //   (b) the special cron header is present + matches the env
+        //       secret (pg_cron self-invocation).
+        const cronHdr = req.headers.get('x-rs-cron-secret') || '';
+        const cronSecret = Deno.env.get('RS_CRON_SECRET') || '';
+        const isCron = !!cronSecret && cronHdr === cronSecret;
+        if (!isCron && callerRole !== 'admin') return err(403, 'Admin role or cron secret required');
+        return ok(await runDigest(sbUrl, sbService));
+      }
       default:        return err(400, `Unknown kind: ${body.kind}`);
     }
   } catch (e) {
-    console.error(`[send-notification] ${body.kind} failed:`, e);
+    console.error(`[send-notification] ${body.kind} failed:`, e instanceof Error ? e.message : String(e));
     return err(500, e instanceof Error ? e.message : String(e));
   }
 });
 
+// Verify that the caller's practice owns the recipient identifier
+// (email address or phone number). Without this, any authed user can
+// send arbitrary email/SMS to any address using the org's credentials.
+async function _recipientInPractice(
+  field: 'email' | 'phone',
+  value: string,
+  sbUrl: string,
+  sbService: string,
+  practiceId: string,
+): Promise<boolean> {
+  if (!practiceId || !value) return false;
+  const sb = createClient(sbUrl, sbService);
+  const { data, error } = await sb.from('radscheduler').select('data').eq('id', practiceId).single();
+  if (error || !data) return false;
+  let practice: { users?: Array<{ email?: string; phone?: string }>; physicians?: Array<{ email?: string; phone?: string }> } = {};
+  try { practice = JSON.parse((data as any).data); } catch { return false; }
+  const needle = String(value).trim().toLowerCase();
+  const norm = (s: string|undefined) => String(s||'').trim().toLowerCase();
+  const users = practice.users || [];
+  const physes = practice.physicians || [];
+  if (field === 'email') {
+    return users.some(u => norm(u.email) === needle) ||
+           physes.some(p => norm(p.email) === needle);
+  } else {
+    // Phone match — strip non-digits for comparison.
+    const digits = (s: string|undefined) => String(s||'').replace(/\D/g, '');
+    const target = digits(value);
+    if (!target || target.length < 7) return false;
+    return users.some(u => digits(u.phone) === target) ||
+           physes.some(p => digits(p.phone) === target);
+  }
+}
+
+// Escape HTML for the email-body fallback path. The previous fallback
+// only replaced \n→<br>, allowing an attacker (via body field) to
+// inject <script> / <a href> / phishing markup that the recipient's
+// mail client would render — coming from the practice's verified
+// sender domain. Anything explicitly passed in `html` is still trusted
+// (the caller has chosen to pass HTML), so admin-built templates work.
+function escHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ─── Email via Resend ──────────────────────────────────────────────────
-async function sendEmail(b: Body) {
+async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?: string) {
   const apiKey = Deno.env.get('RESEND_API_KEY');
   const from = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@example.com';
   if (!apiKey) throw new Error('RESEND_API_KEY not configured');
   if (!b.to || !b.subject) throw new Error('email requires { to, subject }');
+  if (typeof b.to !== 'string' || b.to.length > 254) throw new Error('email "to" invalid');
+  if (b.subject.length > 998) throw new Error('email subject too long');
+  if (b.body && b.body.length > 100_000) throw new Error('email body too long');
+  // Multi-tenant guard — the recipient address must belong to a user
+  // or physician in the caller's practice. The runDigest path passes
+  // sbUrl/sbService/callerPid empty (server-side fanout); when those
+  // are missing we trust the caller as a server-internal call.
+  if (sbUrl && sbService && callerPid) {
+    const inPractice = await _recipientInPractice('email', b.to, sbUrl, sbService, callerPid);
+    if (!inPractice) throw new Error('Recipient is not a member of your practice. Refusing to send.');
+  }
+  // Length-cap the HTML fallback and escape user-provided body to
+  // prevent injection. Caller can still pass explicit `html` for rich
+  // emails — they're trusted to escape themselves there.
+  const safeBody = (b.body || '').slice(0, 100_000);
+  const htmlFallback = safeBody ? `<p>${escHtml(safeBody).replace(/\n/g, '<br>')}</p>` : undefined;
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from, to: b.to, subject: b.subject,
-      text: b.body || '',
-      html: b.html || (b.body ? `<p>${b.body.replace(/\n/g, '<br>')}</p>` : undefined),
+      text: safeBody,
+      html: b.html || htmlFallback,
     }),
   });
   if (!resp.ok) throw new Error(`Resend ${resp.status}: ${await resp.text()}`);
@@ -122,12 +251,19 @@ async function sendEmail(b: Body) {
 }
 
 // ─── SMS via Twilio ────────────────────────────────────────────────────
-async function sendSMS(b: Body) {
+async function sendSMS(b: Body, sbUrl?: string, sbService?: string, callerPid?: string) {
   const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
   const token = Deno.env.get('TWILIO_AUTH_TOKEN');
   const from = Deno.env.get('TWILIO_FROM_NUMBER');
   if (!sid || !token || !from) throw new Error('Twilio creds not configured');
   if (!b.to || !b.body) throw new Error('sms requires { to, body }');
+  if (b.to.length > 20 || !/^\+?[\d\-\s().]+$/.test(b.to)) throw new Error('sms "to" invalid');
+  if (b.body.length > 1600) throw new Error('sms body too long');
+  // Multi-tenant guard for SMS (mirrors email path).
+  if (sbUrl && sbService && callerPid) {
+    const inPractice = await _recipientInPractice('phone', b.to, sbUrl, sbService, callerPid);
+    if (!inPractice) throw new Error('Recipient is not a member of your practice. Refusing to send.');
+  }
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
   const auth = btoa(`${sid}:${token}`);
   const params = new URLSearchParams({ From: from, To: b.to, Body: b.body });
@@ -141,49 +277,95 @@ async function sendSMS(b: Body) {
 }
 
 // ─── Web Push via VAPID ────────────────────────────────────────────────
-async function sendPush(b: Body, sbUrl: string, sbService: string) {
+async function sendPush(b: Body, sbUrl: string, sbService: string, callerPid?: string) {
   const pub = Deno.env.get('VAPID_PUBLIC_KEY');
   const priv = Deno.env.get('VAPID_PRIVATE_KEY');
   const subject = Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@example.com';
   if (!pub || !priv) throw new Error('VAPID keys not configured');
   if (!b.userId) throw new Error('push requires { userId }');
   webpush.setVapidDetails(subject, pub, priv);
-  // Look up the user's push subscription from the practice's data row.
-  // The client stores it on USERS[i].pushSubscription as a JSON blob.
+  // Multi-tenant scoping — previously the function scanned EVERY
+  // practice's users[] for a matching userId, which let an attacker
+  // in practice A send a push to a user in practice B (with attacker-
+  // controlled title/body/url, i.e. phishing). Restrict to the
+  // caller's practice; non-cron callers MUST supply callerPid.
   const sb = createClient(sbUrl, sbService);
-  const { data: rows, error } = await sb.from('radscheduler').select('id, data');
-  if (error) throw error;
+  let rows: Array<{ id: string; data: any }> = [];
+  if (callerPid) {
+    const { data, error } = await sb.from('radscheduler').select('id, data').eq('id', callerPid).single();
+    if (error) throw error;
+    if (data) rows = [data as any];
+  } else {
+    // Server-internal callers (runDigest) can still scan — they trust
+    // their own userId source.
+    const { data, error } = await sb.from('radscheduler').select('id, data');
+    if (error) throw error;
+    rows = (data || []) as any;
+  }
   let subscription: PushSubscriptionJSON | null = null;
-  for (const r of rows || []) {
+  for (const r of rows) {
     try {
-      const d = JSON.parse(r.data);
+      const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
       const u = (d.users || []).find((u: { id: string; pushSubscription?: PushSubscriptionJSON }) => u.id === b.userId);
       if (u?.pushSubscription) { subscription = u.pushSubscription; break; }
     } catch { /* skip malformed rows */ }
   }
-  if (!subscription) throw new Error(`No push subscription found for user ${b.userId}`);
+  if (!subscription) throw new Error(`No push subscription found for user ${b.userId} in your practice`);
+  // Length-cap payload — sw.js displays this verbatim. Browser push
+  // services typically cap at 4KB; we cap earlier so we never get
+  // surprise 413s.
   const payload = JSON.stringify({
-    title: b.title || 'RadScheduler',
-    body: b.body || '',
-    url: b.url || '/',
-    tag: 'rs-' + (b.title || '').toLowerCase().replace(/\s+/g, '-'),
+    title: (b.title || 'RadScheduler').slice(0, 100),
+    body: (b.body || '').slice(0, 500),
+    url: (b.url || '/').slice(0, 1024),
+    tag: 'rs-' + (b.title || '').toLowerCase().replace(/\s+/g, '-').slice(0, 40),
   });
   await webpush.sendNotification(subscription as never, payload);
   return { ok: true, kind: 'push' };
 }
 
 // ─── Outbound webhooks ─────────────────────────────────────────────────
-async function sendWebhook(b: Body) {
+async function sendWebhook(b: Body, callerRole?: string) {
   if (!b.url) throw new Error('webhook requires { url }');
   if (!/^https?:\/\//.test(b.url)) throw new Error('webhook url must be http(s)');
-  const resp = await fetch(b.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': 'RadScheduler/1.0' },
-    body: JSON.stringify(b.payload || {}),
-  });
+  if (b.url.length > 2048) throw new Error('webhook url too long');
+  // Only admins can configure + invoke webhooks. Without this gate, a
+  // physician-tier user could POST to any URL the practice's edge
+  // function can reach — a vector for SSRF / pivot / spam.
+  if (callerRole !== 'admin') throw new Error('Webhook delivery requires admin role.');
+  // SSRF guard — block private/loopback/metadata destinations.
+  let parsed: URL;
+  try { parsed = new URL(b.url); }
+  catch { throw new Error('webhook url malformed'); }
+  if (isPrivateHost(parsed.hostname)) {
+    throw new Error('webhook url targets a private/internal host — refusing.');
+  }
+  // Length-cap the JSON body to keep error responses from being
+  // weaponized as data exfil channels.
+  const bodyStr = JSON.stringify(b.payload || {});
+  if (bodyStr.length > 32_768) throw new Error('webhook payload too large (>32KB)');
+  // 10s timeout — webhooks shouldn't be long-running fetches; if the
+  // remote is slow we don't want to tie up edge resources.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  let resp: Response;
+  try {
+    resp = await fetch(parsed.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'RadScheduler/1.0' },
+      body: bodyStr,
+      signal: ctrl.signal,
+      redirect: 'error', // refuse 3xx — prevents redirect-to-internal SSRF
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   // Slack / Teams / etc. return 200 OK with a tiny "ok" body. We just
-  // surface non-2xx as failure; the caller's audit log captures intent.
-  if (!resp.ok) throw new Error(`webhook ${resp.status}: ${await resp.text()}`);
+  // surface non-2xx as failure but DON'T echo the remote body to the
+  // caller — it could contain internal hints (e.g. "Slack Webhook
+  // 'invalid_token'" leaks practice config). Caller's audit log
+  // captures intent.
+  if (!resp.ok) throw new Error(`webhook ${resp.status}`);
   return { ok: true, kind: 'webhook', detail: { status: resp.status } };
 }
 

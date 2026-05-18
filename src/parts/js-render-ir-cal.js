@@ -123,10 +123,10 @@ function renderIRCal(){
         if(ic.callType==='weekend'){
           const isStart=ic.date===c.date;
           const siteSh=(ic.site||'').split(' ')[0];
-          ev=`<div class="ev" style="${grpColor}" title="${pnameHtml(ic.physId)} — Weekend Call (${ic.irGroup}) @ ${ic.site}${ic.notes?' · '+ic.notes:''}">
+          ev=`<div class="ev" style="${grpColor}" title="${pnameHtml(ic.physId)} — Weekend Call (${escHtml(ic.irGroup||'')}) @ ${escHtml(ic.site||'')}${ic.notes?' · '+escHtml(ic.notes):''}">
             <div style="font-weight:700;font-size:11px">${holNote}${pshort(ic.physId)}</div>
-            <div style="font-size:9px;opacity:.85">${isStart?'▶ ':''}Wknd Call · ${ic.irGroup}</div>
-            ${siteSh?`<div style="font-size:9px;opacity:.7">${siteSh}</div>`:''}
+            <div style="font-size:9px;opacity:.85">${isStart?'▶ ':''}Wknd Call · ${escHtml(ic.irGroup||'')}</div>
+            ${siteSh?`<div style="font-size:9px;opacity:.7">${escHtml(siteSh)}</div>`:''}
           </div>`;
         } else {
           // Daily (weekday) call covers the entire IR group. The chip is
@@ -136,9 +136,9 @@ function renderIRCal(){
           // record (it shouldn't be for daily, but defensively handle it),
           // that info stays on the physician's IR shift chip alongside
           // where it naturally belongs.
-          ev=`<div class="ev" style="${grpColor}" title="${pnameHtml(ic.physId)} — Daily Call (${ic.irGroup})${ic.notes?' · '+ic.notes:''}">
+          ev=`<div class="ev" style="${grpColor}" title="${pnameHtml(ic.physId)} — Daily Call (${escHtml(ic.irGroup||'')})${ic.notes?' · '+escHtml(ic.notes):''}">
             <div style="font-weight:700;font-size:11px">${holNote}${pshort(ic.physId)}</div>
-            <div style="font-size:9px;opacity:.85">Daily Call · ${ic.irGroup}</div>
+            <div style="font-size:9px;opacity:.85">Daily Call · ${escHtml(ic.irGroup||'')}</div>
           </div>`;
         }
         callEvs+=ev;
@@ -164,15 +164,15 @@ function renderIRCal(){
         const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
         const shiftLbl=s.shift==='1st'?'Day Shift':s.shift==='Home'?'Home':s.shift+' Shift';
         if(s.shift==='Home'){
-          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — Home @ ${s.site}">
+          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — Home @ ${escHtml(s.site||'')}">
             <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
             <div style="font-size:9px;opacity:.8">Home</div>
           </div>`;
         } else {
-          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — ${shiftLbl} @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
+          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — ${escHtml(shiftLbl)} @ ${escHtml(s.site||'')}${s.slotLabel?' ['+escHtml(s.slotLabel)+']':''}${s.sub?' ('+escHtml(s.sub)+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
-            <div style="font-size:9px;opacity:.85">${shiftLbl}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
+            <div style="font-size:9px;opacity:.85">${escHtml(shiftLbl)}</div>
+            <div style="font-size:9px;opacity:.7">${escHtml(siteSh)}${escHtml(slotLbl)}${escHtml(subLbl)}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
           </div>`;
         }
       });
@@ -203,10 +203,10 @@ function renderIRCal(){
           const subLbl = s.sub ? ` · ${s.sub.slice(0,6)}` : '';
           // DR slot label — see comment in IR branch above; same pattern.
           const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
-          shiftEvs+=`<div class="ev" style="${drStyle}" title="${pnameHtml(s.physId)} — DR ${s.shift} Shift @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
+          shiftEvs+=`<div class="ev" style="${drStyle}" title="${pnameHtml(s.physId)} — DR ${escHtml(s.shift)} Shift @ ${escHtml(s.site||'')}${s.slotLabel?' ['+escHtml(s.slotLabel)+']':''}${s.sub?' ('+escHtml(s.sub)+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
-            <div style="font-size:9px;opacity:.85">DR ${s.shift}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl}</div>
+            <div style="font-size:9px;opacity:.85">DR ${escHtml(s.shift)}</div>
+            <div style="font-size:9px;opacity:.7">${escHtml(siteSh)}${escHtml(slotLbl)}${escHtml(subLbl)}</div>
           </div>`;
         }
       });
@@ -285,10 +285,10 @@ function renderIRCal(){
       }
       return true;
     }).forEach(h=>{
-      metaEvs+=`<div class="ev ehol" title="${pnameHtml(h.physId)} — Holiday Call: ${h.name}">
+      metaEvs+=`<div class="ev ehol" title="${pnameHtml(h.physId)} — Holiday Call: ${escHtml(h.name||'')}">
         <div style="font-weight:700;font-size:11px">🏖 ${pshort(h.physId)}</div>
         <div style="font-size:9px;opacity:.85">Hol Call</div>
-        <div style="font-size:9px;opacity:.7">${h.name.split(' ')[0]}</div>
+        <div style="font-size:9px;opacity:.7">${escHtml((h.name||'').split(' ')[0])}</div>
       </div>`;
     });
     (vm[c.date]||[]).filter(pid=>{

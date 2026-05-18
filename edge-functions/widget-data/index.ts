@@ -78,25 +78,73 @@ function payloadPurpose(payload: any): 'widget' | 'cal-feed' {
   return 'widget';
 }
 
-async function verifyAndDecode(code: string, requiredPurpose: 'widget' | 'cal-feed' | 'any'): Promise<any> {
+// Two-stage decoder:
+//   1. Decode + sanity-check the base64 envelope.
+//   2. Stage-2 verify the HMAC against the practice's server-side
+//      secret. The practice secret is fetched in the caller (since
+//      the caller already does a Supabase fetch for the data) and
+//      passed back into _verifyHmac().
+function _decodeEnvelope(code: string): any {
   if (!code || typeof code !== 'string') throw new Error('missing code');
   let payload: any;
   try { payload = JSON.parse(fromB64Url(code.trim())); }
   catch (_) { throw new Error('malformed code'); }
-  if (!payload.sig || !payload.sbAnonKey || !payload.practiceId || !payload.physId) {
+  if (!payload.sig || !payload.practiceId || !payload.physId) {
     throw new Error('pairing payload missing required fields');
   }
-  const { sig, ...rest } = payload;
-  const expected = await hmacB64Url(payload.sbAnonKey, JSON.stringify(rest));
-  if (expected !== sig) throw new Error('signature mismatch');
-  if (payload.exp && new Date(payload.exp).getTime() < Date.now()) {
+  // exp is now REQUIRED. Tokens without an expiry are forever-valid
+  // and outlive any reasonable threat-model assumption.
+  if (!payload.exp) throw new Error('pairing has no expiry — re-issue required');
+  if (new Date(payload.exp).getTime() < Date.now()) {
     throw new Error('pairing expired');
   }
+  // Hard ceiling: reject tokens with absurd expiry (e.g. 100 years
+  // out) — a misissued token shouldn't live longer than the company.
+  const maxExp = Date.now() + 366 * 86400_000 * 2; // ~2 years
+  if (new Date(payload.exp).getTime() > maxExp) {
+    throw new Error('pairing expiry too far in the future');
+  }
+  return payload;
+}
+
+async function _verifyHmac(
+  payload: any,
+  practiceSecret: string | null,
+  requiredPurpose: 'widget' | 'cal-feed' | 'any',
+): Promise<void> {
+  const { sig, ...rest } = payload;
+  // v2+ tokens are signed with the practice's server-side secret.
+  // v1 (legacy) tokens are signed with the public anon key — we
+  // accept those ONLY if the practice has NOT yet rotated to a
+  // server-side secret (i.e. legacy practice, never re-issued). Once
+  // the practice has a server-side secret, v1 tokens are rejected
+  // even if the HMAC against the anon key matches. This forces a
+  // one-time re-issue per pairing on the next launch but eliminates
+  // forgeability.
+  const tokenVersion = +(payload.v || 1);
+  let matched = false;
+  if (practiceSecret) {
+    const expected = await hmacB64Url(practiceSecret, JSON.stringify(rest));
+    matched = expected === sig;
+  }
+  // Legacy v1 fallback — only when practice has no server secret yet.
+  if (!matched && tokenVersion < 2 && !practiceSecret && payload.sbAnonKey) {
+    const legacy = await hmacB64Url(payload.sbAnonKey, JSON.stringify(rest));
+    matched = legacy === sig;
+  }
+  if (!matched) throw new Error('signature mismatch — pairing must be re-issued');
   const actual = payloadPurpose(payload);
   if (requiredPurpose !== 'any' && actual !== requiredPurpose) {
     throw new Error(`token purpose mismatch (got '${actual}', need '${requiredPurpose}')`);
   }
-  return payload;
+}
+
+// Legacy wrapper kept for the GET ICS path which fetches the practice
+// inside the handler. Returns the decoded payload after envelope
+// checks; HMAC verification is done by the caller after fetching the
+// practice's secret.
+async function verifyAndDecode(_code: string, _requiredPurpose: 'widget' | 'cal-feed' | 'any'): Promise<any> {
+  throw new Error('verifyAndDecode is deprecated — use _decodeEnvelope + _verifyHmac');
 }
 
 // ── ICS calendar feed ────────────────────────────────────────────
@@ -275,11 +323,7 @@ Deno.serve(async (req: Request) => {
       return new Response('Use POST for read/write actions; GET only supports action=ics.', { status: 405, headers: CORS });
     }
     let payload: any;
-    // ICS GET path: only accept tokens issued for cal-feed purpose
-    // (or legacy untyped tokens — backwards compat). Reject widget
-    // pairing codes here so a leaked widget pairing can't be reused
-    // as an ICS URL.
-    try { payload = await verifyAndDecode(code, 'cal-feed'); }
+    try { payload = _decodeEnvelope(code); }
     catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const sb = createClient(SB_URL, SVC_KEY);
     const { data, error } = await sb
@@ -291,6 +335,13 @@ Deno.serve(async (req: Request) => {
       if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
       return raw;
     })((data as any).data);
+    // Verify HMAC against the practice's server-side secret. The
+    // ICS GET path only accepts cal-feed tokens (so a leaked widget
+    // pairing can't be reused to subscribe to a physician's calendar).
+    const practiceSecret = (practice && practice.cfg && typeof practice.cfg._widgetSecret === 'string')
+      ? practice.cfg._widgetSecret : null;
+    try { await _verifyHmac(payload, practiceSecret, 'cal-feed'); }
+    catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const physName = `${payload.physFirst || ''} ${payload.physLast || ''}`.trim() || `Physician ${payload.physId}`;
     const ics = buildICSForPhysician(practice, payload.physId, physName);
     return new Response(ics, {
@@ -308,15 +359,20 @@ Deno.serve(async (req: Request) => {
   let body: any;
   try { body = await req.json(); }
   catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
+  if (typeof body !== 'object' || body == null) return jsonResp({ error: 'invalid body' }, 400);
   let payload: any;
   // POST path: widget operations (read practice / add+edit+delete
-  // credit). Only accept widget-purpose or legacy untyped tokens.
-  // Reject cal-feed tokens here so a leaked ICS URL can't be used
-  // to mutate physician credits.
-  try { payload = await verifyAndDecode(body.code, 'widget'); }
+  // credit). Stage-1 decode (no HMAC verify yet — need the practice's
+  // server-side secret first).
+  try { payload = _decodeEnvelope(body.code); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   const sb = createClient(SB_URL, SVC_KEY);
   const action = body.action || 'read';
+
+  // Action allowlist — reject anything we don't explicitly support
+  // before we waste a DB read on it.
+  const ALLOWED_ACTIONS = new Set(['read', 'add-credit', 'edit-credit', 'delete-credit']);
+  if (!ALLOWED_ACTIONS.has(action)) return jsonResp({ error: `unknown action: ${action}` }, 400);
 
   // Helper: the radscheduler table's `data` column is text (NOT jsonb)
   // — the main app stores JSON.stringify(...) into it. PostgREST
@@ -333,25 +389,26 @@ Deno.serve(async (req: Request) => {
     return raw;
   }
 
-  // ── READ ────────────────────────────────────────────────────────
-  if (action === 'read') {
-    const { data, error } = await sb
-      .from('radscheduler').select('data').eq('id', payload.practiceId).single();
-    if (error) return jsonResp({ error: 'practice fetch failed: ' + error.message }, 500);
-    if (!data) return jsonResp({ error: 'practice not found', practiceId: payload.practiceId }, 404);
-    return jsonResp({ data: parsePracticeData((data as any).data) });
-  }
-
-  // For all WRITE actions: read → mutate → write back. No retry on
-  // concurrent-modification — race window is small (a single physician
-  // tapping in the widget) and the practice JSON is bursty-write
-  // dominated by the main app, not the widget.
+  // Single fetch up-front so we can verify HMAC against the practice's
+  // server-side secret BEFORE dispatching to any action. This costs
+  // one extra DB round-trip on read-only calls vs. the legacy code
+  // path, but: (a) the legacy path also did one fetch for read, (b)
+  // verifying HMAC is the only way to prove the caller is authorized.
   const { data: row, error: rdErr } = await sb
     .from('radscheduler').select('data').eq('id', payload.practiceId).single();
   if (rdErr) return jsonResp({ error: 'practice fetch failed: ' + rdErr.message }, 500);
   if (!row) return jsonResp({ error: 'practice not found' }, 404);
   const practice = parsePracticeData((row as any).data);
+  const practiceSecret = (practice && practice.cfg && typeof practice.cfg._widgetSecret === 'string')
+    ? practice.cfg._widgetSecret : null;
+  try { await _verifyHmac(payload, practiceSecret, 'widget'); }
+  catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   if (!Array.isArray(practice.physicianCredits)) practice.physicianCredits = [];
+
+  // ── READ ────────────────────────────────────────────────────────
+  if (action === 'read') {
+    return jsonResp({ data: practice });
+  }
 
   // Stringify before writing back — the column is text. supabase-js
   // would happily UPDATE with an object value (it auto-serializes),
@@ -375,10 +432,14 @@ Deno.serve(async (req: Request) => {
   if (action === 'add-credit') {
     const c = body.credit || {};
     const hours = +c.hours;
-    const reason = (c.reason || '').toString().trim();
-    const ts = (c.ts || new Date().toISOString()).toString();
+    const reason = (c.reason || '').toString().trim().slice(0, 200);
+    const ts = (c.ts || new Date().toISOString()).toString().slice(0, 40);
     if (!hours || hours <= 0 || hours > 24) return jsonResp({ error: 'hours must be in (0, 24]' }, 400);
     if (!reason) return jsonResp({ error: 'reason is required' }, 400);
+    // Soft cap on credit history per physician — protects against
+    // accidental flood (e.g. a buggy widget retry loop).
+    const myCreditCount = practice.physicianCredits.filter((c: any) => c.physId === payload.physId).length;
+    if (myCreditCount > 1000) return jsonResp({ error: 'credit history limit reached for this physician (1000)' }, 429);
     const credit = {
       id: allocateId(),
       physId: payload.physId,
@@ -409,11 +470,11 @@ Deno.serve(async (req: Request) => {
       credit.hours = h;
     }
     if (patch.reason != null) {
-      const r = String(patch.reason).trim();
+      const r = String(patch.reason).trim().slice(0, 200);
       if (!r) return jsonResp({ error: 'reason cannot be empty' }, 400);
       credit.reason = r;
     }
-    if (patch.ts != null) credit.ts = String(patch.ts);
+    if (patch.ts != null) credit.ts = String(patch.ts).slice(0, 40);
     credit.updatedAt = new Date().toISOString();
     practice.physicianCredits[idx] = credit;
     const { error: wrErr } = await writeBack();

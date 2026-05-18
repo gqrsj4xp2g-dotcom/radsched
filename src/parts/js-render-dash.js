@@ -96,8 +96,10 @@ function renderDash(){
    .map(m=>`<div class="met" style="cursor:pointer" onclick="nav('${m.pg}',document.querySelector('[onclick*=${JSON.stringify(m.pg).slice(1,-1)}]'))" title="Go to ${m.pg}">
     <div class="met-lbl">${m.l}</div><div class="met-val">${m.v}</div><div class="met-sub">${m.s}</div></div>`).join('');
   const ancHtml=anchPhys.map(p=>{const c=ancComp(p.id,ym);const pct=c?c.pct:0;
+    // escHtml on p.last / anchorSite — admin-editable strings; without
+    // it, a name like `<img onerror=…>` would execute on every dash render.
     return`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
-      <span style="color:var(--txt2)">${p.last} <span style="color:var(--txt3);font-size:10px">(${(p.anchorSite||'').split(' ')[0]})</span></span>
+      <span style="color:var(--txt2)">${escHtml(p.last)} <span style="color:var(--txt3);font-size:10px">(${escHtml((p.anchorSite||'').split(' ')[0])})</span></span>
       <span style="font-weight:700;color:${pct>=S.cfg.anchorPct?'var(--green)':pct>=40?'var(--amber)':'var(--red)'}">${pct}%</span>
     </div>${ancBar(pct)}</div>`;}).join('');
   document.getElementById('dash-anc').innerHTML=ancHtml||'<p style="color:var(--txt3);font-size:12px">No anchor sites configured.</p>';
@@ -116,24 +118,25 @@ function renderDash(){
     `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(+id)}</span><span class="tag tp">${n} holidays</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None recorded.</p>';
   document.getElementById('dash-open').innerHTML=S.openShifts.filter(o=>!o.claimedBy).slice(0,4).map(o=>
+    // shiftType/sub are admin-editable; escape before innerHTML.
     `<div class="row" style="cursor:pointer" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))">
-      <span style="font-size:12px;flex:1">${o.date}</span><span class="tag ta">${o.shiftType}</span>
-      <span style="color:var(--txt3);font-size:11px">${o.sub||''}</span></div>`
+      <span style="font-size:12px;flex:1">${escHtml(o.date)}</span><span class="tag ta">${escHtml(o.shiftType)}</span>
+      <span style="color:var(--txt3);font-size:11px">${escHtml(o.sub||'')}</span></div>`
   ).join('')||'<p style="color:var(--green-t);font-size:12px">All covered!</p>';
   document.getElementById('dash-vac').innerHTML=S.vacations.filter(v=>v.start>=ym+'-01').sort((a,b)=>a.start>b.start?1:-1).slice(0,4).map(v=>
-    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${v.type}</span><span style="color:var(--txt3);font-size:11px">${v.start}</span></div>`
+    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(v.start)}</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None upcoming.</p>';
   if(isAdm){
     const drA=document.getElementById('dash-anc-mo');if(drA)drA.textContent=monthName;
     const drR=document.getElementById('dash-dr-recent');
     if(drR)drR.innerHTML=S.drShifts.filter(s=>s.date.startsWith(ym)).slice(0,5).map(s=>{
       const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${s.shift}</span><span style="color:var(--txt3);font-size:11px">${s.date.slice(5)}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${escHtml(s.shift)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(s.date.slice(5))}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No shifts.</p>';
     const irR=document.getElementById('dash-ir-recent');
     if(irR)irR.innerHTML=S.irCalls.filter(c=>c.date.startsWith(ym)).slice(0,5).map(c=>{
       const cls=irGroupColorClass(c.irGroup);
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${c.irGroup}</span><span style="color:var(--txt3);font-size:11px">${c.date.slice(5)} ${c.callType}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${escHtml(c.irGroup||'')}</span><span style="color:var(--txt3);font-size:11px">${escHtml(c.date.slice(5))} ${escHtml(c.callType||'')}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No IR calls.</p>';
   }
 }
