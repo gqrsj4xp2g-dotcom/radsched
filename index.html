@@ -44468,12 +44468,16 @@ function _renderPickPreview(prev){
         <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(s.sourceReason||'—')}</td>
         <td style="text-align:center;color:var(--rs-ink-3)">${s.days}</td>
         <td>
-          <select onchange="_xlPickOverrideCell('shift','${escHtml(s.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
-            <option value="">— keep as ${escHtml(s.shift)} —</option>
-            <option value="vacation">Move to vacation</option>
-            <option value="off">Move to Off</option>
-            <option value="ignore">Ignore (drop)</option>
-          </select>
+          ${(() => {
+            const sel = (_xlPickOverrides && _xlPickOverrides[s.sourceRaw || '']) || '';
+            const opt = (v, lbl) => `<option value="${v}"${sel===v?' selected':''}>${lbl}</option>`;
+            return `<select onchange="_xlPickOverrideCell('shift','${escHtml(s.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
+              ${opt('', '— keep as ' + escHtml(s.shift) + ' —')}
+              ${opt('vacation', 'Move to vacation')}
+              ${opt('off', 'Move to Off')}
+              ${opt('ignore', 'Ignore (drop)')}
+            </select>`;
+          })()}
         </td>
       </tr>`).join('')}
       ${cells.length > 120 ? `<tr><td colspan="5" style="color:var(--rs-ink-3)">… and ${cells.length - 120} more</td></tr>` : ''}
