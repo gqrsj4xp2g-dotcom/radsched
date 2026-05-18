@@ -43862,7 +43862,19 @@ function _parsePickWorkbook(rows, prev, sheetName){
   const vacRecs = []; // {physId, start, end, type, notes}
   const shiftRecs = []; // {physId, date, shift, site, notes}
   weeks.forEach(w => {
-    const blockStart = _shiftDate(_blockStart(w.weekStart));
+    // ORDER MATTERS: apply yearShift FIRST, then snap to the
+    // preceding Saturday. The opposite order (snap-then-shift,
+    // which the previous code did) computed Saturday from the
+    // SOURCE year and then bumped the year forward — but a date
+    // that's Saturday in the source year is NOT necessarily a
+    // Saturday in the target year. So blockStart landed on
+    // Sun/Mon/Tue/etc in the target year, and blockEnd =
+    // blockStart + 8 then landed on the WRONG end day — that's
+    // where the "Monday after the vacation" bug came from. By
+    // shifting the year first and then snapping, blockStart is
+    // guaranteed to be a Saturday in the target year and the
+    // 9-day span is guaranteed to end on Sunday.
+    const blockStart = _blockStart(_shiftDate(w.weekStart));
     const blockEnd = addDays(blockStart, BLOCK_DAYS - 1);
     const mkVac = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name];
