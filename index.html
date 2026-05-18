@@ -43902,14 +43902,25 @@ function _parsePickWorkbook(rows, prev, sheetName){
     if(wantVac) mkVac(w.vacation, 'pick');
     if(wantOff) mkVac(w.off,      'Off');
     if(wantBB)  mkVac(w.bbPicks,  'BB');
-    // 2nd/3rd shifts span the same 9-day block. Generate one DR shift
-    // record per day so the calendar shows the assignment continuously
-    // and the rule engine sees the physician as committed every day.
+    // 2nd/3rd shifts span ONLY the Mon-Fri weekdays of the picked work
+    // week. Previously this loop wrote a shift record for every day of
+    // the 9-day vacation-style block (Sat-Sun included), which:
+    //   (1) cluttered the calendar with weekend 2nd-shift entries that
+    //       don't exist in the practice's actual policy (weekend
+    //       coverage is on-call, not 2nd/3rd shift),
+    //   (2) caused the DR auto-assigner to think a physician was
+    //       'committed' on Sat/Sun when they weren't, blocking valid
+    //       weekend-call assignment paths,
+    //   (3) made the "imported successfully" count look 9× higher
+    //       than it really should be.
+    // Walk the block and only push records whose day-of-week is Mon-Fri.
     const mkShift = (entries, shiftKind) => entries.forEach(e => {
       const m = nameMap[e.name];
       if(!m || !m.physId) return;
       for(let i = 0; i < BLOCK_DAYS; i++){
         const ds = addDays(blockStart, i);
+        const dow = parseDateLocal(ds).getDay();   // 0=Sun, 6=Sat
+        if(dow === 0 || dow === 6) continue;       // skip weekends
         shiftRecs.push({
           physId: m.physId,
           date: ds,
