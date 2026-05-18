@@ -6767,6 +6767,22 @@ function _irsaSolveMCF(opts){
       perPhysOver[e._physId] = (result.edgeFlows[i] || 0);
     }
   });
+  // Build per-slot candidate map for the explainer. Each phys→slot
+  // edge with cap=1 represents a physician who PASSED all hard rules
+  // for this slot; the edge.cost summarizes the soft penalties +
+  // tiebreakers. This is the data admins need to answer "why was X
+  // picked over Y on this date?". We collect it BEFORE the decode
+  // step so we can flag the picked physician for each slot.
+  const slotCandidates = {};   // slotIdx → [ {physId, cost, isPicked} ]
+  edges.forEach((e, i) => {
+    if(e._kind !== 'phys-slot') return;
+    if(!slotCandidates[e._slotIdx]) slotCandidates[e._slotIdx] = [];
+    slotCandidates[e._slotIdx].push({
+      physId: e._physId,
+      cost:   e.cost,
+      isPicked: (result.edgeFlows[i] === 1),
+    });
+  });
   // Decode: any phys→slot edge with flow=1 is an assignment
   const preview = [];
   // Stable per-physician order so the "last K = over-quota" rule is
