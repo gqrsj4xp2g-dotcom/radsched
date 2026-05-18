@@ -44423,12 +44423,19 @@ function _renderPickPreview(prev){
         <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(m.sourceRaw||'—')}</td>
         <td style="font-size:11px;color:var(--rs-ink-3)">${escHtml(m.sourceReason||'—')}</td>
         <td>
-          <select onchange="_xlPickOverrideCell('vacation','${escHtml(m.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
-            <option value="">— keep as vacation —</option>
-            <option value="shift2">Move to 2nd shift</option>
-            <option value="shift3">Move to 3rd shift</option>
-            <option value="ignore">Ignore (drop)</option>
-          </select>
+          ${(() => {
+            // Reflect any active override so the dropdown isn't always
+            // sitting at the default after the override was applied.
+            // sel = current override (or '' for none).
+            const sel = (_xlPickOverrides && _xlPickOverrides[m.sourceRaw || '']) || '';
+            const opt = (v, lbl) => `<option value="${v}"${sel===v?' selected':''}>${lbl}</option>`;
+            return `<select onchange="_xlPickOverrideCell('vacation','${escHtml(m.sourceRaw||'')}',this.value)" style="font-size:11px;padding:2px 4px">
+              ${opt('', '— keep as vacation —')}
+              ${opt('shift2', 'Move to 2nd shift')}
+              ${opt('shift3', 'Move to 3rd shift')}
+              ${opt('ignore', 'Ignore (drop)')}
+            </select>`;
+          })()}
         </td>
       </tr>`).join('')}
       ${uniqVac.length > 80 ? `<tr><td colspan="7" style="color:var(--rs-ink-3)">… and ${uniqVac.length - 80} more</td></tr>` : ''}
