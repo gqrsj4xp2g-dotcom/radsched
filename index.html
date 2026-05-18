@@ -6457,14 +6457,96 @@ function _diagnoseSlotUnfillable(slot, opts){
 // Pass an array of slot objects (must have date, site, slotLabel, _group)
 // and an optional quotaExhausted map. Returns an HTML string.
 //
+// One-click "Assign now (over quota)" handler invoked from the
+// Over-quota pool row in _renderUnfilledDiagnostic. Bypasses the
+// auto-assigner and writes the IR shift record directly, AFTER a
+// re-validation pass that checks the slot is still unfilled and
+// the physician still passes the same one-per-day / vacation /
+// conference / call-day-site checks the solver enforces. Quota
+// is the ONLY thing this button skips — every other rule still
+// applies, so the admin can't accidentally over-ride a hard
+// constraint by clicking too fast.
+function _assignOverQuotaNow(payload){
+  if(!_adminOnly('override quota and assign')) return;
+  payload = payload || {};
+  const { physId, date, site, slotLabel, irGroup } = payload;
+  if(!physId || !date || !site){
+    if(typeof _toast === 'function') _toast('Invalid assignment payload.', 'err');
+    return;
+  }
+  const p = (S.physicians||[]).find(x => x.id === physId);
+  if(!p){
+    if(typeof _toast === 'function') _toast('Physician not found.', 'err');
+    return;
+  }
+  // Schedule-lock guard — same as every other manual assignment path.
+  if(typeof _canEditDate === 'function' && !_canEditDate(date)) return;
+  // Re-validate the hard constraints. Quota is intentionally NOT
+  // checked here — that's exactly the override the admin is asking
+  // for. But everything else must still hold.
+  try{
+    if(typeof vacDays === 'function' && vacDays(physId).has(date)){
+      alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first.`);
+      return;
+    }
+    if(typeof _has2ndOr3rdShift === 'function' && _has2ndOr3rdShift(physId, date)){
+      alert(`${p.last} is on a 2nd/3rd shift on ${date} and cannot also work an IR shift.`);
+      return;
+    }
+    // One IR shift per day: a duplicate at the exact (date, site,
+    // slotLabel) is a no-op; at the same date but a DIFFERENT site
+    // is a double-booking we refuse.
+    const sameDate = (S.irShifts||[]).filter(s => s.physId === physId && s.date === date);
+    const exact = sameDate.find(s => s.site === site && (s.slotLabel||'') === (slotLabel||''));
+    if(exact){
+      if(typeof _toast === 'function') _toast('This slot is already filled by this physician.', 'info');
+      return;
+    }
+    if(sameDate.length){
+      if(!confirm(`${p.last} already has an IR shift on ${date} at ${sameDate[0].site||'?'}. Add another at ${site}?`)) return;
+    }
+    const callDay = (S.irCalls||[]).find(c => c.physId === physId &&
+      ((c.callType === 'daily' && c.date === date) ||
+       (c.callType === 'weekend' && [c.date, addDays(c.date,1), addDays(c.date,2), addDays(c.date,3)].includes(date))));
+    const _ctx = { physId, date, site, shift: '1st', kind: 'ir-shift', irGroup: irGroup || p.irGroup || '', ym: date.slice(0,7) };
+    if(typeof callDayRulesOk === 'function' && !callDayRulesOk(p, _ctx)){
+      if(!confirm(`Call-day site rule says ${p.last} should be at a different site for this date (they're on call). Assign anyway?`)) return;
+    }
+  } catch(_){ /* defensive — never let the re-validation throw block the override */ }
+  const newId = S.nextId++;
+  const note = `Manual over-quota override${callDay ? ' (also on call)' : ''}`;
+  (S.irShifts = S.irShifts || []).push({
+    id: newId,
+    physId,
+    date,
+    shift: '1st',
+    site,
+    sub: '',
+    slotLabel: slotLabel || '',
+    irGroup: irGroup || p.irGroup || '',
+    notes: note,
+  });
+  if(typeof _audit === 'function') _audit('irShift.overrideOverQuota', { id: newId, physId, date, site, slotLabel: slotLabel||'', irGroup: irGroup||p.irGroup||'' });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _toast === 'function') _toast(`✓ Assigned ${p.last} to ${site}${slotLabel?' · '+slotLabel:''} on ${date} (over-quota override).`, 'ok');
+  // Re-run the preview so the unfilled slot collapses and the
+  // physician's quota count + this date's drop-down both update.
+  // Use whichever solver the admin has selected (legacy or MCF).
+  try{
+    if((S.cfg||{}).useSolver === 'mcf' && typeof _previewIRShiftAA_MCF === 'function') _previewIRShiftAA_MCF();
+    else if(typeof previewIRShiftAA === 'function') previewIRShiftAA();
+  }catch(_){ /* preview is informational — don't break the assignment if it fails */ }
+}
+
 // For each slot the rendered drill-down has THREE sections:
 //   1. Blocked phys table — every IR-FTE phys with their exclusion reasons.
 //   2. 🤝 Cross-coverage pool — phys from the OTHER IR group whose ONLY
 //      block is the group mismatch (no rule conflicts; admin can manually
 //      assign them with cross-group fill-in semantics).
 //   3. ⚖ Over-quota pool — in-group phys whose ONLY block is hitting their
-//      period quota. Admin can override quota via manual assignment if
-//      coverage is more important than fairness for that day.
+//      period quota. Admin can override quota via the "Assign now" button
+//      next to each phys (rs-v42 added the one-click handler).
 function _renderUnfilledDiagnostic(unfilledSlots, opts){
   if(!unfilledSlots || !unfilledSlots.length) return '';
   opts = opts || {};
