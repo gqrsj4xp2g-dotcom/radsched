@@ -44523,10 +44523,15 @@ function rematchPickImport(){
     if(wantVac) mk(w.vacation, 'pick');
     if(wantOff) mk(w.off,      'Off');
     if(wantBB)  mk(w.bbPicks,  'BB');
+    // Match the parser path: 2nd/3rd shifts are Mon-Fri only.
+    // Without this filter the re-match path would re-introduce the
+    // weekend records the main parser was just fixed to skip.
     const mkS = (entries, sk) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
       for(let i = 0; i < BLOCK; i++){
         const ds = addDays(start, i);
+        const dow = parseDateLocal(ds).getDay();
+        if(dow === 0 || dow === 6) continue;
         shiftRecs.push({
           physId: m.physId, date: ds, shift: sk,
           site: 'At Home / Remote', sub: '',
