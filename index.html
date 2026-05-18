@@ -18264,7 +18264,12 @@ function previewIRShiftAA(){
       // and fairness; the site-level coverage is independent.
       var _ap=null; for(var _apIdx=0;_apIdx<allP.length;_apIdx++){if(allP[_apIdx].id===assigned[ai].physId){_ap=allP[_apIdx];break;}}
       var _realGrp=_ap?(_ap.irGroup||grp):grp;
-      _irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:_realGrp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||'',isFillIn:!!assigned[ai].isFillIn});
+      // Carry slotIndex through so _diagnoseSlotUnfillable can use it
+      // for the sameSlot check — slotLabel can be the empty string in
+      // unlabeled multi-slot sites, which would falsely match unfilled
+      // slots at the same (date, site) and hide "already placed today"
+      // from the diagnostic. slotIndex is unique per (date, site, role).
+      _irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:_realGrp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||'',isFillIn:!!assigned[ai].isFillIn,_preAllocSlotIndex:assigned[ai]._preAllocSlotIndex});
     }
     for(pi=0;pi<phys.length;pi++){
       phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;
