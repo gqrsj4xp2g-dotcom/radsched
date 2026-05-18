@@ -21770,7 +21770,11 @@ async function adminCreateAccount(){
       throw new Error('Your admin session has expired. Sign out and sign back in, then try again.');
     }
     const url=_getUrl();
-    console.info('[RS createUser] POST', `${url}/functions/v1/create-user`, {email,first,last,role,physId,practiceId:_PRACTICE_ID||'main'});
+    // Log only the endpoint and a sanitized envelope — never log email
+    // addresses, passwords, or auth tokens. Email/PHI logged to the
+    // browser console can be exfiltrated by any installed extension
+    // with debugger access, and we audit-trail at the server side.
+    console.info('[RS createUser] POST', `${url}/functions/v1/create-user`, { role, physId, hasEmail: !!email });
     const res=await fetch(`${url}/functions/v1/create-user`,{
       method:'POST',
       headers:{
@@ -21781,9 +21785,12 @@ async function adminCreateAccount(){
       body:JSON.stringify({action:'create',email,password:pw,first,last,role,physId,practiceId:_PRACTICE_ID||'main'})
     });
 
-    // Grab raw text first so we can log it even if JSON parsing fails
+    // Grab raw text first so we can recover from parse failure, but
+    // ONLY log the HTTP status — the response body can contain the
+    // freshly-created user ID, email, role, and on error the upstream
+    // provider's full envelope. Status alone is enough for triage.
     const rawText = await res.text();
-    console.info(`[RS createUser] HTTP ${res.status}`, rawText.slice(0,1000));
+    console.info(`[RS createUser] HTTP ${res.status}${res.ok ? '' : ' (failed)'}`);
 
     let body={};
     try{ body = rawText ? JSON.parse(rawText) : {}; }
