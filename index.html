@@ -6484,6 +6484,7 @@ function _assignOverQuotaNow(payload){
   // Re-validate the hard constraints. Quota is intentionally NOT
   // checked here — that's exactly the override the admin is asking
   // for. But everything else must still hold.
+  let alsoOnCall = false;
   try{
     if(typeof vacDays === 'function' && vacDays(physId).has(date)){
       alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first.`);
@@ -6495,7 +6496,7 @@ function _assignOverQuotaNow(payload){
     }
     // One IR shift per day: a duplicate at the exact (date, site,
     // slotLabel) is a no-op; at the same date but a DIFFERENT site
-    // is a double-booking we refuse.
+    // is a double-booking we refuse unless admin explicitly confirms.
     const sameDate = (S.irShifts||[]).filter(s => s.physId === physId && s.date === date);
     const exact = sameDate.find(s => s.site === site && (s.slotLabel||'') === (slotLabel||''));
     if(exact){
@@ -6505,7 +6506,7 @@ function _assignOverQuotaNow(payload){
     if(sameDate.length){
       if(!confirm(`${p.last} already has an IR shift on ${date} at ${sameDate[0].site||'?'}. Add another at ${site}?`)) return;
     }
-    const callDay = (S.irCalls||[]).find(c => c.physId === physId &&
+    alsoOnCall = !!(S.irCalls||[]).find(c => c.physId === physId &&
       ((c.callType === 'daily' && c.date === date) ||
        (c.callType === 'weekend' && [c.date, addDays(c.date,1), addDays(c.date,2), addDays(c.date,3)].includes(date))));
     const _ctx = { physId, date, site, shift: '1st', kind: 'ir-shift', irGroup: irGroup || p.irGroup || '', ym: date.slice(0,7) };
@@ -6514,7 +6515,7 @@ function _assignOverQuotaNow(payload){
     }
   } catch(_){ /* defensive — never let the re-validation throw block the override */ }
   const newId = S.nextId++;
-  const note = `Manual over-quota override${callDay ? ' (also on call)' : ''}`;
+  const note = `Manual over-quota override${alsoOnCall ? ' (also on call)' : ''}`;
   (S.irShifts = S.irShifts || []).push({
     id: newId,
     physId,
