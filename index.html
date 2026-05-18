@@ -30431,15 +30431,24 @@ function _renderSubNeedList(){
 // ── Tools: Constraint settings save ──────────────────────────────────
 function saveConstraintSettings(){
   if(!_adminOnly('save constraint settings')) return;
-  const num = id => { const v = +document.getElementById(id)?.value; return Number.isFinite(v) ? v : null; };
+  // Bounded numeric setter — without min/max clamping, an admin entering
+  // `-5` or `300` for anchorPctHard breaks all anchor comparisons and
+  // can crash render code that assumes the value is a sane percentage.
+  // Same logic for the other settings — all are days/weeks/percents
+  // with natural bounds.
+  const numIn = (id, min, max) => {
+    const v = +document.getElementById(id)?.value;
+    if(!Number.isFinite(v)) return null;
+    return Math.max(min, Math.min(max, v));
+  };
   if(!S.cfg) S.cfg = {};
-  const recovery = num('cs-recovery'); if(recovery != null) S.cfg.recoveryDays = recovery;
-  const gap = num('cs-holgap'); if(gap != null) S.cfg.holidayBlockGap = gap;
-  const hardAnc = num('cs-anchorhard'); if(hardAnc != null) S.cfg.anchorPctHard = hardAnc;
+  const recovery = numIn('cs-recovery', 0, 30); if(recovery != null) S.cfg.recoveryDays = recovery;
+  const gap      = numIn('cs-holgap',   0, 30); if(gap != null) S.cfg.holidayBlockGap = gap;
+  const hardAnc  = numIn('cs-anchorhard', 0, 100); if(hardAnc != null) S.cfg.anchorPctHard = hardAnc;
   if(!S.cfg.burnout) S.cfg.burnout = {};
-  const consec = num('cs-bo-days'); if(consec != null) S.cfg.burnout.consecMaxDays = consec;
-  const wkndQ = num('cs-bo-wknd'); if(wkndQ != null) S.cfg.burnout.weekendsPerQ = wkndQ;
-  const holsY = num('cs-bo-hol'); if(holsY != null) S.cfg.burnout.holidaysPerY = holsY;
+  const consec = numIn('cs-bo-days',  1, 60);  if(consec != null) S.cfg.burnout.consecMaxDays = consec;
+  const wkndQ  = numIn('cs-bo-wknd',  0, 13);  if(wkndQ != null)  S.cfg.burnout.weekendsPerQ = wkndQ;
+  const holsY  = numIn('cs-bo-hol',   0, 20);  if(holsY != null)  S.cfg.burnout.holidaysPerY = holsY;
   if(typeof _audit === 'function') _audit('cfg.constraints.save', {recovery, gap, hardAnc, consec, wkndQ, holsY});
   triggerSave();
   if(typeof _toast === 'function') _toast('Constraint settings saved.', 'ok');
