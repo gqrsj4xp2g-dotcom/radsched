@@ -6755,22 +6755,57 @@ function _irsaSolveMCF(opts){
   });
   // Solve
   const result = _mcfSolve(numNodes, edges, SOURCE, SINK, allSlots.length);
+  // First pass: count how much flow went through each physician's in-
+  // quota edge vs. their over-quota edge. We use this in the decode
+  // loop below to tag the LAST K assignments per physician as
+  // "over-quota" so the preview row + audit note reflect reality.
+  // (Edges are listed in deterministic source→phys-slot order; the
+  // tag-the-last-K rule matches the natural cost-minimising order.)
+  const perPhysOver = {};
+  edges.forEach((e, i) => {
+    if(e._kind === 's-phys-over'){
+      perPhysOver[e._physId] = (result.edgeFlows[i] || 0);
+    }
+  });
   // Decode: any phys→slot edge with flow=1 is an assignment
   const preview = [];
+  // Stable per-physician order so the "last K = over-quota" rule is
+  // deterministic across runs.
+  const perPhysAssigns = {};
   edges.forEach((e, i) => {
     if(e._kind === 'phys-slot' && result.edgeFlows[i] === 1){
-      const slot = allSlots[e._slotIdx];
-      const p = allP.find(x => x.id === e._physId);
-      if(!p || !slot) return;
+      (perPhysAssigns[e._physId] ||= []).push({ slotIdx: e._slotIdx });
+    }
+  });
+  Object.keys(perPhysAssigns).forEach(pidStr => {
+    const pid = +pidStr;
+    const list = perPhysAssigns[pid];
+    list.sort((a, b) => a.slotIdx - b.slotIdx);
+    const overCount = perPhysOver[pid] || 0;
+    list.forEach((entry, idx) => { entry.isOver = (idx >= list.length - overCount); });
+    const p = allP.find(x => x.id === pid);
+    if(!p) return;
+    list.forEach(entry => {
+      const slot = allSlots[entry.slotIdx];
+      if(!slot) return;
+      const isCross = slot._group !== p.irGroup;
+      // Note priority: cross-group beats over-quota in label since it
+      // carries more rule context. An admin scanning the table cares
+      // most that the shift crossed groups; the over-quota signal is
+      // surfaced on the per-physician row above.
+      const note = isCross ? 'MCF (cross-group)'
+                 : entry.isOver ? 'MCF (over-quota)'
+                 : 'MCF';
       preview.push({
         physId: p.id, date: slot.date, site: slot.site,
         irGroup: p.irGroup || slot._group || '', shift: '1st', sub: '',
-        notes: slot._group !== p.irGroup ? 'MCF (cross-group)' : 'MCF',
+        notes: note,
         slotLabel: slot.slotLabel || '',
-        isFillIn: slot._group !== p.irGroup,
+        isFillIn: isCross,
+        _overQuota: entry.isOver,
         _preAllocSlotIndex: slot.slotIndex,
       });
-    }
+    });
   });
   return {
     preview,
