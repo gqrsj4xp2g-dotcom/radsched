@@ -43556,6 +43556,19 @@ function vacImportTab(t,el){
 
 let _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], nameMap: {} };
 
+// Persistent per-cell overrides. Keyed by the Excel cell's raw text.
+// Survives across re-parses (i.e. clicking "Replace existing imports"
+// or re-picking the file) so admin overrides don't silently disappear
+// the moment the parser rebuilds _xlPickData.allWeeks. Cleared
+// explicitly when the admin picks a different file or when the
+// preview is dismissed.
+//
+// Each value is the target bucket: 'ignore', 'vacation', 'shift2',
+// 'shift3', 'off'. Missing key = no override (use parser's
+// classification verbatim). _applyPickOverrides() walks allWeeks
+// after the parser builds it and moves entries to match this map.
+let _xlPickOverrides = {};
+
 function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
   const file = input.files[0]; if(!file) return;
