@@ -32381,15 +32381,15 @@ function renderIRCal(){
         const slotLbl = s.slotLabel ? ` · ${s.slotLabel}` : '';
         const shiftLbl=s.shift==='1st'?'Day Shift':s.shift==='Home'?'Home':s.shift+' Shift';
         if(s.shift==='Home'){
-          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — Home @ ${s.site}">
+          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — Home @ ${escHtml(s.site||'')}">
             <div style="font-weight:700;font-size:11px">🏠 ${pshort(s.physId)}</div>
             <div style="font-size:9px;opacity:.8">Home</div>
           </div>`;
         } else {
-          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — ${shiftLbl} @ ${s.site}${s.slotLabel?' ['+s.slotLabel+']':''}${s.sub?' ('+s.sub+')':''}">
+          shiftEvs+=`<div class="ev" style="${style}" title="${pnameHtml(s.physId)} — ${escHtml(shiftLbl)} @ ${escHtml(s.site||'')}${s.slotLabel?' ['+escHtml(s.slotLabel)+']':''}${s.sub?' ('+escHtml(s.sub)+')':''}">
             <div style="font-weight:700;font-size:11px">${pshort(s.physId)}</div>
-            <div style="font-size:9px;opacity:.85">${shiftLbl}</div>
-            <div style="font-size:9px;opacity:.7">${siteSh}${slotLbl}${subLbl}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
+            <div style="font-size:9px;opacity:.85">${escHtml(shiftLbl)}</div>
+            <div style="font-size:9px;opacity:.7">${escHtml(siteSh)}${escHtml(slotLbl)}${escHtml(subLbl)}${_driveTimeBadge(s.physId,s.site,s.shift,s.date,'IR')}</div>
           </div>`;
         }
       });
