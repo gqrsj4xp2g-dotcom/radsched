@@ -43976,6 +43976,12 @@ function _parsePickWorkbook(rows, prev, sheetName){
     const shifted = new Date(y + yearShift, m - 1, d);
     return fmtDate(shifted);
   };
+  // Apply any persistent per-cell overrides the admin set before this
+  // re-parse. This is what makes "Ignore Boulous - sold back" actually
+  // stick when the user later clicks Replace and the file is re-parsed
+  // from scratch — without this step the override only affects the
+  // first parse run and gets blown away by the rebuild.
+  if(typeof _applyPickOverrides === 'function') _applyPickOverrides(weeks);
   const vacRecs = []; // {physId, start, end, type, notes}
   const shiftRecs = []; // {physId, date, shift, site, notes}
   weeks.forEach(w => {
