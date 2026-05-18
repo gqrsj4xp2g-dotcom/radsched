@@ -44543,44 +44543,58 @@ function _pickSetMapping(rawName, physIdStr){
 function _xlPickOverrideCell(currentKind, sourceRaw, target){
   if(!_xlPickData || !_xlPickData.allWeeks) return;
   if(!sourceRaw){ if(typeof _toast === 'function') _toast('Can\'t reclassify a cell with no source text.', 'err'); return; }
-  // Find every week-entry that came from this exact source cell and
-  // remove it from its current bucket; then push it into the target
-  // bucket (or omit entirely for 'ignore').
-  _xlPickData.allWeeks.forEach(w => {
-    const buckets = ['vacation', 'off', 'bbPicks', 'shift2', 'shift3'];
-    buckets.forEach(b => {
-      if(!Array.isArray(w[b])) return;
-      const moved = [];
-      w[b] = w[b].filter(e => {
-        if(e.raw !== sourceRaw) return true;
-        moved.push(e);
-        return false;
-      });
-      if(moved.length){
-        if(target === '' || target === undefined){
-          // Revert: put back where they came from (no-op since we
-          // just removed them — re-add).
-          w[b].push(...moved);
-        } else if(target === 'ignore'){
-          // Drop entirely — don't re-add anywhere.
-        } else {
-          // Map to the new bucket.
-          const dst = target === 'shift2' ? 'shift2'
-                    : target === 'shift3' ? 'shift3'
-                    : target === 'vacation' ? 'vacation'
-                    : target === 'off' ? 'off'
-                    : null;
-          if(dst){
-            if(!Array.isArray(w[dst])) w[dst] = [];
-            moved.forEach(e => w[dst].push({ ...e, reason: `manual override → ${dst}` }));
-          }
-        }
-      }
-    });
-  });
+  // Persist the override so it survives any subsequent re-parse of
+  // the same file (the Replace flow re-runs the parser from scratch,
+  // which would otherwise drop the override and re-add the cell).
+  if(target === '' || target === undefined){
+    delete _xlPickOverrides[sourceRaw];
+  } else {
+    _xlPickOverrides[sourceRaw] = target;
+  }
+  // Apply to the IN-MEMORY allWeeks immediately so the preview reflects
+  // the change without a re-parse. Subsequent re-parses will read the
+  // persistent map via _applyPickOverrides.
+  _applyPickOverrides(_xlPickData.allWeeks);
   if(typeof _toast === 'function') _toast(`Reclassified "${sourceRaw}" → ${target || 'unchanged'}`, 'info');
   // Regenerate records + re-render preview.
   if(typeof rematchPickImport === 'function') rematchPickImport();
+}
+
+// Apply the persistent _xlPickOverrides map to the given allWeeks
+// array. Mutates in place: removes entries matching an overridden
+// sourceRaw from whatever bucket they're in, then re-adds them to
+// the override target (or drops them for 'ignore'). Called by both
+// the live override path (via _xlPickOverrideCell) AND the parser
+// (after it builds allWeeks from scratch) so overrides survive the
+// Replace-existing-imports flow.
+function _applyPickOverrides(weeks){
+  if(!Array.isArray(weeks) || !_xlPickOverrides || !Object.keys(_xlPickOverrides).length) return;
+  const buckets = ['vacation', 'off', 'bbPicks', 'shift2', 'shift3'];
+  weeks.forEach(w => {
+    // First sweep: collect everything that needs to be moved/dropped.
+    const moved = [];   // {entry, target}
+    buckets.forEach(b => {
+      if(!Array.isArray(w[b])) return;
+      w[b] = w[b].filter(e => {
+        const target = _xlPickOverrides[e.raw];
+        if(target == null) return true;
+        moved.push({ entry: e, target });
+        return false;
+      });
+    });
+    // Second sweep: re-add at the target bucket (or drop for 'ignore').
+    moved.forEach(({ entry, target }) => {
+      if(target === 'ignore') return;
+      const dst = target === 'shift2' ? 'shift2'
+                : target === 'shift3' ? 'shift3'
+                : target === 'vacation' ? 'vacation'
+                : target === 'off' ? 'off'
+                : null;
+      if(!dst) return;
+      if(!Array.isArray(w[dst])) w[dst] = [];
+      w[dst].push({ ...entry, reason: `manual override → ${dst}` });
+    });
+  });
 }
 
 function rematchPickImport(){
