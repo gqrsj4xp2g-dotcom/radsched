@@ -3430,6 +3430,50 @@ tbody tr:hover{background:var(--bg3)}
 
 
 
+<!-- UNFILLED SLOTS — consolidated post-auto-assign gap view -->
+<div id="page-unfilled" class="page admin-only">
+  <div class="pg-title">⚠ Unfilled Slots</div>
+  <div class="pg-sub">Every DR shift, IR shift, IR call, weekend call, and holiday-call requirement that has no physician assigned right now. This view scans the CURRENT state of the schedule (post-apply), not a preview. Run after each auto-assign apply to see what's still uncovered. Click any gap to jump to the calendar at that date for manual assignment.</div>
+
+  <div class="flexe" style="margin-bottom:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+    <div class="fg" style="margin:0">
+      <label>Month</label>
+      <input id="uf-mo" type="month" onchange="renderUnfilled()">
+    </div>
+    <div class="fg" style="margin:0">
+      <label>Range</label>
+      <select id="uf-range" onchange="renderUnfilled()">
+        <option value="1">Just this month</option>
+        <option value="3" selected>Next 3 months</option>
+        <option value="6">Next 6 months</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0">
+      <label>Category</label>
+      <select id="uf-cat" onchange="renderUnfilled()">
+        <option value="all" selected>All categories</option>
+        <option value="dr">DR 1st shift</option>
+        <option value="ir">IR 1st shift</option>
+        <option value="ircall">IR daily call</option>
+        <option value="irwknd">IR weekend call</option>
+        <option value="wknd">DR weekend call</option>
+        <option value="holiday">Holiday call</option>
+      </select>
+    </div>
+    <div class="fg" style="margin:0">
+      <label>Group</label>
+      <select id="uf-grp" onchange="renderUnfilled()">
+        <option value="">All</option>
+      </select>
+    </div>
+    <button class="bp bsm" onclick="renderUnfilled()">🔄 Rescan</button>
+    <button class="bsm" onclick="_exportUnfilledCSV()">📋 Copy as CSV</button>
+  </div>
+
+  <div id="uf-summary" style="margin-bottom:14px"></div>
+  <div id="uf-list"></div>
+</div>
+
 <!-- ANCHOR REPORT -->
 <!-- @PAGE_ANCHOR_REPORT_BEGIN — managed by tools/build-index.sh from src/parts/page-anchor-report.html. Edit the source file, not this block. See src/README.md. -->
 <div id="page-anchor-report" class="page admin-only">
