@@ -12072,12 +12072,12 @@ function renderDash(){
     const drR=document.getElementById('dash-dr-recent');
     if(drR)drR.innerHTML=S.drShifts.filter(s=>s.date.startsWith(ym)).slice(0,5).map(s=>{
       const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${s.shift}</span><span style="color:var(--txt3);font-size:11px">${s.date.slice(5)}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${escHtml(s.shift)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(s.date.slice(5))}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No shifts.</p>';
     const irR=document.getElementById('dash-ir-recent');
     if(irR)irR.innerHTML=S.irCalls.filter(c=>c.date.startsWith(ym)).slice(0,5).map(c=>{
       const cls=irGroupColorClass(c.irGroup);
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${c.irGroup}</span><span style="color:var(--txt3);font-size:11px">${c.date.slice(5)} ${c.callType}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${escHtml(c.irGroup||'')}</span><span style="color:var(--txt3);font-size:11px">${escHtml(c.date.slice(5))} ${escHtml(c.callType||'')}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No IR calls.</p>';
   }
 }
