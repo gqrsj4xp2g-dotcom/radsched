@@ -6662,9 +6662,9 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
     if(overQuota.length){
       html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--amber-bg,#fffbeb);border-left:3px solid var(--amber,#d97706);border-radius:4px">
         <div style="font-size:11px;font-weight:700;color:var(--amber-t);margin-bottom:4px">⚖ Over-quota pool — ${overQuota.length} in-group physician${overQuota.length===1?'':'s'}</div>
-        <div style="font-size:10.5px;color:var(--txt2);margin-bottom:6px">In-group, not blocked by any rule, but already at their period quota. Manual assignment over-quota is allowed (admin override) when coverage is more critical than per-period fairness.</div>
+        <div style="font-size:10.5px;color:var(--txt2);margin-bottom:6px">In-group, not blocked by any rule, but already at their period quota. Click <strong>Assign now</strong> to commit a shift to this slot immediately (over-quota override is admin-only and audit-logged).</div>
         <table style="width:100%;font-size:11px"><thead><tr>
-          <th style="text-align:left">Physician</th><th style="text-align:left">Quota</th><th style="text-align:left">Anchor Site</th>
+          <th style="text-align:left">Physician</th><th style="text-align:left">Quota</th><th style="text-align:left">Anchor Site</th><th></th>
         </tr></thead><tbody>`;
       overQuota.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
         const p = (S.physicians||[]).find(x => x.id === c.physId);
@@ -6672,10 +6672,25 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
         // Extract the quota fraction from the reason string for display
         const q = (c.reasons[0]||'').match(/over quota \((\d+\/\d+)\)/);
         const qLabel = q ? q[1] : '—';
+        // The "Assign now" button posts directly into S.irShifts
+        // (or S.drShifts depending on slot kind) bypassing the
+        // auto-assigner. We embed the slot/phys context as data-
+        // attributes; the click handler reads them, validates one
+        // more time, and writes the record. Audit-logged as
+        // `irShift.overrideOverQuota` so admins can answer "who
+        // approved this?" later.
+        const slotPayload = JSON.stringify({
+          physId: c.physId,
+          date: slot.date,
+          site: slot.site,
+          slotLabel: slot.slotLabel || '',
+          irGroup: slot._group || '',
+        }).replace(/"/g, '&quot;');
         html += `<tr>
           <td style="font-weight:600">${escHtml(c.name)}</td>
           <td><span class="tag" style="font-size:9px;background:var(--amber-bg);color:var(--amber-t)">${escHtml(qLabel)}</span></td>
           <td style="color:var(--txt2)">${escHtml(anchor)}</td>
+          <td style="text-align:right"><button class="bp bsm" style="font-size:10.5px;padding:3px 8px" onclick="_assignOverQuotaNow(${slotPayload})">+ Assign now</button></td>
         </tr>`;
       });
       html += '</tbody></table></div>';
