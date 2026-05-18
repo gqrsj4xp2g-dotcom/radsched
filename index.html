@@ -44638,6 +44638,16 @@ function _xlPickOverrideCell(currentKind, sourceRaw, target){
   } else {
     _xlPickOverrides[sourceRaw] = target;
   }
+  // RESTORE from pristine snapshot BEFORE re-applying. Without this,
+  // 'revert to default' on a cell that was previously set to 'ignore'
+  // would have no effect — the entry was destructively removed from
+  // allWeeks during the original override. We restore from pristine
+  // (the parser's untouched output) and then re-apply ALL active
+  // overrides, so the net effect is "show the current override set
+  // applied to the pristine parser output."
+  if(_xlPickPristineWeeks){
+    _xlPickData.allWeeks = _xlPickClonePristine(_xlPickPristineWeeks) || _xlPickData.allWeeks;
+  }
   // Apply to the IN-MEMORY allWeeks immediately so the preview reflects
   // the change without a re-parse. Subsequent re-parses will read the
   // persistent map via _applyPickOverrides.
