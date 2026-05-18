@@ -6458,6 +6458,12 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       .map(([r, n]) => `<span class="tag" style="font-size:9.5px;margin-right:4px;background:var(--bg3);color:var(--txt2)">${escHtml(r)} × ${n}</span>`)
       .join('');
     const slotLabel = slot.slotLabel ? ' · ' + escHtml(slot.slotLabel) : '';
+    // Universal-holiday badge — if this date is a US federal holiday
+    // that the auto-assigner SHOULD have skipped, surface it so the
+    // admin knows this isn't a true "unfillable" gap, just a date
+    // that needs Holiday Call coverage instead.
+    const _uh = (typeof _universalHolidayFor === 'function') ? _universalHolidayFor(slot.date) : null;
+    const uhBadge = _uh ? `<span class="tag" style="font-size:9.5px;margin-left:6px;background:var(--red-bg,#fee2e2);color:var(--red-t)">🎉 ${escHtml(_uh)}</span>` : '';
     // Cross-group pool: ALL phys in a different IR group, categorized by
     // whether they have any blocking reason BESIDES the group mismatch.
     //   "available" → wrong group only (clean candidate; admin can override)
