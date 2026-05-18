@@ -42275,22 +42275,27 @@ function _rsHydrateFilter(el, lsKey){
   // since onchange (not addEventListener) overwrites, no leak.
   el.onchange = function(){
     try{ localStorage.setItem(lsKey, el.value || ''); }catch(_){}
-    // Bubble the original render() call — most calendar dropdowns
-    // already have onchange="renderDRCal()" inline; that fires AFTER
-    // this assignment because the onchange attribute is preserved in
-    // the inline handler — actually NO, this property assignment
-    // REPLACES the inline attribute. So we have to manually call
-    // the inline handler. Look it up via the attribute string and
-    // eval; safer: a tiny lookup table on the element's data-onchange.
-    const inline = el.getAttribute('data-onchange') || el.dataset.onchange || '';
-    if(inline){ try{ new Function(inline).call(el); }catch(_){} }
-    else {
-      // Fallback: try a render function based on the element's id prefix.
-      const idPrefix = (el.id || '').split('-')[0];
-      const fnMap = { drc:'renderDRCal', irc:'renderIRCal', os:'renderOpenShifts', anc:'renderAnchorReport' };
-      const fnName = fnMap[idPrefix];
-      if(fnName && typeof window[fnName] === 'function'){ try{ window[fnName](); }catch(_){} }
+    // Allow callers to declare an `data-onchange-fn="renderDRCal"`
+    // attribute pointing at a globally-exposed function. We resolve
+    // it through an ALLOWLIST — never eval the attribute as code.
+    // Previously this branch used `new Function(inline)` which made
+    // any data-onchange attribute (and by extension any DOM sink
+    // that could write into it) a JS RCE primitive in the page.
+    const fnName = el.getAttribute('data-onchange-fn') || el.dataset.onchangeFn || '';
+    const ALLOWED_FNS = new Set([
+      'renderDRCal','renderIRCal','renderOpenShifts','renderAnchorReport',
+      'renderHolTable','renderHolCounter','renderManageShifts','renderFTE',
+      'renderVacTable','renderAudit','renderErrorLog','renderSettings',
+    ]);
+    if(fnName && ALLOWED_FNS.has(fnName) && typeof window[fnName] === 'function'){
+      try{ window[fnName](); }catch(_){}
+      return;
     }
+    // Fallback: try a render function based on the element's id prefix.
+    const idPrefix = (el.id || '').split('-')[0];
+    const fnMap = { drc:'renderDRCal', irc:'renderIRCal', os:'renderOpenShifts', anc:'renderAnchorReport' };
+    const fbName = fnMap[idPrefix];
+    if(fbName && typeof window[fbName] === 'function'){ try{ window[fbName](); }catch(_){} }
   };
 }
 
