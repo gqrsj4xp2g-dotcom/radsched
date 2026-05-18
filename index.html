@@ -21100,6 +21100,17 @@ function dashNavMonth(dir){
   renderDash();
 }
 
+// "Today" shortcut. Useful after browsing forward to plan-ahead months
+// — one tap to snap the dashboard back to the current month rather
+// than counting clicks through the ◀ / ▶ buttons.
+function dashJumpToday(){
+  const now = new Date();
+  _dashYm = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1)).slice(0,7);
+  renderDash();
+  // Visual confirmation only if user wasn't already on this month.
+  if(typeof _toast === 'function') _toast('Jumped to current month.', 'info');
+}
+
 /* ─── CHAT ─── */
 
 
