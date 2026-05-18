@@ -44349,6 +44349,27 @@ function _renderPickPreview(prev){
   const yearMeta = d.yearMeta || {};
   const totalWeeks = (d.allWeeks || []).length;
   let html = '';
+  // ── Active overrides banner ───────────────────────────────────────
+  // When the admin has set any "Ignore" / "Move to X" overrides via
+  // the per-cell dropdowns below, show them at the top with counts +
+  // a one-click "Clear all overrides" button. Without this banner the
+  // overrides were invisible after the preview re-rendered, making
+  // admins think their click did nothing.
+  const overrideEntries = Object.entries(_xlPickOverrides || {});
+  if(overrideEntries.length){
+    const byTarget = {};
+    overrideEntries.forEach(([raw, tgt]) => { byTarget[tgt] = (byTarget[tgt] || 0) + 1; });
+    const chips = Object.entries(byTarget).map(([t, n]) =>
+      `<span class="tag" style="background:var(--amber-bg,#fef3c7);color:var(--amber-t,#854d0e);font-size:11px;padding:2px 8px;border-radius:11px;font-weight:600">${escHtml(t)} × ${n}</span>`
+    ).join(' ');
+    html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber-bg,#fef3c7);border-left:3px solid var(--amber,#d97706);border-radius:6px;font-size:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><strong>⚙ ${overrideEntries.length} active override${overrideEntries.length===1?'':'s'}</strong> ${chips}</div>
+        <button class="bsm" style="font-size:11px;padding:3px 10px" onclick="_clearAllPickOverrides()">Clear all overrides</button>
+      </div>
+      <div style="margin-top:4px;color:var(--rs-ink-3);font-size:11px">These persist across "Replace existing imports" / re-pick so the same cells are skipped or remapped every time.</div>
+    </div>`;
+  }
   // ── Year banner — show this FIRST so a wrong-year file is obvious ──
   // The 2026-file-but-vacations-landed-in-2025 bug surfaced because the
   // preview didn't tell the user what year the dates resolved to. This
