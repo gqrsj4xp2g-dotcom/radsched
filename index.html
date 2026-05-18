@@ -44003,6 +44003,13 @@ function _parsePickWorkbook(rows, prev, sheetName){
     const shifted = new Date(y + yearShift, m - 1, d);
     return fmtDate(shifted);
   };
+  // Snapshot the pristine parse result BEFORE applying overrides so
+  // _xlPickOverrideCell can restore from it when the admin reverts an
+  // override. Without this snapshot, "— keep as vacation —" (the
+  // revert option) would clear the override map but couldn't actually
+  // restore the entry, because _applyPickOverrides mutates allWeeks
+  // destructively (the entry is already gone from the bucket).
+  _xlPickPristineWeeks = _xlPickClonePristine(weeks);
   // Apply any persistent per-cell overrides the admin set before this
   // re-parse. This is what makes "Ignore Boulous - sold back" actually
   // stick when the user later clicks Replace and the file is re-parsed
