@@ -35577,27 +35577,138 @@ function renderAnchorReport(){
   el.innerHTML = html;
 }
 
+// Universal-holiday safety net.
+// ─────────────────────────────────────────────────────────────────────
+// Pain it solves: admins routinely forget to define every federal
+// holiday on the Holiday Call → Define Holidays tab. The auto-assigner
+// then happily places people on Christmas, Thanksgiving, July 4, etc.
+// — which is never the right behavior. Define-holidays is still the
+// single source of truth for HOLIDAY CALL ASSIGNMENT, but for the
+// "do not auto-assign a regular shift" check we also fall back to a
+// computed list of the major US federal holidays. Admins who run a
+// non-US practice or want auto-assign to ignore a holiday can disable
+// this via `S.cfg.skipUniversalHolidays = false`.
+//
+// We deliberately only treat these as a BLACKOUT (no auto-assign /
+// no claim of new open shifts on this day); we do NOT auto-create
+// any holiday-call coverage records. The admin must still go to the
+// Holiday Call tab to assign actual coverage.
+const _UNIVERSAL_HOLIDAYS = {
+  // Fixed-date holidays — Jan 1, Jul 4, Nov 11, Dec 25.
+  fixed: [
+    { mm: 1,  dd: 1,  name: "New Year's Day" },
+    { mm: 7,  dd: 4,  name: 'Independence Day' },
+    { mm: 11, dd: 11, name: 'Veterans Day' },
+    { mm: 12, dd: 25, name: 'Christmas Day' },
+  ],
+  // Computed (nth weekday of month) holidays. dow uses Sunday=0.
+  // nth=-1 means "last weekday of month".
+  computed: [
+    { mm: 1,  nth:  3, dow: 1, name: 'MLK Jr. Day' },
+    { mm: 2,  nth:  3, dow: 1, name: "Presidents' Day" },
+    { mm: 5,  nth: -1, dow: 1, name: 'Memorial Day' },
+    { mm: 9,  nth:  1, dow: 1, name: 'Labor Day' },
+    { mm: 11, nth:  4, dow: 4, name: 'Thanksgiving' },
+  ],
+};
+
+// Cache: ISO date → holiday name (or null). Memoized per year because
+// the date math is the same for every call against the same year.
+const _UH_CACHE = new Map();
+function _universalHolidayFor(dateISO){
+  if(!dateISO || typeof dateISO !== 'string') return null;
+  if(_UH_CACHE.has(dateISO)) return _UH_CACHE.get(dateISO);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateISO);
+  if(!m){ _UH_CACHE.set(dateISO, null); return null; }
+  const yr = +m[1], mm = +m[2], dd = +m[3];
+  // Fixed-date pass
+  for(const h of _UNIVERSAL_HOLIDAYS.fixed){
+    if(h.mm === mm && h.dd === dd){
+      _UH_CACHE.set(dateISO, h.name);
+      return h.name;
+    }
+  }
+  // Federal-shift: if Jan 1 / Jul 4 / Dec 25 falls on Sat, the
+  // observed federal holiday is the preceding Fri; if Sun, the
+  // following Mon. We shift the BLACKOUT to the observed day too so
+  // practices that follow the federal observance don't auto-schedule
+  // it.
+  const dow = parseDateLocal(dateISO).getDay();
+  for(const h of _UNIVERSAL_HOLIDAYS.fixed){
+    // Friday before a Saturday holiday
+    if(dow === 5){
+      const sat = addDays(dateISO, 1);
+      const satM = parseDateLocal(sat);
+      if(satM.getDate() === h.dd && (satM.getMonth()+1) === h.mm){
+        const name = h.name + ' (observed)';
+        _UH_CACHE.set(dateISO, name);
+        return name;
+      }
+    }
+    // Monday after a Sunday holiday
+    if(dow === 1){
+      const sun = addDays(dateISO, -1);
+      const sunM = parseDateLocal(sun);
+      if(sunM.getDate() === h.dd && (sunM.getMonth()+1) === h.mm){
+        const name = h.name + ' (observed)';
+        _UH_CACHE.set(dateISO, name);
+        return name;
+      }
+    }
+  }
+  // Computed (nth weekday) pass
+  for(const h of _UNIVERSAL_HOLIDAYS.computed){
+    if(h.mm !== mm) continue;
+    if(parseDateLocal(dateISO).getDay() !== h.dow) continue;
+    if(h.nth === -1){
+      // Last occurrence of dow in month → date + 7 must be next month.
+      const next = parseDateLocal(addDays(dateISO, 7));
+      if((next.getMonth()+1) !== mm){
+        _UH_CACHE.set(dateISO, h.name);
+        return h.name;
+      }
+    } else {
+      // nth occurrence: 1+(dd-1)/7 should equal nth.
+      if(Math.floor((dd - 1) / 7) + 1 === h.nth){
+        _UH_CACHE.set(dateISO, h.name);
+        return h.name;
+      }
+    }
+  }
+  _UH_CACHE.set(dateISO, null);
+  return null;
+}
+
 // A date is a "holiday" and should be excluded from regular auto-assigners if
 // it appears in any holiday defined on the Holiday Call → Define Holidays tab.
-// That tab is the SINGLE source of truth for what counts as a holiday — it
-// populates S.holidayDefs[*].dates (an explicit date-array per holiday block).
+// That tab is the SINGLE source of truth for what counts as a holiday for the
+// PURPOSE of assigning holiday-call coverage. For the BLACKOUT (auto-assign
+// must skip this day), we also include universal US federal holidays — see
+// _universalHolidayFor() — so an admin who forgot to define Christmas doesn't
+// get Christmas auto-staffed with regular shifts.
 //
 // The regular DR + IR weekend auto-assigners skip any weekend where BOTH
 // Sat+Sun (DR) or the ENTIRE Fri→Mon span (IR) is holiday-defined, so that
 // Holiday Call coverage handles those days instead of the regular distributor.
 function isHolidayBlackout(date){
   if(!date) return false;
-  return (S.holidayDefs||[]).some(d => (d.dates||[]).includes(date));
+  if((S.holidayDefs||[]).some(d => (d.dates||[]).includes(date))) return true;
+  // Universal-holiday fallback — opt-out via S.cfg.skipUniversalHolidays=false.
+  if((S.cfg||{}).skipUniversalHolidays === false) return false;
+  return !!_universalHolidayFor(date);
 }
 
 // Debug helper — returns the matched holiday def for diagnostic messages.
-// Always {source:'definition', name, year} format now since there's only one
-// source (the Holiday Call → Define Holidays tab).
+// Returns either {source:'definition', name, year} from S.holidayDefs OR
+// {source:'universal', name} from the federal-holiday fallback.
 function _holidayReasonFor(date){
   if(!date) return null;
   for(const d of (S.holidayDefs||[])){
     if((d.dates||[]).includes(date)) return {source:'definition', name:d.name, year:d.year};
   }
+  if((S.cfg||{}).skipUniversalHolidays === false) return null;
+  const uh = _universalHolidayFor(date);
+  if(uh) return {source:'universal', name: uh, year: +date.slice(0,4)};
   return null;
 }
 
