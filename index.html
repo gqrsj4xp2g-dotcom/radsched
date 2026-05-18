@@ -17565,6 +17565,88 @@ _previewIRShiftAA_MCF._renderInline = function(run, ctx){
   });
   html += '</tbody></table></div></div>';
 
+  // Exceptions panel — every assignment flagged as cross-group or
+  // over-quota gets its own drill-down here. The big "why is X on
+  // this date instead of Y?" question is answered by showing the
+  // cost the solver computed for the picked physician AND the next
+  // 3 in-group candidates, with their cost deltas. Admins finally
+  // get to see the trade-off rather than a one-line "(cross-group)"
+  // note.
+  var exceptions = (run.preview||[]).filter(function(a){
+    return a.notes === 'MCF (cross-group)' || a.notes === 'MCF (over-quota)';
+  });
+  if(exceptions.length){
+    var xByKind = { cross: 0, over: 0 };
+    exceptions.forEach(function(a){
+      if(a.notes === 'MCF (cross-group)') xByKind.cross++; else xByKind.over++;
+    });
+    html += '<div class="card" style="margin-bottom:10px;border-left:3px solid var(--amber,#d97706)">' +
+      '<div class="card-title">⚖ Auto-Assign Exceptions — ' + exceptions.length +
+        '<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">' +
+          xByKind.cross + ' cross-group · ' + xByKind.over + ' over-quota' +
+        '</span>' +
+      '</div>' +
+      '<div class="note ni" style="font-size:11px;margin-bottom:8px">Every assignment below diverges from the ideal in-group / in-quota choice. Expand each one to see the cost the solver computed for the picked physician AND the next 3 alternatives, so you can audit the trade-off.</div>';
+    var explain = run.assignmentExplain || {};
+    exceptions.forEach(function(a){
+      var key = a.date + '|' + a.site + '|' + (a._preAllocSlotIndex ?? 0);
+      var info = explain[key] || {};
+      var cands = (info.candidates || []).slice(0, 4);   // top 4 by cost (incl. picked)
+      var picked = (S.physicians||[]).find(function(p){return p.id === a.physId;});
+      var pickedName = picked ? (picked.last + ', ' + picked.first) : ('#' + a.physId);
+      var pickedGroup = picked ? (picked.irGroup||'?') : '?';
+      var kindBadge = a.notes === 'MCF (cross-group)'
+        ? '<span class="tag" style="font-size:9.5px;background:var(--blue-bg);color:var(--blue-t);font-weight:700">cross-group</span>'
+        : '<span class="tag" style="font-size:9.5px;background:var(--amber-bg);color:var(--amber-t);font-weight:700">over-quota</span>';
+      // Picked + alternatives table.
+      var rows = cands.map(function(c){
+        var p2 = (S.physicians||[]).find(function(p){return p.id === c.physId;});
+        if(!p2) return '';
+        var lbl = p2.last + ', ' + p2.first;
+        var grp2 = p2.irGroup || '?';
+        var isPickedRow = c.physId === a.physId;
+        var rowStyle = isPickedRow ? 'background:var(--amber-bg,#fffbeb);font-weight:700' : '';
+        var deltaCol = '';
+        if(typeof info.pickedCost === 'number' && typeof c.cost === 'number'){
+          var delta = c.cost - info.pickedCost;
+          deltaCol = delta === 0 ? '<span style="color:var(--txt3)">(picked)</span>'
+                  : (delta > 0   ? '<span style="color:var(--red-t)">+'+delta.toFixed(1)+'</span>'
+                                 : '<span style="color:var(--green-t)">'+delta.toFixed(1)+'</span>');
+        }
+        return '<tr style="'+rowStyle+'">' +
+          '<td>' + escHtml(lbl) + (isPickedRow ? ' ←' : '') + '</td>' +
+          '<td><span class="tag" style="font-size:9px">'+escHtml(grp2)+'</span></td>' +
+          '<td style="text-align:right;font-family:ui-monospace,monospace">' + (typeof c.cost === 'number' ? c.cost.toFixed(1) : '—') + '</td>' +
+          '<td style="text-align:right">' + deltaCol + '</td>' +
+        '</tr>';
+      }).filter(Boolean).join('');
+      var altCount = (info.candidates || []).length;
+      html += '<details style="margin-bottom:6px;border:1px solid var(--bdr);border-radius:5px;padding:6px 10px;background:var(--bg2)">' +
+        '<summary style="cursor:pointer;font-size:12px;font-weight:600">' +
+          '<span style="color:var(--amber-t)">' + escHtml(a.date) + '</span>' +
+          '<span style="margin-left:6px;color:var(--txt2)">' + escHtml(a.site) + (a.slotLabel ? ' · ' + escHtml(a.slotLabel) : '') + '</span>' +
+          '<span style="margin-left:8px;font-weight:400">→ ' + escHtml(pickedName) + ' (' + escHtml(pickedGroup) + ')</span>' +
+          '<span style="margin-left:8px">' + kindBadge + '</span>' +
+        '</summary>' +
+        '<div style="margin-top:6px;font-size:11px">' +
+          '<div style="font-size:10.5px;color:var(--txt3);margin-bottom:4px">' +
+            'Slot group: <strong>' + escHtml(info.slotGroup || '?') + '</strong> · ' +
+            'Picked physician\'s group: <strong>' + escHtml(pickedGroup) + '</strong> · ' +
+            altCount + ' eligible candidate' + (altCount===1?'':'s') + ' (passed all hard rules)' +
+          '</div>' +
+          (rows
+            ? '<table style="width:100%"><thead><tr><th style="text-align:left">Physician</th><th style="text-align:left">Group</th><th style="text-align:right">Cost</th><th style="text-align:right">Δ vs picked</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            : '<div style="color:var(--txt3);font-style:italic">No alternative candidates passed the hard-rule filter — this physician was the only option.</div>'
+          ) +
+          '<div style="font-size:10px;color:var(--txt3);margin-top:6px;line-height:1.4">' +
+            'Cost legend: anchor mismatch +50 · cross-group +200 · on-call -80 · in-group over-quota +100 · burnout flag +25/each · unmet sub-need -30 · quota-deficit bonus (small).' +
+          '</div>' +
+        '</div>' +
+      '</details>';
+    });
+    html += '</div>';
+  }
+
   // Unfillable slots — rich per-slot diagnostic in a collapsible drill-down.
   // Each slot lists every IR-FTE physician with the reason(s) they were
   // excluded (vacation, site rule, sequence, quota, etc.) so admins can
@@ -17576,7 +17658,7 @@ _previewIRShiftAA_MCF._renderInline = function(run, ctx){
     html += '<div class="note ni" style="font-size:12px;margin-top:4px">ℹ ' + callF + ' on-call slot(s) preferred a hospital placement (cost = -80 per match).</div>';
   }
   if(crossGrpCount){
-    html += '<div class="note ni" style="font-size:12px;margin-top:4px">ℹ ' + crossGrpCount + ' cross-group fill-in(s) used (cost = +200 per).</div>';
+    html += '<div class="note ni" style="font-size:12px;margin-top:4px">ℹ ' + crossGrpCount + ' cross-group fill-in(s) used (cost = +200 per — should appear in Exceptions above).</div>';
   }
 
   if(box) box.innerHTML = html;
