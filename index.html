@@ -6823,6 +6823,27 @@ function _irsaSolveMCF(opts){
       });
     });
   });
+  // Build per-assignment explainer map keyed by date|site|slotIndex.
+  // Each entry has the picked physician + the top-N runners-up by cost,
+  // so the preview's "Why?" drill-down can show admins exactly which
+  // alternatives the solver considered and how much cheaper / more
+  // expensive they were.
+  const assignmentExplain = {};
+  preview.forEach(p => {
+    // Resolve slot index from preview row → look up candidate list.
+    const slotIdx = allSlots.findIndex(s =>
+      s.date === p.date && s.site === p.site && s.slotIndex === p._preAllocSlotIndex
+    );
+    if(slotIdx < 0) return;
+    const cands = (slotCandidates[slotIdx] || []).slice().sort((a, b) => a.cost - b.cost);
+    const key = p.date + '|' + p.site + '|' + (p._preAllocSlotIndex ?? 0);
+    assignmentExplain[key] = {
+      picked: p.physId,
+      pickedCost: (cands.find(c => c.physId === p.physId) || {}).cost,
+      candidates: cands,
+      slotGroup: allSlots[slotIdx]._group || '',
+    };
+  });
   return {
     preview,
     stats: {
@@ -6830,6 +6851,7 @@ function _irsaSolveMCF(opts){
       cost: result.cost, edgesConsidered: edgeStats.considered, edgesEligible: edgeStats.eligible,
       edgesBlocked: edgeStats.blockedHard,
     },
+    assignmentExplain,
   };
 }
 
