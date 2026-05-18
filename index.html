@@ -44469,11 +44469,30 @@ function rematchPickImport(){
     if(dow === 0) return addDays(ds, -1);
     return addDays(ds, -1 - dow);
   };
+  // Apply the same year-shift that the parser used. Without this,
+  // re-mapping a name (which calls rematchPickImport) would generate
+  // dates anchored to the SOURCE year, while the original preview
+  // and apply path used the TARGET year — admin would see different
+  // dates after re-mapping. Read the override + the cached fileYear
+  // from _xlPickData.yearMeta so the math matches the parser.
+  const targetYearInput = +(document.getElementById('xl-pick-target-year')?.value || 0);
+  const fileYear = +(_xlPickData.yearMeta && _xlPickData.yearMeta.fileYear || 0);
+  const yearShift = (targetYearInput && fileYear) ? (targetYearInput - fileYear) : 0;
+  const _shiftDateR = (ds) => {
+    if(!ds || !yearShift) return ds;
+    const [y, m, d] = ds.split('-').map(Number);
+    return fmtDate(new Date(y + yearShift, m - 1, d));
+  };
   const BLOCK = 9;
   const nameMap = _xlPickData.nameMap || {};
   const vacRecs = [], shiftRecs = [];
   (_xlPickData.allWeeks || []).forEach(w => {
-    const start = _blockStartR(w.weekStart);
+    // Shift FIRST then snap to Saturday — see the matching comment
+    // in _parsePickWorkbook for why ordering matters. With the old
+    // snap-then-shift order, end = Mon-after-the-bookend-weekend
+    // because the Saturday snap was computed against the source
+    // year's calendar instead of the target year's.
+    const start = _blockStartR(_shiftDateR(w.weekStart));
     const end = addDays(start, BLOCK - 1);
     const mk = (entries, label) => entries.forEach(e => {
       const m = nameMap[e.name]; if(!m || !m.physId) return;
