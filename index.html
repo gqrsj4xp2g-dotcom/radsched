@@ -18155,7 +18155,14 @@ function previewIRShiftAA(){
       }
     }catch(_){}
     if(typeof _renderUnfilledDiagnostic === 'function'){
-      html += _renderUnfilledDiagnostic(unfilledSlotsLegacy, { quotaExhausted: _qExhausted });
+      // Pass the in-run assignments so the diagnostic can flag
+      // "already placed today by this run" instead of incorrectly
+      // labeling those physicians as "no blocking reason \u2014 likely
+      // quota".
+      html += _renderUnfilledDiagnostic(unfilledSlotsLegacy, {
+        quotaExhausted: _qExhausted,
+        runAssignments: _irsaPreview,
+      });
     } else {
       html += '<div class="note nw" style="font-size:12px;margin-top:4px">\u26a0 '+totalU+' slot(s) unfillable \u2014 all physicians unavailable.</div>';
     }
