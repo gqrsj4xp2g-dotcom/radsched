@@ -12037,8 +12037,10 @@ function renderDash(){
    .map(m=>`<div class="met" style="cursor:pointer" onclick="nav('${m.pg}',document.querySelector('[onclick*=${JSON.stringify(m.pg).slice(1,-1)}]'))" title="Go to ${m.pg}">
     <div class="met-lbl">${m.l}</div><div class="met-val">${m.v}</div><div class="met-sub">${m.s}</div></div>`).join('');
   const ancHtml=anchPhys.map(p=>{const c=ancComp(p.id,ym);const pct=c?c.pct:0;
+    // escHtml on p.last / anchorSite — admin-editable strings; without
+    // it, a name like `<img onerror=…>` would execute on every dash render.
     return`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
-      <span style="color:var(--txt2)">${p.last} <span style="color:var(--txt3);font-size:10px">(${(p.anchorSite||'').split(' ')[0]})</span></span>
+      <span style="color:var(--txt2)">${escHtml(p.last)} <span style="color:var(--txt3);font-size:10px">(${escHtml((p.anchorSite||'').split(' ')[0])})</span></span>
       <span style="font-weight:700;color:${pct>=S.cfg.anchorPct?'var(--green)':pct>=40?'var(--amber)':'var(--red)'}">${pct}%</span>
     </div>${ancBar(pct)}</div>`;}).join('');
   document.getElementById('dash-anc').innerHTML=ancHtml||'<p style="color:var(--txt3);font-size:12px">No anchor sites configured.</p>';
