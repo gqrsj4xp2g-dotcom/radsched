@@ -6369,17 +6369,36 @@ function _diagnoseSlotUnfillable(slot, opts){
   // the misleading "— no blocking reason — likely quota" label for
   // physicians who are genuinely unavailable because the solver
   // already committed them elsewhere today.
-  const runAssigns = Array.isArray(opts.runAssignments) ? opts.runAssignments : [];
+  // Belt-and-suspenders: prefer the explicit runAssignments opt, but
+  // fall back to the module-level _irsaPreview if the caller forgot
+  // to pass it. The user reported a case where Lucas was placed at
+  // CHS on 8/10 yet the diagnostic for a different 8/10 slot showed
+  // him as 'eligible (passed all rules)' instead of 'already placed
+  // today (CHS)'. The fallback makes sure we always see the live
+  // preview state regardless of caller wiring.
+  let runAssigns = Array.isArray(opts.runAssignments) ? opts.runAssignments : null;
+  if(!runAssigns && Array.isArray(typeof _irsaPreview !== 'undefined' ? _irsaPreview : null)){
+    runAssigns = _irsaPreview;
+  }
+  runAssigns = runAssigns || [];
   const placedThisRun = {};   // physId → {date, site, slotLabel}
   runAssigns.forEach(a => {
-    if(a && a.date === slot.date && a.physId != null){
-      // Skip the slot itself — that's the slot we're trying to diagnose;
-      // the picked physician for it (if any) would otherwise show as
-      // "blocked by this run".
-      const sameSlot = a.site === slot.site && (a.slotLabel||'') === (slot.slotLabel||'');
-      if(sameSlot) return;
-      placedThisRun[a.physId] = { site: a.site, slotLabel: a.slotLabel || '' };
-    }
+    if(!a || a.physId == null) return;
+    // Normalize date to YYYY-MM-DD substring so a stray timestamp
+    // (rare but possible) still matches the slot's date prefix.
+    const aDate = String(a.date || '').slice(0, 10);
+    const sDate = String(slot.date || '').slice(0, 10);
+    if(!aDate || aDate !== sDate) return;
+    // Skip the slot itself — that's the slot we're trying to diagnose;
+    // the picked physician for it (if any) would otherwise show as
+    // "blocked by this run". Match on site + slotLabel + slotIndex
+    // since rotation can swap slotLabels between picks at the same
+    // (date, site). slotIndex is the stable identifier.
+    const sameSlot = a.site === slot.site &&
+      ((a.slotLabel||'') === (slot.slotLabel||'') ||
+       (a._preAllocSlotIndex != null && slot.slotIndex != null && a._preAllocSlotIndex === slot.slotIndex));
+    if(sameSlot) return;
+    placedThisRun[a.physId] = { site: a.site, slotLabel: a.slotLabel || '' };
   });
   const out = [];
   allP.forEach(p => {
