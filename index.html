@@ -6626,9 +6626,16 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
           <th style="text-align:left">Physician</th><th style="text-align:left">Group</th><th style="text-align:left">Why excluded</th>
         </tr></thead><tbody>`;
     diag.sort((a,b) => a.name.localeCompare(b.name)).forEach(d => {
+      // When the diagnostic returns no reasons, the physician is genuinely
+      // eligible right now. That means the SOLVER chose to leave them
+      // unassigned for some reason that isn't a hard rule — most often
+      // they were a runner-up and a different physician scored better
+      // for this slot (or all slots in their group). The fix path is
+      // usually NOT "raise quota" but "expand the candidate pool" (e.g.
+      // make this site mixed, or relax sequence/site rules).
       const reasonHtml = d.reasons.length
         ? d.reasons.map(r => `<span class="tag" style="font-size:9.5px;margin-right:4px">${escHtml(r)}</span>`).join('')
-        : '<span style="color:var(--green-t);font-weight:700">— no blocking reason — likely quota</span>';
+        : '<span style="color:var(--green-t);font-weight:700">— eligible (passed all rules) — solver chose not to pick this round</span>';
       html += `<tr><td style="font-weight:600">${escHtml(d.name)}</td><td><span class="tag" style="font-size:9px">${escHtml(d.group||'—')}</span></td><td>${reasonHtml}</td></tr>`;
     });
     html += '</tbody></table></div></details></div></details>';
