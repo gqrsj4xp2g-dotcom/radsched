@@ -18148,7 +18148,11 @@ function previewIRShiftAA(){
                             && natLangRulesOk(_cpCtx);
           if(_cpPassesRules){
             var cpCounts=_irsaCountsForQuota(cP,slot);
-            assigned.push({physId:cP.id,date:slot.date,site:slot.site,notes:cpCounts?'Auto (on-call)':'Auto (on-call fill-in)'});
+            // Include slotLabel + _preAllocSlotIndex so this entry can
+            // be distinguished from sibling slots at the same site —
+            // the diagnostic uses this to detect "already placed today
+            // at a different slot" correctly.
+            assigned.push({physId:cP.id,date:slot.date,site:slot.site,notes:cpCounts?'Auto (on-call)':'Auto (on-call fill-in)',slotLabel:slot.slotLabel||'',_preAllocSlotIndex:slot.slotIndex});
             if(cpCounts){cnt[cP.id]++;if(cP.anchorSite&&cP.anchorSite===slot.site)anc[cP.id]++;}
             callF++;totalA++;continue;
           }
