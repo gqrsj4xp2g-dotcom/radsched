@@ -44536,6 +44536,57 @@ function rematchPickImport(){
   if(typeof _toast === 'function') _toast('Re-matched with manual mappings.', 'ok');
 }
 
+// Bulk delete every vacation and DR shift record that was created by
+// a previous pick-sheet import. We identify imported records by the
+// `notes` field starting with "Imported:" (the prefix applyPickImport
+// and rematchPickImport stamp onto every record they write). Records
+// added manually or via the standard vacation importer don't carry
+// this prefix, so they're left untouched.
+//
+// Confirmation: count first, show counts, get explicit yes/no. Take
+// a snapshot before deleting so the Backups → Restore page can recover
+// if the admin changes their mind.
+async function clearImportedPickRecords(){
+  if(!_adminOnly('clean up imported records')) return;
+  const isImported = s => typeof s?.notes === 'string' && /^Imported:/i.test(s.notes);
+  const vacToGo = (S.vacations||[]).filter(isImported);
+  const shToGo  = (S.drShifts ||[]).filter(isImported);
+  const total = vacToGo.length + shToGo.length;
+  const msgEl = document.getElementById('xl-pick-cleanup-msg');
+  if(!total){
+    if(msgEl) msgEl.textContent = 'Nothing to clean up — no records with an "Imported:" tag found.';
+    if(typeof _toast === 'function') _toast('No imported records to delete.', 'info');
+    return;
+  }
+  const sample = vacToGo.slice(0, 3).map(v => `• ${pname(v.physId)} · ${v.start}–${v.end}`).join('<br>') +
+    (vacToGo.length > 3 ? `<br><span style="color:var(--rs-ink-3)">…and ${vacToGo.length-3} more vacations</span>` : '');
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Delete ${total} imported record${total===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">
+          This permanently removes <strong>${vacToGo.length}</strong> imported vacation${vacToGo.length===1?'':'s'}
+          and <strong>${shToGo.length}</strong> imported 2nd/3rd shift record${shToGo.length===1?'':'s'}.
+          Records added manually or via the standard vacation importer are NOT touched.
+          ${vacToGo.length ? `<br><br><strong>Sample:</strong><br>${sample}` : ''}
+          <br><br>A backup is taken first; if you change your mind, restore from Settings → Backups.
+        </div>`,
+        confirmLabel: 'Delete imported records',
+        destructive: true,
+      })
+    : confirm(`Delete ${vacToGo.length} imported vacations and ${shToGo.length} imported shifts? A backup is taken first.`);
+  if(!ok) return;
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('import-cleanup'); }catch(_){ /* non-blocking */ }
+  }
+  S.vacations = (S.vacations||[]).filter(v => !isImported(v));
+  S.drShifts  = (S.drShifts ||[]).filter(s => !isImported(s));
+  if(typeof _audit === 'function') _audit('import.cleanup', { vacRemoved: vacToGo.length, shRemoved: shToGo.length });
+  if(typeof triggerSave === 'function') triggerSave();
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(msgEl) msgEl.textContent = `✓ Removed ${vacToGo.length} vacation${vacToGo.length===1?'':'s'} and ${shToGo.length} shift${shToGo.length===1?'':'s'}.`;
+  if(typeof _toast === 'function') _toast(`Cleaned up ${total} imported record${total===1?'':'s'}.`, 'ok');
+}
+
 async function applyPickImport(){
   if(!_adminOnly('apply vacation picks import')) return;
   const data = _xlPickData || {};
