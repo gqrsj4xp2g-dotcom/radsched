@@ -17698,7 +17698,12 @@ _previewIRShiftAA_MCF._renderInline = function(run, ctx){
   // excluded (vacation, site rule, sequence, quota, etc.) so admins can
   // see exactly why a date is uncovered and fix the underlying constraint.
   if(unfilledSlots.length){
-    html += _renderUnfilledDiagnostic(unfilledSlots, { quotaExhausted: quotaExhausted });
+    // Pass the MCF preview's in-run assignments so phys placed at
+    // another slot today are flagged correctly, not blamed on quota.
+    html += _renderUnfilledDiagnostic(unfilledSlots, {
+      quotaExhausted: quotaExhausted,
+      runAssignments: run.preview,
+    });
   }
   if(callF){
     html += '<div class="note ni" style="font-size:12px;margin-top:4px">ℹ ' + callF + ' on-call slot(s) preferred a hospital placement (cost = -80 per match).</div>';
