@@ -44572,6 +44572,27 @@ function _pickSetMapping(rawName, physIdStr){
 // and re-run rematchPickImport() to regenerate vacRecs / shiftRecs.
 // This keeps the override path self-consistent with the rematch path
 // for unmatched-name mappings, and dedupes naturally.
+function _clearAllPickOverrides(){
+  if(!_adminOnly('clear pick-sheet overrides')) return;
+  if(!Object.keys(_xlPickOverrides || {}).length){
+    if(typeof _toast === 'function') _toast('No overrides to clear.', 'info');
+    return;
+  }
+  if(!confirm(`Clear all ${Object.keys(_xlPickOverrides).length} overrides? The preview will regenerate from the parser's default classification.`)) return;
+  _xlPickOverrides = {};
+  // Re-parse from cached rows so allWeeks is rebuilt from scratch
+  // without any overrides applied. Falls back to rematchPickImport
+  // if the cached rows aren't available.
+  if(_xlPickLastRows && typeof _parsePickWorkbook === 'function'){
+    const prev = document.getElementById('xl-pick-preview');
+    try{ _parsePickWorkbook(_xlPickLastRows, prev, _xlPickLastSheet || ''); }
+    catch(_){ if(typeof rematchPickImport === 'function') rematchPickImport(); }
+  } else if(typeof rematchPickImport === 'function'){
+    rematchPickImport();
+  }
+  if(typeof _toast === 'function') _toast('All overrides cleared.', 'ok');
+}
+
 function _xlPickOverrideCell(currentKind, sourceRaw, target){
   if(!_xlPickData || !_xlPickData.allWeeks) return;
   if(!sourceRaw){ if(typeof _toast === 'function') _toast('Can\'t reclassify a cell with no source text.', 'err'); return; }
