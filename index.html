@@ -15108,8 +15108,13 @@ function saveAutoRefreshTrafficCfg(){
   if(!S.cfg) S.cfg = {};
   if(!S.cfg.autoRefreshTraffic) S.cfg.autoRefreshTraffic = {};
   const enabled = document.getElementById('auto-traffic-enabled')?.checked !== false;
-  const days = parseInt(document.getElementById('auto-traffic-days')?.value) || 14;
-  const hours = parseInt(document.getElementById('auto-traffic-hours')?.value) || 6;
+  // Clamp days and hourInterval to sane bounds — without these caps,
+  // an admin entering days=99999 / hours=1 would set up a runaway
+  // background loop that hammers the Maps API + blows the billing cap.
+  const rawDays = parseInt(document.getElementById('auto-traffic-days')?.value);
+  const rawHrs  = parseInt(document.getElementById('auto-traffic-hours')?.value);
+  const days  = Math.max(1, Math.min(90,  Number.isFinite(rawDays) ? rawDays : 14));
+  const hours = Math.max(1, Math.min(168, Number.isFinite(rawHrs)  ? rawHrs  : 6));
   S.cfg.autoRefreshTraffic = { enabled, days, hourInterval: hours };
   triggerSave();
   _updateAutoTrafficStatus();
