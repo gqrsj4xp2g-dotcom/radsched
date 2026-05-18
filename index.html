@@ -6520,12 +6520,24 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       if(d.group !== slot._group) return false;
       return d.reasons.every(r => r.indexOf('over quota') === 0);
     });
-    const availNote = availPhys ? `<span style="color:var(--amber-t);font-weight:700;margin-left:8px">${availPhys} phys with no blocking reason</span>` : '';
+    // "Already placed today" cohort — physicians in slot's group who
+    // are blocked ONLY by their other assignment in this same preview
+    // run. Surfacing them at the summary level removes the surprise
+    // when group size < slot count for a day.
+    const placedElsewhere = diag.filter(d => {
+      if(d.group !== slot._group) return false;
+      const onlyReason = d.reasons.length === 1 && d.reasons[0].indexOf('already placed today') === 0;
+      return onlyReason;
+    });
+    const availNote = availPhys ? `<span style="color:var(--amber-t);font-weight:700;margin-left:8px">${availPhys} phys eligible (solver had to pick someone else)</span>` : '';
+    const placedNote = placedElsewhere.length
+      ? `<span style="color:var(--rs-ink-3);font-weight:700;margin-left:8px">🗓 ${placedElsewhere.length} placed elsewhere today</span>`
+      : '';
     const coverNote = crossGroupAll.length
       ? `<span style="color:var(--blue-t);font-weight:700;margin-left:8px">🤝 ${crossCoverage.length}/${crossGroupAll.length} cross-coverage</span>`
       : '';
     const overQNote = overQuota.length
-      ? `<span style="color:var(--amber-t);font-weight:700;margin-left:8px">⚖ ${overQuota.length} over-quota</span>`
+      ? `<span style="color:var(--amber-t);font-weight:700;margin-left:8px">⚖ ${overQuota.length} over-quota (will fire in Pass 4)</span>`
       : '';
     html += `<details style="margin-bottom:6px;border:1px solid var(--bdr);border-radius:5px;padding:6px 10px;background:var(--bg2)">
       <summary style="cursor:pointer;font-size:12px;font-weight:600">
