@@ -43569,6 +43569,22 @@ let _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], name
 // after the parser builds it and moves entries to match this map.
 let _xlPickOverrides = {};
 
+// Pristine snapshot of the parsed allWeeks before any override is
+// applied. This is what makes "revert to default" actually revert —
+// _applyPickOverrides mutates allWeeks destructively, so without a
+// snapshot, removing an override from the map can't bring the entry
+// back (the entry is already gone from allWeeks). Re-cloned every
+// time the parser runs from scratch.
+let _xlPickPristineWeeks = null;
+function _xlPickClonePristine(weeks){
+  // Structured clone — JSON round-trip is sufficient because each
+  // entry is a plain object {raw, name, reason}, no functions or
+  // Dates. Faster than recursive clone for the typical 52-week,
+  // ~500-entry corpus.
+  try { return JSON.parse(JSON.stringify(weeks)); }
+  catch(_){ return null; }
+}
+
 function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
   const file = input.files[0]; if(!file) return;
