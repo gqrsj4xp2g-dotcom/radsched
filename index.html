@@ -12059,12 +12059,13 @@ function renderDash(){
     `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(+id)}</span><span class="tag tp">${n} holidays</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None recorded.</p>';
   document.getElementById('dash-open').innerHTML=S.openShifts.filter(o=>!o.claimedBy).slice(0,4).map(o=>
+    // shiftType/sub are admin-editable; escape before innerHTML.
     `<div class="row" style="cursor:pointer" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))">
-      <span style="font-size:12px;flex:1">${o.date}</span><span class="tag ta">${o.shiftType}</span>
-      <span style="color:var(--txt3);font-size:11px">${o.sub||''}</span></div>`
+      <span style="font-size:12px;flex:1">${escHtml(o.date)}</span><span class="tag ta">${escHtml(o.shiftType)}</span>
+      <span style="color:var(--txt3);font-size:11px">${escHtml(o.sub||'')}</span></div>`
   ).join('')||'<p style="color:var(--green-t);font-size:12px">All covered!</p>';
   document.getElementById('dash-vac').innerHTML=S.vacations.filter(v=>v.start>=ym+'-01').sort((a,b)=>a.start>b.start?1:-1).slice(0,4).map(v=>
-    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${v.type}</span><span style="color:var(--txt3);font-size:11px">${v.start}</span></div>`
+    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(v.start)}</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None upcoming.</p>';
   if(isAdm){
     const drA=document.getElementById('dash-anc-mo');if(drA)drA.textContent=monthName;
