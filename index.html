@@ -6663,8 +6663,31 @@ function _irsaSolveMCF(opts){
   const numNodes = SINK + 1;
   const edges = [];
   // source → phys
-  allP.forEach((p, i) => {
-    edges.push({ from: SOURCE, to: physIdx(p.id), cap: quotas[p.id] || 0, cost: 0, _kind: 's-phys', _physId: p.id });
+  // Per physician we emit TWO source→phys edges:
+  //   (a) "in-quota" cap = quotas[p], cost = 0   — the natural budget
+  //   (b) "over-quota" cap = OVER_ALLOWANCE,
+  //                       cost = OVER_QUOTA_PENALTY (= 100)
+  //
+  // Why two: with a single cap edge fixed at `quotas[p]`, the MCF model
+  // physically cannot route more than the quota through any in-group
+  // physician. When the in-group quota is exhausted, the only remaining
+  // flow path becomes a cross-group edge (cost +200), so the solver
+  // assigned cross-group physicians IN PREFERENCE TO in-group
+  // physicians who would simply have been over quota by one or two
+  // shifts. The greedy solver already prefers in-group over-quota
+  // (Pass 4) BEFORE cross-group (Pass 5); the MCF solver should match.
+  //
+  // The over-quota edge has cost (OVER_QUOTA_PENALTY = 100) < the
+  // cross-group cost (200), so the solver will prefer to push one more
+  // shift through an in-group physician before reaching for a cross-
+  // group fill-in. Capacity is bounded so we never push an outrageous
+  // number of extra shifts through one person.
+  const OVER_QUOTA_PENALTY = 100;          // < 200 (cross-group cost)
+  const OVER_ALLOWANCE     = 10;           // hard ceiling on over-shifts per phys
+  allP.forEach((p) => {
+    const inQuotaCap = quotas[p.id] || 0;
+    edges.push({ from: SOURCE, to: physIdx(p.id), cap: inQuotaCap, cost: 0,                 _kind: 's-phys',       _physId: p.id });
+    edges.push({ from: SOURCE, to: physIdx(p.id), cap: OVER_ALLOWANCE, cost: OVER_QUOTA_PENALTY, _kind: 's-phys-over', _physId: p.id });
   });
   // slot → sink
   allSlots.forEach((s, i) => {
