@@ -6355,10 +6355,40 @@ function _diagnoseSlotUnfillable(slot, opts){
   opts = opts || {};
   const ym = (slot.date || '').slice(0, 7);
   const allP = (S.physicians || []).filter(p => p.irFte > 0);
+  // Build a per-physician "already placed in THIS preview run" index so
+  // the diagnostic stops blaming quota for physicians who were actually
+  // picked for a DIFFERENT slot on the same date. opts.runAssignments
+  // is the in-progress assignment list from the caller (legacy: the
+  // `assigned[]` array; MCF: run.preview). Without this index we get
+  // the misleading "— no blocking reason — likely quota" label for
+  // physicians who are genuinely unavailable because the solver
+  // already committed them elsewhere today.
+  const runAssigns = Array.isArray(opts.runAssignments) ? opts.runAssignments : [];
+  const placedThisRun = {};   // physId → {date, site, slotLabel}
+  runAssigns.forEach(a => {
+    if(a && a.date === slot.date && a.physId != null){
+      // Skip the slot itself — that's the slot we're trying to diagnose;
+      // the picked physician for it (if any) would otherwise show as
+      // "blocked by this run".
+      const sameSlot = a.site === slot.site && (a.slotLabel||'') === (slot.slotLabel||'');
+      if(sameSlot) return;
+      placedThisRun[a.physId] = { site: a.site, slotLabel: a.slotLabel || '' };
+    }
+  });
   const out = [];
   allP.forEach(p => {
     const reasons = [];
     const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group || p.irGroup, ym };
+    // In-run placement — this is the new check. If the solver already
+    // placed this physician at a different slot today in THIS preview
+    // run, they cannot also fill the current slot — but they're not
+    // over quota and there's nothing about them the admin needs to
+    // "fix". Surface as its own reason so the label doesn't claim
+    // "likely quota" misleadingly.
+    if(placedThisRun[p.id]){
+      const pr = placedThisRun[p.id];
+      reasons.push('already placed today (' + pr.site + (pr.slotLabel ? ' · ' + pr.slotLabel : '') + ') by this preview run');
+    }
     // Vacation
     try{ if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)) reasons.push('on vacation'); }catch(_){}
     // Sold-back date (CME / personal)
@@ -6405,7 +6435,10 @@ function _diagnoseSlotUnfillable(slot, opts){
     try{ if(typeof callDayRulesOk === 'function' && !callDayRulesOk(p, ctx)) reasons.push('call-day site rule'); }catch(_){}
     // Natural-language rule
     try{ if(typeof natLangRulesOk === 'function' && !natLangRulesOk(ctx)) reasons.push('custom natural-language rule'); }catch(_){}
-    // Quota — per-run constraint, supplied by caller
+    // Quota — per-run constraint, supplied by caller. We include the
+    // current count vs cap so admins can see how far over the phys is
+    // even when over-quota assignment IS permitted (cf. Pass 4 in the
+    // greedy solver + over-quota edge in MCF).
     if(opts.quotaExhausted && opts.quotaExhausted[p.id]){
       reasons.push(`over quota (${opts.quotaExhausted[p.id]})`);
     }
