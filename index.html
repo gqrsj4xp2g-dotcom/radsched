@@ -46405,9 +46405,28 @@ async function applyPickImport(){
   });
   // 2nd / 3rd shifts — site is forced to "At Home / Remote" (matches the
   // app's home-only policy for these shift types). De-duplicated upstream.
+  // Apply-time also re-checks for any OTHER booking on phys+date — this
+  // catches Vacation Sold Back's just-created Home shifts and prevents
+  // double-booking when the source Excel has both an Off and a 2nd shift
+  // for the same physician/day. The preview-time dedup only sees S as
+  // it was BEFORE vacations were applied; this check sees the live state.
   sh.forEach(r => {
     const dup = (S.drShifts || []).find(s => s.physId === r.physId && s.date === r.date && s.shift === r.shift);
     if(dup){ shSkipped++; return; }
+    const existing = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(r.physId, r.date)
+      : (S.drShifts || []).filter(s => s.physId === r.physId && s.date === r.date)
+          .map(s => ({ kind: 'DR ' + s.shift }));
+    if(existing.length){
+      shConflict++;
+      // Audit each skip so an admin can answer "why didn't Lucas get 2nd shift?".
+      if(typeof _audit === 'function') _audit('import.skipConflict', {
+        physId: r.physId, date: r.date, shift: r.shift,
+        conflictsWith: existing.map(e => e.kind || `DR ${e.shift}`).join(', '),
+        sourceRaw: r.sourceRaw || '',
+      });
+      return;
+    }
     S.drShifts.push({
       id: S.nextId++, physId: r.physId, date: r.date, shift: r.shift,
       site: r.site || 'At Home / Remote', sub: r.sub || '',
