@@ -43693,7 +43693,14 @@ function _rsConfirm(opts){
     const okBtn = dialog.querySelector('[data-rs-action="ok"]');
     const cancelBtn = dialog.querySelector('[data-rs-action="cancel"]');
     const previouslyFocused = document.activeElement;
-    setTimeout(() => okBtn?.focus(), 30);
+    // onShow lets callers focus a custom element inside the dialog
+    // body (e.g. an inline <input>) instead of the default OK button.
+    // Runs AFTER the dialog is in the DOM so getElementById works.
+    if(typeof opts.onShow === 'function'){
+      setTimeout(() => { try{ opts.onShow(dialog); }catch(_){} }, 30);
+    } else {
+      setTimeout(() => okBtn?.focus(), 30);
+    }
     function close(result){
       try{ host.remove(); }catch(_){}
       try{ previouslyFocused?.focus?.(); }catch(_){}
