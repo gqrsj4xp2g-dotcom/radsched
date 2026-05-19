@@ -12498,6 +12498,21 @@ function nav(pg, el, subTab, opts){
     'tools':renderTools,
   };
   if(fns[pg]) fns[pg]();
+  // ── Sync URL hash so browser back/forward + bookmarks deep-link ───
+  // Format: `#/<page>` or `#/<page>/<subTab>`. The leading `/` is the
+  // discriminator that lets _bootDeepLink ignore non-routing hashes
+  // (notably Supabase's `#access_token=…&type=recovery` flow). When
+  // nav was called FROM popstate (`opts.fromHistory === true`) we
+  // skip pushState so we don't bury the back-stack with duplicates.
+  try{
+    if(!opts || !opts.fromHistory){
+      const targetHash = '#/' + encodeURIComponent(pg) +
+        (subTab ? '/' + encodeURIComponent(subTab) : '');
+      if(location.hash !== targetHash){
+        history.pushState({ rsNav: true, pg, subTab: subTab || null }, '', targetHash);
+      }
+    }
+  }catch(_){}
   // Restore scroll AFTER the render — `requestAnimationFrame` waits for
   // the browser to compute layout so scrollHeight is final. Two rAFs
   // because some renders trigger an additional layout pass via image /
@@ -12513,6 +12528,62 @@ function nav(pg, el, subTab, opts){
       scroller.scrollTop = Math.min(saved, max);
     }catch(_){}
   }));
+}
+
+// ── Browser back/forward navigation ────────────────────────────────
+// Listen for the popstate event so the OS back/forward buttons drive
+// SPA nav instead of unloading the page (or doing nothing). State
+// objects pushed by nav() carry { rsNav, pg, subTab }; if the user
+// navigated back to a state we DIDN'T push (e.g. boot-with-empty
+// state), fall back to parsing location.hash ourselves.
+window.addEventListener('popstate', (e) => {
+  try{
+    let pg = null, subTab = null;
+    if(e.state && e.state.rsNav && e.state.pg){
+      pg = e.state.pg; subTab = e.state.subTab || null;
+    } else {
+      const h = (location.hash || '').replace(/^#/, '');
+      if(h.startsWith('/')){
+        const parts = h.slice(1).split('/');
+        pg = decodeURIComponent(parts[0] || '');
+        subTab = parts[1] ? decodeURIComponent(parts[1]) : null;
+      }
+    }
+    if(!pg) return;
+    // Ignore navigation to pages that don't exist (defensive — guards
+    // against a stale bookmark for a removed page).
+    if(!document.getElementById('page-' + pg)) return;
+    const item = document.querySelector(`.snav-item[data-pg="${pg}"]`);
+    if(typeof nav === 'function') nav(pg, item, subTab, { fromHistory: true });
+  }catch(err){
+    if(typeof _logError === 'function') _logError('popstate-nav', err.message, err);
+  }
+});
+
+// ── Boot-time deep-link rehydration ───────────────────────────────
+// When the page loads with `#/<page>` in the URL (a bookmark or shared
+// link), nav there AFTER the initial Dashboard render so the target
+// page picks up the freshly-loaded S state. Recovery / auth hashes
+// (no leading `/`) are intentionally ignored so we don't fight the
+// Supabase password-reset flow that uses #access_token=… on load.
+function _bootDeepLink(){
+  try{
+    const h = (location.hash || '').replace(/^#/, '');
+    if(!h.startsWith('/')) return;
+    const parts = h.slice(1).split('/');
+    const pg = decodeURIComponent(parts[0] || '');
+    const subTab = parts[1] ? decodeURIComponent(parts[1]) : null;
+    if(!pg || pg === 'dashboard') return; // dashboard is already on
+    if(!document.getElementById('page-' + pg)) return;
+    // Tiny delay so the dashboard finishes its initial render first;
+    // some pages depend on _afterMutation having run once.
+    setTimeout(() => {
+      try{
+        const item = document.querySelector(`.snav-item[data-pg="${pg}"]`);
+        if(typeof nav === 'function') nav(pg, item, subTab);
+      }catch(_){}
+    }, 60);
+  }catch(_){}
 }
 
 /* @JS_RENDER_DASH_BEGIN — managed by tools/build-index.sh from src/parts/js-render-dash.js. Edit the source file, not this block. See src/README.md. */
