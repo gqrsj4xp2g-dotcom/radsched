@@ -18833,6 +18833,12 @@ function addIRShift(){
     alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);
     return;
   }
+  // Cross-shift-type block: a DR 2nd/3rd shift (typically imported from
+  // a pick sheet) prevents IR shifts the same day. Warn-and-confirm so
+  // the admin can still override consciously.
+  if(typeof _has2ndOr3rdShift === 'function' && _has2ndOr3rdShift(physId, date)){
+    if(!confirm(`${p.last} already has a 2nd or 3rd DR shift on ${date}. Adding an IR shift on the same day double-books them. Continue?`)) return;
+  }
   const _ruleCtx = {
     physId, date, site, shift, sub,
     kind: 'ir-shift',
