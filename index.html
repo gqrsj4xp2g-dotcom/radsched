@@ -8339,6 +8339,37 @@ let _dateIdx        = null; // {dr, ir, irc, wkn, vac} maps date → array
 // runs when something actually reads after a mutation.
 function _markDateIdxDirty(){ _dateIdxVersion++; }
 
+// ── Long-lived interval registry ─────────────────────────────────────
+// Audit pass 3 finding: 7 module-level setInterval calls (notif dot,
+// save dot, sticky-bar apply, last-saved age, net badge, stale-save
+// badge, on-call reminder scheduler) never get cleared on logout.
+// On a long-lived tab that switches practices or logs out + back in,
+// duplicate timers accumulate forever. New API:
+//   _rsRegisterInterval('name', handle, opts)
+//   _rsClearAllIntervals()  — called from doLogout
+// Pass `keepOnLogout: true` for genuinely user-scoped timers (e.g.
+// theme-pref refresh) so they survive a sign-out + sign-in cycle.
+const _rsIntervals = new Map();
+function _rsRegisterInterval(name, handle, opts){
+  if(!handle) return handle;
+  // Clear any prior handle registered under the same name so callers
+  // can re-register without leaking the previous one.
+  const prev = _rsIntervals.get(name);
+  if(prev){
+    try{ clearInterval(prev.handle); }catch(_){}
+  }
+  _rsIntervals.set(name, { handle, keepOnLogout: !!(opts && opts.keepOnLogout) });
+  return handle;
+}
+function _rsClearAllIntervals(opts){
+  const includeKeep = !!(opts && opts.includeKeepOnLogout);
+  _rsIntervals.forEach((entry, name) => {
+    if(!includeKeep && entry.keepOnLogout) return;
+    try{ clearInterval(entry.handle); }catch(_){}
+    _rsIntervals.delete(name);
+  });
+}
+
 function _rebuildDateIdx(){
   const idx = { dr:{}, ir:{}, irc:{}, wkn:{}, vac:{} };
   const push = (m, k, v) => { (m[k] = m[k] || []).push(v); };
