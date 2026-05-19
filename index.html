@@ -18197,6 +18197,31 @@ function previewIRShiftAA(){
   if((S.cfg||{}).useSolver === 'mcf' && typeof _irsaSolveMCF === 'function'){
     return _previewIRShiftAA_MCF();
   }
+  // ── Async progress indicator (rs-v52) ────────────────────────────
+  // The greedy solver is synchronous and can freeze the UI for 1-10s
+  // on large practices. Show an indeterminate progress bar in the
+  // preview box BEFORE the work begins, then defer the actual solve
+  // via setTimeout(0) so the browser gets a paint cycle. Without
+  // this defer, the bar HTML is set but the screen doesn't repaint
+  // until JS yields — which is exactly when the work finishes.
+  var _box = document.getElementById('irsa-box');
+  if(_box && typeof _showProgress === 'function'){
+    _box.innerHTML = '<div id="irsa-progress" style="padding:24px;max-width:420px;margin:8px auto"></div>';
+    var _grp = (document.getElementById('irsa-grp')||{}).value || 'both';
+    var _per = (document.getElementById('irsa-period')||{}).value || 'H2';
+    _showProgress('irsa-progress', `Running greedy solver — ${_per}, ${_grp === 'both' ? 'both groups' : _grp}…`);
+    // Re-call ourselves through a flag so the second invocation skips
+    // this progress-shim and runs the body. setTimeout(0) yields a
+    // paint cycle so the bar renders before the long sync solve.
+    if(!previewIRShiftAA._solving){
+      previewIRShiftAA._solving = true;
+      setTimeout(() => {
+        try { previewIRShiftAA(); }
+        finally { previewIRShiftAA._solving = false; }
+      }, 16);
+      return;
+    }
+  }
   var period=(document.getElementById('irsa-period')||{}).value||'H2';
   var yr=(document.getElementById('irsa-yr')||{}).value||String(new Date().getFullYear());
   var monthYM=(document.getElementById('irsa-mo')||{}).value||'';
