@@ -6771,12 +6771,44 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       d.reasons.length > 1 ||
       (d.reasons.length === 1 && d.reasons[0].indexOf('different IR group') !== 0)
     );
-    // Over-quota in-group pool: phys IN the slot's group whose ONLY block
-    // is hitting their period quota. Manual assignment can override.
+    // Override pool: in-group physicians blocked ONLY by SOFT reasons
+    // that an admin can knowingly override. Previously this filter
+    // required the ONLY reason to be 'over quota' — which meant a
+    // phys at quota + violating a sequence rule was hidden behind a
+    // wall of red tags with no override path, and the assigner went
+    // to the cross-group pool instead. Per user feedback ("allow
+    // people to go over their limit if they are available before
+    // going to the pool"), we now consider these reasons soft:
+    //   • over quota (period FTE soft cap)
+    //   • site rule blocks (admin-configured site preference)
+    //   • day condition mismatch (e.g. Tue/Thu only)
+    //   • sequence rule (max consecutive / min rest)
+    //   • tumor-board / clinic conflict (already overridable via
+    //     allowBreakForUnfilledIR flag)
+    // Reasons that REMAIN hard (button not shown if any present):
+    //   • vacation / sold-back / 2nd or 3rd shift / on IR call /
+    //     pre-existing manual shift / call-day site rule /
+    //     conference at this site / not eligible (anchor-fillin
+    //     roster) / different IR group / placed today by this run /
+    //     natural-language rule.
+    const SOFT_REASON_PREFIXES = [
+      'over quota',
+      'site rule blocks',
+      'day condition mismatch',
+      'sequence rule',
+      'tumor-board / clinic',
+    ];
+    const isSoftReason = r => SOFT_REASON_PREFIXES.some(p => r.indexOf(p) === 0);
     const overQuota = diag.filter(d => {
       if(!d.reasons.length) return false;
       if(d.group !== slot._group) return false;
-      return d.reasons.every(r => r.indexOf('over quota') === 0);
+      // Hide the row if NO over-quota reason exists — these aren't
+      // "over-quota" candidates, they're just rule violators. The
+      // Assign-now override still fires for them though (see button
+      // label below); we just don't surface them in this section.
+      const hasQuota = d.reasons.some(r => r.indexOf('over quota') === 0);
+      if(!hasQuota) return false;
+      return d.reasons.every(isSoftReason);
     });
     // "Already placed today" cohort — physicians in slot's group who
     // are blocked ONLY by their other assignment in this same preview
