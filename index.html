@@ -11425,6 +11425,7 @@ function _startPollFallback(){
     // handler will fire a manual refresh when the user returns.
     if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     _pollInFlight = true;
+    _pollStartedAt = Date.now();
     try{
       const d=await _pullFromSupabase();
       const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
@@ -11447,6 +11448,7 @@ function _startPollFallback(){
       try{ if(typeof _logError === 'function') _logError('poll', 'Poll-pull failed: '+(e?.message||String(e)), e); }catch(_){}
     } finally {
       _pollInFlight = false;
+      _pollStartedAt = 0;
     }
   }, intervalMs);
 }
