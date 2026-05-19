@@ -25640,6 +25640,11 @@ async function sendBroadcast(){
   }catch(e){
     if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--red-t)';}
   }
+  } finally {
+    clearTimeout(_resetIfStuck);
+    _broadcastInFlight = false;
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = _origLabel || 'Send'; }
+  }
 }
 
 async function sendBroadcastTest(){
