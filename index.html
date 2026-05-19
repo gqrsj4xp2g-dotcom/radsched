@@ -33903,11 +33903,27 @@ function addIRCallManual(){
 function removeIRCall(id){
   if(!_adminOnly('remove IR call')) return;
   const ic = (S.irCalls||[]).find(x=>x.id===id);
-  if(ic && typeof _canEditDate==='function' && !_canEditDate(ic.date)) return;
-  S.irCalls=S.irCalls.filter(x=>x.id!==id);
-  if(ic && typeof _audit==='function') _audit('irCall.remove', {id, physId:ic.physId, date:ic.date, callType:ic.callType});
+  if(!ic) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(ic.date)) return;
+  // Snapshot for undo BEFORE the filter mutation. Matches the pattern
+  // used by deleteDRShift / deleteIRShift / deleteVacation — the audit
+  // flagged this function as the odd one out (no confirm, no undo).
+  const snapshot = {...ic};
+  S.irCalls = S.irCalls.filter(x => x.id !== id);
+  if(typeof _audit==='function') _audit('irCall.remove', {id, physId:ic.physId, date:ic.date, callType:ic.callType});
   triggerSave();
   _afterMutation();
+  if(typeof _toastUndoDelete === 'function'){
+    _toastUndoDelete(
+      `IR call removed — ${pname(ic.physId)} · ${ic.date}`,
+      () => {
+        S.irCalls = [...(S.irCalls||[]), snapshot];
+        if(typeof _audit==='function') _audit('irCall.undelete', {id});
+        triggerSave();
+        _afterMutation();
+      }
+    );
+  }
 }
 
 let _editingIRCallId = null;
