@@ -11691,6 +11691,14 @@ function buildCal(ym){
 }
 function getWeek(date,ym){const [y,m]=ym.split('-').map(Number);const first=new Date(y,m-1,1);return Math.floor((parseDateLocal(date).getDate()-1+first.getDay())/7)+1;}
 function parseDateLocal(ds){const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);}
+// Local-clock helpers — replace `new Date().toISOString().slice(...)`
+// across the app. The toISOString() path returns UTC; for a user in
+// America/Los_Angeles after 5pm PDT on May 31, it returns 2026-06-01
+// even though it's still May to them. Defaulting a month-picker to
+// "next month" right at quitting time on the 31st is a real bug
+// that's been reported repeatedly. Always use these helpers when
+// you need today's "calendar" date/month from the USER'S point of
+// view (vs an audit-log timestamp where UTC IS what you want).
 function addDays(ds,n){const d=parseDateLocal(ds);d.setDate(d.getDate()+n);return fmtDate(d);}
 function fmtDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 // DST-safe absolute day difference between two ISO date strings ('YYYY-MM-DD').
