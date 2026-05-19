@@ -12796,7 +12796,9 @@ function renderDash(){
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
   const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
-  document.getElementById('dash-metrics').innerHTML=[
+  // Null guard — see dash-greet comment above.
+  const dm=document.getElementById('dash-metrics');
+  if(dm) dm.innerHTML=[
     {l:'DR Physicians',v:drPs.length,s:'incl. mixed',pg:'physicians'},
     {l:'IR Physicians',v:irPs.length,s:'incl. mixed',pg:'ir-cal'},
     {l:'Open Shifts',v:open,s:'unclaimed',pg:'open-shifts'},
