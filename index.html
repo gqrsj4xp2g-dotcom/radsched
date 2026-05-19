@@ -35249,6 +35249,22 @@ function _irrQuotas(gPhys, slots, targetFn){
 
 function previewIRRebalance(){
   if(!_adminOnly('preview IR rebalance')) return;
+  // Defer-shim — see previewIRShiftAA.
+  if(!previewIRRebalance._deferred){
+    const _prev = document.getElementById('irr-preview');
+    if(_prev && typeof _showProgress === 'function'){
+      _prev.innerHTML = '<div id="irr-progress" style="padding:24px;max-width:420px;margin:8px auto"></div>';
+      const _typ = document.getElementById('irr-type')?.value || 'both';
+      const _grp = document.getElementById('irr-grp')?.value || 'both';
+      _showProgress('irr-progress', `Rebalancing IR ${_typ} — ${_grp === 'both' ? 'both groups' : _grp}…`);
+      previewIRRebalance._deferred = true;
+      setTimeout(() => {
+        try { previewIRRebalance(); }
+        finally { previewIRRebalance._deferred = false; }
+      }, 16);
+      return;
+    }
+  }
   const months  = _irrMonths();
   const label   = _irrPeriodLabel(months);
   const grp     = document.getElementById('irr-grp')?.value||'both';
