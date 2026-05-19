@@ -9819,7 +9819,7 @@ function _hydrateUserFromSession(sbUser){
     u={id:sbUser.id,email,pw:'',role,practiceId:_ROW_ID,
       first:userMeta.first||email.split('@')[0],last:userMeta.last||'',
       physId:metaPhysId,
-      joined:userMeta.joined||new Date().toISOString().slice(0,10),
+      joined:userMeta.joined||_todayLocalISO(),
       notifPrefs:{master:true,chatDM:true,chatGroup:false,chatMention:true,swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,holiday:true,vacation:true,openShift:false,broadcast:true}};
     USERS.push(u);
   } else {
@@ -10040,14 +10040,14 @@ async function doRegister(){
     }
     // Fallback: local registration
     if(USERS.find(x=>x.email===email)){showErr('An account with this email already exists.');if(btn)btn.textContent='Create Account';return;}
-    const nu={id:'u'+Date.now(),email,pw,role:'user',first,last,physId:null,joined:new Date().toISOString().slice(0,10),
+    const nu={id:'u'+Date.now(),email,pw,role:'user',first,last,physId:null,joined:_todayLocalISO(),
       notifPrefs:{master:true,chatDM:true,chatGroup:false,chatMention:true,swapReq:true,swapRes:true,shiftAssign:true,shiftRemove:true,holiday:true,vacation:true,openShift:false,broadcast:true}};
     USERS.push(nu); CU=nu; if(btn)btn.textContent='Create Account'; launchApp(); return;
   }
   try{
     const {data,error}=await sb.auth.signUp({
       email, password:pw,
-      options:{data:{role:'user',first,last,physId:null,practiceId:_PRACTICE_ID||'main',joined:new Date().toISOString().slice(0,10)}}
+      options:{data:{role:'user',first,last,physId:null,practiceId:_PRACTICE_ID||'main',joined:_todayLocalISO()}}
     });
     if(error) throw error;
     if(data.user){
@@ -22488,7 +22488,7 @@ function suggestSwapPartners(kind, shiftId, limit){
   const requireIR = (kind === 'ir' || kind === 'irc');
   // Build per-physician forward count for fairness ranking (next 90 days).
   const fwd = {};
-  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
+  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : _todayLocalISO();
   const horizon = (typeof addDays === 'function') ? addDays(today, 90) : null;
   const inRange = (d) => d && d >= today && (!horizon || d <= horizon);
   (S.drShifts || []).forEach(s => { if(s.physId && inRange(s.date)){ fwd[s.physId] = (fwd[s.physId] || 0) + 1; } });
@@ -22529,7 +22529,7 @@ function openSwapSuggestModal(){
     alert('Your account isn\'t linked to a physician profile.');
     return;
   }
-  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
+  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : _todayLocalISO();
   // Collect my upcoming shifts (next 30 days).
   const myShifts = [];
   (S.drShifts || []).forEach(s => {
@@ -22777,7 +22777,7 @@ async function adminCreateAccount(){
     const localUser={
       id:'u'+Date.now(), email, first, last, role, physId,
       practiceId:_PRACTICE_ID||'main',
-      joined:new Date().toISOString().slice(0,10),
+      joined:_todayLocalISO(),
       notifPrefs:{...defaultPrefs}
     };
     USERS.push(localUser);
@@ -22869,7 +22869,7 @@ Click Cancel to abort.`;
         const adoptedUser={
           id: existingId, email, first, last, role, physId,
           practiceId: currentPractice,
-          joined: (existingMeta.joined) || new Date().toISOString().slice(0,10),
+          joined: (existingMeta.joined) || _todayLocalISO(),
           notifPrefs: {...defaultPrefs}
         };
         USERS.push(adoptedUser);
@@ -22922,7 +22922,7 @@ Click Cancel to abort.`;
     const newUser={
       id:newUserId, email, first, last, role, physId,
       practiceId:_PRACTICE_ID||'main',
-      joined:new Date().toISOString().slice(0,10),
+      joined:_todayLocalISO(),
       notifPrefs:{...defaultPrefs}
     };
     USERS.push(newUser);
@@ -30650,7 +30650,7 @@ function renderTools(){
   try{
     if(typeof renderLockedMonths === 'function') renderLockedMonths();
     const lp = document.getElementById('lock-month-picker');
-    if(lp && !lp.value) lp.value = (typeof fmtDate === 'function' ? fmtDate(new Date()) : new Date().toISOString().slice(0,10)).slice(0,7);
+    if(lp && !lp.value) lp.value = (typeof fmtDate === 'function' ? fmtDate(new Date()) : _todayLocalISO()).slice(0,7);
   }catch(_){}
   // Practice announcements admin list.
   try{
@@ -39307,7 +39307,7 @@ function _renderEquityHeatmap(){
   if(!host) return;
   const today = (typeof fmtDate === 'function')
     ? fmtDate(new Date())
-    : new Date().toISOString().slice(0,10);
+    : _todayLocalISO();
   const horizonDays = 90;
   const horizonEnd = (typeof addDays === 'function')
     ? addDays(today, horizonDays)
@@ -39414,7 +39414,7 @@ function _renderOnCallConfirmation(isAdmin){
   if(!host) return;
   const today = (typeof fmtDate === 'function')
     ? fmtDate(new Date())
-    : new Date().toISOString().slice(0,10);
+    : _todayLocalISO();
   const onCall = _onCallPhysiciansForDate(today);
   if(!onCall.length){ host.innerHTML = ''; return; }
   // Physicians see only their OWN on-call status (with a self-ack button).
@@ -39486,7 +39486,7 @@ async function _scheduleOnCallReminders(){
   if(!reg || !reg.showNotification) return;
   const today = (typeof fmtDate === 'function')
     ? fmtDate(new Date())
-    : new Date().toISOString().slice(0,10);
+    : _todayLocalISO();
   const myPhysId = CU?.physId || null;
   if(!myPhysId) return;
   const onCall = _onCallPhysiciansForDate(today).filter(o => o.physId === myPhysId);
