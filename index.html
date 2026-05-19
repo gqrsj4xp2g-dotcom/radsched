@@ -6056,6 +6056,37 @@ function _adminOnly(action){
 
 
 /* ─── RESET / CLEAR FUNCTIONS ─── */
+async function _resetDRAutoAssign(){
+  if(!_adminOnly('reset DR auto-assign')) return;
+  const autoShifts = (S.drShifts||[]).filter(s => s.notes === 'Auto' || s.notes === 'Auto-home');
+  if(!autoShifts.length && !(S.aaPreview||[]).length){
+    if(typeof _toast==='function') _toast('Nothing to reset — no auto-assigned shifts found.', 'info');
+    return;
+  }
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Reset auto-assigned DR shifts?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">
+          This removes <strong>${autoShifts.length}</strong> auto-assigned shift${autoShifts.length===1?'':'s'} (notes = "Auto" or "Auto-home"). Manually-assigned shifts are kept.<br><br>
+          <span style="color:var(--rs-ink-3)">Also clears the unapplied preview (${(S.aaPreview||[]).length} pending). Cannot be undone except via Settings → Backups.</span>
+        </div>`,
+        confirmLabel: 'Reset',
+        destructive: true,
+      })
+    : confirm(`Delete ${autoShifts.length} auto-assigned DR shifts? This cannot be undone.`);
+  if(!ok) return;
+  // Take a backup before wiping. Reuse the existing snapshot helper if available.
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('reset-dr-auto'); }catch(_){}
+  }
+  S.aaPreview = [];
+  S.drShifts = S.drShifts.filter(s => s.notes !== 'Auto' && s.notes !== 'Auto-home');
+  if(typeof _audit === 'function') _audit('drShift.resetAuto', { removed: autoShifts.length });
+  triggerSave();
+  _afterMutation();
+  if(typeof _toast==='function') _toast(`✓ Removed ${autoShifts.length} auto-assigned shift${autoShifts.length===1?'':'s'}.`, 'ok');
+}
+
 async function clearWkCalls(mode){
   if(!_adminOnly('clear weekend calls')) return;
   const ym = document.getElementById('wk-date')?.value?.slice(0,7)||'';
