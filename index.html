@@ -21104,9 +21104,13 @@ async function removeSiteWithCascade(idx){
   // Refresh anything that might be showing the deleted site
   if(document.getElementById('phys-list')) renderPhysicians();
   if(document.getElementById('ss-content')) renderSiteSlots();
-  const si=document.getElementById('save-indicator');
-  if(si){si.textContent=`\u2713 Removed site "${name}" and ${total} reference(s)`;si.style.color='var(--green-t)';
-    setTimeout(()=>{if(si)si.textContent='';},4000);}
+  // Full mutation fan-out so calendars / dashboard / FTE / unfilled
+  // tab reflect the cascade. Same gap that the apply-AA fixes had:
+  // local renders only refresh the obvious surfaces while the rest
+  // sit stale until navigated.
+  if(typeof _afterMutation === 'function') _afterMutation();
+  if(typeof _audit === 'function') _audit('site.remove.cascade', { name, drN, irN, wkN, icN, osN, anchoredPhys, allowedPhys });
+  if(typeof _toast === 'function') _toast(`\u2713 Removed site "${name}" and ${total} reference${total===1?'':'s'}.`, 'ok');
 }
 
 function editSiteAnchors(i){
