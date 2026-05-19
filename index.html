@@ -19007,11 +19007,14 @@ function addIRShift(){
     alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);
     return;
   }
-  // Cross-shift-type block: a DR 2nd/3rd shift (typically imported from
-  // a pick sheet) prevents IR shifts the same day. Warn-and-confirm so
-  // the admin can still override consciously.
-  if(typeof _has2ndOr3rdShift === 'function' && _has2ndOr3rdShift(physId, date)){
-    if(!confirm(`${p.last} already has a 2nd or 3rd DR shift on ${date}. Adding an IR shift on the same day double-books them. Continue?`)) return;
+  // Universal one-shift-per-day check — see addDRShift for full
+  // rationale. Replaces the rs-v51 narrow 2nd/3rd guard with a
+  // comprehensive any-shift check.
+  const _existingIR = (typeof _physBookingsOnDate === 'function')
+    ? _physBookingsOnDate(physId, date) : [];
+  if(_existingIR.length){
+    const list = _existingIR.map(b => '• ' + b.kind + (b.site ? ' @ ' + b.site : '')).join('\n');
+    if(!confirm(`${p.last} already has ${_existingIR.length} assignment(s) on ${date}:\n\n${list}\n\nAdd this IR ${shift} shift anyway? (One physician per shift per day is the standard rule — overriding double-books them.)`)) return;
   }
   const _ruleCtx = {
     physId, date, site, shift, sub,
