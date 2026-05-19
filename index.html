@@ -36439,6 +36439,12 @@ async function applyIRRebalance(){
   document.getElementById('irr-apply-note').textContent='';
   const procNote=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';
   _updateSaveUI(`✓ Rebalanced — ${appliedSwaps} swap(s) applied, ${revertedSwaps} kept original${procNote}`,'var(--green-t)');
+  // Same fix as applyIRShiftAA / applyAA — every dependent view
+  // (calendar, dashboard, FTE, fairness, unfilled-slots tab) needs
+  // to refresh after a bulk push. Without _afterMutation, the
+  // calendar shows pre-rebalance assignments on the user's next
+  // visit until they manually navigate the month picker.
+  if(typeof _afterMutation === 'function') _afterMutation();
   renderIRRebalancePrep();
   document.getElementById('irr-preview').innerHTML=
     `<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied, ${revertedSwaps} kept with original physician.</div>`;
