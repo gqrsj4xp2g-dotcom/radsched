@@ -25553,8 +25553,15 @@ function renderBroadcast(){
   }).join('');
 }
 
+let _broadcastInFlight = false;
 async function sendBroadcast(){
   if(!_adminOnly('send broadcast emails')) return;
+  // Audit caught duplicate-send risk: button stayed clickable during
+  // the multi-recipient loop. Lock + disable while in-flight.
+  if(_broadcastInFlight){
+    if(typeof _toast === 'function') _toast('Already sending — wait for the current broadcast to finish.', 'info');
+    return;
+  }
   const subject=document.getElementById('bc-subject')?.value.trim();
   const body   =document.getElementById('bc-body')?.value.trim();
   const audience=document.getElementById('bc-audience')?.value||'all';
@@ -25569,8 +25576,28 @@ async function sendBroadcast(){
     const p=u.notifPrefs||_NOTIF_DEFAULTS;
     return p.master!==false && p.broadcast!==false;
   });
-  if(!recipients.length){alert('No recipients in the selected audience (either empty, all opted out, or missing valid delivery emails).');return;}
-  if(!confirm(`Send this email to ${recipients.length} recipient(s)?`)) return;
+  if(!recipients.length){ if(typeof _toast==='function') _toast('No recipients in the selected audience (either empty, all opted out, or missing valid delivery emails).', 'warn'); else alert('No recipients in the selected audience.'); return; }
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Send broadcast to ${recipients.length} recipient${recipients.length===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">Subject: <strong>${escHtml(subject)}</strong><br><span style="color:var(--rs-ink-3)">Audience: ${escHtml(audience)} · ${recipients.length} delivery address${recipients.length===1?'':'es'}</span></div>`,
+        confirmLabel: 'Send',
+        destructive: false,
+      })
+    : confirm(`Send this email to ${recipients.length} recipient(s)?`);
+  if(!ok) return;
+  _broadcastInFlight = true;
+  const sendBtn = document.querySelector('#page-broadcast button[onclick*="sendBroadcast()"]');
+  const _origLabel = sendBtn ? sendBtn.textContent : null;
+  if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
+  const _resetIfStuck = setTimeout(() => {
+    if(_broadcastInFlight){
+      _broadcastInFlight = false;
+      if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = _origLabel || 'Send'; }
+      console.warn('[RS] sendBroadcast watchdog reset — took >60s');
+    }
+  }, 60_000);
+  try{
 
   if(statusEl){statusEl.textContent='Sending…';statusEl.style.color='var(--txt3)';}
   try{
