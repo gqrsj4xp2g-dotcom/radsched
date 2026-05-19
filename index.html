@@ -11330,6 +11330,12 @@ function _doSubscribeRealtimeSocket(){
     });
 }
 
+// Re-entrancy guard for the polling loop. A previous bug fired a new
+// _pullFromSupabase on a slow network even though the prior pull had
+// not returned, leading to two concurrent _applyRemoteData passes and
+// occasional flicker / double-renders.
+let _pollInFlight = false;
+
 function _startPollFallback(){
   // Polling fallback: pull from Supabase every 10s. For admins this is
   // a backup in case realtime drops an event; for non-admins (whose
@@ -11343,11 +11349,18 @@ function _startPollFallback(){
   clearInterval(_pollInterval);
   _pollInterval=setInterval(async()=>{
     if(!_supabase||_isRestoring) return;
+    // Skip if a previous poll is still in flight. Without this, a slow
+    // Supabase round-trip could fire 2-3 overlapping pulls within the
+    // 10s interval, each of which would call _applyRemoteData and
+    // _refreshCurrentPage — visible as a flicker and a fast double
+    // render. The previous pull's `finally` block clears this flag.
+    if(_pollInFlight) return;
     if(S._lastSaved&&(new Date()-S._lastSaved)<5000) return; // skip if we just saved
     // Skip when the tab isn't visible — saves a Supabase round-trip
     // every 10-20s on every background tab. The visibilitychange
     // handler will fire a manual refresh when the user returns.
     if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    _pollInFlight = true;
     try{
       const d=await _pullFromSupabase();
       const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
@@ -11368,6 +11381,8 @@ function _startPollFallback(){
       // Settings → Error log. Was silent; first-line triage was
       // impossible because the user just saw "no sync" with no clue.
       try{ if(typeof _logError === 'function') _logError('poll', 'Poll-pull failed: '+(e?.message||String(e)), e); }catch(_){}
+    } finally {
+      _pollInFlight = false;
     }
   }, intervalMs);
 }
