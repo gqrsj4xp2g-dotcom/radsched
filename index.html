@@ -124,78 +124,129 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
    Edit the source file, not this block. See src/README.md. */
    Edit the source file, not this block. See src/README.md. */
 /* ── AUTH ──
-   Single-card centered design. Earlier layout had a 420px marketing
-   panel + a card on the right with a long feature list; the user
-   asked for a tighter screen with less empty space and no marketing
-   copy. Card defaults to a desktop-appropriate size (460px /
-   40-44px padding / 80px logo) and scales DOWN for tablets and
-   phones so the desktop view doesn't look mobile-sized. */
+   Single-card centered design. Every dimension uses clamp(min, vw,
+   max) so the layout scales fluidly between phone and desktop
+   instead of snapping at breakpoints. Earlier rs-v61 used
+   @media-driven jumps which left phone screens feeling cramped at
+   the smallest breakpoint. This pass uses viewport-relative math so
+   spacing/font-size/widths all interpolate smoothly:
+     - phone (≈ 360-480 viewport): tight but breathable
+     - tablet (480-900): medium
+     - desktop (≥ 900): full size
+   The clamp() upper bounds match the rs-v61 desktop look; the lower
+   bounds avoid going so small that touch targets break. */
 #auth{
   display:flex;
   align-items:center;
   justify-content:center;
   min-height:100vh;
-  padding:32px;
+  padding:clamp(14px, 3.5vw, 32px);
   background:
     radial-gradient(1000px 700px at 18% 0%, rgba(59,130,246,0.20), transparent 62%),
     radial-gradient(1000px 800px at 100% 100%, rgba(30,58,95,0.6), transparent 60%),
     linear-gradient(160deg,#0f1f33 0%,#050a14 100%);
 }
 /* Subtle outer halo behind the card so it doesn't float lonely on
-   wide monitors. Pure CSS — no extra DOM. */
+   wide monitors. The halo scales gently with the card width. */
 .auth-card{
   background:var(--bg2);
   border-radius:var(--rxl);
-  padding:44px 48px 38px;
+  /* Vertical / horizontal padding scale independently so the card
+     stays comfortable to tap on phones without being chunky on
+     desktop. */
+  padding:clamp(22px, 5.5vw, 44px) clamp(20px, 6vw, 48px) clamp(20px, 5vw, 38px);
   width:100%;
-  max-width:460px;
+  /* Fill viewport minus the 28px margin on each side until we hit
+     the 460px desktop cap. Avoids the "lonely card" look on phones
+     and prevents the 460px cap from kicking in too early. */
+  max-width:min(460px, calc(100vw - 28px));
   box-shadow:
     0 32px 64px -16px rgba(0,0,0,0.6),
     0 0 0 1px rgba(255,255,255,0.05),
-    0 0 0 12px rgba(59,130,246,0.04);
+    0 0 0 clamp(0px, 1.5vw, 12px) rgba(59,130,246,0.04);
   position:relative;
 }
-.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:18px}
-.auth-logo-wrap svg{width:80px;height:80px;filter:drop-shadow(0 12px 26px rgba(59,130,246,0.36))}
-.auth-brand{font-size:26px;font-weight:800;letter-spacing:-.5px;color:var(--navy);text-align:center;margin-bottom:4px}
-.auth-tagline{font-size:12.5px;color:var(--txt3);text-align:center;margin-bottom:22px;letter-spacing:.02em}
-.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:20px}
-.auth-tab{flex:1;padding:9px 7px;text-align:center;font-size:13px;font-weight:700;cursor:pointer;border-radius:4px;color:var(--txt2);transition:.15s}
+.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:clamp(12px, 2.5vw, 18px)}
+.auth-logo-wrap svg{
+  /* 60→80px across viewports. Matches the visual weight of the
+     wordmark below; bigger logos on desktop look overbearing. */
+  width:clamp(60px, 9vw, 80px);
+  height:clamp(60px, 9vw, 80px);
+  filter:drop-shadow(0 12px 26px rgba(59,130,246,0.36));
+}
+.auth-brand{
+  font-size:clamp(20px, 4.5vw, 26px);
+  font-weight:800;
+  letter-spacing:-.5px;
+  color:var(--navy);
+  text-align:center;
+  margin-bottom:4px;
+}
+.auth-tagline{
+  font-size:clamp(11.5px, 2.5vw, 12.5px);
+  color:var(--txt3);
+  text-align:center;
+  margin-bottom:clamp(16px, 3.5vw, 22px);
+  letter-spacing:.02em;
+}
+.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:clamp(14px, 3vw, 20px)}
+.auth-tab{
+  flex:1;
+  padding:clamp(8px, 2vw, 9px) 7px;
+  text-align:center;
+  font-size:clamp(12.5px, 2.8vw, 13px);
+  font-weight:700;
+  cursor:pointer;
+  border-radius:4px;
+  color:var(--txt2);
+  transition:.15s;
+}
 .auth-tab.on{background:var(--bg2);color:var(--navy);box-shadow:var(--sh)}
-.afield{margin-bottom:14px}
-.afield label{display:block;font-size:10px;font-weight:800;color:var(--txt2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
-.afield input,.afield select{width:100%;padding:11px 13px;border:1.5px solid var(--bdr2);border-radius:var(--r);font-size:14px;font-family:inherit;background:var(--bg2);color:var(--txt);transition:border .12s}
+.afield{margin-bottom:clamp(11px, 2.5vw, 14px)}
+.afield label{display:block;font-size:10.5px;font-weight:800;color:var(--txt2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+/* Input font-size pinned at 16px to suppress iOS Safari's auto-zoom
+   on focus (<16px triggers zoom). Padding still scales for visual
+   density. */
+.afield input,.afield select{
+  width:100%;
+  padding:clamp(10px, 2.5vw, 12px) clamp(11px, 3vw, 14px);
+  border:1.5px solid var(--bdr2);
+  border-radius:var(--r);
+  font-size:16px;
+  font-family:inherit;
+  background:var(--bg2);
+  color:var(--txt);
+  transition:border .12s;
+}
+@media(min-width:720px){
+  /* On true desktop, shrink the field font slightly so it doesn't
+     look oversized next to the rest of the UI. iOS auto-zoom
+     concern doesn't apply on desktop. */
+  .afield input,.afield select{font-size:14.5px}
+}
 .afield input:focus,.afield select:focus{outline:none;border-color:var(--blue)}
-.abtn{width:100%;padding:12px;background:var(--navy);color:#fff;border:none;border-radius:var(--r);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;transition:background .15s;letter-spacing:.02em;margin-top:4px}
+.abtn{
+  width:100%;
+  padding:clamp(11px, 2.8vw, 13px);
+  background:var(--navy);
+  color:#fff;
+  border:none;
+  border-radius:var(--r);
+  font-size:clamp(13.5px, 3vw, 14.5px);
+  font-weight:800;
+  cursor:pointer;
+  font-family:inherit;
+  transition:background .15s;
+  letter-spacing:.02em;
+  margin-top:4px;
+  min-height:44px; /* iOS HIG minimum touch target */
+}
 .abtn:hover{background:var(--blue)}
-.aerr{background:var(--red-bg);color:var(--red-t);border:1px solid #fca5a5;border-radius:var(--r);padding:8px 11px;font-size:12px;margin-bottom:10px;display:none}
-.anote{font-size:10px;color:var(--txt3);text-align:center;margin-top:12px}
+.aerr{background:var(--red-bg);color:var(--red-t);border:1px solid #fca5a5;border-radius:var(--r);padding:9px 12px;font-size:12.5px;margin-bottom:10px;display:none;line-height:1.4}
+.anote{font-size:10.5px;color:var(--txt3);text-align:center;margin-top:12px}
 .arole-row{display:flex;gap:6px;margin-bottom:10px}
 .arole-btn{flex:1;padding:8px;border:1.5px solid var(--bdr2);border-radius:var(--r);cursor:pointer;text-align:center;background:var(--bg2);color:var(--txt2);font-size:12px;font-weight:700;transition:.12s;font-family:inherit}
 .arole-btn.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue-t)}
-
-/* ── RESPONSIVE AUTH ──
-   Scale down on tablet, scale down again on phone. Desktop is the
-   default size above — don't override unless the viewport actually
-   needs the smaller version. */
-@media(max-width:720px){
-  #auth{padding:24px}
-  .auth-card{max-width:400px;padding:32px 32px 28px}
-  .auth-logo-wrap{margin-bottom:14px}
-  .auth-logo-wrap svg{width:68px;height:68px}
-  .auth-brand{font-size:22px}
-  .auth-tagline{font-size:11.5px;margin-bottom:18px}
-  .auth-tabs{margin-bottom:18px}
-  .auth-tab{font-size:12px;padding:7px}
-  .afield{margin-bottom:12px}
-  .afield input,.afield select{padding:9px 11px;font-size:13px}
-  .abtn{padding:11px;font-size:13px}
-}
-@media(max-width:480px){
-  #auth{padding:16px}
-  .auth-card{padding:24px 20px 20px;max-width:100%}
-  .auth-tabs{margin-bottom:14px}
-}
 
 /* @AUTH_END */
 
