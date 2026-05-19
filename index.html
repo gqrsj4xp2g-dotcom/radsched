@@ -44704,6 +44704,13 @@ async function _pushToSupabase(){
         console.warn('[RS] Catastrophic-loss guard probe failed (continuing):', probeErr);
       }
     }
+    // Final practice-switch guard — abort if _ROW_ID changed since
+    // we built the payload. Otherwise we'd upsert into the new
+    // practice's row with the old practice's data (silent corruption).
+    if(_ROW_ID !== _pushRowId){
+      console.warn('[RS] Push aborted at upsert: _ROW_ID changed during build');
+      return false;
+    }
     const {error}=await _supabase.from(_TABLE).upsert(payload);
     if(error)throw error;
     S._lastSaved=new Date();
