@@ -45814,15 +45814,48 @@ function _renderPickPreview(prev){
       ${shiftBanner}
     </div>`;
   }
+  // ── Pre-import conflict summary ───────────────────────────────────
+  // Shift rows that the dedup dropped because the physician is already
+  // on a different shift/call that day. Surfaced inline + collapsible
+  // detail panel so admins see WHY a row from the file is missing.
+  const conflicts = d.shiftConflicts || [];
   html += `
     <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-bottom:10px;align-items:center">
       <strong>${totalWeeks} week${totalWeeks===1?'':'s'} parsed</strong>
       <span><span class="tag ta">${vac.length}</span> vacations to import</span>
       <span><span class="tag tb">${sh.filter(s=>s.shift==='2nd').length}</span> 2nd-shift entries</span>
       <span><span class="tag tt">${sh.filter(s=>s.shift==='3rd').length}</span> 3rd-shift entries</span>
+      ${conflicts.length ? `<span style="color:var(--amber,#d97706)"><strong>${conflicts.length}</strong> shift${conflicts.length===1?'':'s'} skipped (already booked)</span>` : ''}
       ${um.length ? `<span style="color:var(--amber,#d97706)"><strong>${um.length}</strong> unmatched name${um.length===1?'':'s'}</span>` : ''}
       ${low.length ? `<span style="color:var(--amber,#d97706)"><strong>${low.length}</strong> low-confidence match${low.length===1?'':'es'}</span>` : ''}
     </div>`;
+  // Expandable details for the conflict skips — one row per skipped
+  // (phys, date, shift) tuple with the bookings it conflicted with.
+  if(conflicts.length){
+    // Dedupe by sourceRaw so a 9-day block doesn't appear 9 times
+    const seenC = new Map();
+    conflicts.forEach(c => {
+      const key = `${c.physId}|${c.shift}|${c.sourceRaw}`;
+      if(!seenC.has(key)) seenC.set(key, { ...c, days: 1 });
+      else seenC.get(key).days++;
+    });
+    const uniqC = [...seenC.values()];
+    html += `<details style="margin-bottom:8px"><summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--amber,#d97706)">▶ ${uniqC.length} cell${uniqC.length===1?'':'s'} skipped — physician already on another shift / call</summary>
+      <div style="font-size:11px;color:var(--rs-ink-3);margin:6px 0 4px">
+        Per the one-shift-per-day policy, these rows from your file were dropped because the listed physician already has a conflicting assignment on that date. Remove or move the existing assignment first if you want this import to land.
+      </div>
+      <div style="overflow-x:auto;max-height:240px;overflow-y:auto;margin-top:6px">
+      <table class="tbl"><thead><tr><th>Physician</th><th>Date</th><th>Tried to import</th><th>Already on</th><th>Source cell</th></tr></thead><tbody>
+      ${uniqC.slice(0,60).map(c => `<tr>
+        <td>${pnameHtml(c.physId)}</td>
+        <td>${escHtml(c.date)}${c.days > 1 ? ` <span style="color:var(--rs-ink-3);font-size:10px">×${c.days}d</span>` : ''}</td>
+        <td><span class="tag ${c.shift==='2nd'?'tb':'tt'}">${escHtml(c.shift)}</span></td>
+        <td style="font-size:11px;color:var(--amber,#d97706)">${escHtml((c.conflicts||[]).join(', '))}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;color:var(--rs-ink-2)">${escHtml(c.sourceRaw||'—')}</td>
+      </tr>`).join('')}
+      ${uniqC.length > 60 ? `<tr><td colspan="5" style="color:var(--rs-ink-3)">… and ${uniqC.length - 60} more</td></tr>` : ''}
+      </tbody></table></div></details>`;
+  }
   if(vac.length){
     // Dedupe by source cell so the preview shows one row per cell
     // rather than N rows for an N-day vacation block.
