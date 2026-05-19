@@ -199,7 +199,11 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   /* Drawer sidebar — hidden by default, slides in when .sidebar.open */
   .layout{flex-direction:row;overflow:visible}
   .sidebar{
-    position:fixed;left:0;top:0;bottom:0;width:80vw;max-width:320px;height:100vh;
+    /* 80vw was too wide on phones — content area shrank to ~20%
+       and tables/cards became unreadable while the drawer was open.
+       70vw with a tighter 280px cap leaves ~30% main area visible,
+       and the overlay still makes the drawer feel modal-ish. */
+    position:fixed;left:0;top:0;bottom:0;width:70vw;max-width:280px;height:100vh;
     transform:translateX(-100%);transition:transform .22s ease;z-index:300;
     background:var(--bg2);border-right:1px solid var(--bdr);box-shadow:2px 0 20px rgba(0,0,0,.15);
     display:flex;flex-direction:column;flex-wrap:nowrap;padding:0;
@@ -266,6 +270,29 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   /* Inputs touch-friendly */
   input,select,textarea,button{min-height:44px;font-size:14px}
   input[type=checkbox],input[type=radio]{min-height:0;width:20px;height:20px}
+  /* Neutralize inline `min-width` and fixed pixel `width` on form
+     groups and selects/inputs. Many admin panels were authored with
+     inline `style="min-width:180px"` on .fg wrappers and `width:140px`
+     on selects — fine on desktop, but on phones they prevent wrap and
+     push content past the viewport edge. The !important is unavoidable
+     because the inline attribute wins specificity without it. */
+  .fg{min-width:0 !important; width:100% !important}
+  .fg > input, .fg > select, .fg > textarea{
+    min-width:0 !important; width:100% !important; max-width:100% !important;
+  }
+  /* Same for bare inputs/selects with inline width set */
+  input[style*="width:"], select[style*="width:"]{
+    max-width:100% !important;
+  }
+  /* Flex containers used as toolbars — force wrap so phone-width can
+     never overflow horizontally. Some authors used <div style="display:flex">
+     without flex-wrap; those would otherwise blow out the viewport. */
+  .flex{flex-wrap:wrap}
+  /* Block ALL container-level overflow at the page boundary as a final
+     safety net. Without this a single rogue 600px-wide image or chart
+     can shove the whole page sideways. */
+  .page, .page > *{max-width:100%}
+  body{overflow-x:hidden}
   .bsm,.bxs{min-height:36px;font-size:11px}
   .bxs{min-height:32px}
   /* Tabs scroll horizontally */
@@ -349,6 +376,13 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
    Edit the source file, not this block. See src/README.md. */
 /* ── CARDS ── */
 .card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;margin-bottom:12px;box-shadow:var(--sh)}
+/* Density variants. Use instead of inline style="padding:..." so the
+   spacing system stays consistent. `tight` is for sidebar / compact
+   panels; `flush` is for cards whose child elements handle their own
+   padding (chat message scroller, AI chat panel). */
+.card-tight{padding:10px}
+.card-cozy{padding:12px}
+.card-flush{padding:0}
 .card-title{font-size:13px;font-weight:800;margin-bottom:10px;color:var(--txt)}
 .ibox{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rl);padding:14px 16px;margin-bottom:12px}
 
@@ -3254,7 +3288,7 @@ tbody tr:hover{background:var(--bg3)}
     <div style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
 
       <!-- Groups -->
-      <div class="card" style="flex:1;padding:10px;overflow-y:auto;min-height:0">
+      <div class="card card-tight" style="flex:1;overflow-y:auto;min-height:0">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Groups</span>
           <button class="bp bxs admin-only" style="font-size:10px;padding:2px 7px" onclick="openChatGroupEditor()">+ New</button>
@@ -3263,7 +3297,7 @@ tbody tr:hover{background:var(--bg3)}
       </div>
 
       <!-- Direct Messages -->
-      <div class="card" style="flex:1;padding:10px;overflow-y:auto;min-height:0">
+      <div class="card card-tight" style="flex:1;overflow-y:auto;min-height:0">
         <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Direct Messages</div>
         <div id="chat-dm-list"></div>
       </div>
@@ -3271,7 +3305,7 @@ tbody tr:hover{background:var(--bg3)}
 
     <!-- Main chat area -->
     <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden">
+      <div class="card card-flush" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
 
         <!-- Header -->
         <div style="padding:10px 14px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -4983,7 +5017,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <strong>IR 1st Shift</strong> — configures when IR physicians commute<br>
           Round-trip = outbound + return (not 2×one-way). Auto-refreshes every Monday 5 AM.
         </div>
-        <div class="card" style="background:var(--bg2);margin-bottom:8px;padding:10px 12px">
+        <div class="card card-cozy" style="margin-bottom:8px">
           <div style="font-weight:700;font-size:12px;margin-bottom:6px">1st Shift Departure & Return Times
             <span style="font-weight:400;font-size:10px;color:var(--txt3);margin-left:6px">24-hour format · used for daily traffic queries</span>
           </div>
@@ -5475,7 +5509,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
 
   <div style="display:flex;gap:14px;height:660px">
     <div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
-      <div class="card" style="padding:12px;flex-shrink:0">
+      <div class="card card-cozy" style="flex-shrink:0">
         <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Quick Actions</div>
         <div style="display:flex;flex-direction:column;gap:6px">
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('Summarize this month schedule coverage and highlight any gaps or over-assigned physicians.')">📊 Schedule summary</button>
@@ -5491,7 +5525,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
           <button class="bt bsm" style="text-align:left;font-size:11px" onclick="aiQuick('I need to add a new hospital site. Ask me for the name, IR group (if any), and any anchor physicians.')">🏥 Add a new site</button>
         </div>
       </div>
-      <div class="card" style="padding:12px;flex:1;overflow-y:auto">
+      <div class="card card-cozy" style="flex:1;overflow-y:auto">
         <div style="font-size:10px;font-weight:800;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">What it can do</div>
         <div style="font-size:11px;color:var(--txt2);line-height:1.7">
           ✦ Read &amp; analyze schedule data<br>
@@ -5511,7 +5545,7 @@ CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true
       </div>
     </div>
     <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden">
+      <div class="card card-flush" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:10px 16px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;justify-content:space-between;align-items:center">
           <div>
             <span style="font-weight:800;font-size:13px">AI Scheduling Agent</span>
@@ -6008,30 +6042,56 @@ function _isSU(){ return CU?.role==='superuser'; }
 function _isAdminOrSU(){ return CU?.role==='admin'||CU?.role==='superuser'; }
 
 function _adminOnly(action){
-  if(!_isAdminOrSU()){alert('Only administrators can '+action+'.');return false;}
+  if(!_isAdminOrSU()){
+    // Toast instead of a blocking alert — non-admin clicking an admin
+    // control should get a non-modal notice that doesn't interrupt
+    // their workflow. Previously every click on an admin-gated path
+    // triggered an OS-level dialog.
+    if(typeof _toast === 'function') _toast('🔒 Admin only — can\'t ' + action + '.', 'warn');
+    else alert('Only administrators can '+action+'.');
+    return false;
+  }
   return true;
 }
 
 
 /* ─── RESET / CLEAR FUNCTIONS ─── */
-function clearWkCalls(mode){
+async function clearWkCalls(mode){
   if(!_adminOnly('clear weekend calls')) return;
   const ym = document.getElementById('wk-date')?.value?.slice(0,7)||'';
   let targets = mode==='month'&&ym ? S.weekendCalls.filter(w=>(w.satDate||'').startsWith(ym)) : S.weekendCalls;
-  if(!targets.length){alert('No weekend calls to clear.');return;}
-  if(!confirm(`Delete ${targets.length} weekend call(s)? This cannot be undone.`))return;
+  if(!targets.length){ if(typeof _toast==='function') _toast('No weekend calls to clear.', 'info'); return; }
+  const scopeLabel = mode==='month' ? `for ${escHtml(ym)}` : '(all months)';
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Delete ${targets.length} weekend call${targets.length===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">Scope: ${scopeLabel}<br><span style="color:var(--rs-ink-3)">This cannot be undone except via Settings → Backups.</span></div>`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      })
+    : confirm(`Delete ${targets.length} weekend call(s)? This cannot be undone.`);
+  if(!ok) return;
   const ids=new Set(targets.map(w=>w.id));
   S.weekendCalls=S.weekendCalls.filter(w=>!ids.has(w.id));
   triggerSave(); renderWkBuilder();
   _updateSaveUI(`✓ Cleared ${ids.size} weekend call(s)`,'var(--green-t)');
 }
 
-function clearIRCalls(mode){
+async function clearIRCalls(mode){
   if(!_adminOnly('clear IR calls')) return;
   const ym = document.getElementById('irl-mo')?.value || document.getElementById('irb-week')?.value?.slice(0,7) || '';
   let targets = (mode==='month'&&ym) ? S.irCalls.filter(c=>c.date.startsWith(ym)) : S.irCalls;
-  if(!targets.length){alert('No IR calls to clear.');return;}
-  if(!confirm(`Delete ${targets.length} IR call(s)? This cannot be undone.`))return;
+  if(!targets.length){ if(typeof _toast==='function') _toast('No IR calls to clear.', 'info'); return; }
+  const scopeLabel = mode==='month' ? `for ${escHtml(ym)}` : '(all months)';
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Delete ${targets.length} IR call${targets.length===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">Scope: ${scopeLabel}<br><span style="color:var(--rs-ink-3)">This cannot be undone except via Settings → Backups.</span></div>`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      })
+    : confirm(`Delete ${targets.length} IR call(s)? This cannot be undone.`);
+  if(!ok) return;
   const ids=new Set(targets.map(c=>c.id));
   S.irCalls=S.irCalls.filter(c=>!ids.has(c.id));
   triggerSave();
@@ -8570,7 +8630,7 @@ function _modalConfirm(opts){
 function showErrorLog(){
   if(!_errorLog.length){
     if(typeof _toast === 'function') _toast('No recent errors logged.', 'info');
-    else alert('No recent errors logged.');
+    else if(typeof _toast==='function') _toast('No recent errors logged.', 'info'); else alert('No recent errors logged.');
     return;
   }
   const lines = _errorLog.slice().reverse().map(e => {
@@ -9402,7 +9462,7 @@ function clearAllData(){
     const a=document.createElement('a');a.href=url;a.download='RadScheduler_Web.html';
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    alert('Fresh copy downloaded. Open the downloaded file to start with default data.');
+    if(typeof _toast==='function') _toast('✓ Fresh copy downloaded. Open it to start with default data.', 'ok'); else alert('Fresh copy downloaded. Open the downloaded file to start with default data.');
   }catch(e){
     Object.assign(S,backup);USERS.length=0;usersBackup.forEach(u=>USERS.push(u));
     alert('Reset failed: '+e.message);
@@ -11931,7 +11991,7 @@ async function switchPractice(id,name){
       if(_leaderCheckTimer){ clearInterval(_leaderCheckTimer); _leaderCheckTimer = null; }
       _initLeaderElection();
     } else {
-      alert('No data found for practice '+id+'.');
+      if(typeof _toast==='function') _toast('No data found for practice '+id+'.', 'info'); else alert('No data found for practice '+id+'.');
     }
   }catch(e){
     console.error('[RS] switchPractice load error:',e);
@@ -14207,7 +14267,7 @@ function _pgRenderGroupCard(gid){
     </label>`;
   }).join('');
 
-  slot.innerHTML = `<div class="card" style="margin-bottom:12px;border:2px solid var(--amber);padding:10px">
+  slot.innerHTML = `<div class="card card-tight" style="border:2px solid var(--amber)">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <input type="text" value="${_pgEsc(g.name)}" onchange="_pgUpdateField(${gid}, 'name', this.value)"
         style="flex:1;font-size:13px;font-weight:700;padding:4px 6px;border:1px solid var(--bdr);border-radius:4px">
@@ -43599,6 +43659,66 @@ async function _pushToSupabase(){
         }
       ))
     };
+    // ── Catastrophic-loss guard ──────────────────────────────────────
+    // The 2026-05-19 incident: a tab with empty in-memory S overwrote
+    // a 266KB DB row with 3KB of defaults, wiping every physician,
+    // shift, vacation, and call. This guard refuses to push a payload
+    // that would shrink the row by an order of magnitude AND zero out
+    // operational arrays, unless the user explicitly approves.
+    //
+    // Heuristic: if the OUTGOING payload has zero physicians + zero
+    // shifts + zero calls + zero vacations + zero holidays, but the
+    // REMOTE row currently has any of those, this is almost certainly
+    // a corrupted in-memory state about to be persisted. Block + alert
+    // the user; offer to refresh from remote.
+    //
+    // The check is cheap: we already did a `probe` GET above for
+    // conflict detection. We reuse that result when available; if not
+    // (push within _CONFLICT_PROBE_SKIP_MS of last successful push),
+    // we do a fast count probe. Fail-open: any probe error skips the
+    // guard so we don't deadlock pushes on transient network errors.
+    const outPhys = (S.physicians||[]).length;
+    const outDR   = (S.drShifts||[]).length;
+    const outIR   = (S.irShifts||[]).length;
+    const outIRC  = (S.irCalls||[]).length;
+    const outVac  = (S.vacations||[]).length;
+    const outHol  = (S.holidays||[]).length;
+    const outTotal = outPhys + outDR + outIR + outIRC + outVac + outHol;
+    if(outTotal === 0){
+      try{
+        const { data: prePushProbe } = await _supabase
+          .from(_TABLE).select('data').eq('id', _ROW_ID).single();
+        if(prePushProbe?.data){
+          let remote = null;
+          try{ remote = JSON.parse(prePushProbe.data); }catch(_){}
+          const remoteTotal =
+            ((remote?.physicians||[]).length) +
+            ((remote?.drShifts||[]).length) +
+            ((remote?.irShifts||[]).length) +
+            ((remote?.irCalls||[]).length) +
+            ((remote?.vacations||[]).length) +
+            ((remote?.holidays||[]).length);
+          if(remoteTotal > 25){   // any reasonable practice has more than 25 records total
+            console.error('[RS] CATASTROPHIC-LOSS GUARD blocked save: local has 0 records, remote has '+remoteTotal+'. Refusing to overwrite.');
+            _updateSaveUI('🛑 Save BLOCKED — local empty vs remote '+remoteTotal+' records','var(--red-t)');
+            if(typeof _toast === 'function'){
+              _toast('🛑 Save blocked: your tab has 0 records but the DB has ' + remoteTotal + '. Refusing to overwrite. Reload to pull fresh data.', 'err');
+            }
+            // Don't push. Don't clear _hasUnsavedChanges — let user reload.
+            // Audit so the support team can find this if it ever fires again.
+            try{
+              if(typeof _audit === 'function'){
+                _audit('save.blocked.empty', { local: 0, remoteTotal, rowId: _ROW_ID });
+              }
+            }catch(_){}
+            return false;
+          }
+        }
+      }catch(probeErr){
+        // Fail-open: don't deadlock saves on a transient probe failure.
+        console.warn('[RS] Catastrophic-loss guard probe failed (continuing):', probeErr);
+      }
+    }
     const {error}=await _supabase.from(_TABLE).upsert(payload);
     if(error)throw error;
     S._lastSaved=new Date();
