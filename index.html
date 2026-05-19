@@ -44625,6 +44625,22 @@ async function _pushToSupabase(){
     _consecutiveSaveFails = 0;
     _updateSaveUI('✓ Synced','var(--green-t)');
     if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge();
+    // ── Cross-tab broadcast of LOCAL save ────────────────────────────
+    // Audit fix: previously followers only got `remote-update` from the
+    // leader's realtime handler. But the leader suppresses its OWN
+    // realtime echo (Guard 3 in _subscribeRealtime) to avoid re-applying
+    // its own write. That meant when the leader saved a local mutation,
+    // follower tabs were never notified and silently fell out of sync.
+    // Fix: broadcast the payload to followers ourselves on a successful
+    // push. The BC receiver only applies it on follower tabs (`!_isLeader`)
+    // so the leader doesn't re-apply its own data.
+    try{
+      if(typeof _bcSend === 'function' && payload?.data){
+        let parsed = null;
+        try{ parsed = JSON.parse(payload.data); }catch(_){}
+        if(parsed) _bcSend({type:'remote-update', tabId:_TAB_ID, payload:parsed, ts:Date.now()});
+      }
+    }catch(_){}
     // Side-table dual-write (off by default). When enabled (via
     // S.cfg.shiftsSideTable === true), mirror the in-blob shift arrays
     // to public.radscheduler_shifts so renders / analytics / future
