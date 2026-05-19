@@ -21001,7 +21001,7 @@ function toggleSiteSubsAll(i, kind, useAll){
   _afterMutation();
 }
 
-function removeSiteWithCascade(idx){
+async function removeSiteWithCascade(idx){
   if(!_adminOnly('remove a site')) return;
   const s=S.sites[idx];
   if(!s) return;
@@ -21015,16 +21015,46 @@ function removeSiteWithCascade(idx){
   const anchoredPhys=(S.physicians||[]).filter(p=>p.anchorSite===name).length;
   const allowedPhys=(S.physicians||[]).filter(p=>(p.allowedSites||[]).includes(name)).length;
   const total=drN+irN+wkN+icN+osN;
-  const msg=`Remove site "${name}"?\n\nThis will also delete/clean up:\n`+
-    `\u2022 ${drN} DR shift(s)\n`+
-    `\u2022 ${irN} IR shift(s)\n`+
-    `\u2022 ${wkN} weekend call(s)\n`+
-    `\u2022 ${icN} IR call(s)\n`+
-    `\u2022 ${osN} open shift(s)\n`+
-    `\u2022 ${anchoredPhys} physician anchor link(s)\n`+
-    `\u2022 ${allowedPhys} allowed-site reference(s)\n`+
-    `\u2022 All slot config, site rules, day conditions, drive-times referencing "${name}"`;
-  if(!confirm(msg)) return;
+  // Use _rsConfirm so the cascade-table renders inline (matches the
+  // IR group cascade preview from rs-v52). Snapshot before mutating
+  // so admin can recover via Backups if they later regret it.
+  const rowsHtml = `
+    <table style="width:100%;font-size:12px;margin-top:8px">
+      <thead><tr><th style="text-align:left;padding:4px 8px;color:var(--rs-ink-3);font-weight:600">Object</th><th style="text-align:right;padding:4px 8px;color:var(--rs-ink-3);font-weight:600">Affected</th></tr></thead>
+      <tbody>
+        ${drN ? `<tr><td style="padding:4px 8px">DR shifts</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${drN}</td></tr>` : ''}
+        ${irN ? `<tr><td style="padding:4px 8px">IR shifts</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${irN}</td></tr>` : ''}
+        ${wkN ? `<tr><td style="padding:4px 8px">Weekend calls</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${wkN}</td></tr>` : ''}
+        ${icN ? `<tr><td style="padding:4px 8px">IR calls</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${icN}</td></tr>` : ''}
+        ${osN ? `<tr><td style="padding:4px 8px">Open shifts</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${osN}</td></tr>` : ''}
+        ${anchoredPhys ? `<tr><td style="padding:4px 8px">Physician anchor links</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${anchoredPhys}</td></tr>` : ''}
+        ${allowedPhys ? `<tr><td style="padding:4px 8px">Allowed-site references</td><td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace">${allowedPhys}</td></tr>` : ''}
+      </tbody>
+    </table>`;
+  const noRefs = (drN + irN + wkN + icN + osN + anchoredPhys + allowedPhys) === 0;
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Remove site "${name}"?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">
+          ${noRefs
+            ? `This site has no shifts, calls, or physician references \u2014 it's safe to remove cleanly.`
+            : `This will delete every record that references the site, and clean up slot config, site rules, day conditions, and drive-times.`}
+          ${noRefs ? '' : rowsHtml}
+          <div style="margin-top:8px;color:var(--rs-ink-3);font-size:11px">Recoverable via Settings \u2192 Backups (snapshot is taken before deletion).</div>
+        </div>`,
+        confirmLabel: 'Remove site',
+        destructive: true,
+      })
+    : confirm(`Remove site "${name}"? Affects ${total} records.`);
+  if(!ok) return;
+  // Take a backup BEFORE the cascade. Critical for site delete \u2014 the
+  // blast radius can be hundreds of records and is reach-into-every-
+  // table. _snapshotBeforeBulk uses the existing per-practice
+  // radscheduler_backups path which is rotated via the existing
+  // pruner (90-day retention).
+  if(!noRefs && typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('site-remove-cascade'); }catch(_){}
+  }
 
   // 1. Remove the site itself
   S.sites.splice(idx,1);
