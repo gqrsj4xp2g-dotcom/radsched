@@ -44666,8 +44666,13 @@ async function _pushToSupabase(){
     const outTotal = outPhys + outDR + outIR + outIRC + outVac + outHol;
     if(outTotal === 0){
       try{
+        // Practice-switch guard: same rationale as the conflict probe above.
+        if(_ROW_ID !== _pushRowId){
+          console.warn('[RS] Push aborted before catastrophic-loss probe: _ROW_ID changed mid-flight');
+          return false;
+        }
         const { data: prePushProbe } = await _supabase
-          .from(_TABLE).select('data').eq('id', _ROW_ID).single();
+          .from(_TABLE).select('data').eq('id', _pushRowId).single();
         if(prePushProbe?.data){
           let remote = null;
           try{ remote = JSON.parse(prePushProbe.data); }catch(_){}
