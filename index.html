@@ -12967,11 +12967,16 @@ document.addEventListener('keydown', (e) => {
   const ae = document.activeElement;
   if(ae && (ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
   // Modal candidates in priority order. Each entry: [check-if-open, close-fn].
+  // ssm-modal (swap-suggest finder) and rationale-modal (Why X picked?) are
+  // dynamically injected and removed entirely when closed — we check for
+  // their presence in the DOM rather than an .open class flip.
   const modals = [
     ['link-modal',           () => closeModal('link-modal')],
     ['ir-group-remove-modal',() => closeModal('ir-group-remove-modal')],
     ['chat-group-modal',     () => typeof closeChatGroupEditor === 'function' && closeChatGroupEditor()],
     ['dtd-modal',            () => typeof closeDriveTimeDetails === 'function' && closeDriveTimeDetails()],
+    ['ssm-modal',            () => { const el = document.getElementById('ssm-modal'); if(el) el.remove(); }],
+    ['rationale-modal',      () => { const el = document.getElementById('rationale-modal'); if(el) el.remove(); }],
   ];
   for(const [id, close] of modals){
     const el = document.getElementById(id);
