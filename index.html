@@ -43711,10 +43711,27 @@ function _rsConfirm(opts){
     host.addEventListener('click', (e) => { if(e.target === host) close(false); });
     dialog.addEventListener('keydown', (e) => {
       if(e.key === 'Escape'){ e.preventDefault(); close(false); return; }
-      if(e.key === 'Enter' && document.activeElement !== cancelBtn){ e.preventDefault(); close(true); return; }
+      // Enter inside a TEXTAREA inserts a newline — never submit.
+      // Enter inside an INPUT submits unless the user's focused on
+      // the cancel button. This makes inline-input dialogs work
+      // (typing email + Enter saves).
+      if(e.key === 'Enter' && document.activeElement !== cancelBtn){
+        const ae = document.activeElement;
+        if(ae && ae.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        close(true);
+        return;
+      }
       if(e.key === 'Tab'){
-        // Trap: cycle between the two buttons
-        const arr = [...buttons];
+        // Trap: cycle through ALL focusable elements inside the
+        // dialog (input/select/textarea/button, not just the two
+        // action buttons). Without this, inline inputs in the body
+        // either escape the trap or get skipped on Tab.
+        const focusables = dialog.querySelectorAll(
+          'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const arr = [...focusables];
+        if(!arr.length) return;
         const idx = arr.indexOf(document.activeElement);
         if(idx === -1) return;
         e.preventDefault();
