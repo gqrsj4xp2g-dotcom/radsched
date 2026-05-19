@@ -13079,6 +13079,38 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Global Enter-to-submit ────────────────────────────────────────────
+// Audit finding: only 1 <form> wrapper exists in the entire app, so
+// pressing Enter in any admin form is a dead key. Wrapping every page
+// in a <form> is a massive refactor. This delegated listener fixes
+// the 90% case: an input/select with a `data-submit="#btnId"`
+// attribute triggers a click on that button when Enter is pressed.
+//
+// To opt a form into this, add data-submit="#submit-btn-id" to each
+// text/number/email input. Textareas are exempt (Enter inserts a
+// newline). Selects also trigger on Enter — useful for "Add X" forms
+// that have a dropdown as the last field.
+document.addEventListener('keydown', (e) => {
+  if(e.key !== 'Enter') return;
+  if(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if(!t || !t.matches) return;
+  // Textareas treat Enter as newline. Buttons handle Enter natively.
+  if(t.tagName === 'TEXTAREA') return;
+  if(t.tagName === 'BUTTON') return;
+  // Only proceed when the focused element has explicit opt-in.
+  const target = t.getAttribute && t.getAttribute('data-submit');
+  if(!target) return;
+  const btn = document.querySelector(target);
+  if(!btn || btn.disabled) return;
+  e.preventDefault();
+  // Blur the input first so any onchange/blur validators fire (e.g.
+  // _invalidField), then click the button. Tiny defer is enough; the
+  // blur side-effects synchronously update the DOM before .click().
+  if(typeof t.blur === 'function') t.blur();
+  btn.click();
+});
+
 // Update a Supabase Auth user's metadata (physId, role, etc.) via edge function
 async function _updateUserAuthMeta(userId, fields){
   try{
