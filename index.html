@@ -11701,6 +11701,9 @@ function parseDateLocal(ds){const[y,m,d]=ds.split('-').map(Number);return new Da
 // view (vs an audit-log timestamp where UTC IS what you want).
 function addDays(ds,n){const d=parseDateLocal(ds);d.setDate(d.getDate()+n);return fmtDate(d);}
 function fmtDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _todayLocalISO(){ return fmtDate(new Date()); }            // 'YYYY-MM-DD' local
+function _todayLocalYM(){ return _todayLocalISO().slice(0,7); }     // 'YYYY-MM' local
+function _todayLocalYear(){ return new Date().getFullYear(); }      // 2026 local
 // DST-safe absolute day difference between two ISO date strings ('YYYY-MM-DD').
 // `(t2 - t1) / 86_400_000` drifts ±0.04 across DST boundaries (23h/25h day),
 // so a "<=7 days" adjacency check can miss or falsely fire on the spring/fall
