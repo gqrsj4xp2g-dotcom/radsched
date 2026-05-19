@@ -13051,7 +13051,36 @@ function doLink(uid){
   // Also update Supabase Auth metadata so link persists across logins
   _updateUserAuthMeta(u.id,{physId:u.physId}).catch(()=>{});
 }
-function closeModal(id){document.getElementById(id).classList.remove('open');}
+// Track the element that had focus before each modal opened so the
+// closer can restore focus when the modal goes away. Keyed by modal
+// id so multiple stacks can coexist (rare but possible).
+const _modalFocusReturn = {};
+function _saveModalFocusFor(id){
+  // Called by openers — captures the currently-focused element before
+  // the modal claims it. If a modal is opened without going through
+  // this (legacy paths), focus return just falls back to body which
+  // is harmless.
+  if(!id) return;
+  const ae = document.activeElement;
+  if(ae && ae !== document.body) _modalFocusReturn[id] = ae;
+}
+function _restoreModalFocusFor(id){
+  // Called by closers AFTER the modal is hidden/removed. Restoring
+  // BEFORE the close would cause the focus ring to flash on the
+  // saved element then back to body when the modal eats focus on
+  // hide. Safe to call when no entry exists.
+  if(!id) return;
+  const el = _modalFocusReturn[id];
+  delete _modalFocusReturn[id];
+  if(el && typeof el.focus === 'function' && document.contains(el)){
+    try{ el.focus({ preventScroll: false }); }catch(_){}
+  }
+}
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.remove('open');
+  _restoreModalFocusFor(id);
+}
 
 // Global Escape-to-close handler. Walks the known modal IDs from most-likely-
 // to-be-open to least and closes the first visible one. Skips when an input is
