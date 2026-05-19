@@ -15807,21 +15807,45 @@ function populateDtqSelects(){
   const physSel = document.getElementById('dtq-phys');
   const siteSel = document.getElementById('dtq-site');
   const dateEl  = document.getElementById('dtq-date');
+  const statusEl = document.getElementById('dtq-status');
+  // Track what's missing so we can guide the admin to fix it instead
+  // of just showing a disabled "No X with addresses" dead-end option.
+  const missing = [];
   if(physSel){
     const physWith = (S.physicians||[]).filter(p => p.address?.trim())
       .sort((a,b) => (a.last+a.first).localeCompare(b.last+b.first));
     physSel.innerHTML = '<option value="">— Select physician —</option>' +
       physWith.map(p => `<option value="${p.id}">${escHtml(p.last+', '+p.first)}</option>`).join('');
-    if(!physWith.length) physSel.innerHTML = '<option disabled>No physicians with addresses</option>';
+    if(!physWith.length){
+      physSel.innerHTML = '<option disabled>No physicians with addresses</option>';
+      missing.push('physician');
+    }
   }
   if(siteSel){
     const sitesWith = (S.sites||[]).filter(s => s.address?.trim() && s.name!=='At Home / Remote')
       .sort((a,b) => a.name.localeCompare(b.name));
     siteSel.innerHTML = '<option value="">— Select site —</option>' +
       sitesWith.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)}</option>`).join('');
-    if(!sitesWith.length) siteSel.innerHTML = '<option disabled>No sites with addresses</option>';
+    if(!sitesWith.length){
+      siteSel.innerHTML = '<option disabled>No sites with addresses</option>';
+      missing.push('site');
+    }
   }
   if(dateEl && !dateEl.value) dateEl.value = fmtDate(new Date());
+  // Surface a helpful actionable status if a dropdown is empty,
+  // instead of leaving the admin to wonder why Look up doesn't work.
+  if(statusEl){
+    if(missing.length){
+      const links = missing.map(kind => {
+        const target = kind === 'physician' ? 'physicians' : 'site-slots';
+        const label = kind === 'physician' ? 'Add physician addresses' : 'Add site addresses';
+        return `<a href="#" onclick="nav('${target}',document.querySelector('.snav-item[data-pg=&quot;${target}&quot;]'));event.preventDefault()" style="color:var(--blue-t);text-decoration:underline">${label}</a>`;
+      }).join(' · ');
+      statusEl.innerHTML = `<span style="color:var(--amber,#d97706)">Need ${missing.join(' + ')} address${missing.length===1?'':'es'} to look up drive times.</span> ${links}`;
+    } else {
+      statusEl.textContent = '';
+    }
+  }
 }
 
 // Admin can pick physician + site + date, and either view cached data (if any)
