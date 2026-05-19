@@ -29311,6 +29311,32 @@ function _initSidebarSections(){
       try{ localStorage.setItem(key, s.open ? '1' : '0'); }catch(_){}
     });
   });
+  // ── Keyboard accessibility for sidebar items ─────────────────────
+  // Audit caught: .snav-item is a <div onclick=...> with no
+  // tabindex / keydown handler, so the entire left nav is
+  // unreachable by keyboard. Make every nav item focusable + add
+  // Enter/Space activation. Idempotent — safe to call again after
+  // dynamic re-render (no duplicate listeners because we set the
+  // attr+listener via property assignment).
+  document.querySelectorAll('.snav-item').forEach(item => {
+    if(item.tabIndex < 0) item.tabIndex = 0;
+    item.setAttribute('role', 'link');
+    item.onkeydown = (e) => {
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault();
+        item.click();
+      }
+    };
+  });
+  // Also expose the section summaries to screen readers — <summary>
+  // is already keyboard-operable (HTML5), but it needs an aria-label
+  // when the text content is just an emoji+word. Skip if already
+  // labeled.
+  document.querySelectorAll('.snav-section > summary').forEach(s => {
+    if(!s.hasAttribute('aria-label') && s.textContent){
+      s.setAttribute('aria-label', s.textContent.trim() + ' section toggle');
+    }
+  });
 }
 // Wire on DOM ready (the sidebar is already in the DOM by then).
 if(typeof window !== 'undefined' && !window._rsSnavInit){
