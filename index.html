@@ -13040,7 +13040,12 @@ function openLinkModal(uid){
   // literal. Using JSON.stringify isolates it as a JS string expression.
   const uidJs = JSON.stringify(String(uid));
   document.getElementById('link-modal-body').innerHTML=`<div class="fg"><label>Physician</label><select id="lm-sel"><option value="">None</option>${opts}</select></div><button class="bp" onclick="doLink(${uidJs.replace(/"/g,'&quot;')})">Save</button>`;
+  // Save focus return BEFORE the modal opens so closeModal can
+  // hand focus back to the trigger button.
+  _saveModalFocusFor('link-modal');
   document.getElementById('link-modal').classList.add('open');
+  // Move focus into the modal so the first field gets keyboard focus.
+  setTimeout(() => { document.getElementById('lm-sel')?.focus(); }, 0);
 }
 function doLink(uid){
   const u=USERS.find(x=>x.id===uid);if(!u) return;
