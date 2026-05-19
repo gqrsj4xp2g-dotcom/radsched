@@ -34111,6 +34111,56 @@ function _has2ndOr3rdShift(physId, date){
   return S.drShifts.some(s => s.physId===physId && s.date===date && (s.shift==='2nd'||s.shift==='3rd'));
 }
 
+// Universal one-shift-per-day check. Per user policy: if a physician
+// is on ANY shift (DR 1st/2nd/3rd/Home, IR 1st/2nd/3rd/Home, weekend
+// call, or an IR daily call), they are NOT eligible for any OTHER
+// shift on the same date. IR weekend call (Fri→Mon span) is also
+// counted because it occupies the physician across the full span.
+//
+// NOTE: IR daily call is INCLUDED here even though _irsaBlocked
+// historically allowed IR call + IR procedure shift to co-exist
+// (the "phys on call works their procedure shift" pattern). Per the
+// new rule, manual paths now warn-and-confirm for ANY existing
+// booking; the auto-assigner stays as-is (its on-call preference
+// path is designed around the call+shift pattern and disabling it
+// would break the rotation).
+//
+// `excludeId` lets a caller exclude a specific record's id so the
+// edit-this-shift flow doesn't flag itself.
+function _physBookingsOnDate(physId, date, excludeId){
+  if(!physId || !date) return [];
+  const out = [];
+  (S.drShifts||[]).forEach(s => {
+    if(s.physId === physId && s.date === date && s.id !== excludeId){
+      out.push({ kind: 'DR ' + (s.shift || '?'), site: s.site||'', id: s.id });
+    }
+  });
+  (S.irShifts||[]).forEach(s => {
+    if(s.physId === physId && s.date === date && s.id !== excludeId){
+      out.push({ kind: 'IR ' + (s.shift || '?'), site: s.site||'', id: s.id });
+    }
+  });
+  (S.irCalls||[]).forEach(c => {
+    if(c.physId !== physId || c.id === excludeId) return;
+    if(c.callType === 'daily' && c.date === date){
+      out.push({ kind: 'IR daily call', site: c.site||'', id: c.id });
+    } else if(c.callType === 'weekend'){
+      // Fri→Mon: c.date is Friday, span includes c.date+0..+3
+      const span = [c.date, addDays(c.date,1), addDays(c.date,2), addDays(c.date,3)];
+      if(span.includes(date)){
+        out.push({ kind: 'IR weekend call', site: c.site||'', id: c.id });
+      }
+    }
+  });
+  (S.weekendCalls||[]).forEach(w => {
+    if(w.physId !== physId || w.id === excludeId) return;
+    if(w.satDate === date || w.sunDate === date || w.date === date){
+      out.push({ kind: 'Weekend call', site: w.site||'', id: w.id });
+    }
+  });
+  return out;
+}
+
 function _hasAdjacentIRCall(physId, date){
   // Blocks back-to-back: no daily call immediately adjacent to another call
   // Rule: no daily call on Thu (day before Fri weekend start) or Tue (day after Mon weekend end)
