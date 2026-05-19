@@ -124,77 +124,103 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
    Edit the source file, not this block. See src/README.md. */
    Edit the source file, not this block. See src/README.md. */
 /* ── AUTH ──
-   Single-card centered design. Every dimension uses clamp(min, vw,
-   max) so the layout scales fluidly between phone and desktop
-   instead of snapping at breakpoints. Earlier rs-v61 used
-   @media-driven jumps which left phone screens feeling cramped at
-   the smallest breakpoint. This pass uses viewport-relative math so
-   spacing/font-size/widths all interpolate smoothly:
-     - phone (≈ 360-480 viewport): tight but breathable
-     - tablet (480-900): medium
-     - desktop (≥ 900): full size
-   The clamp() upper bounds match the rs-v61 desktop look; the lower
-   bounds avoid going so small that touch targets break. */
+   Two-column desktop, single-column phone. Fills the screen on
+   wide monitors so the design doesn't look like a tiny mobile
+   modal floating in space. The LEFT column carries the brand
+   (logo + name only — no marketing copy per user request); the
+   RIGHT column holds the form. On phones the columns stack and
+   the brand panel becomes a compact header strip above the form. */
 #auth{
+  display:flex;
+  min-height:100vh;
+  background:var(--bg);
+}
+/* ── BRAND PANEL (left on desktop, header on mobile) ── */
+.auth-brand-panel{
+  flex:1 1 50%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:clamp(32px, 5vw, 64px);
+  background:
+    radial-gradient(900px 700px at 25% 30%, rgba(59,130,246,0.28), transparent 60%),
+    radial-gradient(900px 800px at 100% 100%, rgba(30,58,95,0.65), transparent 60%),
+    linear-gradient(160deg,#0f1f33 0%,#050a14 100%);
+  position:relative;
+  overflow:hidden;
+}
+.auth-brand-panel::after{
+  /* Subtle grid pattern overlay so the dark panel doesn't feel empty.
+     Pure CSS — radial-gradient repeats produce calendar-grid dots. */
+  content:'';
+  position:absolute;
+  inset:0;
+  background-image:radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size:24px 24px;
+  pointer-events:none;
+}
+.auth-brand-svg{
+  width:clamp(96px, 14vw, 144px);
+  height:clamp(96px, 14vw, 144px);
+  filter:drop-shadow(0 18px 40px rgba(59,130,246,0.45));
+  position:relative;
+  z-index:1;
+}
+.auth-brand-name{
+  font-size:clamp(28px, 4vw, 40px);
+  font-weight:800;
+  letter-spacing:-.5px;
+  color:#fff;
+  margin-top:clamp(18px, 2.5vw, 28px);
+  text-align:center;
+  position:relative;
+  z-index:1;
+}
+.auth-brand-tag{
+  font-size:clamp(12px, 1.4vw, 14px);
+  color:rgba(255,255,255,0.55);
+  margin-top:6px;
+  text-align:center;
+  letter-spacing:.04em;
+  position:relative;
+  z-index:1;
+}
+/* ── FORM PANEL (right on desktop, body on mobile) ── */
+.auth-form-panel{
+  flex:1 1 50%;
   display:flex;
   align-items:center;
   justify-content:center;
-  min-height:100vh;
-  padding:clamp(14px, 3.5vw, 32px);
-  background:
-    radial-gradient(1000px 700px at 18% 0%, rgba(59,130,246,0.20), transparent 62%),
-    radial-gradient(1000px 800px at 100% 100%, rgba(30,58,95,0.6), transparent 60%),
-    linear-gradient(160deg,#0f1f33 0%,#050a14 100%);
+  padding:clamp(24px, 4vw, 56px);
+  background:var(--bg);
 }
-/* Subtle outer halo behind the card so it doesn't float lonely on
-   wide monitors. The halo scales gently with the card width. */
 .auth-card{
   background:var(--bg2);
   border-radius:var(--rxl);
-  /* Vertical / horizontal padding scale independently so the card
-     stays comfortable to tap on phones without being chunky on
-     desktop. */
-  padding:clamp(22px, 5.5vw, 44px) clamp(20px, 6vw, 48px) clamp(20px, 5vw, 38px);
+  padding:clamp(28px, 4vw, 44px) clamp(24px, 4vw, 44px) clamp(24px, 3.5vw, 36px);
   width:100%;
-  /* Fill viewport minus the 28px margin on each side until we hit
-     the 460px desktop cap. Avoids the "lonely card" look on phones
-     and prevents the 460px cap from kicking in too early. */
-  max-width:min(460px, calc(100vw - 28px));
-  box-shadow:
-    0 32px 64px -16px rgba(0,0,0,0.6),
-    0 0 0 1px rgba(255,255,255,0.05),
-    0 0 0 clamp(0px, 1.5vw, 12px) rgba(59,130,246,0.04);
-  position:relative;
+  max-width:440px;
+  box-shadow:0 12px 32px -8px rgba(15,31,51,0.18), 0 0 0 1px rgba(15,31,51,0.05);
 }
-.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:clamp(12px, 2.5vw, 18px)}
-.auth-logo-wrap svg{
-  /* 60→80px across viewports. Matches the visual weight of the
-     wordmark below; bigger logos on desktop look overbearing. */
-  width:clamp(60px, 9vw, 80px);
-  height:clamp(60px, 9vw, 80px);
-  filter:drop-shadow(0 12px 26px rgba(59,130,246,0.36));
-}
-.auth-brand{
-  font-size:clamp(20px, 4.5vw, 26px);
+.auth-card-title{
+  font-size:clamp(20px, 2.5vw, 24px);
   font-weight:800;
-  letter-spacing:-.5px;
+  letter-spacing:-.4px;
   color:var(--navy);
-  text-align:center;
   margin-bottom:4px;
 }
-.auth-tagline{
-  font-size:clamp(11.5px, 2.5vw, 12.5px);
+.auth-card-sub{
+  font-size:clamp(12px, 1.4vw, 13px);
   color:var(--txt3);
-  text-align:center;
-  margin-bottom:clamp(16px, 3.5vw, 22px);
-  letter-spacing:.02em;
+  margin-bottom:clamp(18px, 2.5vw, 24px);
 }
-.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:clamp(14px, 3vw, 20px)}
+.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:clamp(16px, 2.5vw, 22px)}
 .auth-tab{
   flex:1;
-  padding:clamp(8px, 2vw, 9px) 7px;
+  padding:clamp(8px, 1.4vw, 10px) 7px;
   text-align:center;
-  font-size:clamp(12.5px, 2.8vw, 13px);
+  font-size:clamp(12.5px, 1.4vw, 13.5px);
   font-weight:700;
   cursor:pointer;
   border-radius:4px;
@@ -202,14 +228,14 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   transition:.15s;
 }
 .auth-tab.on{background:var(--bg2);color:var(--navy);box-shadow:var(--sh)}
-.afield{margin-bottom:clamp(11px, 2.5vw, 14px)}
+.afield{margin-bottom:clamp(11px, 1.6vw, 14px)}
 .afield label{display:block;font-size:10.5px;font-weight:800;color:var(--txt2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
 /* Input font-size pinned at 16px to suppress iOS Safari's auto-zoom
-   on focus (<16px triggers zoom). Padding still scales for visual
-   density. */
+   on focus (<16px triggers zoom). @media(min-width:720px) below
+   drops back to 14.5px on desktop where that concern is moot. */
 .afield input,.afield select{
   width:100%;
-  padding:clamp(10px, 2.5vw, 12px) clamp(11px, 3vw, 14px);
+  padding:clamp(10px, 1.6vw, 12px) clamp(11px, 1.8vw, 14px);
   border:1.5px solid var(--bdr2);
   border-radius:var(--r);
   font-size:16px;
@@ -219,27 +245,24 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   transition:border .12s;
 }
 @media(min-width:720px){
-  /* On true desktop, shrink the field font slightly so it doesn't
-     look oversized next to the rest of the UI. iOS auto-zoom
-     concern doesn't apply on desktop. */
   .afield input,.afield select{font-size:14.5px}
 }
 .afield input:focus,.afield select:focus{outline:none;border-color:var(--blue)}
 .abtn{
   width:100%;
-  padding:clamp(11px, 2.8vw, 13px);
+  padding:clamp(11px, 1.8vw, 13px);
   background:var(--navy);
   color:#fff;
   border:none;
   border-radius:var(--r);
-  font-size:clamp(13.5px, 3vw, 14.5px);
+  font-size:clamp(13.5px, 1.6vw, 14.5px);
   font-weight:800;
   cursor:pointer;
   font-family:inherit;
   transition:background .15s;
   letter-spacing:.02em;
   margin-top:4px;
-  min-height:44px; /* iOS HIG minimum touch target */
+  min-height:44px;
 }
 .abtn:hover{background:var(--blue)}
 .aerr{background:var(--red-bg);color:var(--red-t);border:1px solid #fca5a5;border-radius:var(--r);padding:9px 12px;font-size:12.5px;margin-bottom:10px;display:none;line-height:1.4}
@@ -247,6 +270,29 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
 .arole-row{display:flex;gap:6px;margin-bottom:10px}
 .arole-btn{flex:1;padding:8px;border:1.5px solid var(--bdr2);border-radius:var(--r);cursor:pointer;text-align:center;background:var(--bg2);color:var(--txt2);font-size:12px;font-weight:700;transition:.12s;font-family:inherit}
 .arole-btn.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue-t)}
+
+/* ── RESPONSIVE: stack columns on tablet/phone ── */
+@media(max-width:860px){
+  #auth{flex-direction:column}
+  .auth-brand-panel{
+    flex:0 0 auto;
+    padding:clamp(20px, 5vw, 36px);
+    flex-direction:row;
+    gap:14px;
+    justify-content:center;
+  }
+  .auth-brand-panel::after{background-size:18px 18px}
+  .auth-brand-svg{width:48px;height:48px}
+  .auth-brand-name{font-size:24px;margin-top:0;text-align:left}
+  .auth-brand-tag{display:none}
+  .auth-form-panel{padding:clamp(16px, 4vw, 32px) clamp(16px, 4vw, 32px) clamp(32px, 5vw, 48px)}
+}
+@media(max-width:480px){
+  .auth-brand-panel{padding:18px 16px}
+  .auth-brand-svg{width:40px;height:40px}
+  .auth-brand-name{font-size:20px}
+  .auth-card{padding:24px 22px 22px}
+}
 
 /* @AUTH_END */
 
