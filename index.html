@@ -33217,7 +33217,14 @@ function previewAA(){
     else
       S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome,slotLabel:a.slotLabel||''});
   });
-  triggerSave();document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
+  triggerSave();
+  // Same bug fix as applyIRShiftAA: push the full refresh fan-out
+  // so the calendar, dashboard, FTE monitor, fairness scoreboard,
+  // and unfilled-slots tab all reflect the new state on subsequent
+  // apply runs. Without this, the second-and-later applies looked
+  // like they did nothing on the calendar.
+  if(typeof _afterMutation === 'function') _afterMutation();
+  document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }
 
