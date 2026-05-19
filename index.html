@@ -34383,6 +34383,24 @@ function _iraPeriodLabel(months){
 /* @JS_IR_ASSIGN_BEGIN — managed by tools/build-index.sh from src/parts/js-ir-assign.js. Edit the source file, not this block. See src/README.md. */
 function previewIRAA(){
   if(!_adminOnly('preview IR auto-assign')) return;
+  // Defer-shim: see previewIRShiftAA for the rationale. Greedy solver
+  // freezes the UI for 1-10s on large rosters; show an indeterminate
+  // bar first and yield a paint cycle.
+  if(!previewIRAA._deferred){
+    const _box = document.getElementById('ira-box');
+    if(_box && typeof _showProgress === 'function'){
+      _box.innerHTML = '<div id="iraa-progress" style="padding:24px;max-width:420px;margin:8px auto"></div>';
+      const _typ = document.getElementById('ira-type')?.value || 'both';
+      const _grp = document.getElementById('ira-grp')?.value || 'both';
+      _showProgress('iraa-progress', `Solving IR call assignments — ${_typ}, ${_grp === 'both' ? 'both groups' : _grp}…`);
+      previewIRAA._deferred = true;
+      setTimeout(() => {
+        try { previewIRAA(); }
+        finally { previewIRAA._deferred = false; }
+      }, 16);
+      return;
+    }
+  }
 
   // ─── INPUTS & SETUP ────────────────────────────────────────────────────
   const months    = _iraMonths();
