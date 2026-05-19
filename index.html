@@ -22587,6 +22587,15 @@ Click Cancel to abort.`;
     console.error('[RS] adminCreateAccount error:', e);
     setMsg(`<span style="color:var(--red-t)">Error: ${escHtml(e.message||String(e)||'Unknown error')}</span>`);
   }
+  } finally {
+    // Always re-enable + clear the inflight guard regardless of which
+    // early return or thrown error ended the function body. The
+    // watchdog timer is cleared too so it doesn't fire a second
+    // reset later.
+    clearTimeout(_resetIfStuck);
+    _adminCreateInFlight = false;
+    if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = origLabel || 'Create account'; }
+  }
 }
 
 /* ─── PHYSICIAN SITE RULES ─── */
