@@ -29322,6 +29322,53 @@ if(typeof window !== 'undefined' && !window._rsSnavInit){
   }
 }
 
+// ── Wire Enter-to-submit on key admin forms ──────────────────────────
+// Each entry maps a container ID to the primary submit button. At boot
+// we walk every text-like input and select inside the container and
+// stamp `data-submit="#<btnId>"` on it. The global Enter listener
+// (defined near the modal Esc handler) picks this up and clicks the
+// button when the user presses Enter from any field.
+//
+// Containers (form regions): a more specific selector than the page id
+// is used where needed to avoid catching filter dropdowns / table
+// search boxes that aren't part of the add-form.
+function _initEnterSubmit(){
+  const forms = [
+    // [container selector that scopes the fields, submit-button id]
+    ['#page-physicians .ibox',         '#phys-submit-btn'],
+    ['#page-vacations .ibox:first-of-type', '#vac-submit-btn'],
+    ['#page-dr-builder .ibox:first-of-type', '#dr-shift-submit-btn'],
+    ['#page-ir-shifts .ibox:first-of-type',  '#ir-shift-submit-btn'],
+    ['#page-ir-builder .ibox:first-of-type', '#ir-call-submit-btn'],
+    ['#page-holidays .ibox:first-of-type',   '#holiday-submit-btn'],
+    ['#page-open-shifts .ibox:first-of-type','#open-shift-submit-btn'],
+    ['#page-user-mgmt .ibox:first-of-type',  '#ca-submit-btn'],
+  ];
+  forms.forEach(([containerSel, btnSel]) => {
+    const container = document.querySelector(containerSel);
+    const btn = document.querySelector(btnSel);
+    if(!container || !btn) return;
+    // Only stamp text-ish inputs + selects. Skip textareas (Enter =
+    // newline), checkboxes/radios (toggled by Space), and date pickers
+    // where Enter has native picker semantics — but date pickers ALSO
+    // fire change events that we want to capture, so include them too.
+    const fields = container.querySelectorAll(
+      'input[type="text"], input[type="email"], input[type="password"], ' +
+      'input[type="number"], input[type="date"], input[type="month"], ' +
+      'input:not([type]), select'
+    );
+    fields.forEach(f => f.setAttribute('data-submit', btnSel));
+  });
+}
+if(typeof window !== 'undefined' && !window._rsEnterSubmitInit){
+  window._rsEnterSubmitInit = true;
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', _initEnterSubmit, { once: true });
+  } else {
+    _initEnterSubmit();
+  }
+}
+
 // ── Topbar overflow menu (⋯) ────────────────────────────────────────
 // Routes the secondary actions previously crowding the topbar:
 //   Undo / Redo / Cal mode toggle / Print / Shortcuts cheat-sheet /
