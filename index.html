@@ -20123,9 +20123,19 @@ function _renderMessages(){
 function sendChatMessage(){
   const inp=document.getElementById('chat-input');if(!inp||!_chatContext)return;
   const text=inp.value.trim();if(!text)return;
-  // Cap message length to protect shared DB payload size
-  if(text.length>4000){
-    alert('Message too long (4000 character limit). Please shorten or split into multiple messages.');
+  // Cap message length to protect shared DB payload size.
+  // Inline error pattern: red-border the textarea + show a small
+  // character count + remaining message under it. Much less
+  // disruptive than a blocking alert and tells the user exactly
+  // how far over they are.
+  if(text.length > 4000){
+    if(typeof _invalidField === 'function'){
+      _invalidField(inp, `${text.length} chars / 4000 cap — shorten by ${text.length-4000} or split into multiple messages.`);
+    } else if(typeof _toast === 'function'){
+      _toast(`Message too long (${text.length}/4000). Shorten or split.`, 'err');
+    } else {
+      alert('Message too long (4000 character limit). Please shorten or split into multiple messages.');
+    }
     return;
   }
   const msg={
