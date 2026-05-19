@@ -46225,7 +46225,28 @@ function rematchPickImport(){
     if(wantS3) mkS(w.shift3, '3rd');
   });
   _xlPickData.vacations = vacRecs.filter(v => !(S.vacations||[]).some(ex => ex.physId === v.physId && ex.start === v.start));
-  _xlPickData.shifts    = shiftRecs.filter(s => !(S.drShifts ||[]).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift));
+  // Universal one-shift-per-day rule applies on rematch too; see
+  // _parsePickWorkbook for the rationale. Without this re-applying a
+  // manual name mapping would re-introduce conflicting 2nd/3rd shifts
+  // the initial parse would have filtered out.
+  const _rematchConflicts = [];
+  _xlPickData.shifts = shiftRecs.filter(s => {
+    if((S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)) return false;
+    const existing = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(s.physId, s.date)
+      : (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date)
+          .map(ex => ({ kind: 'DR ' + ex.shift }));
+    if(existing.length){
+      _rematchConflicts.push({
+        physId: s.physId, date: s.date, shift: s.shift,
+        conflicts: existing.map(e => e.kind || `DR ${e.shift}`),
+        sourceRaw: s.sourceRaw || '',
+      });
+      return false;
+    }
+    return true;
+  });
+  _xlPickData.shiftConflicts = _rematchConflicts;
   _xlPickData.unmatched = Object.entries(nameMap).filter(([_, m]) => m.status === 'unmatched').map(([n]) => n);
   _xlPickData.lowConf   = Object.entries(nameMap).filter(([_, m]) => m.status === 'low').map(([n,m]) => ({ name: n, suggested: _physById(m.physId)?.last, score: m.score }));
   _renderPickPreview(document.getElementById('xl-pick-preview'));
