@@ -32935,6 +32935,19 @@ function addWkCall(){
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
   if(wkCnt(pid,satDate.slice(0,7))>=maxDR(p,'wk')&&!confirm('At weekend cap. Add anyway?'))return;
   if(_hasAdjacentWeekend(pid,satDate)){alert('Back-to-back weekend call not allowed: '+p.last+' already covers an adjacent weekend.');return;}
+  // Universal one-shift-per-day check on EITHER weekend day. Same
+  // rationale as addDRShift / addIRShift: an existing assignment
+  // (shift, call, holiday) on Sat OR Sun should warn-and-confirm
+  // before stacking weekend call on top.
+  if(typeof _physBookingsOnDate === 'function'){
+    const satB = _physBookingsOnDate(pid, satDate);
+    const sunB = _physBookingsOnDate(pid, sunDate);
+    const all = [...satB.map(b=>({...b, day:'Sat'})), ...sunB.map(b=>({...b, day:'Sun'}))];
+    if(all.length){
+      const list = all.map(b => '• ' + b.day + ': ' + b.kind + (b.site ? ' @ ' + b.site : '')).join('\n');
+      if(!confirm(`${p.last} already has assignment(s) this weekend:\n\n${list}\n\nAdd weekend call on top anyway?`)) return;
+    }
+  }
   const _newId = S.nextId++;
   S.weekendCalls.push({id:_newId,physId:pid,satDate,sunDate,sub,site,ctype:document.getElementById('wk-ctype').value,notes:document.getElementById('wk-notes').value});
   if(typeof _audit==='function') _audit('weekendCall.add', {id:_newId, physId:pid, satDate, sunDate, site});
