@@ -18841,7 +18841,7 @@ function renderIRShiftBuilder(){
   }
   // Set default month if empty
   const moEl = document.getElementById('irsf-mo');
-  if(moEl && !moEl.value) moEl.value = new Date().toISOString().slice(0,7);
+  if(moEl && !moEl.value) moEl.value = _todayLocalYM();
   // Populate sites for selected physician
   updateIRSbInfo();
   renderIRShiftTable();
@@ -18992,7 +18992,7 @@ function addIRShift(){
 function fillIRHomeShifts(){
   if(!_adminOnly('fill IR home shifts')) return;
   const moEl = document.getElementById('irsf-mo');
-  const ym = moEl?.value || new Date().toISOString().slice(0,7);
+  const ym = moEl?.value || _todayLocalYM();
   if(!ym){ alert('Set a filter month first.'); return; }
 
   let added = 0;
@@ -19895,7 +19895,7 @@ function renderOpenShifts(){
   const pSel=document.getElementById('os-phys');
   if(pSel&&pSel.options.length<2) S.physicians.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.text=p.last+', '+p.first;pSel.appendChild(o);});
   const pid=pSel?.value?+pSel.value:null;
-  const ym=document.getElementById('os-mo')?.value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('os-mo')?.value||_todayLocalYM();
   const selP=pid?S.physicians.find(p=>p.id===pid):null;
   const opens=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)).sort((a,b)=>a.date>b.date?1:-1);
   // Trade-marketplace offers (one-sided "give-up" board) for the same month.
@@ -19954,7 +19954,7 @@ function renderOpenShifts(){
   el.innerHTML=html;
 }
 function renderManageShifts(){
-  const ym=document.getElementById('osmf-mo')?.value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('osmf-mo')?.value||_todayLocalYM();
   const grp=document.getElementById('osmf-grp')?.value||'';
   const rows=(S.openShifts||[]).filter(o=>o.date.startsWith(ym)&&(!grp||o.group===grp)).sort((a,b)=>a.date>b.date?1:-1);
   const el=document.getElementById('osm-tbody');if(!el)return;
@@ -21327,7 +21327,7 @@ function renderSiteSlots(){
   // Management"). renderSitesList writes to BOTH anchors — sites-list (in
   // Settings) and sites-list-ssl (on this tab) — so they stay in sync.
   renderSitesList();
-  const ym=document.getElementById('ss-mo')?.value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('ss-mo')?.value||_todayLocalYM();
   const [y,m]=ym.split('-').map(Number);
   const first=new Date(y,m-1,1);
   const weeks=Math.ceil((first.getDay()+new Date(y,m,0).getDate())/7);
@@ -21374,7 +21374,7 @@ function toggleSlotSubs(siteName, week, sh){
   if(_slotSubsExpanded.has(key)) _slotSubsExpanded.delete(key);
   else _slotSubsExpanded.add(key);
   renderSlotGrid(
-    document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7),
+    document.getElementById('ss-mo')?.value || _todayLocalYM(),
     week
   );
 }
@@ -21515,7 +21515,7 @@ function _ssSetTotalSlot(siteName, week, sh, val){
     });
   }
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
 }
 
 // Writer for a per-slot DR label. Sanitized + persisted. Empty string deletes.
@@ -21542,7 +21542,7 @@ function _ssSetSubSlot(siteName, week, sh, sub, val){
   }
   if(Object.keys(S.siteSlotsSubs[key]).length === 0) delete S.siteSlotsSubs[key];
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
 }
 
 function _ssClearSubSlots(siteName, week, sh){
@@ -21550,7 +21550,7 @@ function _ssClearSubSlots(siteName, week, sh){
   const key = `${siteName}|${week}|${sh}`;
   delete S.siteSlotsSubs[key];
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || new Date().toISOString().slice(0,7), week);
+  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
 }
 
 /* ─── IR SLOTS ─── */
@@ -29016,7 +29016,7 @@ function logImport(msg, type='info'){
 /* @JS_RENDER_DR_CAL_BEGIN — managed by tools/build-index.sh from src/parts/js-render-dr-cal.js. Edit the source file, not this block. See src/README.md. */
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
-  const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('drc-mo').value||_todayLocalYM();
   const fp=document.getElementById('drc-phys');
   if(fp&&fp.options.length<2){
     // Include DR + MIXED + any IR physician who has at least one existing DR
@@ -32989,7 +32989,7 @@ function _iraTogglePeriodInputs(){
 /* @JS_DR_ASSIGN_BEGIN — managed by tools/build-index.sh from src/parts/js-dr-assign.js. Edit the source file, not this block. See src/README.md. */
 function previewAA(){
   if(!_adminOnly('preview auto-assign')) return;
-  const ym=document.getElementById('aa-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('aa-mo').value||_todayLocalYM();
   const typ=document.getElementById('aa-type').value;
   // Build period: 'month' (default), 'semi-1', or 'semi-2'. The half-month
   // options narrow the cell set so admins can fill the schedule in two
@@ -33380,7 +33380,7 @@ function previewAA(){
 /* @JS_RENDER_IR_CAL_BEGIN — managed by tools/build-index.sh from src/parts/js-render-ir-cal.js. Edit the source file, not this block. See src/README.md. */
 /* ─── IR CALENDAR ─── */
 function renderIRCal(){
-  const ym=document.getElementById('irc-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('irc-mo').value||_todayLocalYM();
   const fg=document.getElementById('irc-grp')?.value||'';
   const fpid=+document.getElementById('irc-phys')?.value||0;
   const fsite=document.getElementById('irc-site')?.value||'';
@@ -34194,7 +34194,7 @@ function fillDRHomeForIR(modeOrOpts){
                                           : 'fill unscheduled IR physicians';
   if(!_adminOnly(adminMsg)) return { ok:false, error:'Admin access required.' };
 
-  const ym = opts.ym || document.getElementById('irsf-mo')?.value || new Date().toISOString().slice(0,7);
+  const ym = opts.ym || document.getElementById('irsf-mo')?.value || _todayLocalYM();
   if(!ym){
     const m = 'Set the Filter Month above first.';
     if(!silent) alert(m);
@@ -34539,7 +34539,7 @@ function saveEditIRCall(id){
 }
 
 function renderIRList(){
-  const ym=document.getElementById('irl-mo')?.value||new Date().toISOString().slice(0,7);const grp=document.getElementById('irl-grp')?.value||'';
+  const ym=document.getElementById('irl-mo')?.value||_todayLocalYM();const grp=document.getElementById('irl-grp')?.value||'';
   const ctColors={'daily':'tt','weekend':'tpk'};
   const tbody = document.getElementById('irl-tbody'); if(!tbody) return;
   const physOpts = S.physicians.filter(p=>p.irFte>0)
@@ -36609,7 +36609,7 @@ async function applyIRRebalance(){
 */
 function _scanUnfilled(opts){
   opts = opts || {};
-  const fromYM = opts.fromYM || (new Date().toISOString().slice(0,7));
+  const fromYM = opts.fromYM || (_todayLocalYM());
   const monthsN = +opts.months || 3;
   const cat = opts.cat || 'all';
   const grp = opts.group || '';
@@ -36812,7 +36812,7 @@ function renderUnfilled(){
   if(!moEl) return;
   // Default the month picker to current month + populate group filter.
   if(!moEl.value){
-    moEl.value = new Date().toISOString().slice(0,7);
+    moEl.value = _todayLocalYM();
   }
   const grpEl = document.getElementById('uf-grp');
   if(grpEl){
@@ -39660,7 +39660,7 @@ async function unlockMonth(ym){
 async function lockAllCompletedMonths(){
   if(!_adminOnly('lock months')) return;
   if(!Array.isArray(S.lockedMonths)) S.lockedMonths = [];
-  const todayYm = new Date().toISOString().slice(0,7);
+  const todayYm = _todayLocalYM();
   // Collect every month that has at least one stored shift/call/vacation
   // AND has fully ended (i.e. month-prefix is strictly less than current
   // month). This avoids locking empty future months — there's nothing
