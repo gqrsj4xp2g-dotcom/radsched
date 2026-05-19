@@ -32400,6 +32400,19 @@ function addDRShift(){
   if(p.role==='IR' && !confirm(`${p.last} is an IR-only physician (no DR FTE allocation). DR shifts for IR physicians are unusual — they typically cover only IR work. Continue assigning this DR shift anyway?`)) return;
   // Hard block: physician is on vacation this date
   if(vacDays(pid).has(date)){alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);return;}
+  // Cross-shift-type block: if the physician already has a 2nd or 3rd
+  // shift on this date (typically imported from the pick sheet's
+  // multi-day evening/overnight block), assigning a 1st shift on the
+  // same day would silently double-book them. Surface as a warn-and-
+  // confirm so admins can override consciously.
+  if(shift !== '2nd' && shift !== '3rd' && typeof _has2ndOr3rdShift === 'function' && _has2ndOr3rdShift(pid, date)){
+    if(!confirm(`${p.last} already has a 2nd or 3rd shift on ${date}. Adding a ${shift} shift on the same day double-books them. Continue?`)) return;
+  }
+  // Mirror-symmetric: existing 1st shift on date when admin tries to
+  // add a 2nd/3rd. Same rationale.
+  if((shift === '2nd' || shift === '3rd') && (S.drShifts||[]).some(s => s.physId===pid && s.date===date && (s.shift==='1st' || (s.shift==='Home' && !s.autoHome)))){
+    if(!confirm(`${p.last} already has a 1st shift / Home assignment on ${date}. A ${shift} shift typically replaces those (read-from-home). Continue?`)) return;
+  }
   const kMap={s1:'1st',s2:'2nd',s3:'3rd',home:'Home'};
   const k=Object.entries(kMap).find(([,v])=>v===shift)?.[0];
   if(k&&!p.shiftElig[k]&&!confirm(`${p.last} is not designated for ${shift} shift. Continue?`))return;
