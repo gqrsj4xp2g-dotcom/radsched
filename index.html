@@ -13730,7 +13730,13 @@ function addVac(){
   if(!_adminOnly('add time off'))return;
   const pid=+document.getElementById('v-phys').value;
   const s=document.getElementById('v-start').value,e=document.getElementById('v-end').value;
-  if(!s||!e||e<s){alert('Check dates');return;}
+  // Inline error on the offending field instead of a vague "Check dates"
+  // alert. The form's existing #v-guardrail div is for the
+  // _validateVacationWindow live preview; per-field errors go on the
+  // input itself via _invalidField.
+  if(!s){ if(typeof _invalidField==='function') _invalidField(document.getElementById('v-start'), 'Start date required.'); else alert('Start date required.'); return; }
+  if(!e){ if(typeof _invalidField==='function') _invalidField(document.getElementById('v-end'),   'End date required.');   else alert('End date required.');   return; }
+  if(e < s){ if(typeof _invalidField==='function') _invalidField(document.getElementById('v-end'), 'End must be on or after start.'); else alert('Check dates'); return; }
   // Schedule lock: block if EITHER endpoint falls in a locked month.
   // Vacation often spans month boundaries — if any locked month is touched,
   // the admin must unlock first.
