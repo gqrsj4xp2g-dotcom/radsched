@@ -22271,13 +22271,16 @@ function openSwapSuggestModal(){
       <div id="ssm-partners-${s.kind}-${s.id}" style="margin-top:8px"></div>
     </div>`).join('');
   // Render into a generic modal slot.
+  // Capture focus return BEFORE injecting the modal so the close
+  // handler can restore focus to whichever button opened this.
+  _saveModalFocusFor('ssm-modal');
   const wrap = document.createElement('div');
   wrap.className = 'modal-wrap';
   wrap.id = 'ssm-modal';
   wrap.style.display = 'flex';
-  wrap.onclick = (e) => { if(e.target === wrap) document.getElementById('ssm-modal').remove(); };
+  wrap.onclick = (e) => { if(e.target === wrap){ document.getElementById('ssm-modal').remove(); _restoreModalFocusFor('ssm-modal'); } };
   wrap.innerHTML = `<div class="modal" style="max-width:560px">
-    <button class="modal-close" onclick="document.getElementById('ssm-modal').remove()">✕</button>
+    <button class="modal-close" onclick="document.getElementById('ssm-modal').remove(); _restoreModalFocusFor('ssm-modal');">✕</button>
     <div class="modal-title">🔄 Find swap partner</div>
     <div style="font-size:11.5px;color:var(--rs-ink-3);margin-bottom:10px">Your upcoming shifts (next 30 days). Click <em>See partners</em> to get top candidates ranked by upcoming-work fairness.</div>
     ${rowsHtml}
