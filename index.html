@@ -12687,7 +12687,10 @@ function renderDash(){
   const[y,m]=ym.split('-').map(Number);
   const monthName=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
   const ml=document.getElementById('dash-month-label');if(ml)ml.textContent=monthName;
-  document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
+  // Null guard — renderDash can fire from page transitions before
+  // the dashboard DOM is mounted (rare but documented in the field).
+  const gr=document.getElementById('dash-greet');
+  if(gr) gr.textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
   // The "More analytics" details wrapper is what gets toggled now —
   // dash-admin-section lives INSIDE it. Setting block on the inner
