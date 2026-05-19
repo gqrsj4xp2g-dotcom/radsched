@@ -11377,7 +11377,14 @@ function _doSubscribeRealtimeSocket(){
 // _pullFromSupabase on a slow network even though the prior pull had
 // not returned, leading to two concurrent _applyRemoteData passes and
 // occasional flicker / double-renders.
+//
+// _pollStartedAt records when the in-flight pull began so a watchdog
+// can force-clear the flag if the underlying fetch never resolves
+// (mobile captive portal, dead TCP socket, etc.). Without the
+// watchdog, one hung fetch would silently kill polling forever.
 let _pollInFlight = false;
+let _pollStartedAt = 0;
+const _POLL_STUCK_MS = 60000; // declare a poll "stuck" after 60s
 
 function _startPollFallback(){
   // Polling fallback: pull from Supabase every 10s. For admins this is
