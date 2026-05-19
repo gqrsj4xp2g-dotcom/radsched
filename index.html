@@ -37357,15 +37357,35 @@ function editOpenShift(id){
   alert('Removed for editing. Update above and click Add to save.');
 }
 
-function deleteOpenShift(id){
-  if(!confirm('Delete this open shift?'))return;
+async function deleteOpenShift(id){
+  const o = (S.openShifts||[]).find(x => x.id === id);
+  if(!o){ if(typeof _toast==='function') _toast('Open shift not found.', 'info'); return; }
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: 'Delete open shift?',
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">${escHtml(o.date)} · <strong>${escHtml(o.shiftType||'?')}</strong> at ${escHtml(o.site||'TBD')}${o.claimedBy?'<br><span style="color:var(--amber-t)">⚠ Currently claimed by '+escHtml(pname(o.claimedBy))+'</span>':''}</div>`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      })
+    : confirm('Delete this open shift?');
+  if(!ok) return;
   S.openShifts=S.openShifts.filter(x=>x.id!==id);
   triggerSave();renderManageShifts();renderOpenShifts();
 }
 
-function clearClaimedShifts(){
+async function clearClaimedShifts(){
   if(!_adminOnly('clear claimed shifts')) return;
-  if(!confirm('Remove all claimed shifts from the board?'))return;
+  const claimed = (S.openShifts||[]).filter(o => o.claimedBy);
+  if(!claimed.length){ if(typeof _toast==='function') _toast('No claimed shifts to remove.', 'info'); return; }
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: `Remove ${claimed.length} claimed shift${claimed.length===1?'':'s'}?`,
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5">This permanently removes every open-shift record that already has a claimant. Unclaimed shifts stay on the board. The physician's assignment record (in S.drShifts / S.irShifts) is NOT removed — just the open-shift trail.</div>`,
+        confirmLabel: 'Remove claimed',
+        destructive: true,
+      })
+    : confirm('Remove all claimed shifts from the board?');
+  if(!ok) return;
   S.openShifts=S.openShifts.filter(o=>!o.claimedBy);
   triggerSave();renderManageShifts();renderOpenShifts();
 }
