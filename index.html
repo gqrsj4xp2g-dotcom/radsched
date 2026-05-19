@@ -37030,12 +37030,21 @@ function saveEditHoliday(id){
   triggerSave(); renderHolTable(); renderHolCounter();
 }
 
-function deleteHoliday(id){
+async function deleteHoliday(id){
   if(!_adminOnly('delete holiday assignment'))return;
   const h=S.holidays.find(x=>x.id===id);
-  if(h && typeof _canEditDate==='function' && !_canEditDate(h.date)) return;
-  if(!confirm('Delete this assignment?'))return;
-  if(h&&((h.group==='IR' || /^IR-/.test(h.group||'')))) _removeHolidayIRCall(h.physId, h.date);
+  if(!h) return;
+  if(typeof _canEditDate==='function' && !_canEditDate(h.date)) return;
+  const ok = (typeof _rsConfirm === 'function')
+    ? await _rsConfirm({
+        title: 'Delete holiday assignment?',
+        bodyHtml: `<div style="font-size:12.5px;line-height:1.5"><strong>${escHtml(pname(h.physId))}</strong> · ${escHtml(h.name || 'holiday')} · ${escHtml(h.date)}<br><span style="color:var(--rs-ink-3)">This removes the assignment + any synced IR call record.</span></div>`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      })
+    : confirm('Delete this assignment?');
+  if(!ok) return;
+  if(h.group==='IR' || /^IR-/.test(h.group||'')) _removeHolidayIRCall(h.physId, h.date);
   S.holidays=S.holidays.filter(x=>x.id!==id);
   triggerSave();
   _afterMutation();
