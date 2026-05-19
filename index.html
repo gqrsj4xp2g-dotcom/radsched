@@ -10150,6 +10150,13 @@ async function doLogout(){
   if(typeof _perfMonTimer !== 'undefined' && _perfMonTimer){
     clearInterval(_perfMonTimer); _perfMonTimer = null;
   }
+  // Tear down every module-level interval that registered via
+  // _rsRegisterInterval (notif dot, save dot, quick-filters,
+  // sticky-bar apply, last-saved age, net badge, stale-save badge,
+  // builder conflict watcher). Without this, a long-lived tab that
+  // logs out + back in accumulates duplicate timers on every
+  // session — 7 leaks per cycle.
+  if(typeof _rsClearAllIntervals === 'function') _rsClearAllIntervals();
   if(typeof _bc !== 'undefined' && _bc){
     try{ _bc.close(); }catch(_){}
     _bc = null;
