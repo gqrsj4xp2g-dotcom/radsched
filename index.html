@@ -45467,12 +45467,34 @@ function _parsePickWorkbook(rows, prev, sheetName){
     if(wantS3) mkShift(w.shift3, '3rd');
   });
   // De-duplicate against existing data (don't propose duplicates).
+  // ── Shift dedup now enforces the universal "one shift per day" rule ──
+  // Bug fix: the old exact-match dedup `(physId, date, shift)` allowed
+  // a 2nd shift to coexist with a Home shift created by Vacation Sold
+  // Back's auto-fill (Home !== 2nd → both got pushed). Per user policy
+  // a physician on ANY shift/call that day is ineligible for any other.
+  // Skip the row and track WHY so the preview can surface it.
   const dedupVac = vacRecs.filter(v =>
     !(S.vacations || []).some(ex => ex.physId === v.physId && ex.start === v.start)
   );
-  const dedupShifts = shiftRecs.filter(s =>
-    !(S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)
-  );
+  const shiftConflictRows = [];
+  const dedupShifts = shiftRecs.filter(s => {
+    // Exact-duplicate path: same phys+date+shift — silent dedup.
+    if((S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)) return false;
+    // Any-other-booking path: phys has SOME shift/call on this date.
+    const existing = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(s.physId, s.date)
+      : (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date)
+          .map(ex => ({ kind: 'DR ' + ex.shift }));
+    if(existing.length){
+      shiftConflictRows.push({
+        physId: s.physId, date: s.date, shift: s.shift,
+        conflicts: existing.map(e => e.kind || `DR ${e.shift}`),
+        sourceRaw: s.sourceRaw || '',
+      });
+      return false;
+    }
+    return true;
+  });
   const unmatched = Object.entries(nameMap).filter(([_, m]) => m.status === 'unmatched').map(([n]) => n);
   const lowConf = Object.entries(nameMap).filter(([_, m]) => m.status === 'low').map(([n,m]) => ({name: n, suggested: _physById(m.physId)?.last, score: m.score}));
   // Year-detection metadata for the preview banner. yearShift > 0 means
