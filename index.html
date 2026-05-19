@@ -13099,13 +13099,15 @@ document.addEventListener('keydown', (e) => {
   // ssm-modal (swap-suggest finder) and rationale-modal (Why X picked?) are
   // dynamically injected and removed entirely when closed — we check for
   // their presence in the DOM rather than an .open class flip.
+  // Every close path also restores keyboard focus to the trigger element
+  // captured by _saveModalFocusFor (no-op if the opener didn't save).
   const modals = [
     ['link-modal',           () => closeModal('link-modal')],
     ['ir-group-remove-modal',() => closeModal('ir-group-remove-modal')],
-    ['chat-group-modal',     () => typeof closeChatGroupEditor === 'function' && closeChatGroupEditor()],
-    ['dtd-modal',            () => typeof closeDriveTimeDetails === 'function' && closeDriveTimeDetails()],
-    ['ssm-modal',            () => { const el = document.getElementById('ssm-modal'); if(el) el.remove(); }],
-    ['rationale-modal',      () => { const el = document.getElementById('rationale-modal'); if(el) el.remove(); }],
+    ['chat-group-modal',     () => { if(typeof closeChatGroupEditor === 'function') closeChatGroupEditor(); _restoreModalFocusFor('chat-group-modal'); }],
+    ['dtd-modal',            () => { if(typeof closeDriveTimeDetails === 'function') closeDriveTimeDetails(); _restoreModalFocusFor('dtd-modal'); }],
+    ['ssm-modal',            () => { const el = document.getElementById('ssm-modal'); if(el) el.remove(); _restoreModalFocusFor('ssm-modal'); }],
+    ['rationale-modal',      () => { const el = document.getElementById('rationale-modal'); if(el) el.remove(); _restoreModalFocusFor('rationale-modal'); }],
   ];
   for(const [id, close] of modals){
     const el = document.getElementById(id);
