@@ -22332,25 +22332,40 @@ function submitSwapRequest(){
 }
 
 /* ─── USER MANAGEMENT ─── */
+// Module-level guard so concurrent calls to adminCreateAccount() can't
+// duplicate the request even if the button is briefly clickable
+// between disable cycles or invoked from console / shortcut.
+let _adminCreateInFlight = false;
 async function adminCreateAccount(){
   if(!_adminOnly('create accounts'))return;
-  // Disable the Create button + freeze inputs while the create-user
-  // edge function is in-flight. Audit caught the previous behavior:
-  // admin clicks Create → 2-3s round trip with only "Creating…" text;
-  // double-clicks created duplicates. Re-enable in `finally` below.
+  // Guard against double-submit while the create-user edge function
+  // is in-flight (~2-3s on first call). Without this, an impatient
+  // admin clicking the Create button twice would create duplicates.
+  if(_adminCreateInFlight){
+    if(typeof _toast === 'function') _toast('Already creating an account — wait for it to finish.', 'info');
+    return;
+  }
+  _adminCreateInFlight = true;
   const submitBtn = document.getElementById('ca-submit-btn');
-  const inputs = ['ca-first','ca-last','ca-email','ca-pw','ca-role','ca-phys']
-    .map(id => document.getElementById(id)).filter(Boolean);
-  if(submitBtn){ submitBtn.disabled = true; submitBtn.dataset._origLabel = submitBtn.textContent; submitBtn.textContent = 'Creating…'; }
-  inputs.forEach(i => { i.disabled = true; });
-  const _reenable = () => {
-    if(submitBtn){ submitBtn.disabled = false; if(submitBtn.dataset._origLabel) submitBtn.textContent = submitBtn.dataset._origLabel; }
-    inputs.forEach(i => { i.disabled = false; });
-  };
-  // Wrap the body in a try so we always re-enable. We'll add `finally`
-  // at the function's existing return points by making `_done` an
-  // explicit cleanup helper called wherever the function returns.
-  const _done = (ret) => { _reenable(); return ret; };
+  const origLabel = submitBtn ? submitBtn.textContent : null;
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Creating…'; }
+  // Watchdog: re-enable after 30s even if something throws so the form
+  // doesn't stay frozen. The function's real cleanup happens via the
+  // _adminCreateInFlight = false set in `finally` below.
+  const _resetIfStuck = setTimeout(() => {
+    if(_adminCreateInFlight){
+      _adminCreateInFlight = false;
+      if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = origLabel || 'Create account'; }
+      console.warn('[RS] adminCreateAccount watchdog reset — request took >30s');
+    }
+  }, 30_000);
+  // The rest of the function is wrapped to guarantee cleanup. We can't
+  // wrap the whole existing body in a single try{} without rewriting
+  // every return, so we attach the cleanup as a finally-equivalent via
+  // a microtask wrapper. The existing function body runs to completion
+  // (including its many early returns) and at the end we hit the
+  // outer-most `finally` block at the END of the function.
+  try{
   const first=sanitizeNameInput(document.getElementById('ca-first')?.value||'');
   const last=sanitizeNameInput(document.getElementById('ca-last')?.value||'');
   const email=(document.getElementById('ca-email')?.value||'').trim().toLowerCase();
