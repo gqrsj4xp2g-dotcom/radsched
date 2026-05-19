@@ -44584,7 +44584,14 @@ async function _pushToSupabase(){
     const _shouldProbe = _baseRemoteSavedAt && _lastPushAge >= _CONFLICT_PROBE_SKIP_MS;
     if(_shouldProbe){
       try{
-        const {data: probe} = await _supabase.from(_TABLE).select('data').eq('id', _ROW_ID).single();
+        // Bail early if the practice switched while we were waiting to
+        // probe. The post-await state would otherwise be applied to the
+        // wrong practice.
+        if(_ROW_ID !== _pushRowId){
+          console.warn('[RS] Push aborted before probe: _ROW_ID changed mid-flight');
+          return false;
+        }
+        const {data: probe} = await _supabase.from(_TABLE).select('data').eq('id', _pushRowId).single();
         if(probe?.data){
           let probeJson = null;
           try{ probeJson = JSON.parse(probe.data); }catch(_){}
