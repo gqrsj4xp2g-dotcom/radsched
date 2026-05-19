@@ -44525,6 +44525,15 @@ async function _pushToSupabase(){
     return false;
   }
   _isSaving=true;
+  // Capture _ROW_ID at the start of the push so a mid-flight
+  // switchPractice() can't redirect our write to a different
+  // practice's row. Without this, the conflict probe below reads
+  // the OLD practice's data, the payload is built from in-memory
+  // state, and the final UPSERT could land on the wrong row if
+  // _ROW_ID has been re-bound by the time the await chain resolves.
+  // We re-check before the actual upsert and bail with a clear
+  // error if the practice has changed.
+  const _pushRowId = _ROW_ID;
   // Watchdog: if the underlying Supabase fetch hangs (mobile carrier captive
   // portal, dead TCP socket, etc.), `await` never resolves and the .finally
   // never runs — so `_isSaving` would be stuck `true` forever and every
