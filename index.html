@@ -34537,6 +34537,28 @@ function addIRCallManual(){
     }
   }
   if(callType==='2nd'||callType==='3rd'){alert('2nd and 3rd shifts are not used for IR call. Choose Daily Call or Weekend Call.');return;}
+  // Universal one-shift-per-day check. For daily call, check just
+  // the date. For weekend call, check the Fri→Mon span. Warn-and-
+  // confirm (admin override is by design) so the admin sees if
+  // they're stacking call on top of an existing shift.
+  if(typeof _physBookingsOnDate === 'function'){
+    const datesToCheck = callType === 'weekend'
+      ? [date, addDays(date,1), addDays(date,2), addDays(date,3)]
+      : [date];
+    const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const all = [];
+    datesToCheck.forEach(d => {
+      _physBookingsOnDate(physId, d).forEach(b => {
+        all.push({...b, dateStr: d + ' (' + dowNames[parseDateLocal(d).getDay()] + ')'});
+      });
+    });
+    if(all.length){
+      const phys = S.physicians.find(x=>x.id===physId);
+      const physLast = phys?.last || ('Phys#'+physId);
+      const list = all.map(b => '• ' + b.dateStr + ': ' + b.kind + (b.site ? ' @ ' + b.site : '')).join('\n');
+      if(!confirm(`${physLast} already has assignment(s) overlapping this IR ${callType} call:\n\n${list}\n\nAdd IR call anyway?`)) return;
+    }
+  }
   const irGroup=document.getElementById('ird-grp').value;const site=document.getElementById('ird-site').value;
   const p=S.physicians.find(x=>x.id===physId);
   if(p?.irGroup&&p.irGroup!==irGroup&&!confirm(`${p.last} is in ${p.irGroup} group. Assign to ${irGroup}?`))return;
