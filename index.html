@@ -37299,7 +37299,13 @@ function renderHolDefList(){
   const el = document.getElementById('holdef-list'); if(!el) return;
   const defs = (S.holidayDefs||[]).sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
   if(!defs.length){
-    el.innerHTML='<div class="note ni">No holidays defined yet. Create one above.</div>';
+    el.innerHTML = `
+      <div class="rs-empty" style="text-align:center;padding:18px 12px">
+        <div style="font-size:22px;margin-bottom:6px">🎄</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:3px">No holidays defined</div>
+        <div style="font-size:11.5px;color:var(--rs-ink-3);margin-bottom:10px">Use the form above to add Thanksgiving, Christmas, July 4, etc. Each definition tells the auto-assigner which dates to skip + lets you assign holiday call.</div>
+        <button class="bp bsm" onclick="document.getElementById('holdef-name')?.focus()">+ Add the first holiday</button>
+      </div>`;
     return;
   }
   el.innerHTML = defs.map(d=>{
