@@ -10317,6 +10317,10 @@ async function launchApp(){
         setTimeout(()=>{if(si)si.textContent='';},4000);}
     }
     renderDash();
+    // If the URL has a `#/<page>` deep-link, route to it now that
+    // boot is past the auth gate. No-op when the hash is empty,
+    // points at /dashboard, or is a Supabase recovery hash.
+    if(typeof _bootDeepLink === 'function') _bootDeepLink();
     // Kick off the periodic future-shift auto-refresh after the dashboard
     // is on screen. Idempotent — safe to call on every launchApp.
     if(typeof _startAutoRefreshTrafficLoop === 'function') _startAutoRefreshTrafficLoop();
