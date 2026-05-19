@@ -11359,7 +11359,12 @@ function _startPollFallback(){
         if(si){si.textContent='↻ Refreshed';si.style.color='var(--blue-t)';
           setTimeout(()=>{if(si)si.textContent='';},2000);}
       }
-    }catch(e){/* non-fatal poll error */}
+    }catch(e){
+      // Surface the error to the error log so admins can see it from
+      // Settings → Error log. Was silent; first-line triage was
+      // impossible because the user just saw "no sync" with no clue.
+      try{ if(typeof _logError === 'function') _logError('poll', 'Poll-pull failed: '+(e?.message||String(e)), e); }catch(_){}
+    }
   }, intervalMs);
 }
 
