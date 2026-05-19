@@ -45757,6 +45757,25 @@ function _clearAllPickOverrides(){
   if(typeof _toast === 'function') _toast('All overrides cleared.', 'ok');
 }
 
+// Remove any S.vacations / S.drShifts record that was imported from a
+// specific Excel cell. Matches by the notes pattern that
+// applyPickImport stamps on every imported row: `Imported: <label>
+// <sourceRaw>`. We pin sourceRaw at the END of the string with a
+// space delimiter so 'Imported: pick Smith - 1' doesn't accidentally
+// match an override for 'Smith - 12'.
+function _xlPickRemoveExistingForRaw(sourceRaw){
+  if(!sourceRaw) return { vacRemoved: 0, shRemoved: 0 };
+  const needle = ' ' + sourceRaw;
+  const matches = (notes) => typeof notes === 'string'
+    && /^Imported:\s/.test(notes)
+    && notes.endsWith(needle);
+  const beforeV = (S.vacations||[]).length;
+  const beforeS = (S.drShifts ||[]).length;
+  S.vacations = (S.vacations||[]).filter(v => !matches(v.notes));
+  S.drShifts  = (S.drShifts ||[]).filter(s => !matches(s.notes));
+  return { vacRemoved: beforeV - S.vacations.length, shRemoved: beforeS - S.drShifts.length };
+}
+
 function _xlPickOverrideCell(currentKind, sourceRaw, target){
   if(!_xlPickData || !_xlPickData.allWeeks) return;
   if(!sourceRaw){ if(typeof _toast === 'function') _toast('Can\'t reclassify a cell with no source text.', 'err'); return; }
@@ -45767,6 +45786,30 @@ function _xlPickOverrideCell(currentKind, sourceRaw, target){
     delete _xlPickOverrides[sourceRaw];
   } else {
     _xlPickOverrides[sourceRaw] = target;
+  }
+  // ── Retroactive cleanup ──────────────────────────────────────────
+  // Bug report: 'When I say skip things in the Excel uploader it
+  // doesn't actually ignore things and just brings those things into
+  // calendar regardless.' Root cause: setting Ignore correctly
+  // dropped the cell from the about-to-be-imported list, but if the
+  // cell had ALREADY been imported on a previous Apply, that
+  // existing S.vacations / S.drShifts record stayed. User
+  // perception: 'Ignore = remove from schedule', not 'skip on next
+  // import'. Fix: when target is 'ignore' OR the user is moving to
+  // a different bucket (vacation↔shift2 etc.), purge any existing
+  // S record imported from that exact sourceRaw. The new bucket's
+  // records will be added on the next Apply via the usual flow.
+  let purgedV = 0, purgedS = 0;
+  if(target === 'ignore' || (target && target !== '')){
+    const removed = _xlPickRemoveExistingForRaw(sourceRaw);
+    purgedV = removed.vacRemoved;
+    purgedS = removed.shRemoved;
+    if(purgedV + purgedS > 0){
+      // Save + refresh dependent views so the cascade is visible.
+      if(typeof triggerSave === 'function') triggerSave();
+      if(typeof _afterMutation === 'function') _afterMutation();
+      if(typeof _audit === 'function') _audit('import.override.purge', { sourceRaw, target, vacRemoved: purgedV, shRemoved: purgedS });
+    }
   }
   // RESTORE from pristine snapshot BEFORE re-applying. Without this,
   // 'revert to default' on a cell that was previously set to 'ignore'
@@ -45782,7 +45825,15 @@ function _xlPickOverrideCell(currentKind, sourceRaw, target){
   // the change without a re-parse. Subsequent re-parses will read the
   // persistent map via _applyPickOverrides.
   _applyPickOverrides(_xlPickData.allWeeks);
-  if(typeof _toast === 'function') _toast(`Reclassified "${sourceRaw}" → ${target || 'unchanged'}`, 'info');
+  // Toast: tell the user EXACTLY what happened. If existing records
+  // were removed AND the override was set, mention both.
+  if(typeof _toast === 'function'){
+    if(purgedV + purgedS > 0){
+      _toast(`Reclassified "${sourceRaw}" → ${target || 'unchanged'} · removed ${purgedV+purgedS} existing record${(purgedV+purgedS)===1?'':'s'}.`, 'ok');
+    } else {
+      _toast(`Reclassified "${sourceRaw}" → ${target || 'unchanged'}.`, 'info');
+    }
+  }
   // Regenerate records + re-render preview.
   if(typeof rematchPickImport === 'function') rematchPickImport();
 }
