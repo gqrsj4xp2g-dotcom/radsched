@@ -13667,8 +13667,13 @@ function saveEditVac(id){
   const endEl   = document.getElementById(`vace-end-${id}`);
   const notesEl = document.getElementById(`vace-notes-${id}`);
   const s = startEl?.value, e = endEl?.value;
-  if(!s || !e){ alert('Both start and end dates required.'); return; }
-  if(e < s){ alert('End date must be on or after start date.'); return; }
+  // Inline field-level errors instead of OS alerts. `_invalidField`
+  // (defined elsewhere) red-borders the input + appends a small
+  // descriptive error below it; the error auto-clears when the user
+  // edits the field again.
+  if(!s){ if(typeof _invalidField==='function') _invalidField(startEl, 'Start date required.'); else alert('Both start and end dates required.'); return; }
+  if(!e){ if(typeof _invalidField==='function') _invalidField(endEl, 'End date required.'); else alert('Both start and end dates required.'); return; }
+  if(e < s){ if(typeof _invalidField==='function') _invalidField(endEl, 'End date must be on or after start date.'); else alert('End date must be on or after start date.'); return; }
   v.physId = +physEl?.value || v.physId;
   v.type   = typeEl?.value || v.type;
   v.start  = s;
