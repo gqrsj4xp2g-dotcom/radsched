@@ -11440,7 +11440,9 @@ function _refreshCurrentPage(){
 // the rest. Only calls a render if its anchor DOM element actually exists,
 // so first-time-opening-a-page still lazy-initializes normally.
 function _afterMutation(){
-  try{ _refreshCurrentPage(); }catch(e){}
+  try{ _refreshCurrentPage(); }catch(e){
+    try{ if(typeof _logError === 'function') _logError('_refreshCurrentPage', e?.message||String(e), e); }catch(_){}
+  }
   // Schedule-adjacent views that might be holding stale snapshots
   const renders = [
     ['drc-mo', 'renderDRCal'],
@@ -11460,7 +11462,12 @@ function _afterMutation(){
     try{
       const fn = window[fnName];
       if(typeof fn === 'function') fn();
-    }catch(e){ /* non-fatal — this is best-effort */ }
+    }catch(e){
+      // Log render failures so admins can triage — a renderer
+      // throwing silently used to take down a whole page with no
+      // signal beyond the user seeing a blank area.
+      try{ if(typeof _logError === 'function') _logError(fnName, e?.message||String(e), e); }catch(_){}
+    }
   });
 }
 
