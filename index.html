@@ -11404,7 +11404,21 @@ function _startPollFallback(){
     // 10s interval, each of which would call _applyRemoteData and
     // _refreshCurrentPage — visible as a flicker and a fast double
     // render. The previous pull's `finally` block clears this flag.
-    if(_pollInFlight) return;
+    //
+    // Watchdog: if the flag has been set for longer than _POLL_STUCK_MS
+    // the previous pull likely hung forever (the await never resolved,
+    // so the finally never ran). Force-clear and proceed — losing one
+    // hung pull is far better than killing polling forever.
+    if(_pollInFlight){
+      if(_pollStartedAt && (Date.now() - _pollStartedAt) > _POLL_STUCK_MS){
+        console.warn('[RS] Poll watchdog: forcing _pollInFlight clear after',
+          ((Date.now()-_pollStartedAt)/1000).toFixed(1)+'s stuck');
+        _pollInFlight = false;
+        _pollStartedAt = 0;
+      } else {
+        return;
+      }
+    }
     if(S._lastSaved&&(new Date()-S._lastSaved)<5000) return; // skip if we just saved
     // Skip when the tab isn't visible — saves a Supabase round-trip
     // every 10-20s on every background tab. The visibilitychange
