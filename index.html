@@ -22334,6 +22334,23 @@ function submitSwapRequest(){
 /* ─── USER MANAGEMENT ─── */
 async function adminCreateAccount(){
   if(!_adminOnly('create accounts'))return;
+  // Disable the Create button + freeze inputs while the create-user
+  // edge function is in-flight. Audit caught the previous behavior:
+  // admin clicks Create → 2-3s round trip with only "Creating…" text;
+  // double-clicks created duplicates. Re-enable in `finally` below.
+  const submitBtn = document.getElementById('ca-submit-btn');
+  const inputs = ['ca-first','ca-last','ca-email','ca-pw','ca-role','ca-phys']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.dataset._origLabel = submitBtn.textContent; submitBtn.textContent = 'Creating…'; }
+  inputs.forEach(i => { i.disabled = true; });
+  const _reenable = () => {
+    if(submitBtn){ submitBtn.disabled = false; if(submitBtn.dataset._origLabel) submitBtn.textContent = submitBtn.dataset._origLabel; }
+    inputs.forEach(i => { i.disabled = false; });
+  };
+  // Wrap the body in a try so we always re-enable. We'll add `finally`
+  // at the function's existing return points by making `_done` an
+  // explicit cleanup helper called wherever the function returns.
+  const _done = (ret) => { _reenable(); return ret; };
   const first=sanitizeNameInput(document.getElementById('ca-first')?.value||'');
   const last=sanitizeNameInput(document.getElementById('ca-last')?.value||'');
   const email=(document.getElementById('ca-email')?.value||'').trim().toLowerCase();
