@@ -12251,7 +12251,12 @@ function ancComp(physId, ym){
   const atAnc = irShifts.filter(s => s.site === p.anchorSite).length;
 
   const pct = Math.round(atAnc / tot * 100);
-  return {tot, atAnc, pct, ok: pct >= S.cfg.anchorPct, anchor: p.anchorSite};
+  // Null-safe S.cfg read — during a remote restore S.cfg can briefly
+  // be undefined, and an unchecked `.anchorPct` throws. Default to
+  // the 70% practice norm if missing; same pattern used in three
+  // other call sites (see line 18146 et al).
+  const _anchorTgt = (S.cfg && S.cfg.anchorPct) || 70;
+  return {tot, atAnc, pct, ok: pct >= _anchorTgt, anchor: p.anchorSite};
 }
 
 function ancBadge(c){
@@ -12262,7 +12267,9 @@ function ancBadge(c){
 }
 
 function ancBar(pct){
-  const cls = pct >= S.cfg.anchorPct ? 'af-ok' : pct >= 40 ? 'af-lo' : 'af-bad';
+  // Same null-safe S.cfg read as ancComp — see comment there.
+  const _anchorTgt = (S.cfg && S.cfg.anchorPct) || 70;
+  const cls = pct >= _anchorTgt ? 'af-ok' : pct >= 40 ? 'af-lo' : 'af-bad';
   return `<div class="anc-track"><div class="anc-fill ${cls}" style="width:${Math.min(100,pct)}%"></div></div>`;
 }
 
