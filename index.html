@@ -18695,12 +18695,19 @@ function previewIRShiftAA(){
   });
   _irsaPreview.forEach(function(a){S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup,slotLabel:a.slotLabel||''});});
   var n=_irsaPreview.length;_irsaPreview=[];_irsaDRPreview=[];triggerSave();
+  // Bug fix: previously this function only called renderIRCal +
+  // renderDRCal + renderDRBuilder inline, which left the dashboard,
+  // FTE monitor, fairness scoreboard, coverage gap detector, and
+  // unfilled-slots tab stale until the user navigated. Worse, the
+  // inline render calls fired BEFORE the next paint, so even when
+  // _shiftsOnDate's date-index rebuild WAS scheduled, the calendar
+  // rendered the second-most-recent state on subsequent apply runs.
+  // _afterMutation() runs the full refresh fan-out and is what every
+  // other mutation path uses.
+  if(typeof _afterMutation === 'function') _afterMutation();
   var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
   if(box)box.innerHTML='<div class="note ns">\u2713 '+n+' IR shift(s) assigned for '+periodLbl+'.</div>';
   if(applyBtn)applyBtn.style.display='none';
-  if(document.getElementById('irc-mo'))renderIRCal();
-  if(document.getElementById('drc-mo'))renderDRCal();
-  if(document.getElementById('drb-tbody'))renderDRBuilder();
 }
 
 function clearIRShiftsPeriod(){
