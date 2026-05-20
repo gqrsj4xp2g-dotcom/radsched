@@ -11518,8 +11518,35 @@ function _registerServiceWorker(){
   // deployed the SW yet.
   fetch('/sw.js', {method:'HEAD'}).then(resp => {
     if(!resp.ok) return; // not deployed yet — silent
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => { console.log('[RS] Service worker registered ✓ scope:', reg.scope); })
+    // updateViaCache:'none' tells the browser to NEVER serve sw.js from
+    // HTTP cache when checking for SW updates. Without this, a CDN-
+    // cached sw.js could keep us on an old version even after deploy
+    // (user force-reloads, browser still sees old sw.js, no update
+    // detected, old SW keeps serving cached shell — user reports "the
+    // new version isn't showing up no matter how many times I reload").
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        console.log('[RS] Service worker registered ✓ scope:', reg.scope);
+        // Aggressively check for a new SW on this page load and again
+        // every 60s while the tab is open. Cheap (just a HEAD on sw.js
+        // when nothing changed) and means deploys propagate to long-
+        // lived tabs without the user having to do anything.
+        try{ reg.update(); }catch(_){}
+        setInterval(() => { try{ reg.update(); }catch(_){} }, 60_000);
+        // When a new SW reaches "installed" state with another SW
+        // currently in control, that's an update. Tell it to skip
+        // waiting so it activates immediately, then the
+        // 'controllerchange' listener below reloads the page.
+        reg.addEventListener('updatefound', () => {
+          const installing = reg.installing;
+          if(!installing) return;
+          installing.addEventListener('statechange', () => {
+            if(installing.state === 'installed' && navigator.serviceWorker.controller){
+              try{ installing.postMessage({ type: 'rs:skip-waiting' }); }catch(_){}
+            }
+          });
+        });
+      })
       .catch(err => { console.warn('[RS] Service worker registration failed:', err); });
   }).catch(() => { /* probe failed — likely network error or no sw.js, silent */ });
   // When the SW posts an update notification, surface a non-blocking
@@ -11531,6 +11558,19 @@ function _registerServiceWorker(){
     if(m && m.type === 'rs:sw-updated'){
       _showSwUpdateBanner(m.version || 'new');
     }
+  });
+  // 'controllerchange' fires when the new SW activates and takes over
+  // control of this page. That's the safe moment to reload — at this
+  // point a refresh will be served by the NEW SW with the NEW shell.
+  // Guard with a one-shot flag so a SW that posts multiple updates
+  // doesn't trigger a reload loop.
+  let _reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(_reloaded) return;
+    _reloaded = true;
+    // Tiny delay so any in-flight save the user just triggered
+    // (Cmd+S, debounced edit) has a chance to flush via beforeunload.
+    setTimeout(() => { try{ location.reload(); }catch(_){} }, 150);
   });
 }
 let _swUpdateBannerShown = false;
