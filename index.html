@@ -30363,7 +30363,7 @@ function _renderDRTable(){
         </td>
       </tr>`;
     }
-    const p=S.physicians.find(x=>x.id===s.physId);const isAnc=p?.anchorSite===s.site;
+    const p=_physById(s.physId);const isAnc=p?.anchorSite===s.site;
     const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
     return`<tr><td>${pnameHtml(s.physId)}</td><td>${s.date}</td><td><span class="tag ${cls}">${s.shift}</span></td><td>${s.site}</td>
     <td>${s.autoHome?'<span class="tag" style="background:#fdf4ff;color:#6b21a8">Auto-Home</span>':isAnc?'<span class="tag tg">✓ Anchor</span>':'<span class="tag tgr">Non-anchor</span>'}</td>
@@ -34227,7 +34227,7 @@ function previewAA(){
   if(hospPrev.length+wkPrev.length>0){
     html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Date</th><th>Type</th><th>Site</th><th>Anchor?</th></tr></thead><tbody>';
     [...hospPrev,...wkPrev].slice(0,30).forEach(a=>{
-      const p=S.physicians.find(x=>x.id===a.physId);
+      const p=_physById(a.physId);
       const site=a.site||''; const isAnc=p?.anchorSite===site;
       html+=`<tr><td>${pnameHtml(a.physId)}</td><td>${a.satDate||a.date}</td><td><span class="tag ${a.type==='wk'?'tg':'tb'}">${a.type==='wk'?'Weekend':a.shift}</span></td><td>${site}</td><td>${isAnc?'<span class="tag tg">✓</span>':'—'}</td></tr>`;
     });
@@ -34447,7 +34447,7 @@ function renderIRCal(){
       // Previously this only surfaced autoHome shifts, hiding legitimate regular
       // DR assignments made via the Schedule Builder or import.
       _shiftsOnDate('dr', c.date).filter(s=>(!fpid||s.physId===fpid)).forEach(s=>{
-        const p=S.physicians.find(x=>x.id===s.physId);
+        const p=_physById(s.physId);
         if(!p||p.irFte===0)return;             // only IR-eligible physicians
         if(fg&&p.irGroup!==fg)return;          // respect IR group filter
 
@@ -34503,13 +34503,13 @@ function renderIRCal(){
           }
           if(fpid && !participantIds.includes(fpid)) return;
           const irParticipants = participantIds.filter(pid => {
-            const pp = S.physicians.find(x => x.id === pid);
+            const pp = _physById(pid);
             return pp && (pp.irFte > 0);
           });
           if(!irParticipants.length) return;
           if(fg){
             const hasGroupMatch = irParticipants.some(pid => {
-              const pp = S.physicians.find(x => x.id === pid);
+              const pp = _physById(pid);
               return pp && pp.irGroup === fg;
             });
             if(!hasGroupMatch) return;
