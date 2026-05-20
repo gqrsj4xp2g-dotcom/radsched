@@ -34545,7 +34545,7 @@ function renderIRCal(){
         // falls back to the physician's current irGroup.
         const _m = /^IR-(.+)$/.exec(h.group||'');
         if(_m) return _m[1] === fg;
-        const ph=S.physicians.find(x=>x.id===h.physId);
+        const ph=_physById(h.physId);
         return ph?.irGroup===fg;
       }
       return true;
@@ -34557,8 +34557,8 @@ function renderIRCal(){
       </div>`;
     });
     (vm[c.date]||[]).filter(pid=>{
-      const p=S.physicians.find(x=>x.id===pid&&x.irFte>0);
-      return p&&(!fg||p.irGroup===fg)&&(!fpid||pid===fpid);
+      const p=_physById(pid);
+      return p && p.irFte>0 && (!fg||p.irGroup===fg) && (!fpid||pid===fpid);
     }).forEach(pid=>{
       metaEvs+=`<div class="ev evac" title="${pnameHtml(pid)} — Vacation/Time Off">
         <div style="font-weight:700;font-size:11px">${pshort(pid)}</div>
