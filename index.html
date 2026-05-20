@@ -24858,7 +24858,14 @@ function _aiExecuteTool(name, input) {
   if(name === 'assign_dr_shift'){
     if(!adminOk) return { ok:false, error:'Admin access required.' };
     const {physId, date, shift, site, sub, notes, force} = input;
-    const p = S.physicians.find(x=>x.id===physId);
+    // Parameter validation: catch malformed inputs BEFORE they hit
+    // the data layer. Without this, a date like "Jan 15" or "2026/01/01"
+    // would silently fail vacation-match + create a record with an
+    // unparseable date string. The AI agent gets a clear error it
+    // can quote back and recover from.
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return { ok:false, error:'date must be in YYYY-MM-DD format (got: ' + JSON.stringify(date) + ').' };
+    if(!['1st','2nd','3rd','Home'].includes(shift)) return { ok:false, error:'shift must be one of: 1st, 2nd, 3rd, Home (got: ' + JSON.stringify(shift) + ').' };
+    const p = _physById(physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
     const vd = vacDays(physId);
     if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
