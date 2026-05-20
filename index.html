@@ -1635,15 +1635,25 @@ tbody tr:hover{background:var(--bg3)}
   <div class="auth-card">
     <div class="auth-card-title">Welcome back</div>
     <div class="auth-card-sub">Sign in to your practice account</div>
-    <div class="auth-tabs">
-      <div class="auth-tab on" id="at-login" onclick="authTab('login')">Sign In</div>
-      <div class="auth-tab" id="at-reg" onclick="authTab('reg')">Create Account</div>
+    <div class="auth-tabs" role="tablist">
+      <!-- Keyboard accessibility: each tab needs role/tabindex/keydown
+           so keyboard-only users can switch with arrow keys, Enter,
+           or Space. Previously a <div onclick> was visible-only. -->
+      <div class="auth-tab on" id="at-login" onclick="authTab('login')"
+        role="tab" tabindex="0" aria-selected="true" aria-controls="af-login"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();authTab('login');}">Sign In</div>
+      <div class="auth-tab" id="at-reg" onclick="authTab('reg')"
+        role="tab" tabindex="0" aria-selected="false" aria-controls="af-reg"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();authTab('reg');}">Create Account</div>
     </div>
-    <div class="aerr" id="aerr"></div>
+    <div class="aerr" id="aerr" role="alert"></div>
 
     <form id="af-login" onsubmit="event.preventDefault();doLogin();" autocomplete="on">
-      <div class="afield"><label>Email</label><input id="li-email" type="email" name="username" autocomplete="username" placeholder="you@hospital.org"></div>
-      <div class="afield"><label>Password</label><input id="li-pw" type="password" name="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <!-- `for=` ties each label to its input; clicking the label
+           focuses the field. Without it, the label is just decorative
+           text and screen readers don't announce the relationship. -->
+      <div class="afield"><label for="li-email">Email</label><input id="li-email" type="email" name="username" autocomplete="username" placeholder="you@hospital.org"></div>
+      <div class="afield"><label for="li-pw">Password</label><input id="li-pw" type="password" name="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
       <button class="abtn" type="submit">Sign In</button>
       <div style="text-align:right;margin-top:6px">
         <a href="#" onclick="event.preventDefault();doForgotPassword()" style="font-size:11px;color:var(--blue-t);text-decoration:none">Forgot password?</a>
@@ -1652,12 +1662,12 @@ tbody tr:hover{background:var(--bg3)}
 
     <div id="af-reg" style="display:none">
       <div class="g2">
-        <div class="afield"><label>First Name</label><input id="rf-first" placeholder="Jane"></div>
-        <div class="afield"><label>Last Name</label><input id="rf-last" placeholder="Smith"></div>
+        <div class="afield"><label for="rf-first">First Name</label><input id="rf-first" placeholder="Jane"></div>
+        <div class="afield"><label for="rf-last">Last Name</label><input id="rf-last" placeholder="Smith"></div>
       </div>
-      <div class="afield"><label>Email</label><input id="rf-email" type="email" placeholder="you@hospital.org"></div>
-      <div class="afield"><label>Password</label><input id="rf-pw" type="password" placeholder="Min 8 characters"></div>
-      <div class="afield"><label>Confirm Password</label><input id="rf-pw2" type="password" placeholder="Repeat password"></div>
+      <div class="afield"><label for="rf-email">Email</label><input id="rf-email" type="email" placeholder="you@hospital.org"></div>
+      <div class="afield"><label for="rf-pw">Password</label><input id="rf-pw" type="password" placeholder="Min 8 characters"></div>
+      <div class="afield"><label for="rf-pw2">Confirm Password</label><input id="rf-pw2" type="password" placeholder="Repeat password"></div>
       <div class="afield"><label>Account Role</label>
         <div class="note ni" style="font-size:11px;line-height:1.4; margin-top:4px">
           New registrations are created as standard Physician / User accounts. Administrator accounts must be added by an existing admin from the practice dashboard.
