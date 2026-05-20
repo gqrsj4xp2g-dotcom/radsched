@@ -45286,13 +45286,31 @@ function _initSupabase(){
   }catch(e){console.error('[RS] Supabase init failed:',e);return null;}
 }
 
+// Track consecutive pull failures so we can surface a "sync paused"
+// banner after several silent misses. Previously _pullFromSupabase
+// just logged to console and returned null on error — the polling
+// loop kept calling but the user had no way to know real-time sync
+// was broken.
+let _pullFailCount = 0;
 async function _pullFromSupabase(){
   if(!_initSupabase())return null;
   try{
     const {data,error}=await _supabase.from(_TABLE).select('data').eq('id',_ROW_ID).single();
     if(error&&error.code!=='PGRST116')throw error;
+    _pullFailCount = 0; // success — reset counter
     return data?JSON.parse(data.data):null;
-  }catch(e){console.error('[RS] Pull failed:',e);return null;}
+  }catch(e){
+    _pullFailCount++;
+    console.error('[RS] Pull failed:',e);
+    // After 3 consecutive misses, the network or backend is likely
+    // genuinely down — surface a non-blocking toast. Only toast on
+    // the threshold transition (n === 3) so we don't spam the user
+    // every poll cycle during a sustained outage.
+    if(_pullFailCount === 3 && typeof _toast === 'function'){
+      _toast('Real-time sync paused — connectivity issue. Edits queue locally and will sync when reconnected.', 'warn');
+    }
+    return null;
+  }
 }
 
 let _isSaving=false;
