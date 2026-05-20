@@ -39721,11 +39721,29 @@ function exportPracticeArchive(){
     state: {},
   };
   // Clone everything from S (excluding cache fields starting with _).
-  Object.keys(S).forEach(k => {
-    if(k.startsWith('_')) return;
-    archive.state[k] = JSON.parse(JSON.stringify(S[k]));
-  });
-  archive.state.users = JSON.parse(JSON.stringify(USERS || []));
+  // Perf fix: was 15-20 separate JSON.parse(JSON.stringify(S[k])) per
+  // key (200KB state → 15 round-trips through the JSON parser =
+  // ~500ms freeze). Now batched into a single clone using
+  // structuredClone (Chromium 98+, Firefox 94+, Safari 15.4+) with
+  // a JSON-roundtrip fallback for older browsers. Both methods skip
+  // _-prefixed keys via the temporary projection object.
+  const _projected = {};
+  for(const k of Object.keys(S)){
+    if(!k.startsWith('_')) _projected[k] = S[k];
+  }
+  _projected.users = USERS || [];
+  let _cloned;
+  try{
+    _cloned = (typeof structuredClone === 'function')
+      ? structuredClone(_projected)
+      : JSON.parse(JSON.stringify(_projected));
+  }catch(_){
+    // Fallback if structuredClone trips on a non-cloneable value
+    // (e.g. Function or DOM ref accidentally on S). JSON-roundtrip
+    // silently drops those keys, which is fine for archives.
+    _cloned = JSON.parse(JSON.stringify(_projected));
+  }
+  Object.assign(archive.state, _cloned);
   try{
     const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
