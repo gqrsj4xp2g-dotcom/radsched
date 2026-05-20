@@ -24429,7 +24429,14 @@ function addHoliday(){
   if(S.holidays.find(h=>h.physId===pid&&h.date===date&&h.group===grp)){
     if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
   }
-  S.holidays.push({id:S.nextId++, name, date, year:yr, physId:pid, group:grp, notes});
+  const _newHolId = S.nextId++;
+  S.holidays.push({id:_newHolId, name, date, year:yr, physId:pid, group:grp, notes});
+  // Audit-trail: holiday assignment was an undocumented mutation —
+  // the holiday-call dispute path ("who picked Thanksgiving?") had
+  // no record of who assigned what when. Logged here.
+  if(typeof _audit === 'function') _audit('holiday.add', {
+    id: _newHolId, physId: pid, date, year: yr, group: grp, name,
+  });
   // Auto-sync to the correct calendar — removes conflicting auto-assignments on
   // that date so the holiday call physician "owns" the day across the app.
   if(_irMatch) _syncHolidayToIRCall(pid, date, name);
