@@ -641,9 +641,31 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   }
   .cal-day .cal-date::before{content:attr(data-dow);color:var(--txt3);font-weight:500;font-size:11px;margin-right:8px}
   .cal-day .ev{padding:8px 10px;font-size:13px;margin:3px 0;border-radius:5px;min-height:40px}
-  /* Tables go horizontal-scroll instead of breaking the layout */
-  table{font-size:12px;display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
-  th,td{padding:8px 10px;min-height:40px}
+  /* ── Tables on mobile ──
+     Strategy: keep `display:table` semantics (so headers/rows still
+     align properly) but allow cells to wrap text instead of forcing
+     nowrap. If the table is genuinely too wide, the parent .page
+     container absorbs the overflow via the safety-net rule above.
+     The earlier `display:block` form looked broken — alignment
+     between rows was lost and headers floated above misaligned
+     cells. This form keeps the table looking like a table. */
+  table{font-size:12px; max-width:100%; width:100%}
+  /* Wrap text instead of forcing a single line. white-space:normal
+     lets cells reflow; overflow-wrap:anywhere breaks long
+     unbreakable tokens. */
+  table th, table td{
+    padding:8px 10px;
+    min-height:40px;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+    vertical-align:top;
+  }
+  /* Genuinely wide tables (>5 columns, like Anchor Report) can opt
+     into horizontal scrolling by wrapping in <div class="tbl-scroll">
+     in their template, or by adding the class via JS. */
+  .tbl-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%}
+  .tbl-scroll > table{min-width:520px} /* allow internal width inside the scroller */
   /* Modals full-screen-ish */
   .modal{max-width:100vw;width:100%;height:100%;border-radius:0;max-height:100vh}
   .modal-wrap{padding:0}
