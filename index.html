@@ -666,6 +666,63 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
      in their template, or by adding the class via JS. */
   .tbl-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%}
   .tbl-scroll > table{min-width:520px} /* allow internal width inside the scroller */
+  /* ── Targeted mobile fixes for specific overflow offenders ──
+     The mobile audit (rs-v69) flagged these as templates that
+     bake desktop dimensions into inline styles, overriding the
+     general .fg / .flex / [style*="..."] guards above. */
+  /* Calendar 7-column grid: don't stretch past viewport. The cell
+     contents already collapse to a vertical-list on phones via the
+     .cal-body rule above; this is a backstop for any other 7-col
+     usage. */
+  .cal-grid, .cal-grid-ir{
+    max-width:100%;
+    grid-template-columns:repeat(7, minmax(0, 1fr)) !important;
+  }
+  /* Chat left-sidebar (200px) → narrower on phone. */
+  #page-chat [style*="width:200px"],
+  #page-chat [style*="width: 200px"]{
+    width:36vw !important;
+    max-width:140px !important;
+  }
+  /* Date / number / time / month inputs that bake `width:140px` etc.
+     in inline styles. Override to fill the available row width. */
+  input[type=date][style*="width:"],
+  input[type=time][style*="width:"],
+  input[type=month][style*="width:"],
+  input[type=number][style*="width:"]{
+    width:100% !important;
+    max-width:100% !important;
+  }
+  /* `.rs-cp-name` (communication-preferences row name) had
+     white-space:nowrap that could force a long physician name to
+     push the parent flex row past viewport width. Allow wrap. */
+  .rs-cp-name{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+  }
+  /* Auto-fill grids that ask for minimum 140px per cell — too wide
+     for phones. Allow them to drop down to 100px so 2 columns fit
+     on a 360px screen instead of 1 column with awkward padding. */
+  [style*="auto-fill,minmax(140px"],
+  [style*="auto-fill, minmax(140px"],
+  [style*="auto-fill,minmax(160px"],
+  [style*="auto-fill, minmax(160px"]{
+    grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)) !important;
+  }
+  /* Modal cards with hardcoded `width:420px` etc. inline — clamp
+     so they don't overhang on a 375px viewport. */
+  .card[style*="width:420px"],
+  .card[style*="width: 420px"],
+  .card[style*="width:480px"],
+  .card[style*="width: 480px"],
+  .card[style*="width:500px"],
+  .card[style*="width: 500px"]{
+    width:95vw !important;
+    max-width:100% !important;
+  }
   /* Modals full-screen-ish */
   .modal{max-width:100vw;width:100%;height:100%;border-radius:0;max-height:100vh}
   .modal-wrap{padding:0}
