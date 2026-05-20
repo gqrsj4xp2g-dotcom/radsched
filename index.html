@@ -14675,7 +14675,31 @@ function startEditVac(id){
   _editingVacId = id;
   renderVacations();
 }
-function cancelEditVac(){ _editingVacId = null; renderVacations(); }
+function cancelEditVac(){
+  // Dirty-check: if the user changed any field in the row, confirm
+  // before discarding. The old behavior silently dropped edits the
+  // moment the user clicked ✕ Cancel; this catches the common
+  // "fat-finger" misclick.
+  if(_editingVacId != null){
+    const v = (S.vacations || []).find(x => x.id === _editingVacId);
+    if(v){
+      const physEl  = document.getElementById(`vace-phys-${_editingVacId}`);
+      const typeEl  = document.getElementById(`vace-type-${_editingVacId}`);
+      const startEl = document.getElementById(`vace-start-${_editingVacId}`);
+      const endEl   = document.getElementById(`vace-end-${_editingVacId}`);
+      const notesEl = document.getElementById(`vace-notes-${_editingVacId}`);
+      const changed =
+        (physEl  && +physEl.value !== v.physId) ||
+        (typeEl  && typeEl.value  !== v.type)   ||
+        (startEl && startEl.value !== v.start)  ||
+        (endEl   && endEl.value   !== v.end)    ||
+        (notesEl && (notesEl.value || '') !== (v.notes || ''));
+      if(changed && !confirm('Discard unsaved changes to this vacation?')) return;
+    }
+  }
+  _editingVacId = null;
+  renderVacations();
+}
 function saveEditVac(id){
   if(!_adminOnly('edit vacation')) return;
   const v = S.vacations.find(x => x.id === id); if(!v) return;
