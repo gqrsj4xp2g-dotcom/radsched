@@ -12864,6 +12864,15 @@ function _toggleMobileNav(force){
 // boot; the response is HTTP-cached by the browser. The result is
 // written into _RS_BUILD_TAG and the pill's textContent is updated in
 // place if the pill has already mounted.
+// ── HTML build tag baked at deploy time ──
+// This MUST match the CACHE_VERSION in sw.js at the time index.html
+// is built. The boot probe below compares this constant against the
+// deployed sw.js's CACHE_VERSION; a mismatch means the HTML the
+// user is looking at is stale, and we auto-heal by nuking caches +
+// unregistering the SW + reloading. Without this, users could sit
+// indefinitely on a stale shell whenever an old SW served them
+// the OLD index.html that pinned them to an OLD pill-click handler.
+const _RS_HTML_BUILD = 'rs-v72';
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
@@ -12881,6 +12890,38 @@ let _RS_BUILD_TAG = '…';
       _RS_BUILD_TAG = m[1];
       const pill = document.getElementById('rs-build-pill');
       if(pill) pill.textContent = _RS_BUILD_TAG;
+      // ── Auto-heal stuck users ──
+      // If the live sw.js's version differs from THIS html's baked
+      // build, the user is on a stale shell. Nuke every cache,
+      // unregister every SW, and reload with a cache-bust query.
+      // Guard against reload loops with sessionStorage so a one-
+      // shot heal doesn't trap the tab refreshing forever.
+      try{
+        if(_RS_BUILD_TAG && _RS_BUILD_TAG !== '…' && _RS_BUILD_TAG !== _RS_HTML_BUILD){
+          const HEAL_KEY = 'rs.autoHeal.' + _RS_BUILD_TAG;
+          if(sessionStorage.getItem(HEAL_KEY)){
+            console.warn('[RS] Auto-heal already attempted this session ('+_RS_HTML_BUILD+' → '+_RS_BUILD_TAG+'); not retrying.');
+          } else {
+            sessionStorage.setItem(HEAL_KEY, '1');
+            console.warn('[RS] Stale HTML detected ('+_RS_HTML_BUILD+' on a server serving '+_RS_BUILD_TAG+'). Auto-healing…');
+            try{
+              if('caches' in self){
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+              }
+            }catch(_){}
+            try{
+              if('serviceWorker' in navigator){
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(reg => reg.unregister()));
+              }
+            }catch(_){}
+            const url = new URL(location.href);
+            url.searchParams.set('_rsheal', Date.now().toString(36));
+            location.replace(url.toString());
+          }
+        }
+      }catch(_){}
     }
   }catch(_){ /* offline / no SW — pill stays as '…' */ }
 })();
