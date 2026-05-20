@@ -39788,7 +39788,10 @@ function _renderEquityHeatmap(){
     const fteShare = ((p.drFte || 0) + (p.irFte || 0)) / totalFte;
     const cell = (label, m, total) => {
       const expected = total * fteShare;
-      const actual = m[p.id];
+      // m[p.id] may be undefined for physicians with zero assignments
+      // in the horizon. `undefined / expected` would yield NaN, which
+      // renders as "NaN · NaN%" in the cell. Coerce to 0 first.
+      const actual = m[p.id] || 0;
       const ratio = expected > 0 ? actual / expected : 1;
       const { bg, fg } = ratioColor(ratio);
       const pct = Math.round(ratio * 100);
