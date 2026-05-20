@@ -32607,11 +32607,23 @@ function renderAuditLog(){
   // or "all changes on 2026-04-23".
   if(filter){
     rows = rows.filter(r => {
+      // Cheap checks FIRST so we can short-circuit before the
+      // expensive JSON.stringify on the detail payload. Earlier
+      // version stringified detail for every row regardless of
+      // whether action/ts already matched — at 1500 audit entries
+      // that's a ~1.5s freeze per keystroke. Now the stringify
+      // only runs when action and ts both miss, AND we cache the
+      // result on the row so re-filtering (e.g. typing more
+      // characters) doesn't re-stringify.
       const hayAction = (r.action || '').toLowerCase();
       if(hayAction.includes(filter)) return true;
       const hayTs = (r.ts || '').toLowerCase();
       if(hayTs.includes(filter)) return true;
-      const hayDetail = JSON.stringify(r.detail || {}).toLowerCase();
+      let hayDetail = r._haystackDetail;
+      if(hayDetail === undefined){
+        hayDetail = JSON.stringify(r.detail || {}).toLowerCase();
+        try{ r._haystackDetail = hayDetail; }catch(_){} // ignore frozen objects
+      }
       if(hayDetail.includes(filter)) return true;
       // Resolve physId references in the detail to physician last names
       // so "smith" matches an entry that only stored {physId: 7}.
