@@ -47373,8 +47373,21 @@ async function clearImportedPickRecords(){
   if(typeof _toast === 'function') _toast(`Cleaned up ${total} imported record${total===1?'':'s'}.`, 'ok');
 }
 
+let _pickImportInFlight = false;
 async function applyPickImport(){
   if(!_adminOnly('apply vacation picks import')) return;
+  // Re-entrancy guard for the pick-sheet import. A double-click on
+  // Apply during the _snapshotBeforeBulk round-trip used to fire
+  // two concurrent imports and double-add every record. 30s
+  // watchdog clears the lock if any branch throws or returns
+  // before the normal completion path runs.
+  if(_pickImportInFlight){
+    if(typeof _toast === 'function') _toast('Import already running…', 'info');
+    return;
+  }
+  _pickImportInFlight = true;
+  const _pickImportWatchdog = setTimeout(() => { _pickImportInFlight = false; }, 60000);
+  try{
   const data = _xlPickData || {};
   // The parser already de-duplicated against current state when building
   // the preview, so `data.vacations` and `data.shifts` should NOT include
