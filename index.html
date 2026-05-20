@@ -26312,21 +26312,36 @@ async function _notify(kind, opts){
       recipList.push({email: adminInbox.toLowerCase(), name: 'Admin Alerts'});
     }
 
-    const res = await fetch(`${url}/functions/v1/send-notification`, {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'apikey':key,
-        'Authorization':`Bearer ${key}`
-      },
-      body: JSON.stringify({
-        kind,
-        subject: opts.subject,
-        body: opts.body,
-        recipients: recipList,
-        from_practice: _PRACTICE_ID||'main'
-      })
-    });
+    // 10s timeout via AbortController. Previously the fetch had no
+    // timeout — a hung edge function (slow region, rate-limited
+    // Resend, malformed recipient causing internal retry storm)
+    // could block this call indefinitely, and any await chain that
+    // awaited _notify hung with it. 10s is well above normal
+    // edge-function p99 but short enough that a stuck call surfaces
+    // quickly. AbortError gets caught by the outer catch below.
+    const _notifCtrl = new AbortController();
+    const _notifTimer = setTimeout(() => _notifCtrl.abort(), 10000);
+    let res;
+    try{
+      res = await fetch(`${url}/functions/v1/send-notification`, {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'apikey':key,
+          'Authorization':`Bearer ${key}`
+        },
+        body: JSON.stringify({
+          kind,
+          subject: opts.subject,
+          body: opts.body,
+          recipients: recipList,
+          from_practice: _PRACTICE_ID||'main'
+        }),
+        signal: _notifCtrl.signal
+      });
+    } finally {
+      clearTimeout(_notifTimer);
+    }
     if(!res.ok){
       let errBody={};
       try{errBody=await res.json();}catch(e){errBody={raw:await res.text().catch(()=>'')};}
