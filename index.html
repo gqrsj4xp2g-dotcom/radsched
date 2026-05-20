@@ -124,75 +124,154 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
    Edit the source file, not this block. See src/README.md. */
    Edit the source file, not this block. See src/README.md. */
 /* ── AUTH ──
-   Apple-style single-card sign-in. Symmetrical, centered, generous
-   whitespace, system fonts, no gradients. Off-white background
-   matches Apple's #f5f5f7 ID page; white card with a soft elevation
-   shadow; restrained type with -0.02em letter-spacing on the
-   heading; everything on an 8px spacing grid.
+   Enterprise split-screen sign-in. LEFT: dark navy hero with
+   prominent logo, wordmark, tagline, and trust signals. RIGHT:
+   clean white form panel with a sized-for-presence form. Both
+   panels are 50/50 on desktop and stack on tablet/phone.
 
-   Scope: the auth page overrides the app's default Georgia serif
-   with -apple-system / SF Pro Display so the auth screen has a
-   distinct, polished feel independent of the in-app typography. */
+   Inspirations: Atlassian, Linear, Notion enterprise login —
+   substantial brand presence balanced against a confident form. */
 #auth{
+  display:flex;
+  min-height:100vh;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter','Segoe UI',Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  color:#1d1d1f;
+}
+
+/* ── BRAND HERO (left panel on desktop) ── */
+.auth-hero{
+  flex:0 0 46%;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  padding:clamp(40px, 5vw, 80px);
+  background:
+    radial-gradient(800px 600px at 20% 30%, rgba(59,130,246,0.18), transparent 60%),
+    radial-gradient(900px 800px at 100% 100%, rgba(15,31,51,0.4), transparent 60%),
+    linear-gradient(155deg, #0a1f3a 0%, #050d1c 100%);
+  color:#fff;
+  position:relative;
+  overflow:hidden;
+}
+.auth-hero::before{
+  /* Subtle vertical gradient strip on the right edge that fades
+     into the form panel — softens the hard color boundary on
+     wider screens. */
+  content:'';
+  position:absolute;
+  inset:0;
+  background:linear-gradient(90deg, transparent 88%, rgba(255,255,255,0.04) 100%);
+  pointer-events:none;
+}
+.auth-hero-inner{
+  position:relative;
+  z-index:1;
+  max-width:480px;
+  width:100%;
+  margin:0 auto;
+}
+.auth-hero-logo{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:48px;
+}
+.auth-hero-logo svg{
+  width:44px;
+  height:44px;
+  flex-shrink:0;
+}
+.auth-hero-logo-text{
+  font-size:18px;
+  font-weight:600;
+  letter-spacing:-0.015em;
+  color:#fff;
+}
+.auth-hero-title{
+  font-size:clamp(28px, 3.6vw, 44px);
+  font-weight:600;
+  letter-spacing:-0.025em;
+  line-height:1.15;
+  color:#fff;
+  margin-bottom:18px;
+}
+.auth-hero-subtitle{
+  font-size:clamp(15px, 1.4vw, 17px);
+  color:rgba(255,255,255,0.65);
+  line-height:1.55;
+  margin-bottom:48px;
+  max-width:480px;
+  font-weight:400;
+  letter-spacing:-0.005em;
+}
+.auth-hero-features{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+}
+.auth-hero-feature{
+  display:flex;
+  align-items:flex-start;
+  gap:14px;
+  color:rgba(255,255,255,0.85);
+  font-size:14.5px;
+  letter-spacing:-0.005em;
+  line-height:1.5;
+}
+.auth-hero-feature-icon{
+  flex-shrink:0;
+  width:22px;
+  height:22px;
+  border-radius:6px;
+  background:rgba(59,130,246,0.18);
+  color:#60a5fa;
   display:flex;
   align-items:center;
   justify-content:center;
-  min-height:100vh;
-  padding:clamp(16px, 4vw, 48px);
-  /* Background: subtle two-stop radial that anchors the card on
-     wide monitors without becoming "busy". Apple ID page uses a
-     similar near-invisible gradient. */
-  background:
-    radial-gradient(900px 600px at 50% 0%, rgba(0,113,227,0.05), transparent 70%),
-    #f5f5f7;
-  /* Apple-system font stack just on auth — `body` keeps Georgia
-     elsewhere. -apple-system is SF Pro on Apple devices, Segoe UI
-     on Windows, Roboto on Android — all sans-serifs that render
-     the auth card crisply. */
-  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,Inter,sans-serif;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
+  font-size:13px;
+  font-weight:700;
+  margin-top:1px;
+}
+.auth-hero-footer{
+  margin-top:48px;
+  padding-top:24px;
+  border-top:1px solid rgba(255,255,255,0.08);
+  font-size:12.5px;
+  color:rgba(255,255,255,0.4);
+  letter-spacing:-0.005em;
+}
+
+/* ── FORM PANEL (right panel on desktop) ── */
+.auth-form-panel{
+  flex:1 1 54%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:clamp(40px, 5vw, 80px);
+  background:#ffffff;
 }
 .auth-card{
   background:#ffffff;
-  border-radius:20px;
-  /* Generous desktop padding — Apple's actual sign-in cards are
-     substantial. 64px vertical / 64px horizontal at large viewports
-     scales down to 32/28 on phones via clamp. */
-  padding:clamp(36px, 5.5vw, 64px) clamp(28px, 5.5vw, 64px);
   width:100%;
-  /* Desktop card is ~520px wide so it has real screen presence;
-     mobile fills the viewport minus the page padding. Earlier 420px
-     looked mobile-sized on a 1440px monitor. */
-  max-width:520px;
-  /* Multi-stop soft elevation gives the card more presence on a
-     wide screen without looking "stacked". Plus a 1px hairline
-     border at very low contrast. */
-  box-shadow:
-    0 1px 2px rgba(0,0,0,0.05),
-    0 12px 32px -8px rgba(0,0,0,0.10),
-    0 32px 80px -24px rgba(0,113,227,0.08);
-  border:1px solid rgba(0,0,0,0.06);
+  max-width:420px;
+  padding:0;
+  border:none;
+  box-shadow:none;
 }
-.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:clamp(20px, 2.5vw, 28px)}
-.auth-logo-wrap svg{
-  width:clamp(64px, 7vw, 84px);
-  height:clamp(64px, 7vw, 84px);
-  /* No drop-shadow — Apple icons sit flat on the background. */
-}
+.auth-logo-wrap{display:none}
 .auth-brand{
-  font-size:clamp(24px, 2.8vw, 30px);
+  font-size:clamp(26px, 2.8vw, 32px);
   font-weight:600;
-  letter-spacing:-0.022em;
+  letter-spacing:-0.025em;
   color:#1d1d1f;
-  text-align:center;
   margin-bottom:8px;
 }
 .auth-tagline{
-  font-size:clamp(14px, 1.4vw, 15px);
+  font-size:clamp(14.5px, 1.4vw, 15.5px);
   color:#6e6e73;
-  text-align:center;
-  margin-bottom:clamp(24px, 3vw, 32px);
+  margin-bottom:clamp(28px, 3vw, 36px);
   font-weight:400;
   letter-spacing:-0.005em;
 }
