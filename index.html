@@ -20695,10 +20695,15 @@ async function applyPhysImport(){
     return;
   }
   _physImportInFlight = true;
+  // Safety net: if any branch throws or returns early before the
+  // bottom clears the flag, this watchdog releases the lock after
+  // 30s so the user isn't permanently stuck.
+  const _physImportWatchdog = setTimeout(() => { _physImportInFlight = false; }, 30000);
   const data = _xlPhysData;
   if(!data || (!data.willCreate.length && !data.willUpdate.length)){
     alert('Nothing to import.');
     _physImportInFlight = false;
+    clearTimeout(_physImportWatchdog);
     return;
   }
   if(typeof _snapshotBeforeBulk === 'function'){
