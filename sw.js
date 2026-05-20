@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v67';
+const CACHE_VERSION = 'rs-v68';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
@@ -56,31 +56,59 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
 
+  // ── Navigation / HTML shell: NETWORK-FIRST ──
+  // The HTML shell (index.html, / ) used to be stale-while-revalidate,
+  // which meant a force-reload kept showing the OLD page from cache
+  // while the new version was fetched silently for "next time". Users
+  // would force-reload three or four times before seeing a deploy.
+  // Network-first means: when online, the user always gets the
+  // freshest shell on the very first reload. Cache is the offline
+  // fallback only.
+  const isNavigation = e.request.mode === 'navigate'
+    || (e.request.destination === 'document')
+    || url.pathname === '/'
+    || url.pathname.endsWith('/index.html');
+  if (isNavigation) {
+    e.respondWith(
+      fetch(e.request)
+        .then((resp) => {
+          if (resp && resp.status === 200 && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(e.request, copy)).catch(() => {});
+          }
+          return resp;
+        })
+        .catch(() => caches.match(e.request).then((cached) => cached || Promise.reject(new Error('offline'))))
+    );
+    return;
+  }
+
+  // ── Static assets: stale-while-revalidate (manifest, icons, etc.) ──
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const network = fetch(e.request)
         .then((resp) => {
-          // Cache successful 200 responses for next visit.
           if (resp && resp.status === 200 && resp.type === 'basic') {
             const copy = resp.clone();
-            caches.open(CACHE_NAME)
-              .then((c) => c.put(e.request, copy))
-              .catch(() => {});
+            caches.open(CACHE_NAME).then((c) => c.put(e.request, copy)).catch(() => {});
           }
           return resp;
         })
         .catch(() => cached || Promise.reject(new Error('offline')));
-
-      // stale-while-revalidate: return cached immediately if we have it,
-      // refresh in the background.
       return cached || network;
     })
   );
 });
 
-// Page-driven cache-bust (used by Settings → Offline Support → Re-check).
+// Page-driven cache-bust (used by Settings → Offline Support → Re-check)
+// and skip-waiting (used by the auto-update flow on the page side —
+// when the page detects a new SW reached "installed" while we still
+// have a controller, it posts {type:'rs:skip-waiting'} so the new SW
+// activates immediately, fires 'controllerchange' on the page, and
+// the page reloads on the fresh shell).
 self.addEventListener('message', (e) => {
-  if (e.data === 'rs:clear-cache') {
+  const data = e.data;
+  if (data === 'rs:clear-cache') {
     caches.keys()
       .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() =>
@@ -88,6 +116,11 @@ self.addEventListener('message', (e) => {
           cs.forEach((c) => c.postMessage('rs:cache-cleared'))
         )
       );
+    return;
+  }
+  if (data && data.type === 'rs:skip-waiting') {
+    self.skipWaiting();
+    return;
   }
 });
 
