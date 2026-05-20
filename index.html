@@ -20683,11 +20683,22 @@ function previewPhysImport(input){
   reader.readAsArrayBuffer(file);
 }
 
+let _physImportInFlight = false;
 async function applyPhysImport(){
   if(!_adminOnly('apply physicians import')) return;
+  // Re-entrancy guard. Without this, a double-click on the Apply
+  // button could push the same physicians twice while the snapshot
+  // round-trip was mid-flight. The previous behavior left the
+  // practice with duplicate rosters that required a manual cleanup.
+  if(_physImportInFlight){
+    if(typeof _toast === 'function') _toast('Import already running…', 'info');
+    return;
+  }
+  _physImportInFlight = true;
   const data = _xlPhysData;
   if(!data || (!data.willCreate.length && !data.willUpdate.length)){
     alert('Nothing to import.');
+    _physImportInFlight = false;
     return;
   }
   if(typeof _snapshotBeforeBulk === 'function'){
