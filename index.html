@@ -32593,11 +32593,16 @@ function renderAuditLog(){
     return;
   }
   // Highlight matched substrings in action / detail for visual scanning.
-  const highlight = (s, q) => {
-    if(!q) return escHtml(s);
+  // Perf fix: hoist the compiled regex to the outer scope so we don't
+  // re-build it for every row (200+ rows × 6 cells = 1200+ regex
+  // compilations per audit-log render with a filter applied).
+  const _hlRe = filter
+    ? new RegExp('(' + filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig')
+    : null;
+  const highlight = (s) => {
     const escs = escHtml(s);
-    const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-    return escs.replace(re, '<mark style="background:#fef08a;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
+    if(!_hlRe) return escs;
+    return escs.replace(_hlRe, '<mark style="background:#fef08a;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
   };
   el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries (most recent first)${filter ? ` matching <strong>"${escHtml(filter)}"</strong>` : ''}</div>
     <table class="tbl" style="font-size:11.5px"><thead><tr>
