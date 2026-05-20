@@ -12867,7 +12867,13 @@ function _toggleMobileNav(force){
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
-    const r = await fetch('/sw.js', { cache: 'no-cache' });
+    // Cache-bust the URL with a unique query string AND use
+    // cache:'no-store' so neither HTTP cache nor SW cache can serve
+    // a stale sw.js. The SW also explicitly bypasses sw.js fetches
+    // now (see sw.js fetch handler) so this hits the origin every
+    // time. Without both layers, the pill showed last-deployed
+    // version even after a fresh deploy.
+    const r = await fetch('/sw.js?_=' + Date.now(), { cache: 'no-store' });
     if(!r.ok) return;
     const t = await r.text();
     const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(t);
