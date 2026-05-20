@@ -9778,11 +9778,14 @@ let _PRACTICES=[];       // all practices (admin only for switching)
 // USERS loaded from embedded file data
 
 function authTab(t){
-  document.getElementById('at-login').classList.toggle('on', t==='login');
-  document.getElementById('at-reg').classList.toggle('on', t==='reg');
+  const li = document.getElementById('at-login');
+  const rg = document.getElementById('at-reg');
+  if(li){ li.classList.toggle('on', t==='login'); li.setAttribute('aria-selected', t==='login'); }
+  if(rg){ rg.classList.toggle('on', t==='reg');   rg.setAttribute('aria-selected', t==='reg'); }
   document.getElementById('af-login').style.display = t==='login'?'block':'none';
   document.getElementById('af-reg').style.display = t==='reg'?'block':'none';
-  document.getElementById('aerr').style.display='none';
+  const err = document.getElementById('aerr');
+  if(err) err.style.display='none';
 }
 function showErr(msg){const e=document.getElementById('aerr');if(!e)return;e.textContent=msg;e.style.display=msg?'block':'none';}
 
