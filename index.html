@@ -1644,8 +1644,8 @@ tbody tr:hover{background:var(--bg3)}
       <div class="afield"><label for="li-email">Email</label><input id="li-email" type="email" name="username" autocomplete="username" placeholder="you@hospital.org"></div>
       <div class="afield"><label for="li-pw">Password</label><input id="li-pw" type="password" name="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
       <button class="abtn" type="submit">Sign In</button>
-      <div style="text-align:right;margin-top:6px">
-        <a href="#" onclick="event.preventDefault();doForgotPassword()" style="font-size:11px;color:var(--blue-t);text-decoration:none">Forgot password?</a>
+      <div class="auth-secondary">
+        <a class="auth-link" href="#" onclick="event.preventDefault();doForgotPassword()">Forgot password?</a>
       </div>
     </form>
 
@@ -1657,12 +1657,10 @@ tbody tr:hover{background:var(--bg3)}
       <div class="afield"><label for="rf-email">Email</label><input id="rf-email" type="email" placeholder="you@hospital.org"></div>
       <div class="afield"><label for="rf-pw">Password</label><input id="rf-pw" type="password" placeholder="Min 8 characters"></div>
       <div class="afield"><label for="rf-pw2">Confirm Password</label><input id="rf-pw2" type="password" placeholder="Repeat password"></div>
-      <div class="afield"><label>Account Role</label>
-        <div class="note ni" style="font-size:11px;line-height:1.4; margin-top:4px">
-          New registrations are created as standard Physician / User accounts. Administrator accounts must be added by an existing admin from the practice dashboard.
-        </div>
+      <div class="auth-info">
+        New accounts are created as Physician / User. Administrator access is granted by an existing admin from your practice dashboard.
       </div>
-      <button class="abtn" onclick="doRegister()">Create Account</button>
+      <button class="abtn" onclick="doRegister()" style="margin-top:14px">Create Account</button>
     </div>
 
     <!-- ─── SUPABASE CONFIG (recovery / first-time setup) ─────────────────
@@ -1671,29 +1669,28 @@ tbody tr:hover{background:var(--bg3)}
          localStorage entry is missing or wiped is locked out — there'd be
          no way to enter credentials except DevTools.
     ─────────────────────────────────────────────────────────────────────── -->
-    <details id="auth-sb-config" style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:10px">
-      <summary style="cursor:pointer;font-size:11px;color:var(--txt3);user-select:none">
-        ⚙️ Configure Supabase connection
-        <span id="auth-sb-status" style="margin-left:6px;font-weight:600"></span>
+    <details id="auth-sb-config" class="auth-config-details">
+      <summary>
+        <span class="auth-config-summary-text">Configure Supabase connection</span>
+        <span id="auth-sb-status" class="auth-config-status"></span>
       </summary>
-      <div style="margin-top:8px;font-size:11px;color:var(--txt3);line-height:1.4">
-        Required for cross-device sync. Get these from your Supabase project: <strong>Settings → API</strong>.
-        The anon key is safe to share with end users.
+      <div class="auth-config-help">
+        Required for cross-device sync. Get these from your Supabase project: <strong>Settings → API</strong>. The anon key is safe to share.
       </div>
-      <div class="afield" style="margin-top:8px"><label>Project URL</label>
+      <div class="afield" style="margin-top:12px"><label for="auth-sb-url">Project URL</label>
         <input id="auth-sb-url" type="url" name="supabase-url" placeholder="https://YOURPROJECT.supabase.co" autocomplete="off" data-1p-ignore data-lpignore="true">
       </div>
-      <div class="afield"><label>Anon (public) key <small style="color:var(--txt3)">(safe to share — public)</small></label>
+      <div class="afield"><label for="auth-sb-key">Anon (public) key</label>
         <!--
           type="text" (NOT password) — keeps Safari/Chrome from picking this up
           as a competing login password and disabling biometric autofill on
           the real login form. The anon key is public anyway. data-1p-ignore /
           data-lpignore tell 1Password / LastPass to skip it too.
         -->
-        <input id="auth-sb-key" type="text" name="supabase-anon-key" placeholder="eyJhbGciOiJI…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" style="font-family:ui-monospace,monospace;font-size:11px">
+        <input id="auth-sb-key" type="text" name="supabase-anon-key" placeholder="eyJhbGciOiJI…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" style="font-family:ui-monospace,monospace;font-size:13px;letter-spacing:-0.005em">
       </div>
-      <button class="abtn" type="button" onclick="saveAuthSupabaseConfig()" style="margin-top:4px">💾 Save &amp; Reload</button>
-      <div id="auth-sb-msg" style="font-size:11px;margin-top:6px;min-height:14px"></div>
+      <button class="abtn" type="button" onclick="saveAuthSupabaseConfig()" style="margin-top:6px">Save &amp; Reload</button>
+      <div id="auth-sb-msg" class="auth-config-msg"></div>
     </details>
   </div><!-- /.auth-card -->
 </div>
