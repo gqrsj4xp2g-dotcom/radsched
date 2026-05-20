@@ -12594,9 +12594,17 @@ function _pageGuardSweep(){
   }
 })();
 (function _installScrollPersistence(){
+  // Double-wire guard. If `.main` isn't in the DOM on first call,
+  // wire() schedules a retry via setTimeout. Without this flag a
+  // race between DOMContentLoaded and the retry could attach the
+  // scroll listener twice — every scroll then fires two debounced
+  // localStorage writes.
+  let _wired = false;
   const wire = () => {
+    if(_wired) return true;
     const scroller = document.querySelector('.main');
     if(!scroller) return false;
+    _wired = true;
     let saveTimer = null;
     scroller.addEventListener('scroll', () => {
       clearTimeout(saveTimer);
