@@ -11627,7 +11627,7 @@ function _registerServiceWorker(){
   // Probe the sw.js URL first so we don't generate a console error if it 404s.
   // The HEAD request is cheap and the result reveals whether the admin has
   // deployed the SW yet.
-  fetch('/sw.js', {method:'HEAD'}).then(resp => {
+  fetch('/sw.js?_=' + Date.now(), {method:'HEAD', cache:'no-store'}).then(resp => {
     if(!resp.ok) return; // not deployed yet — silent
     // updateViaCache:'none' tells the browser to NEVER serve sw.js from
     // HTTP cache when checking for SW updates. Without this, a CDN-
