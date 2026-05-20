@@ -14814,7 +14814,16 @@ function addVac(){
   }
   const vType=document.getElementById('v-type').value;
   const vNotes=document.getElementById('v-notes').value;
-  S.vacations.push({id:S.nextId++,physId:pid,start:s,end:e,type:vType,notes:vNotes});
+  const _newVacId = S.nextId++;
+  S.vacations.push({id:_newVacId,physId:pid,start:s,end:e,type:vType,notes:vNotes});
+  // Audit-trail: vacation creation was an undocumented mutation —
+  // forensics on a "who scheduled me off?" dispute had nothing to
+  // reference. Now logged with full context so an admin can answer
+  // it from the audit-log search.
+  if(typeof _audit === 'function') _audit('vacation.add', {
+    id: _newVacId, physId: pid, start: s, end: e, type: vType,
+    days: Math.round((parseDateLocal(e) - parseDateLocal(s))/86400000) + 1,
+  });
   // Sold back: auto-fill all weekdays with DR home shifts, block IR assignment
   if(vType==='Vacation Sold Back'){
     let cur=parseDateLocal(s),endD=parseDateLocal(e);
