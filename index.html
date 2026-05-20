@@ -14499,7 +14499,8 @@ function bulkAssignMultiWeek(shift){
   triggerSave();
   renderDRBuilder();
   const si=document.getElementById('save-indicator');
-  const msg=`✓ Assigned ${added} × ${shift} shift for ${p.last}${skipped?` (${skipped} duplicate${skipped>1?'s':''} skipped)`:''}`;
+  const conflictPart = conflictSkipped ? ` (${conflictSkipped} skipped — already on another shift)` : '';
+  const msg=`✓ Assigned ${added} × ${shift} shift for ${p.last}${skipped?` (${skipped} duplicate${skipped>1?'s':''} skipped)`:''}${conflictPart}`;
   if(si){si.textContent=msg;si.style.color='var(--green-t)';setTimeout(()=>{si.textContent='';},5000);}
 }
 
