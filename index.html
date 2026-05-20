@@ -139,7 +139,12 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   justify-content:center;
   min-height:100vh;
   padding:clamp(16px, 4vw, 48px);
-  background:#f5f5f7;
+  /* Background: subtle two-stop radial that anchors the card on
+     wide monitors without becoming "busy". Apple ID page uses a
+     similar near-invisible gradient. */
+  background:
+    radial-gradient(900px 600px at 50% 0%, rgba(0,113,227,0.05), transparent 70%),
+    #f5f5f7;
   /* Apple-system font stack just on auth — `body` keeps Georgia
      elsewhere. -apple-system is SF Pro on Apple devices, Segoe UI
      on Windows, Roboto on Android — all sans-serifs that render
@@ -150,24 +155,33 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
 }
 .auth-card{
   background:#ffffff;
-  border-radius:18px;
-  padding:clamp(32px, 5vw, 56px) clamp(28px, 5vw, 56px);
+  border-radius:20px;
+  /* Generous desktop padding — Apple's actual sign-in cards are
+     substantial. 64px vertical / 64px horizontal at large viewports
+     scales down to 32/28 on phones via clamp. */
+  padding:clamp(36px, 5.5vw, 64px) clamp(28px, 5.5vw, 64px);
   width:100%;
-  max-width:420px;
-  /* Soft, single-layer elevation — Apple uses a near-black shadow
-     at very low alpha rather than the multi-layer "card stack"
-     look. Plus 1px hairline border at low contrast. */
-  box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 8px 24px -6px rgba(0,0,0,0.08);
+  /* Desktop card is ~520px wide so it has real screen presence;
+     mobile fills the viewport minus the page padding. Earlier 420px
+     looked mobile-sized on a 1440px monitor. */
+  max-width:520px;
+  /* Multi-stop soft elevation gives the card more presence on a
+     wide screen without looking "stacked". Plus a 1px hairline
+     border at very low contrast. */
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.05),
+    0 12px 32px -8px rgba(0,0,0,0.10),
+    0 32px 80px -24px rgba(0,113,227,0.08);
   border:1px solid rgba(0,0,0,0.06);
 }
-.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:24px}
+.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:clamp(20px, 2.5vw, 28px)}
 .auth-logo-wrap svg{
-  width:64px;
-  height:64px;
+  width:clamp(64px, 7vw, 84px);
+  height:clamp(64px, 7vw, 84px);
   /* No drop-shadow — Apple icons sit flat on the background. */
 }
 .auth-brand{
-  font-size:clamp(22px, 2.6vw, 26px);
+  font-size:clamp(24px, 2.8vw, 30px);
   font-weight:600;
   letter-spacing:-0.022em;
   color:#1d1d1f;
@@ -175,28 +189,28 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   margin-bottom:8px;
 }
 .auth-tagline{
-  font-size:14px;
+  font-size:clamp(14px, 1.4vw, 15px);
   color:#6e6e73;
   text-align:center;
-  margin-bottom:28px;
+  margin-bottom:clamp(24px, 3vw, 32px);
   font-weight:400;
   letter-spacing:-0.005em;
 }
 .auth-tabs{
   display:flex;
   background:#f5f5f7;
-  border-radius:9px;
-  padding:2px;
-  margin-bottom:24px;
+  border-radius:10px;
+  padding:3px;
+  margin-bottom:clamp(20px, 2.5vw, 26px);
 }
 .auth-tab{
   flex:1;
-  padding:8px 12px;
+  padding:clamp(9px, 1.2vw, 11px) 12px;
   text-align:center;
-  font-size:13px;
+  font-size:clamp(13px, 1.3vw, 14px);
   font-weight:500;
   cursor:pointer;
-  border-radius:7px;
+  border-radius:8px;
   color:#6e6e73;
   transition:all .15s ease;
   letter-spacing:-0.005em;
@@ -208,23 +222,23 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.06);
   font-weight:600;
 }
-.afield{margin-bottom:14px}
+.afield{margin-bottom:clamp(13px, 1.5vw, 16px)}
 .afield label{
   display:block;
-  font-size:12px;
+  font-size:clamp(12.5px, 1.2vw, 13px);
   font-weight:500;
   color:#1d1d1f;
   letter-spacing:-0.005em;
-  margin-bottom:6px;
+  margin-bottom:7px;
 }
 /* Inputs: pinned at 17px on mobile (above iOS 16px zoom threshold),
-   15px on desktop. Rounded 10px, hairline border, subtle focus ring
-   in Apple blue. */
+   16px on desktop for substantial feel. Rounded 11px, hairline
+   border, subtle focus ring in Apple blue. */
 .afield input,.afield select{
   width:100%;
-  padding:11px 14px;
+  padding:13px 16px;
   border:1px solid #d2d2d7;
-  border-radius:10px;
+  border-radius:11px;
   font-size:17px;
   font-family:inherit;
   background:#ffffff;
@@ -234,7 +248,7 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
   appearance:none;
 }
 @media(min-width:720px){
-  .afield input,.afield select{font-size:15px;padding:10px 14px}
+  .afield input,.afield select{font-size:16px;padding:12px 16px}
 }
 .afield input::placeholder{color:#86868b}
 .afield input:focus,.afield select:focus{
@@ -244,19 +258,19 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
 }
 .abtn{
   width:100%;
-  padding:12px;
+  padding:clamp(13px, 1.6vw, 15px);
   background:#0071e3;
   color:#ffffff;
   border:none;
   border-radius:980px; /* Apple-style fully-rounded pill */
-  font-size:15px;
+  font-size:clamp(15px, 1.5vw, 16px);
   font-weight:500;
   cursor:pointer;
   font-family:inherit;
   transition:background .15s ease;
   letter-spacing:-0.005em;
-  margin-top:8px;
-  min-height:44px;
+  margin-top:clamp(8px, 1vw, 12px);
+  min-height:48px;
 }
 .abtn:hover{background:#0077ed}
 .abtn:active{background:#006edb}
