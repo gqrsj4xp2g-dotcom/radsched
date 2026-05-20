@@ -47591,6 +47591,10 @@ async function applyPickImport(){
     _toast(`Imported ${vacAdded} vacation${vacAdded===1?'':'s'} + ${shAdded} shift entries`, 'ok');
   }
   _xlPickData = { vacations: [], shifts: [], unmatched: [], allWeeks: [], nameMap: {} };
+  } finally {
+    _pickImportInFlight = false;
+    clearTimeout(_pickImportWatchdog);
+  }
 }
 
 // Helper: navigate to a calendar page and pre-select the given month so the
