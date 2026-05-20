@@ -25523,6 +25523,16 @@ When the admin describes a scheduling rule, CONFIRM the structured form back to 
 Admin access is required for data-changing operations. The current user role is: ${CU?.role||'unknown'}${CU?.role==='superuser'?' (has full admin privileges)':''}.`;
 
   _aiHistory.push({ role: 'user', content: text });
+  // Token-bloat guard. localStorage save trims at 250 KB but the
+  // in-memory _aiHistory sent to the API each turn was unbounded —
+  // after 20+ turns with tool results the request payload was 100 KB+
+  // of mostly-irrelevant past context. Cap at 40 messages (~20 turns
+  // of user+assistant), keeping the most recent. The visible
+  // _aiTranscript is unaffected so the user still sees full history.
+  const _HIST_MAX = 40;
+  if(_aiHistory.length > _HIST_MAX){
+    _aiHistory = _aiHistory.slice(-_HIST_MAX);
+  }
   // Track this in the visible transcript so we can restore it across reloads.
   _aiTranscript.push({ kind:'msg', role:'user', text, ts: Date.now() });
 
