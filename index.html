@@ -6604,6 +6604,15 @@ async function clearWkCalls(mode){
 async function clearIRCalls(mode){
   if(!_adminOnly('clear IR calls')) return;
   const ym = document.getElementById('irl-mo')?.value || document.getElementById('irb-week')?.value?.slice(0,7) || '';
+  // Scope-ambiguity guard. If the caller asked for 'month' scope but
+  // no month input is populated (e.g. the IR Builder tab has no month
+  // picker yet), the confirm dialog used to say "Scope: for " — a
+  // blank string — and silently fall back to ALL months. Refuse and
+  // tell the user instead.
+  if(mode === 'month' && !ym){
+    if(typeof _toast === 'function') _toast('Select a month first.', 'err');
+    return;
+  }
   let targets = (mode==='month'&&ym) ? S.irCalls.filter(c=>c.date.startsWith(ym)) : S.irCalls;
   if(!targets.length){ if(typeof _toast==='function') _toast('No IR calls to clear.', 'info'); return; }
   const scopeLabel = mode==='month' ? `for ${escHtml(ym)}` : '(all months)';
