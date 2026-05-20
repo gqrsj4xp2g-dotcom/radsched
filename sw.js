@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v70';
+const CACHE_VERSION = 'rs-v71';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
@@ -55,6 +55,20 @@ self.addEventListener('fetch', (e) => {
   // POST mutations, websockets, GitHub deploy) bypasses the cache.
   if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
+
+  // ── NEVER serve OR cache sw.js itself ──
+  // Audit fix (rs-v71): the build-pill displayed an old version
+  // string even after a fresh deploy because the SW's general
+  // fetch handler was caching sw.js on first load, then returning
+  // the cached copy whenever the page asked. That made the page's
+  // version check (`fetch('/sw.js')`) read the OLD version string,
+  // and the page never realized a new SW was available. sw.js MUST
+  // hit the network so the browser's SW-update plumbing — which
+  // does its own cache-busting via updateViaCache:'none' — can
+  // detect new builds.
+  if (url.pathname === '/sw.js' || url.pathname.endsWith('/sw.js')){
+    return; // let the browser handle it directly (no SW intercept)
+  }
 
   // ── Navigation / HTML shell: NETWORK-FIRST ──
   // The HTML shell (index.html, / ) used to be stale-while-revalidate,
