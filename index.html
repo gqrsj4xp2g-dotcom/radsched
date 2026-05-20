@@ -34868,7 +34868,7 @@ function renderIRWeekBuilder(){
       weekDates.slice(0,5).forEach(d=>{
         const existing=S.irCalls.filter(ic=>ic.date===d&&ic.irGroup===g&&ic.callType===ct);
         html+=`<td style="padding:4px 6px;border:1px solid var(--bdr);vertical-align:top">`;
-        existing.forEach(ic=>{const p=S.physicians.find(x=>x.id===ic.physId);
+        existing.forEach(ic=>{const p=_physById(ic.physId);
           html+=`<div style="display:flex;align-items:center;justify-content:space-between;background:${ctBg[ct]};border:1px solid ${ctColor[ct]};border-radius:4px;padding:2px 5px;margin-bottom:2px;font-size:11px;color:${ctColor[ct]}">
             <span>${p?p.last:'?'}</span><span style="cursor:pointer;opacity:.6;font-size:10px" onclick="if(_adminOnly('remove IR call'))removeIRCall(${ic.id}),renderIRWeekBuilder()">✕</span>
           </div>`;});
@@ -34904,7 +34904,7 @@ function renderIRWeekBuilder(){
       <div style="font-weight:800;font-size:13px;color:${gColor};margin-bottom:6px">${g} Group — IR Weekend Call</div>
       <div style="font-size:11px;color:var(--txt2);margin-bottom:8px">Covers: Fri ${fridayDate} evening → Mon ${addDays(fridayDate,3)} morning</div>`;
 
-    if(existing){const p=S.physicians.find(x=>x.id===existing.physId);
+    if(existing){const p=_physById(existing.physId);
       html+=`<div style="display:flex;align-items:center;justify-content:space-between;background:${g==='North'?'var(--teal-bg)':'#d1fae5'};border:1px solid var(--teal-t);border-radius:var(--rl);padding:8px 12px;font-size:12px;font-weight:700">
         <div>
           <div>${p?p.last+', '+p.first:'?'}</div>
