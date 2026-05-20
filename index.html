@@ -6389,6 +6389,26 @@ const _PERSISTED_KEYS = [
   {key:'auditLog',          type:'array'},
   // Vacation picking state
   {key:'vacPicking',        type:'object'},
+  // Per-site/shift physician caps and sub-need minimums. Used by
+  // _siteCap()/_subNeed() during auto-assign and slot rendering.
+  // Audit fix: previously written to S.siteCaps / S.shiftSubNeeds by
+  // the admin Settings → Caps UI but NEVER in the persisted manifest,
+  // so caps survived only within a single session and were lost
+  // cross-device the moment the user opened the app on a phone.
+  {key:'siteCaps',          type:'object'},
+  {key:'shiftSubNeeds',     type:'object'},
+  // Per-date free-text notes ("conference at noon", "Smith handing off
+  // to Lee", etc.). Stored as S.cellNotes = {[ISO date]: 'string'}.
+  // Same manifest-drift fix as above — notes were going to /dev/null
+  // on save.
+  {key:'cellNotes',         type:'object'},
+  // Pinned chat messages keyed by conv-id. Without manifest entry,
+  // a user pinning a message in the practice chat would see the pin
+  // vanish on their next device.
+  {key:'chatPins',          type:'object'},
+  // Per-physician pair-affinity rules ("never schedule X and Y on
+  // same day"). Referenced by manual rule violators.
+  {key:'physicianPairRules', type:'array'},
   // Bookkeeping
   {key:'nextId',            type:'scalar', reset:100},
 ];
