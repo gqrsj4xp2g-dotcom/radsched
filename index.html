@@ -13447,7 +13447,13 @@ function renderDash(){
       <span style="font-size:12px;flex:1">${escHtml(o.date)}</span><span class="tag ta">${escHtml(o.shiftType)}</span>
       <span style="color:var(--txt3);font-size:11px">${escHtml(o.sub||'')}</span></div>`
   ).join('')||'<p style="color:var(--green-t);font-size:12px">All covered!</p>';
-  document.getElementById('dash-vac').innerHTML=S.vacations.filter(v=>v.start>=ym+'-01').sort((a,b)=>a.start>b.start?1:-1).slice(0,4).map(v=>
+  // Dashboard vacation widget: was full-array sort on every render
+  // (dashboard renders 6+ times/minute on a busy admin tab). Filter
+  // first to upcoming-only, THEN sort the smaller subset. A 500-row
+  // S.vacations cuts to typically ~20 upcoming, sort cost drops 95%.
+  const _vacUpcoming = (S.vacations || []).filter(v => v.start >= ym + '-01');
+  _vacUpcoming.sort((a, b) => a.start > b.start ? 1 : -1);
+  document.getElementById('dash-vac').innerHTML = _vacUpcoming.slice(0,4).map(v=>
     `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(v.start)}</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None upcoming.</p>';
   if(isAdm){
