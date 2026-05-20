@@ -10000,25 +10000,51 @@ function _ghUpdateUI(){
   }
 }
 
+// Re-entrancy guard. hardSave() was async with no in-flight protection,
+// so a user double-clicking the toolbar 💾 Save File button could fire
+// two concurrent Supabase pushes — and on the file-download path,
+// generate + download the HTML twice. Now: track in-flight state and
+// disable every Save-File toolbar button while a save is mid-flight.
+let _hardSaveInFlight = false;
 async function hardSave(){
-  if(_getUrl&&_getUrl()&&_getKey&&_getKey()){
-    // Supabase mode: push immediately
-    _updateSaveUI('Saving…','var(--txt2)');
-    const ok=await _pushToSupabase();
-    if(ok){_hasUnsavedChanges=false;_updateSaveUI('✓ Synced','var(--green-t)');}
-  } else {
-    // Fallback: download updated HTML file
-    try{
-      const updatedHTML=_buildSaveHTML();
-      if(!updatedHTML){alert('Cannot build save file.');return;}
-      const blob=new Blob([updatedHTML],{type:'text/html'});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');a.href=url;a.download='RadScheduler_Web.html';
-      document.body.appendChild(a);a.click();document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      _hasUnsavedChanges=false;
-      _updateSaveUI('✓ Downloaded','var(--green-t)');
-    }catch(e){alert('Save failed: '+e.message);}
+  if(_hardSaveInFlight) return;
+  _hardSaveInFlight = true;
+  // Visually disable the button(s) so the user sees their click landed
+  // and can't double-fire. Restore in `finally` below.
+  const _saveBtns = Array.from(document.querySelectorAll('[onclick="hardSave()"]'));
+  _saveBtns.forEach(b => {
+    b.disabled = true;
+    b.style.opacity = '0.6';
+    b.style.cursor = 'progress';
+    b.dataset._origLabel = b.textContent;
+  });
+  try{
+    if(_getUrl&&_getUrl()&&_getKey&&_getKey()){
+      // Supabase mode: push immediately
+      _updateSaveUI('Saving…','var(--txt2)');
+      const ok=await _pushToSupabase();
+      if(ok){_hasUnsavedChanges=false;_updateSaveUI('✓ Synced','var(--green-t)');}
+    } else {
+      // Fallback: download updated HTML file
+      try{
+        const updatedHTML=_buildSaveHTML();
+        if(!updatedHTML){alert('Cannot build save file.');return;}
+        const blob=new Blob([updatedHTML],{type:'text/html'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');a.href=url;a.download='RadScheduler_Web.html';
+        document.body.appendChild(a);a.click();document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        _hasUnsavedChanges=false;
+        _updateSaveUI('✓ Downloaded','var(--green-t)');
+      }catch(e){alert('Save failed: '+e.message);}
+    }
+  } finally {
+    _hardSaveInFlight = false;
+    _saveBtns.forEach(b => {
+      b.disabled = false;
+      b.style.opacity = '';
+      b.style.cursor = '';
+    });
   }
 }
 
