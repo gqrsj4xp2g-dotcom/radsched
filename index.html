@@ -33063,8 +33063,15 @@ function fillDRHomeShifts(){
   if(_fdow===0||_fdow===6){alert('Cannot fill home shifts on weekends. Use the Weekend Calls builder for Saturday/Sunday assignments.');return;}
   S.physicians.filter(p=>p.drFte>0&&p.role!=='IR').forEach(p=>{
     if(vacOnDate.has(p.id))return;
-    const already=S.drShifts.find(s=>s.physId===p.id&&s.date===date)||
-      S.weekendCalls.find(w=>w.physId===p.id&&(w.satDate===date||w.sunDate===date||w.date===date));
+    // Universal one-shift-per-day check — _physBookingsOnDate covers
+    // DR + IR shifts, IR daily/weekend calls, and weekend calls in
+    // one call. Earlier audit found this site checked only DR shifts
+    // + weekend calls, letting a physician land on a DR Home shift
+    // while already on an IR shift / IR daily call.
+    const already = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(p.id, date).length > 0
+      : !!(S.drShifts.find(s=>s.physId===p.id&&s.date===date) ||
+           S.weekendCalls.find(w=>w.physId===p.id&&(w.satDate===date||w.sunDate===date||w.date===date)));
     if(!already){
       // Pick a subspecialty that's both the physician's AND valid at the target site.
       // Home shifts use 'At Home / Remote' which typically has no per-site filter,
