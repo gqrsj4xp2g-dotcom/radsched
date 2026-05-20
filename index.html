@@ -25586,7 +25586,19 @@ Admin access is required for data-changing operations. The current user role is:
         if(block.type === 'tool_use'){
           hasToolUse = true;
           status.textContent = `Running: ${block.name}…`;
-          const result = _aiExecuteTool(block.name, block.input);
+          // Error boundary around _aiExecuteTool — without this, an
+          // uncaught throw inside a tool handler (bad input shape,
+          // missing helper, etc.) would propagate to the outer catch
+          // and kill the conversation with a generic "Error:" message.
+          // Returning a structured failure lets the model recover.
+          let result;
+          try{
+            result = _aiExecuteTool(block.name, block.input);
+          }catch(e){
+            console.error('[RS AI] Tool crashed:', block.name, e);
+            result = { ok:false, crashed:true, error:`Tool ${block.name} crashed: ${e?.message || String(e)}` };
+            if(typeof _logError === 'function') _logError('ai-tool', `${block.name} crashed`, e);
+          }
           toolResults.push({
             type: 'tool_result',
             tool_use_id: block.id,
