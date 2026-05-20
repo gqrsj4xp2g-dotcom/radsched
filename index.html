@@ -14480,10 +14480,18 @@ function bulkAssignMultiWeek(shift){
     if(!confirm(msg)) return;
   }
 
-  let added=0,skipped=0;
+  let added=0,skipped=0,conflictSkipped=0;
   dates.forEach(date=>{
+    // Exact-duplicate skip (same phys+date+shift+site already booked).
     if(S.drShifts.find(s=>s.physId===pid&&s.date===date&&s.shift===shift&&s.site===site)){
       skipped++;return;
+    }
+    // One-shift-per-day check — without this, a bulk multi-week
+    // 2nd-shift assign would happily land on dates where the
+    // physician already has a 1st shift / IR call / weekend call,
+    // creating an undetected double-booking.
+    if(typeof _physBookingsOnDate === 'function' && _physBookingsOnDate(pid, date).length > 0){
+      conflictSkipped++; return;
     }
     S.drShifts.push({id:S.nextId++,physId:pid,date,shift,site,sub,notes,autoHome:false});
     added++;
