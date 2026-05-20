@@ -11897,13 +11897,24 @@ function _doSubscribeRealtimeSocket(){
         }catch(e){console.warn('[RS] Realtime parse error:',e);}
       })
     .subscribe(status=>{
-      if(status==='SUBSCRIBED') console.log('[RS] Realtime subscribed ✓');
+      if(status==='SUBSCRIBED'){
+        console.log('[RS] Realtime subscribed ✓');
+        _realtimeFailCount = 0; // reset backoff on successful subscribe
+      }
       if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){
-        console.warn('[RS] Realtime issue:',status,', retrying in 5s');
-        setTimeout(_subscribeRealtime, 5000);
+        // Exponential backoff. Previous fixed 5s retry hammered
+        // Supabase during sustained outages; a flaky network or
+        // overloaded channel could spawn a retry every 5s for the
+        // life of the session. Cap at 60s so we recover quickly
+        // when the network returns.
+        _realtimeFailCount = (typeof _realtimeFailCount === 'number' ? _realtimeFailCount : 0) + 1;
+        const delay = Math.min(60000, 5000 * Math.pow(2, Math.min(_realtimeFailCount - 1, 4)));
+        console.warn(`[RS] Realtime issue: ${status} (consec=${_realtimeFailCount}), retrying in ${Math.round(delay/1000)}s`);
+        setTimeout(_subscribeRealtime, delay);
       }
     });
 }
+let _realtimeFailCount = 0;
 
 // Re-entrancy guard for the polling loop. A previous bug fired a new
 // _pullFromSupabase on a slow network even though the prior pull had
