@@ -124,174 +124,165 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
    Edit the source file, not this block. See src/README.md. */
    Edit the source file, not this block. See src/README.md. */
 /* ── AUTH ──
-   Two-column desktop, single-column phone. Fills the screen on
-   wide monitors so the design doesn't look like a tiny mobile
-   modal floating in space. The LEFT column carries the brand
-   (logo + name only — no marketing copy per user request); the
-   RIGHT column holds the form. On phones the columns stack and
-   the brand panel becomes a compact header strip above the form. */
+   Apple-style single-card sign-in. Symmetrical, centered, generous
+   whitespace, system fonts, no gradients. Off-white background
+   matches Apple's #f5f5f7 ID page; white card with a soft elevation
+   shadow; restrained type with -0.02em letter-spacing on the
+   heading; everything on an 8px spacing grid.
+
+   Scope: the auth page overrides the app's default Georgia serif
+   with -apple-system / SF Pro Display so the auth screen has a
+   distinct, polished feel independent of the in-app typography. */
 #auth{
   display:flex;
+  align-items:center;
+  justify-content:center;
   min-height:100vh;
-  background:var(--bg);
-}
-/* ── BRAND PANEL (left on desktop, header on mobile) ── */
-.auth-brand-panel{
-  flex:1 1 50%;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  padding:clamp(32px, 5vw, 64px);
-  background:
-    radial-gradient(900px 700px at 25% 30%, rgba(59,130,246,0.28), transparent 60%),
-    radial-gradient(900px 800px at 100% 100%, rgba(30,58,95,0.65), transparent 60%),
-    linear-gradient(160deg,#0f1f33 0%,#050a14 100%);
-  position:relative;
-  overflow:hidden;
-}
-.auth-brand-panel::after{
-  /* Subtle grid pattern overlay so the dark panel doesn't feel empty.
-     Pure CSS — radial-gradient repeats produce calendar-grid dots. */
-  content:'';
-  position:absolute;
-  inset:0;
-  background-image:radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-  background-size:24px 24px;
-  pointer-events:none;
-}
-.auth-brand-svg{
-  width:clamp(96px, 14vw, 144px);
-  height:clamp(96px, 14vw, 144px);
-  filter:drop-shadow(0 18px 40px rgba(59,130,246,0.45));
-  position:relative;
-  z-index:1;
-}
-.auth-brand-name{
-  font-size:clamp(28px, 4vw, 40px);
-  font-weight:800;
-  letter-spacing:-.5px;
-  color:#fff;
-  margin-top:clamp(18px, 2.5vw, 28px);
-  text-align:center;
-  position:relative;
-  z-index:1;
-}
-.auth-brand-tag{
-  font-size:clamp(12px, 1.4vw, 14px);
-  color:rgba(255,255,255,0.55);
-  margin-top:6px;
-  text-align:center;
-  letter-spacing:.04em;
-  position:relative;
-  z-index:1;
-}
-/* ── FORM PANEL (right on desktop, body on mobile) ── */
-.auth-form-panel{
-  flex:1 1 50%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:clamp(24px, 4vw, 56px);
-  background:var(--bg);
+  padding:clamp(16px, 4vw, 48px);
+  background:#f5f5f7;
+  /* Apple-system font stack just on auth — `body` keeps Georgia
+     elsewhere. -apple-system is SF Pro on Apple devices, Segoe UI
+     on Windows, Roboto on Android — all sans-serifs that render
+     the auth card crisply. */
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,Inter,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
 }
 .auth-card{
-  background:var(--bg2);
-  border-radius:var(--rxl);
-  padding:clamp(28px, 4vw, 44px) clamp(24px, 4vw, 44px) clamp(24px, 3.5vw, 36px);
+  background:#ffffff;
+  border-radius:18px;
+  padding:clamp(32px, 5vw, 56px) clamp(28px, 5vw, 56px);
   width:100%;
-  max-width:440px;
-  box-shadow:0 12px 32px -8px rgba(15,31,51,0.18), 0 0 0 1px rgba(15,31,51,0.05);
+  max-width:420px;
+  /* Soft, single-layer elevation — Apple uses a near-black shadow
+     at very low alpha rather than the multi-layer "card stack"
+     look. Plus 1px hairline border at low contrast. */
+  box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 8px 24px -6px rgba(0,0,0,0.08);
+  border:1px solid rgba(0,0,0,0.06);
 }
-.auth-card-title{
-  font-size:clamp(20px, 2.5vw, 24px);
-  font-weight:800;
-  letter-spacing:-.4px;
-  color:var(--navy);
-  margin-bottom:4px;
+.auth-logo-wrap{display:flex;align-items:center;justify-content:center;margin-bottom:24px}
+.auth-logo-wrap svg{
+  width:64px;
+  height:64px;
+  /* No drop-shadow — Apple icons sit flat on the background. */
 }
-.auth-card-sub{
-  font-size:clamp(12px, 1.4vw, 13px);
-  color:var(--txt3);
-  margin-bottom:clamp(18px, 2.5vw, 24px);
+.auth-brand{
+  font-size:clamp(22px, 2.6vw, 26px);
+  font-weight:600;
+  letter-spacing:-0.022em;
+  color:#1d1d1f;
+  text-align:center;
+  margin-bottom:8px;
 }
-.auth-tabs{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:clamp(16px, 2.5vw, 22px)}
+.auth-tagline{
+  font-size:14px;
+  color:#6e6e73;
+  text-align:center;
+  margin-bottom:28px;
+  font-weight:400;
+  letter-spacing:-0.005em;
+}
+.auth-tabs{
+  display:flex;
+  background:#f5f5f7;
+  border-radius:9px;
+  padding:2px;
+  margin-bottom:24px;
+}
 .auth-tab{
   flex:1;
-  padding:clamp(8px, 1.4vw, 10px) 7px;
+  padding:8px 12px;
   text-align:center;
-  font-size:clamp(12.5px, 1.4vw, 13.5px);
-  font-weight:700;
+  font-size:13px;
+  font-weight:500;
   cursor:pointer;
-  border-radius:4px;
-  color:var(--txt2);
-  transition:.15s;
+  border-radius:7px;
+  color:#6e6e73;
+  transition:all .15s ease;
+  letter-spacing:-0.005em;
 }
-.auth-tab.on{background:var(--bg2);color:var(--navy);box-shadow:var(--sh)}
-.afield{margin-bottom:clamp(11px, 1.6vw, 14px)}
-.afield label{display:block;font-size:10.5px;font-weight:800;color:var(--txt2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
-/* Input font-size pinned at 16px to suppress iOS Safari's auto-zoom
-   on focus (<16px triggers zoom). @media(min-width:720px) below
-   drops back to 14.5px on desktop where that concern is moot. */
+.auth-tab:hover{color:#1d1d1f}
+.auth-tab.on{
+  background:#ffffff;
+  color:#1d1d1f;
+  box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.06);
+  font-weight:600;
+}
+.afield{margin-bottom:14px}
+.afield label{
+  display:block;
+  font-size:12px;
+  font-weight:500;
+  color:#1d1d1f;
+  letter-spacing:-0.005em;
+  margin-bottom:6px;
+}
+/* Inputs: pinned at 17px on mobile (above iOS 16px zoom threshold),
+   15px on desktop. Rounded 10px, hairline border, subtle focus ring
+   in Apple blue. */
 .afield input,.afield select{
   width:100%;
-  padding:clamp(10px, 1.6vw, 12px) clamp(11px, 1.8vw, 14px);
-  border:1.5px solid var(--bdr2);
-  border-radius:var(--r);
-  font-size:16px;
+  padding:11px 14px;
+  border:1px solid #d2d2d7;
+  border-radius:10px;
+  font-size:17px;
   font-family:inherit;
-  background:var(--bg2);
-  color:var(--txt);
-  transition:border .12s;
+  background:#ffffff;
+  color:#1d1d1f;
+  transition:border-color .15s, box-shadow .15s;
+  -webkit-appearance:none;
+  appearance:none;
 }
 @media(min-width:720px){
-  .afield input,.afield select{font-size:14.5px}
+  .afield input,.afield select{font-size:15px;padding:10px 14px}
 }
-.afield input:focus,.afield select:focus{outline:none;border-color:var(--blue)}
+.afield input::placeholder{color:#86868b}
+.afield input:focus,.afield select:focus{
+  outline:none;
+  border-color:#0071e3;
+  box-shadow:0 0 0 3px rgba(0,113,227,0.18);
+}
 .abtn{
   width:100%;
-  padding:clamp(11px, 1.8vw, 13px);
-  background:var(--navy);
-  color:#fff;
+  padding:12px;
+  background:#0071e3;
+  color:#ffffff;
   border:none;
-  border-radius:var(--r);
-  font-size:clamp(13.5px, 1.6vw, 14.5px);
-  font-weight:800;
+  border-radius:980px; /* Apple-style fully-rounded pill */
+  font-size:15px;
+  font-weight:500;
   cursor:pointer;
   font-family:inherit;
-  transition:background .15s;
-  letter-spacing:.02em;
-  margin-top:4px;
+  transition:background .15s ease;
+  letter-spacing:-0.005em;
+  margin-top:8px;
   min-height:44px;
 }
-.abtn:hover{background:var(--blue)}
-.aerr{background:var(--red-bg);color:var(--red-t);border:1px solid #fca5a5;border-radius:var(--r);padding:9px 12px;font-size:12.5px;margin-bottom:10px;display:none;line-height:1.4}
-.anote{font-size:10.5px;color:var(--txt3);text-align:center;margin-top:12px}
-.arole-row{display:flex;gap:6px;margin-bottom:10px}
-.arole-btn{flex:1;padding:8px;border:1.5px solid var(--bdr2);border-radius:var(--r);cursor:pointer;text-align:center;background:var(--bg2);color:var(--txt2);font-size:12px;font-weight:700;transition:.12s;font-family:inherit}
-.arole-btn.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue-t)}
-
-/* ── RESPONSIVE: stack columns on tablet/phone ── */
-@media(max-width:860px){
-  #auth{flex-direction:column}
-  .auth-brand-panel{
-    flex:0 0 auto;
-    padding:clamp(20px, 5vw, 36px);
-    flex-direction:row;
-    gap:14px;
-    justify-content:center;
-  }
-  .auth-brand-panel::after{background-size:18px 18px}
-  .auth-brand-svg{width:48px;height:48px}
-  .auth-brand-name{font-size:24px;margin-top:0;text-align:left}
-  .auth-brand-tag{display:none}
-  .auth-form-panel{padding:clamp(16px, 4vw, 32px) clamp(16px, 4vw, 32px) clamp(32px, 5vw, 48px)}
+.abtn:hover{background:#0077ed}
+.abtn:active{background:#006edb}
+.aerr{
+  background:#ffeded;
+  color:#b3261e;
+  border:1px solid #fac5c1;
+  border-radius:10px;
+  padding:10px 14px;
+  font-size:13px;
+  margin-bottom:14px;
+  display:none;
+  line-height:1.4;
 }
+.anote{font-size:12px;color:#86868b;text-align:center;margin-top:14px}
+.arole-row{display:flex;gap:6px;margin-bottom:10px}
+.arole-btn{flex:1;padding:9px;border:1px solid #d2d2d7;border-radius:10px;cursor:pointer;text-align:center;background:#fff;color:#1d1d1f;font-size:13px;font-weight:500;transition:.12s;font-family:inherit}
+.arole-btn.on{border-color:#0071e3;background:#f0f7ff;color:#0071e3}
+
+/* ── RESPONSIVE AUTH ── */
 @media(max-width:480px){
-  .auth-brand-panel{padding:18px 16px}
-  .auth-brand-svg{width:40px;height:40px}
-  .auth-brand-name{font-size:20px}
-  .auth-card{padding:24px 22px 22px}
+  #auth{padding:16px}
+  .auth-card{padding:32px 24px 28px;max-width:100%;border-radius:14px}
+  .auth-logo-wrap{margin-bottom:20px}
+  .auth-tagline{margin-bottom:22px}
+  .auth-tabs{margin-bottom:20px}
 }
 
 /* @AUTH_END */
