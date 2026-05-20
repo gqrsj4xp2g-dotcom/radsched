@@ -40052,11 +40052,15 @@ function _canEditDate(dateOrYm){
 // — the caller decides whether to proceed.
 function _checkRestPeriod(physId, date, restDays){
   if(!physId || !date || !restDays) return '';
-  const target = parseDateLocal(date);
+  // Use addDays (which works on ISO strings and is DST-safe) rather
+  // than manual Date-constructor math. The old `new Date(y, m,
+  // d - i)` form silently relies on JS Date constructor coercion at
+  // negative days and DST transitions can shift the resulting hour
+  // by ±1, which propagates into checkD via fmtDate.
   // Look back `restDays` days for any weekend call, holiday, or IR
   // weekend call assignment for this physician.
   for(let i = 1; i <= restDays; i++){
-    const checkD = fmtDate(new Date(target.getFullYear(), target.getMonth(), target.getDate() - i));
+    const checkD = addDays(date, -i);
     // Weekend call (Sat/Sun)
     const wk = (S.weekendCalls || []).find(w => w.physId === physId && (w.satDate === checkD || w.sunDate === checkD));
     if(wk) return `was on weekend call ${i} day${i===1?'':'s'} ago (${checkD}); rest-period config requires ${restDays} day${restDays===1?'':'s'} off.`;
