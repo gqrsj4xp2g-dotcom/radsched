@@ -13,7 +13,7 @@ test('login screen renders and rejects bad credentials without entering the app'
     document.getElementById('li-email').value = 'bad-login@example.com';
     document.getElementById('li-pw').value = 'not-the-password';
   });
-  await page.evaluate(() => doLogin());
+  await page.evaluate(() => window.doLogin());
 
   await expect(page.locator('#aerr')).toContainText('Invalid email or password');
   await expect(page.locator('#app')).toBeHidden();
@@ -91,7 +91,7 @@ test('basic Supabase save path writes the active practice row through the client
     S.physicians = [{ id: 99001, first: 'Sync', last: 'Tester', role: 'DR', fte: 1 }];
     S._remoteSavedAt = null;
     S._lastSaved = new Date();
-    const ok = await _pushToSupabase();
+    const ok = await window._pushToSupabase();
     const saved = window.__rsMockSupabase.__rows[0] || null;
     return {
       ok,

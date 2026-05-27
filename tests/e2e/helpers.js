@@ -97,14 +97,14 @@ async function launchSyntheticUser(page, role = 'superuser') {
     _ROW_ID = 'main';
     _PRACTICE_ID = 'main';
     _PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
-    await launchApp();
+    await window.launchApp();
   }, role);
 }
 
 async function openToolsOps(page) {
   await page.evaluate(() => {
     localStorage.setItem('rs.toolsTab', 'ops');
-    nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    window.nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
   });
   await expect(page.locator('#page-tools')).toBeVisible();
   await page.waitForTimeout(100);
@@ -119,7 +119,7 @@ async function openToolsOps(page) {
     document.querySelectorAll('#tools-subnav .tab').forEach(tab => {
       tab.classList.toggle('on', tab.getAttribute('data-tt') === 'ops');
     });
-    renderSystemHealth(true);
+    window.renderSystemHealth(true);
   });
   await expect(page.locator('#sys-health-result')).toBeVisible();
 }
