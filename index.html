@@ -35354,6 +35354,39 @@ function _hasIRShiftOnDate(physId, date){
   return !!(S.irShifts||[]).find(s => s.physId===physId && s.date===date && s.shift!=='Home');
 }
 
+// Auto-pair an IR daily call with a matching IR daily shift.
+// Policy: a physician on daily call MUST also be on a procedure
+// shift that day — they're scheduled to BE at the hospital for
+// both the call coverage and the procedure work. If no IR shift
+// exists for (physId, date), create one. No-op if a shift already
+// exists. Resolves site via: explicit call site → phys.irSitePrim
+// → any site in the call's irGroup → 'At Home / Remote' fallback.
+// Returns the new shift record (or null if one already existed).
+function _ensureIRShiftForCall(physId, date, irGroup, callSite, noteSuffix){
+  if(!physId || !date) return null;
+  if(_hasIRShiftOnDate(physId, date)) return null; // already paired
+  const p = _physById(physId);
+  const resolvedSite = callSite
+    || (p && p.irSitePrim)
+    || (S.sites.find(s => s.irGroup === irGroup)?.name)
+    || 'At Home / Remote';
+  const newShift = {
+    id: S.nextId++,
+    physId,
+    date,
+    shift: '1st',
+    site: resolvedSite,
+    sub: '',
+    notes: 'Auto-paired with IR call' + (noteSuffix ? ' (' + noteSuffix + ')' : ''),
+    irGroup: irGroup || (p && p.irGroup) || '',
+  };
+  S.irShifts.push(newShift);
+  if(typeof _audit === 'function') _audit('irCall.autoPairShift', {
+    physId, date, shiftId: newShift.id, site: resolvedSite, irGroup,
+  });
+  return newShift;
+}
+
 function _has2ndOr3rdShift(physId, date){
   // Rule: physicians on a 2nd or 3rd DR shift are blocked from all IR shifts and IR call that day
   return S.drShifts.some(s => s.physId===physId && s.date===date && (s.shift==='2nd'||s.shift==='3rd'));
