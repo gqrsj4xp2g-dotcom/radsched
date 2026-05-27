@@ -9,9 +9,8 @@
 --   • lets us paginate + filter via SQL instead of in-memory JS
 --
 -- Run this once in the Supabase SQL editor when you're ready to
--- enable the side-table flow. The client adapter (in widget-data
--- edge function + main app) checks for the table's existence and
--- auto-falls-back to the in-blob store when absent.
+-- enable the side-table flow. The main app checks for the table's
+-- existence and auto-falls-back to the in-blob store when absent.
 --
 -- This is NON-destructive: the existing in-blob auditLog is left
 -- alone. A follow-up backfill script copies it into the new table.
@@ -29,6 +28,21 @@ CREATE TABLE IF NOT EXISTS public.radscheduler_audit (
   detail       jsonb        DEFAULT '{}'::jsonb
 );
 
+-- Keep older installs aligned with the current shape.
+ALTER TABLE public.radscheduler_audit
+  ADD COLUMN IF NOT EXISTS who text,
+  ADD COLUMN IF NOT EXISTS who_id text,
+  ADD COLUMN IF NOT EXISTS role text,
+  ADD COLUMN IF NOT EXISTS detail jsonb DEFAULT '{}'::jsonb;
+
+UPDATE public.radscheduler_audit
+SET detail = '{}'::jsonb
+WHERE detail IS NULL;
+
+ALTER TABLE public.radscheduler_audit
+  ALTER COLUMN detail SET DEFAULT '{}'::jsonb,
+  ALTER COLUMN detail SET NOT NULL;
+
 -- Most-common access pattern: "show me practice X's audit log,
 -- newest first, optionally filtered by action". The composite index
 -- below is the cheapest single index that supports both pagination
@@ -39,55 +53,67 @@ CREATE INDEX IF NOT EXISTS radscheduler_audit_practice_ts_idx
 CREATE INDEX IF NOT EXISTS radscheduler_audit_action_idx
   ON public.radscheduler_audit (practice_id, action);
 
+-- Backfill and retry safety. The client writes audit rows fire-and-forget;
+-- this index keeps a retried insert or repeated backfill from creating
+-- duplicate rows.
+CREATE UNIQUE INDEX IF NOT EXISTS radscheduler_audit_dedupe_idx
+  ON public.radscheduler_audit (
+    practice_id,
+    ts,
+    action,
+    coalesce(who_id, ''),
+    md5(coalesce(detail::text, ''))
+  );
+
 -- ── 2. Row Level Security ────────────────────────────────────────
--- Insert: any authenticated user (the same role that can edit the
--- practice). Read: only via the existing pairing-code/edge-function
--- path — no anon REST access. So we don't grant the anon role any
--- privileges; the widget-data edge function will use service role.
+-- Authenticated users can insert/read rows for their own practice.
+-- Admins and superusers can see all practices, matching the client
+-- role model. The anon role receives no privileges.
 ALTER TABLE public.radscheduler_audit ENABLE ROW LEVEL SECURITY;
 
--- Allow authenticated users to insert audit entries for their own
--- practice. (Practice-membership check is loose; tighten via a
--- practice_members table when multi-tenant.)
 DROP POLICY IF EXISTS audit_insert_authed ON public.radscheduler_audit;
-CREATE POLICY audit_insert_authed
+DROP POLICY IF EXISTS audit_insert_scoped ON public.radscheduler_audit;
+CREATE POLICY audit_insert_scoped
   ON public.radscheduler_audit
   FOR INSERT
   TO authenticated
-  WITH CHECK (true);
+  WITH CHECK (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
--- Allow authenticated users to select audit rows from any practice
--- they have access to. Adjust if you have a stricter membership
--- model — this matches the existing radscheduler-table policy.
 DROP POLICY IF EXISTS audit_select_authed ON public.radscheduler_audit;
-CREATE POLICY audit_select_authed
+DROP POLICY IF EXISTS audit_select_scoped ON public.radscheduler_audit;
+CREATE POLICY audit_select_scoped
   ON public.radscheduler_audit
   FOR SELECT
   TO authenticated
-  USING (true);
+  USING (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
--- ── 3. Backfill helper (manual) ──────────────────────────────────
--- After enabling the table, run this in the SQL editor to copy any
--- existing in-blob audit entries to the new table. Idempotent: ON
--- CONFLICT does nothing if a row with the same practice+ts+action
--- already exists (a soft uniqueness — the bigserial id stays the
--- canonical key).
---
--- Replace 'YOUR_PRACTICE_ID' with the row id from the radscheduler
--- table.
---
--- Uncomment when ready:
--- INSERT INTO public.radscheduler_audit
---   (practice_id, ts, who, who_id, role, action, detail)
--- SELECT
---   'YOUR_PRACTICE_ID',
---   (entry->>'ts')::timestamptz,
---   entry->>'who',
---   entry->>'whoId',
---   entry->>'role',
---   entry->>'action',
---   coalesce(entry->'detail', '{}'::jsonb)
--- FROM
---   public.radscheduler,
---   jsonb_array_elements(data::jsonb -> 'auditLog') AS entry
--- WHERE id = 'YOUR_PRACTICE_ID';
+-- ── 3. Backfill helper ───────────────────────────────────────────
+-- Copies any existing in-blob audit entries to the side table. Safe to
+-- re-run: the dedupe index plus ON CONFLICT DO NOTHING prevents doubles.
+INSERT INTO public.radscheduler_audit
+  (practice_id, ts, who, who_id, role, action, detail)
+SELECT
+  r.id,
+  CASE
+    WHEN entry->>'ts' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN (entry->>'ts')::timestamptz
+    ELSE now()
+  END,
+  entry->>'who',
+  entry->>'whoId',
+  entry->>'role',
+  coalesce(nullif(entry->>'action', ''), 'unknown'),
+  coalesce(entry->'detail', '{}'::jsonb)
+FROM public.radscheduler r
+CROSS JOIN LATERAL jsonb_array_elements(
+  CASE
+    WHEN jsonb_typeof(r.data::jsonb -> 'auditLog') = 'array' THEN r.data::jsonb -> 'auditLog'
+    ELSE '[]'::jsonb
+  END
+) AS entry
+ON CONFLICT DO NOTHING;
