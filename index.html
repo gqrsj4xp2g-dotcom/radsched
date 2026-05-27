@@ -47618,9 +47618,9 @@ async function applyPickImport(){
     console.log('[RS import] First shift record post-apply:', sample || '(NOT FOUND)');
   }
   if(typeof _audit === 'function') _audit('import.pickSheet', {
-    vacAdded, vacSkipped, shAdded, shSkipped, shConflict,
+    vacAdded, vacSkipped, shAdded, shSkipped, shConflict, shReplaced,
   });
-  logImport(`Pick sheet import: vacations ${vacAdded} added / ${vacSkipped} skipped, shifts ${shAdded} added / ${shSkipped} skipped${shConflict ? ` / ${shConflict} skipped (already on another shift)` : ''}`, 'success');
+  logImport(`Pick sheet import: vacations ${vacAdded} added / ${vacSkipped} skipped, shifts ${shAdded} added${shReplaced ? ` (${shReplaced} replaced Vacation-Sold-Back Home shifts)` : ''} / ${shSkipped} skipped${shConflict ? ` / ${shConflict} skipped (real conflict — 1st shift or IR)` : ''}`, 'success');
   // Determine the imported month range so we can offer a one-click jump
   // to the calendar at the right time. Use the EARLIEST imported date.
   const allDates = [
