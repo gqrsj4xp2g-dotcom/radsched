@@ -51,16 +51,16 @@ It **is** built to defend against:
 CREATE POLICY "Read practice rows" ON practices
   FOR SELECT TO authenticated
   USING (
-    (auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
-    id = (auth.jwt() -> 'app_metadata' ->> 'practiceId')
+    ((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
+    id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId')
   );
 
 -- Write: authenticated practice members, plus admin / superuser
 CREATE POLICY "Practice write" ON practices
   FOR UPDATE TO authenticated
   USING (
-    (auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
-    id = (auth.jwt() -> 'app_metadata' ->> 'practiceId')
+    ((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
+    id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId')
   );
 ```
 
