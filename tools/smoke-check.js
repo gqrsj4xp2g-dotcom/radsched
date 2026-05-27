@@ -176,6 +176,7 @@ check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
 check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
 check('create-user requires admin MFA/AAL2', /function\s+hasAal2/.test(createUser) && /mfa_required/.test(createUser));
+check('create-user has per-caller rate limit', /function\s+rateLimit/.test(createUser) && /Too many user-management requests/.test(createUser));
 check('create-user protects superuser mutation paths', [
   /Only a superuser can modify another superuser account/,
   /Only a superuser can grant the superuser role/,
@@ -185,6 +186,7 @@ check('create-user protects superuser mutation paths', [
 check('admin-ops restores through service-role wrapper with audit evidence', [
   /restore-backup/.test(adminOps),
   /function\s+hasAal2/.test(adminOps),
+  /function\s+rateLimit/.test(adminOps),
   /radscheduler_backups/.test(adminOps),
   /radscheduler_audit/.test(adminOps),
   /radscheduler_telemetry/.test(adminOps),
