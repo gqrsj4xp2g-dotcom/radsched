@@ -44,6 +44,7 @@ Before a production launch, archive:
 - `npm run test:e2e` output.
 - `npm run test:migration-drift` output.
 - `npm run test:edge-monitor` output.
+- Latest `.github/workflows/ops-monitor.yml` run URL.
 - Screenshot/export of Tools > Logs & ops > Go-live readiness.
 - Screenshot/export of Tools > Logs & ops > Enterprise readiness.
 - Backup restore drill result.
