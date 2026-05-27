@@ -28,10 +28,12 @@ These settings cannot be verified from the public browser client:
 
 - Auth > Security > **Leaked password protection** is enabled.
 - Auth > URL Configuration includes the production site URL.
-- Edge Functions shows deployed versions for `create-user`,
+- Edge Functions shows deployed versions for `create-user`, `admin-ops`,
   `send-notification`, `widget-data`, `calendar-feed`, `maps-proxy`, and
   `ai-proxy`.
-- Database policies match `docs/sql/04-rls-advisor-hardening.sql`.
+- Database policies match `docs/sql/04-rls-advisor-hardening.sql` plus the
+  enterprise hardening migrations in `docs/sql/05-admin-mfa-aal2-hardening.sql`
+  and `docs/sql/06-enterprise-telemetry.sql`.
 
 ## Restore confidence
 
