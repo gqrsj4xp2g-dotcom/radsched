@@ -13,7 +13,7 @@ test('login screen renders and rejects bad credentials without entering the app'
     document.getElementById('li-email').value = 'bad-login@example.com';
     document.getElementById('li-pw').value = 'not-the-password';
   });
-  await page.evaluate(() => window.doLogin());
+  await page.evaluate(() => doLogin());
 
   await expect(page.locator('#aerr')).toContainText('Invalid email or password');
   await expect(page.locator('#app')).toBeHidden();
