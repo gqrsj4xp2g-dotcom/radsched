@@ -31,7 +31,10 @@ This document maps RadScheduler controls to practical enterprise evidence.
 
 - Enable Supabase Auth leaked-password protection.
 - Enable Supabase MFA in the dashboard before applying
-  `docs/sql/05-admin-mfa-aal2-hardening.sql`.
+  `docs/sql/05-admin-mfa-aal2-hardening.sql`, then apply
+  `docs/sql/08-aal2-same-practice-access-fix.sql` so same-practice admins
+  at `aal1` can still see their own practice while cross-practice access
+  remains gated by `aal2`.
 - Enable GitHub secret scanning and push protection in repository settings.
 - Configure branch protection for `main`: require CI, CodeQL, and review.
 - Keep production service-role keys out of browsers and repo history.

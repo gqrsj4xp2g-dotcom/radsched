@@ -48,6 +48,9 @@ Migrations applied:
 - Supabase migration name: `enterprise_telemetry`
 - `docs/sql/07-immutable-audit-chain.sql`
 - Applied via linked production SQL query on 2026-05-27.
+- `docs/sql/08-aal2-same-practice-access-fix.sql`
+- Applied via linked production SQL query on 2026-05-27 after verifying
+  same-practice admins at `aal1` could not read their own practice row.
 
 Policies now present:
 

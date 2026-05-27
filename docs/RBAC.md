@@ -24,9 +24,9 @@ RadScheduler authorization is enforced in two places:
 
 - Privileged roles come from `app_metadata.role`.
 - Tenant scope comes from `app_metadata.practiceId`.
-- Admin/superuser privileged DB paths require `aal2` through
+- Admin/superuser cross-practice DB paths require `aal2` through
   `public.radscheduler_admin_aal2()`.
-- Non-admin practice access is scoped with
+- Same-practice access for every role is scoped with
   `public.radscheduler_non_admin_same_practice(target_practice_id)`.
 - `create-user` requires `aal2` and blocks non-superusers from creating,
   granting, deleting, or editing `superuser` accounts.
