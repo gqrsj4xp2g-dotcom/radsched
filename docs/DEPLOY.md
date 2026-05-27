@@ -127,17 +127,31 @@ ON CONFLICT (id) DO NOTHING;
 
 ### Deploy the edge functions
 
-Two edge functions are required for admin operations the client can't do
-directly (writing to `app_metadata` requires the service role key):
+Core edge functions are required for admin operations the client can't do
+directly (writing to `app_metadata`, destructive restores, and other
+service-role actions require server-side enforcement):
 
 #### `create-user`
 
 Creates a new auth user, sets `app_metadata.role` and `practiceId`,
 returns the new user's ID. The client UI invokes this from
-**User Management → Add User**.
+**User Management → Add User**. The function verifies the caller's
+`app_metadata.role` and requires an `aal2` MFA session.
 
 ```bash
 supabase functions deploy create-user --no-verify-jwt
+```
+
+#### `admin-ops`
+
+Runs destructive administrator actions with the service role key. Today it
+handles backup restores by validating the backup payload, writing the active
+practice row, and recording audit + telemetry evidence. The function verifies
+the caller's `app_metadata.role`, requires `aal2`, and blocks admins from
+restoring another practice unless they are superusers.
+
+```bash
+supabase functions deploy admin-ops --no-verify-jwt
 ```
 
 The function source lives in **Settings → Edge Functions → Function source
