@@ -52,10 +52,12 @@ const policyChecks = [
   ['shifts_select_authed policy', /CREATE\s+POLICY\s+shifts_select_authed[\s\S]*?ON\s+public\.radscheduler_shifts[\s\S]*?FOR\s+SELECT[\s\S]*?TO\s+authenticated/i],
   ['audit_insert_scoped policy', /CREATE\s+POLICY\s+audit_insert_scoped[\s\S]*?ON\s+public\.radscheduler_audit[\s\S]*?FOR\s+INSERT[\s\S]*?TO\s+authenticated/i],
   ['audit_select_scoped policy', /CREATE\s+POLICY\s+audit_select_scoped[\s\S]*?ON\s+public\.radscheduler_audit[\s\S]*?FOR\s+SELECT[\s\S]*?TO\s+authenticated/i],
+  ['telemetry_insert_scoped policy', /CREATE\s+POLICY\s+telemetry_insert_scoped[\s\S]*?ON\s+public\.radscheduler_telemetry[\s\S]*?FOR\s+INSERT[\s\S]*?TO\s+authenticated/i],
+  ['telemetry_select_scoped policy', /CREATE\s+POLICY\s+telemetry_select_scoped[\s\S]*?ON\s+public\.radscheduler_telemetry[\s\S]*?FOR\s+SELECT[\s\S]*?TO\s+authenticated/i],
 ];
 
 for (const [label, pattern] of policyChecks) {
-  requireMatch(hardeningScope, label, pattern);
+  requireMatch(label.startsWith('telemetry_') ? allScope : hardeningScope, label, pattern);
 }
 
 const objectChecks = [
@@ -65,6 +67,8 @@ const objectChecks = [
   ['radscheduler_shifts touch trigger', /CREATE\s+TRIGGER\s+radscheduler_shifts_touch_trg/i],
   ['audit table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_audit\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
   ['shift table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_shifts\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
+  ['telemetry table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_telemetry\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
+  ['telemetry practice index', /CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+radscheduler_telemetry_practice_created_idx/i],
 ];
 
 for (const [label, pattern] of objectChecks) {
