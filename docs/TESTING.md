@@ -12,7 +12,7 @@
 | Regression suite | In-app (Tools → run-tests) | Pure-function correctness |
 | Playwright E2E | CLI / CI (`npm run test:e2e`) | Auth shell, role gates, system health, mobile layout, service worker, mocked sync |
 | Migration drift | CLI / CI (`npm run test:migration-drift`) | Required RLS policies and hardening objects are still present |
-| Edge monitor | CLI (`npm run test:edge-monitor`) | Public reachability probes for deployed Supabase edge functions |
+| Edge monitor | CLI / scheduled GitHub Actions (`npm run test:edge-monitor`) | Public reachability probes for deployed Supabase edge functions |
 | Manual smoke | Checklist below | UI/UX + end-to-end flows |
 | Integration | Manual against staging Supabase | Auth + persistence + Realtime |
 
@@ -107,6 +107,9 @@ For launch-day infrastructure checks:
 npm run test:migration-drift
 npm run test:edge-monitor
 ```
+
+The same edge monitor runs every 30 minutes from
+`.github/workflows/ops-monitor.yml`.
 
 ## Manual smoke checklist
 
