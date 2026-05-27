@@ -32300,6 +32300,10 @@ async function renderSystemHealth(quick){
         const { data, error } = await sb.from(_TABLE).select('id').eq('id', _ROW_ID).maybeSingle();
         add(!error && data ? 'ok' : 'warn', 'Practice data row', !error && data ? `Found row ${_ROW_ID}.` : (error?.message || `No row found for ${_ROW_ID}.`));
       }
+      if(sb && _ROW_ID){
+        const { error } = await sb.from('radscheduler_audit').select('ts').eq('practice_id', String(_ROW_ID)).limit(1);
+        add(!error ? 'ok' : 'warn', 'Audit side table', !error ? 'Audit history side table is reachable.' : (error?.message || 'Could not query radscheduler_audit.'));
+      }
     }catch(e){
       add('warn', 'Supabase data probe', e?.message || String(e));
     }
