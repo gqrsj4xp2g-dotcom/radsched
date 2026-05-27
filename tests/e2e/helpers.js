@@ -97,19 +97,24 @@ async function launchSyntheticUser(page, role = 'superuser') {
     _ROW_ID = 'main';
     _PRACTICE_ID = 'main';
     _PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
-    window.launchApp._running = false;
-    await window.launchApp();
+    const launch = globalThis.launchApp || Function('return typeof launchApp === "function" ? launchApp : null')();
+    launch._running = false;
+    await launch();
   }, role);
 }
 
 async function openToolsOps(page) {
   await page.evaluate(() => {
+    const getFn = name => globalThis[name] || Function(`return typeof ${name} === "function" ? ${name} : null`)();
+    const navFn = getFn('nav');
     localStorage.setItem('rs.toolsTab', 'ops');
-    window.nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
   });
   await expect(page.locator('#page-tools')).toBeVisible();
   await page.waitForTimeout(100);
   await page.evaluate(() => {
+    const getFn = name => globalThis[name] || Function(`return typeof ${name} === "function" ? ${name} : null`)();
+    const renderHealth = getFn('renderSystemHealth');
     const pageTools = document.getElementById('page-tools');
     if (pageTools) {
       pageTools.setAttribute('data-active-tab', 'ops');
@@ -120,7 +125,7 @@ async function openToolsOps(page) {
     document.querySelectorAll('#tools-subnav .tab').forEach(tab => {
       tab.classList.toggle('on', tab.getAttribute('data-tt') === 'ops');
     });
-    window.renderSystemHealth(true);
+    renderHealth(true);
   });
   await expect(page.locator('#sys-health-result')).toBeVisible();
 }
