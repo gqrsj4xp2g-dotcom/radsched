@@ -29,8 +29,8 @@ toc = toc_match.group(1)
 banner_re = re.compile(r'^// ── ([^─\n]+?) ─', re.M)
 banners = set(b.strip() for b in banner_re.findall(script) if 'TABLE OF CONTENTS' not in b)
 
-# Lower-case keyword check against the TOC. Normalize punctuation so banners
-# like `"Find next available date" helper` key on `find`, not `"find`.
+# Lower-case keyword check against the TOC. Normalize punctuation so quoted
+# banner names key on the word itself.
 missing = []
 for b in sorted(banners):
     # Pick the first 3 words as the keyword.
