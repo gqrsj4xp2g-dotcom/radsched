@@ -18844,7 +18844,25 @@ function _irsaCountsForQuota(p,slot){
 
 function _irsaEligibleForSlot(p,slot){
   /* At a mixed-role site, only anchors and fill-ins can be assigned.
-     At a normal site, any IR physician in the group is eligible. */
+     At a normal site, any IR physician in the group is eligible —
+     UNLESS the physician has an admin-set `allowedSites` allowlist
+     and this site isn't on it. Same enforcement the DR auto-assigner
+     does at previewAA's pool filter. Without this gate the IR
+     auto-assigner happily placed Reyes (allowed only at CHS) at
+     STFS because the only check was group + mixed-role-anchors,
+     and STFS satisfied both. Mini-anchors and fill-ins on the
+     site override the allowlist (they're explicit per-site grants).
+   */
+  // Allowlist check first — applies whether or not the site is mixed.
+  const allowed = (p && Array.isArray(p.allowedSites)) ? p.allowedSites : [];
+  if(allowed.length && !allowed.includes(slot.site)){
+    // Override: explicit per-site grants (mini-anchor / fill-in) win
+    // over the allowlist. Same pattern as the manual UI's site
+    // candidate filter (line ~30765).
+    const isAnchor  = Array.isArray(slot.anchors)  && slot.anchors.indexOf(p.id) >= 0;
+    const isFillin  = Array.isArray(slot.fillins)  && slot.fillins.indexOf(p.id) >= 0;
+    if(!isAnchor && !isFillin) return false;
+  }
   if(!slot.mixed)return true;
   return (slot.anchors||[]).indexOf(p.id)>=0 || (slot.fillins||[]).indexOf(p.id)>=0;
 }
