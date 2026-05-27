@@ -111,6 +111,12 @@ Run before any release. ~10 minutes.
 - [ ] B receives the change without manual refresh.
 - [ ] Close A; B becomes the leader.
 
+### Operations
+- [ ] Tools → Logs & ops → System health quick check is all green.
+- [ ] Deep check reports service worker, manifest, icon, Supabase, and
+  edge-function reachability without unexpected failures.
+- [ ] Rollback timeline opens and shows recent snapshots when available.
+
 ### Mobile
 - [ ] iOS Safari: viewport correct, no horizontal scroll.
 - [ ] Touch targets ≥ 44×44.

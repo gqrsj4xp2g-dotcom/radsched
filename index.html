@@ -64,7 +64,7 @@
    the BEGIN/END markers verbatim. See src/README.md for the full plan. */
 /* RadScheduler — design tokens.
  * Source of truth for colors, radii, shadows. Injected into index.html
- * between /* @TOKENS_BEGIN */ /* and */ /* @TOKENS_END */ /* by
+ * between the TOKENS_BEGIN and TOKENS_END markers by
  * tools/build-index.sh.
  *
  * To change a token: edit this file → run ./tools/build-index.sh →
@@ -121,7 +121,6 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
 .cp-row input[type=checkbox]{width:17px;height:17px;margin-top:2px;flex-shrink:0;cursor:pointer}
 .cp-desc{font-size:11px;color:var(--txt3);margin-top:2px}
 /* @AUTH_BEGIN — managed by tools/build-index.sh from src/parts/css-auth.css.
-   Edit the source file, not this block. See src/README.md. */
    Edit the source file, not this block. See src/README.md. */
 /* ── AUTH ──
    Enterprise split-screen sign-in. LEFT: dark navy hero with
@@ -494,8 +493,6 @@ body{line-height:calc(1.4 * var(--user-density, 1))}
      needed at this 768px breakpoint. */
 }
 /* @MOBILE_BEGIN — managed by tools/build-index.sh from src/parts/css-mobile.css.
-   Edit the source file, not this block. The build replaces everything between
-   the BEGIN/END markers verbatim. See src/README.md for the full plan. */
    Edit the source file, not this block. The build replaces everything between
    the BEGIN/END markers verbatim. See src/README.md for the full plan. */
 /* ── MOBILE PHONE LAYOUT (≤640px) ──
@@ -4513,7 +4510,7 @@ WHERE email = 'your-admin@example.com';</pre>
     <div class="tab on" data-tt="sim"     onclick="toolsTab('sim',this)" style="padding:10px 18px">🔮 Simulators <span class="tt-count" style="opacity:.55">(4)</span></div>
     <div class="tab"    data-tt="rules"   onclick="toolsTab('rules',this)" style="padding:10px 18px">⚙ Rules &amp; config <span class="tt-count" style="opacity:.55">(4)</span></div>
     <div class="tab"    data-tt="reports" onclick="toolsTab('reports',this)" style="padding:10px 18px">📊 Analytics &amp; reports <span class="tt-count" style="opacity:.55">(5)</span></div>
-    <div class="tab"    data-tt="ops"     onclick="toolsTab('ops',this)" style="padding:10px 18px">📜 Logs &amp; ops <span class="tt-count" style="opacity:.55">(7)</span></div>
+    <div class="tab"    data-tt="ops"     onclick="toolsTab('ops',this)" style="padding:10px 18px">📜 Logs &amp; ops <span class="tt-count" style="opacity:.55">(8)</span></div>
   </div>
 
   <!-- ── 1. What-If Simulator ─────────────────────────────────────────── -->
@@ -4832,6 +4829,7 @@ WHERE email = 'your-admin@example.com';</pre>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <button class="bp bsm" onclick="renderRegressionSuite()">▶ Run all checks</button>
       <button class="bsm" onclick="runStressTest()" title="Synthesize 200 physicians + 1 year of shifts and profile every render path. Auto-snapshots first; one-click revert.">🧪 Stress test (200 phys)</button>
+      <button class="bsm" onclick="showUndoTimeline()" title="Review recent state snapshots and roll the schedule back to a known-good point">⏪ Rollback timeline</button>
       <button class="bsm" onclick="takeNamedSnapshot()">📌 Take named snapshot</button>
       <button class="bsm" onclick="exportPracticeConfig()">⬇ Export config</button>
       <label style="display:inline-flex;align-items:center;cursor:pointer">
@@ -5064,6 +5062,23 @@ WHERE email = 'your-admin@example.com';</pre>
       </div>
     </div>
     <div id="yr-result" style="margin-top:6px;font-size:13px"></div>
+  </div>
+
+  <!-- ── System Health ───────────────────────────────────────────── -->
+  <div class="card" data-tools-tab="ops" style="margin-bottom:14px">
+    <div class="card-title">🩺 System health</div>
+    <div class="note ni" style="font-size:11.5px;margin-bottom:14px">
+      One place to verify sync, service worker, PWA assets, edge functions,
+      GitHub deploy configuration, save health, and recent runtime errors.
+      Use before a go-live session or when something feels off.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="bp" onclick="renderSystemHealth()">▶ Run health check</button>
+      <button class="bsm" onclick="renderSystemHealth(true)">↻ Quick refresh</button>
+      <button class="bsm" onclick="if(typeof showUndoTimeline==='function')showUndoTimeline()">⏪ Rollback timeline</button>
+      <button class="bsm" onclick="if(typeof renderErrorLog==='function'){toolsTab('ops');setTimeout(()=>document.getElementById('el-result')?.scrollIntoView({block:'start'}),50)}">🐛 Error log</button>
+    </div>
+    <div id="sys-health-result" style="margin-top:6px;font-size:13px"></div>
   </div>
 
   <!-- ── 8. Audit log viewer ──────────────────────────────────────────── -->
@@ -11629,7 +11644,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v86';
+const _SW_VERSION = 'rs-v87';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -13000,7 +13015,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v86';
+const _RS_HTML_BUILD = 'rs-v87';
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
@@ -32050,6 +32065,9 @@ function renderTools(){
     const subY = document.getElementById('subcov-year');
     if(subY && !subY.value) subY.value = String(new Date().getFullYear());
   }catch(_){}
+  try{
+    if(typeof renderSystemHealth === 'function') renderSystemHealth(true);
+  }catch(_){}
   _wiToggleFields();
   _initToolsTab();
 }
@@ -32117,6 +32135,189 @@ function _initToolsTab(){
   try{ saved = localStorage.getItem('rs.toolsTab') || ''; }catch(_){}
   if(!saved) saved = 'sim';
   toolsTab(saved, null, /* _skipScroll */ true);
+}
+
+// ── System Health — operational readiness panel ───────────────────────
+// One compact surface for the failure modes admins actually hit: stale
+// service worker, missing PWA assets, disconnected Supabase, edge
+// functions not reachable, queued unsaved changes, GitHub deploy not
+// configured, and runtime errors. This is intentionally browser-native:
+// no server secrets, no privileged calls, no dependency on DevTools.
+function _healthStatusRank(status){
+  return status === 'fail' ? 3 : status === 'warn' ? 2 : status === 'pending' ? 1 : 0;
+}
+function _healthBadge(status){
+  const map = {
+    ok:      ['✓', 'var(--green-t)', 'rgba(22,163,74,.10)'],
+    warn:    ['⚠', 'var(--amber-t,#92400e)', 'rgba(217,119,6,.12)'],
+    fail:    ['✕', 'var(--red-t)', 'rgba(220,38,38,.10)'],
+    pending: ['…', 'var(--rs-ink-3)', 'var(--bg3)'],
+  };
+  const [txt, fg, bg] = map[status] || map.pending;
+  return `<span style="display:inline-grid;place-items:center;width:22px;height:22px;border-radius:999px;background:${bg};color:${fg};font-weight:800;font-size:12px">${txt}</span>`;
+}
+function _healthCard(item){
+  const border = item.status === 'fail' ? 'var(--red)' : item.status === 'warn' ? 'var(--amber,#d97706)' : 'var(--rs-line)';
+  return `<div style="border:1px solid ${border};border-radius:8px;padding:12px;background:var(--bg2);min-height:92px">
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      ${_healthBadge(item.status)}
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:13px;overflow-wrap:anywhere">${escHtml(item.label || '')}</div>
+        <div style="font-size:11.5px;color:var(--rs-ink-3);line-height:1.45;margin-top:3px;overflow-wrap:anywhere">${escHtml(item.detail || '')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+function _healthRender(host, items, title){
+  if(!host) return;
+  const counts = items.reduce((acc, it) => { acc[it.status] = (acc[it.status] || 0) + 1; return acc; }, {});
+  const worst = items.reduce((w, it) => _healthStatusRank(it.status) > _healthStatusRank(w) ? it.status : w, 'ok');
+  const color = worst === 'fail' ? 'var(--red-t)' : worst === 'warn' ? 'var(--amber-t,#92400e)' : 'var(--green-t)';
+  host.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font-weight:800;color:${color}">${escHtml(title || 'System health')} · ${counts.fail||0} fail · ${counts.warn||0} warn · ${counts.ok||0} ok</div>
+      <div style="font-size:11px;color:var(--rs-ink-3)">Last checked ${new Date().toLocaleTimeString()}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px">
+      ${items.map(_healthCard).join('')}
+    </div>`;
+}
+async function _healthFetchText(url, opts){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts?.timeout || 5000);
+  try{
+    const res = await fetch(url, { ...(opts || {}), signal: controller.signal, cache: 'no-store' });
+    const text = await res.text().catch(() => '');
+    return { ok: res.ok, status: res.status, text };
+  }finally{
+    clearTimeout(timer);
+  }
+}
+async function _healthCheckAsset(url){
+  try{
+    const res = await fetch(url, { method:'HEAD', cache:'no-store' });
+    return { ok: res.ok, status: res.status };
+  }catch(e){
+    return { ok:false, status:0, error:e?.message || String(e) };
+  }
+}
+function _healthSanitySummary(){
+  if(typeof _SANITY_CHECKS === 'undefined') return { status:'warn', label:'Data sanity', detail:'Sanity checker is not loaded yet.' };
+  const counts = { ok:0, warn:0, fail:0 };
+  try{
+    for(const c of _SANITY_CHECKS){
+      const r = c.fn();
+      counts[r.status] = (counts[r.status] || 0) + 1;
+    }
+  }catch(e){
+    return { status:'fail', label:'Data sanity', detail:'A sanity check threw: ' + (e?.message || e) };
+  }
+  return {
+    status: counts.fail ? 'fail' : counts.warn ? 'warn' : 'ok',
+    label: 'Data sanity',
+    detail: `${counts.fail} failed, ${counts.warn} warnings, ${counts.ok} passed. Run Tools → Reports → Sanity check for details.`,
+  };
+}
+async function renderSystemHealth(quick){
+  if(!_isAdminOrSU || !_isAdminOrSU()) return;
+  const host = document.getElementById('sys-health-result');
+  if(!host) return;
+  const items = [];
+  const add = (status, label, detail) => items.push({ status, label, detail });
+
+  const expected = (typeof _RS_HTML_BUILD !== 'undefined') ? _RS_HTML_BUILD : '';
+  const htmlSw = (typeof _SW_VERSION !== 'undefined') ? _SW_VERSION : '';
+  add(expected && expected === htmlSw ? 'ok' : 'fail', 'App build marker', expected ? `HTML ${expected}; expected SW ${htmlSw || 'missing'}.` : 'Missing build marker.');
+
+  const cfgUrl = (typeof _getUrl === 'function') ? _getUrl() : '';
+  const cfgKey = (typeof _getKey === 'function') ? _getKey() : '';
+  add(cfgUrl && cfgKey ? 'ok' : 'fail', 'Supabase configuration', cfgUrl && cfgKey ? `Configured for ${cfgUrl.replace(/^https?:\/\//,'')}.` : 'Project URL or anon key is missing.');
+
+  add(_hasUnsavedChanges ? 'warn' : 'ok', 'Save queue', _hasUnsavedChanges ? `Unsaved changes are queued. Consecutive failures: ${typeof _consecutiveSaveFails !== 'undefined' ? _consecutiveSaveFails : 0}.` : `No queued edits. Last saved: ${S?._lastSaved ? S._lastSaved.toLocaleString() : 'not yet in this session'}.`);
+  add((typeof _consecutiveSaveFails !== 'undefined' && _consecutiveSaveFails > 0) ? 'warn' : 'ok', 'Sync retry state', `Consecutive save failures: ${typeof _consecutiveSaveFails !== 'undefined' ? _consecutiveSaveFails : 0}.`);
+
+  const errCount = (typeof _errorLog !== 'undefined' && Array.isArray(_errorLog)) ? _errorLog.length : 0;
+  add(errCount ? 'warn' : 'ok', 'Runtime error log', errCount ? `${errCount} captured entr${errCount===1?'y':'ies'}. Open Error log for details.` : 'No captured runtime errors.');
+
+  const ghCfg = (typeof _ghLoadCfg === 'function') ? (_ghLoadCfg() || {}) : {};
+  add(ghCfg.token && ghCfg.owner && ghCfg.repo ? (ghCfg.enabled ? 'ok' : 'warn') : 'warn',
+      'GitHub auto-deploy',
+      ghCfg.token && ghCfg.owner && ghCfg.repo ? `${ghCfg.owner}/${ghCfg.repo} ${ghCfg.enabled ? 'enabled' : 'configured but paused'}.` : 'Not configured in browser settings; local autosync may still be active.');
+
+  add((typeof navigator !== 'undefined' && navigator.onLine === false) ? 'fail' : 'ok',
+      'Network state',
+      (typeof navigator !== 'undefined' && navigator.onLine === false) ? 'Browser reports offline.' : 'Browser reports online.');
+
+  items.push(_healthSanitySummary());
+
+  if(quick){
+    _healthRender(host, items, 'Quick health');
+    return;
+  }
+
+  _healthRender(host, [...items, {status:'pending', label:'Deep checks', detail:'Checking service worker, assets, session, data row, and edge functions…'}], 'System health');
+
+  try{
+    const swRes = await _healthFetchText('/sw.js');
+    const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(swRes.text || '');
+    const liveSw = m ? m[1] : '';
+    add(swRes.ok && liveSw === expected ? 'ok' : 'fail', 'Service worker source', swRes.ok ? `Live sw.js ${liveSw || 'unknown'}; HTML ${expected || 'unknown'}.` : `Could not fetch sw.js (HTTP ${swRes.status}).`);
+  }catch(e){
+    add('fail', 'Service worker source', 'Could not fetch sw.js: ' + (e?.message || e));
+  }
+
+  try{
+    if(!('serviceWorker' in navigator)){
+      add('warn', 'Service worker registration', 'This browser does not support service workers.');
+    } else {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const ctl = !!navigator.serviceWorker.controller;
+      add(reg?.active ? (ctl ? 'ok' : 'warn') : 'warn', 'Service worker registration', reg?.active ? `Active${ctl ? ' and controlling this page' : ', but this page is not controlled until reload'}.` : 'No active registration yet.');
+    }
+  }catch(e){
+    add('warn', 'Service worker registration', e?.message || String(e));
+  }
+
+  try{
+    const man = await _healthFetchText('/manifest.webmanifest');
+    const parsed = JSON.parse(man.text || '{}');
+    const icons = Array.isArray(parsed.icons) ? parsed.icons : [];
+    const iconChecks = await Promise.all(icons.map(i => _healthCheckAsset(i.src)));
+    const badIcons = iconChecks.filter(r => !r.ok).length;
+    add(man.ok && !badIcons ? 'ok' : 'warn', 'PWA manifest and icons', man.ok ? `${icons.length} icon(s), ${badIcons} missing/unreachable.` : `Manifest HTTP ${man.status}.`);
+  }catch(e){
+    add('warn', 'PWA manifest and icons', e?.message || String(e));
+  }
+
+  if(cfgUrl && cfgKey){
+    try{
+      const sb = (typeof _initAuthClient === 'function' ? _initAuthClient() : (typeof _initSupabase === 'function' ? _initSupabase() : null));
+      const sess = sb?.auth ? await sb.auth.getSession() : { data:{ session:null } };
+      add(sess?.data?.session ? 'ok' : 'warn', 'Auth session', sess?.data?.session ? `Signed in as ${sess.data.session.user?.email || 'current user'}.` : 'No active Supabase session in this browser.');
+      if(sb && _ROW_ID){
+        const { data, error } = await sb.from(_TABLE).select('id').eq('id', _ROW_ID).maybeSingle();
+        add(!error && data ? 'ok' : 'warn', 'Practice data row', !error && data ? `Found row ${_ROW_ID}.` : (error?.message || `No row found for ${_ROW_ID}.`));
+      }
+    }catch(e){
+      add('warn', 'Supabase data probe', e?.message || String(e));
+    }
+
+    for(const fn of ['create-user','send-notification','widget-data','calendar-feed']){
+      try{
+        const res = await fetch(`${cfgUrl.replace(/\/$/,'')}/functions/v1/${fn}`, {
+          method: fn === 'widget-data' || fn === 'calendar-feed' ? 'GET' : 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: fn === 'widget-data' || fn === 'calendar-feed' ? undefined : '{}',
+        });
+        const reachable = [200, 400, 401, 403, 405].includes(res.status);
+        add(reachable ? 'ok' : 'warn', `Edge function: ${fn}`, `Reachability probe returned HTTP ${res.status}${[401,403,405].includes(res.status) ? ' (expected without credentials)' : ''}.`);
+      }catch(e){
+        add('warn', `Edge function: ${fn}`, e?.message || String(e));
+      }
+    }
+  }
+
+  _healthRender(host, items, 'System health');
 }
 
 // ── Performance Monitor (Tools → Logs & ops) ──────────────────────

@@ -22,9 +22,11 @@ None. The app is hands-off.
 
 1. **Check the audit log** for unusual patterns. Filter on `error.*`
    to surface anything captured.
-2. **Check Supabase usage** (Reports → Database / Auth / Realtime).
+2. **Run System health** from Tools → Logs & ops. Use the deep check
+   before releases or after any hosting/Supabase configuration change.
+3. **Check Supabase usage** (Reports → Database / Auth / Realtime).
    If approaching free-tier limits, consider upgrading.
-3. **Run the regression suite** (Tools → run-tests). Failures usually
+4. **Run the regression suite** (Tools → run-tests). Failures usually
    indicate environment drift (e.g. timezone change).
 
 ## Monthly tasks
@@ -98,6 +100,8 @@ If the live Supabase row is corrupted:
 
 - Audit log: every admin mutation, capped at 500 entries.
 - Error log: uncaught errors + render warnings, capped at 100.
+- System health: app shell versioning, Supabase/auth reachability,
+  edge function reachability, save status, PWA assets, and data sanity.
 - Supabase logs: query patterns, edge function invocations.
 - Service worker logs: install/activate/fetch events (per-browser).
 

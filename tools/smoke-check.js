@@ -82,6 +82,9 @@ function unique(arr) {
 const index = read('index.html');
 const sw = read('sw.js');
 const manifestRaw = read('manifest.webmanifest');
+const cssAuth = read('src/parts/css-auth.css');
+const cssMobile = read('src/parts/css-mobile.css');
+const cssTokens = read('src/parts/css-tokens.css');
 let manifest = null;
 try {
   manifest = JSON.parse(manifestRaw);
@@ -100,6 +103,9 @@ if (htmlBuild && htmlSw && swVersion) {
 // Local/prod shell hygiene.
 check('No Cloudflare email-decoder shim in app shell', !/(cdn-cgi|email-decode|cloudflare-static)/.test(index), 'Remove injected CDN scripts from index.html.');
 check('No stale create-user adminCount snippet remains', !/\badminCount\b/.test(index) && !/\badminCount\b/.test(read('supabase/functions/create-user/index.ts')), 'Use privilegedCount/admin+superuser bootstrap logic.');
+check('Managed CSS sources do not start with marker text', !/^\s*Edit the source file/m.test([cssAuth, cssMobile, cssTokens].join('\n---\n')), 'Marker text outside comments can invalidate following CSS.');
+check('Token source comment avoids nested CSS comment delimiters', !/between\s+\/\*/.test(cssTokens), 'Nested /* */ inside comments can corrupt CSS parsing.');
+check('Mobile drawer CSS is present in built shell', /@media\(max-width:760px\)[\s\S]{0,800}\.sidebar\s*\{[\s\S]{0,320}position:fixed/.test(index), 'Mobile sidebar must be off-canvas on phones.');
 
 // PWA assets referenced by sw.js and manifest exist.
 const shellLiteral = extractArrayLiteral(sw, 'SHELL');
@@ -163,6 +169,8 @@ check('Broadcast physician audience excludes admin-only and superuser-only accou
 const reportFn = extractFunctionWindow(index, 'sendMonthlyReportCard', 2200);
 check('Monthly report recipients include superusers', /role\s*={2,3}\s*['"]admin['"][\s\S]{0,100}role\s*={2,3}\s*['"]superuser['"]/.test(reportFn));
 check('User management has protected superuser edit guard', /function\s+_canEditUserRecord\(u\)/.test(index) && /_isSU\(\)/.test(extractFunctionWindow(index, '_canEditUserRecord', 300)));
+check('System health card exists in ops tools', /id="sys-health-result"/.test(index) && /function\s+renderSystemHealth\(/.test(index));
+check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index) && /Rollback timeline/.test(index));
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
 check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
