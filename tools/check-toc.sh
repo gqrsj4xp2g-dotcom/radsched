@@ -29,23 +29,23 @@ toc = toc_match.group(1)
 banner_re = re.compile(r'^// ── ([^─\n]+?) ─', re.M)
 banners = set(b.strip() for b in banner_re.findall(script) if 'TABLE OF CONTENTS' not in b)
 
-# Lower-case keyword check against the TOC.
+# Lower-case keyword check against the TOC. Normalize punctuation so banners
+# like `"Find next available date" helper` key on `find`, not `"find`.
 missing = []
 for b in sorted(banners):
     # Pick the first 3 words as the keyword.
-    key = re.split(r'\s+', b)[0].lower()
+    key = re.sub(r'^[^a-z0-9]+|[^a-z0-9]+$', '', re.split(r'\s+', b)[0].lower())
     if len(key) < 3:
         continue
     if key not in toc.lower():
         missing.append(b)
-        if len(missing) > 20:
-            break
 
 if missing:
     print('Banners not referenced in TOC:', file=sys.stderr)
-    for b in missing[:20]:
+    for b in missing:
         print('  - ' + b, file=sys.stderr)
-    print('(this is a soft warning — update the TOC at top of script)', file=sys.stderr)
+    print('(update the MODULE TABLE OF CONTENTS block at top of script)', file=sys.stderr)
+    sys.exit(1)
 else:
     print('✓ TOC keywords look complete')
 PY
