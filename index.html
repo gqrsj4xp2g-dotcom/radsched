@@ -47517,12 +47517,49 @@ function _pickSetMapping(rawName, physIdStr){
       if(typeof _logError === 'function') _logError('_pickSetMapping rematch', e?.message||String(e), e);
     }
   }
+  // Retroactive cleanup on SKIP: if the user is skipping a name
+  // that was previously imported (e.g. they realize "Smith" was
+  // matched to the wrong Smith on a prior apply), purge every
+  // existing S record that was imported from a cell containing
+  // this raw name. Without this the skip only affects FUTURE
+  // applies — existing records stay on the calendar and the user
+  // sees the skip as ignored.
+  // Only fires on skip (physId === null) — remapping to a
+  // different physician leaves existing records alone since the
+  // user may want them preserved.
+  let purgedV = 0, purgedS = 0;
+  if(!physId){
+    const allWeeks = _xlPickData.allWeeks || [];
+    const sourceRaws = new Set();
+    const buckets = ['vacation', 'off', 'bbPicks', 'shift2', 'shift3'];
+    allWeeks.forEach(w => {
+      buckets.forEach(b => {
+        (w[b] || []).forEach(e => {
+          if(e.name === rawName && e.raw) sourceRaws.add(e.raw);
+        });
+      });
+    });
+    sourceRaws.forEach(raw => {
+      if(typeof _xlPickRemoveExistingForRaw === 'function'){
+        const removed = _xlPickRemoveExistingForRaw(raw);
+        purgedV += removed.vacRemoved;
+        purgedS += removed.shRemoved;
+      }
+    });
+    if(purgedV + purgedS > 0){
+      if(typeof triggerSave === 'function') triggerSave();
+      if(typeof _afterMutation === 'function') _afterMutation();
+      if(typeof _audit === 'function') _audit('import.skipName.purge', { rawName, vacRemoved: purgedV, shRemoved: purgedS });
+    }
+  }
   // User-visible confirmation — without this the dropdown change
   // was silent and admins couldn't tell if the skip "took".
   if(typeof _toast === 'function'){
     const p = physId ? _physById(physId) : null;
     if(physId && p){
       _toast(`Mapped "${rawName}" → ${p.last}, ${p.first}.`, 'ok');
+    } else if(purgedV + purgedS > 0){
+      _toast(`Skipped "${rawName}" — removed ${purgedV+purgedS} existing record${(purgedV+purgedS)===1?'':'s'} and excluded from future imports.`, 'ok');
     } else {
       _toast(`Skipped "${rawName}" — records will not be imported.`, 'info');
     }
