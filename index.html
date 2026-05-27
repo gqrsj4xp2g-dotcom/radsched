@@ -47313,14 +47313,24 @@ function rematchPickImport(){
   const _rematchConflicts = [];
   _xlPickData.shifts = shiftRecs.filter(s => {
     if((S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)) return false;
-    const existing = (typeof _physBookingsOnDate === 'function')
-      ? _physBookingsOnDate(s.physId, s.date)
-      : (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date)
-          .map(ex => ({ kind: 'DR ' + ex.shift }));
-    if(existing.length){
+    // Same VSB-Home replacement policy as the initial parse (rs-v77).
+    // If the only existing conflict is an auto-generated Vacation
+    // Sold Back Home shift, let the new 2nd/3rd shift through —
+    // apply-time will swap them.
+    const conflictingDR = (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date);
+    const conflictingNonDR = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(s.physId, s.date).filter(b => !(b.kind || '').startsWith('DR '))
+      : [];
+    const isVSBHome = ex => ex.shift === 'Home' && (ex.soldBack === true || /vacation sold back/i.test(ex.notes || ''));
+    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isVSBHome) && conflictingNonDR.length === 0;
+    if(onlyVSBHome) return true;
+    if(conflictingDR.length || conflictingNonDR.length){
       _rematchConflicts.push({
         physId: s.physId, date: s.date, shift: s.shift,
-        conflicts: existing.map(e => e.kind || `DR ${e.shift}`),
+        conflicts: [
+          ...conflictingDR.map(ex => `DR ${ex.shift}`),
+          ...conflictingNonDR.map(b => b.kind || 'other'),
+        ],
         sourceRaw: s.sourceRaw || '',
       });
       return false;
