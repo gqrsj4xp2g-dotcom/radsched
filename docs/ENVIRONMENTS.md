@@ -27,3 +27,17 @@ separate deploy URLs for staging and production.
   deliberately copied/staging practice.
 - Production deploys are from `main` only; staging validation runs on the
   `staging` branch and pull requests to `main`.
+- Use `.env.example` for local/prod operator variables and
+  `.env.staging.example` for staging-only smoke credentials.
+- CI runs `npm run test:environment` so production deploys stay pinned to
+  `main` and staging validation stays pinned to `staging`/PRs.
+
+## Promotion evidence
+
+Attach these to every production promotion:
+
+- Staging Validation run URL.
+- Security Scan run URL.
+- `npm run test:edge-monitor` output for staging.
+- SQL migration apply log for staging and production.
+- Restore drill result from staging.
