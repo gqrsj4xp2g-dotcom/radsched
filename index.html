@@ -30389,6 +30389,26 @@ function _drcClearFilters(){
   if(typeof renderDRCal === 'function') renderDRCal();
   if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
 }
+// Reset all four IR-calendar filters (group / phys / site / view).
+// `view` resets to 'both' rather than empty because the dropdown
+// has no blank state — its three options are both/call/shifts and
+// 'both' is the neutral choice. Same persistence-clear pattern as
+// the DR version.
+function _ircClearFilters(){
+  const grp = document.getElementById('irc-grp');
+  if(grp){ grp.value = ''; try{ grp.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const phys = document.getElementById('irc-phys');
+  if(phys){ phys.value = ''; try{ phys.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const site = document.getElementById('irc-site');
+  if(site){ site.value = ''; try{ site.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const v = document.getElementById('irc-view');
+  if(v){ v.value = 'both'; try{ v.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  ['rs.irc.f.group','rs.irc.f.phys','rs.irc.f.site','rs.irc.f.view'].forEach(k => {
+    try{ localStorage.removeItem(k); }catch(_){}
+  });
+  if(typeof renderIRCal === 'function') renderIRCal();
+  if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
+}
 
 /* @JS_RENDER_DR_CAL_END */
 
