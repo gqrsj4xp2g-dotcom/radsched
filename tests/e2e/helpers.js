@@ -100,6 +100,16 @@ async function launchSyntheticUser(page, role = 'superuser') {
     const launch = globalThis.launchApp || Function('return typeof launchApp === "function" ? launchApp : null')();
     launch._running = false;
     await launch();
+    document.getElementById('auth').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    const privileged = role === 'admin' || role === 'superuser';
+    document.querySelectorAll('.admin-only').forEach(el => {
+      if (el.classList.contains('page')) {
+        el.style.display = privileged ? '' : 'none';
+      } else {
+        el.style.display = privileged ? 'block' : 'none';
+      }
+    });
   }, role);
 }
 
