@@ -50,6 +50,7 @@ probe() {
 
 echo "Probing edge functions at $SUPABASE_URL"
 probe create-user POST "200,400,401,403,405"
+probe admin-ops POST "200,400,401,403,405"
 probe send-notification POST "200,400,401,403,405"
 probe widget-data GET "200,400,401,403,405"
 probe calendar-feed GET "200,400,401,403,405"
