@@ -28,14 +28,19 @@ ALTER TABLE practices ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "practices_select" ON practices FOR SELECT
   TO authenticated
-  USING (TRUE);
+  USING (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
+  );
 
 CREATE POLICY "practices_insert" ON practices FOR INSERT
   TO authenticated
-  WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser')
-  );
+  WITH CHECK (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser'));
+
+CREATE POLICY "practices_update" ON practices FOR UPDATE
+  TO authenticated
+  USING (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser'))
+  WITH CHECK (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser'));
 
 -- ── radscheduler: the main per-practice payload ─────────────────────────
 CREATE TABLE radscheduler (
@@ -48,21 +53,24 @@ ALTER TABLE radscheduler ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "radsched_select" ON radscheduler FOR SELECT
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = id)
   );
 
-CREATE POLICY "radsched_write" ON radscheduler FOR ALL
+CREATE POLICY "radsched_insert" ON radscheduler FOR INSERT
+  WITH CHECK (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = id)
+  );
+
+CREATE POLICY "radsched_update" ON radscheduler FOR UPDATE
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = id)
   )
   WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = id)
   );
 
 -- ── radscheduler_backups: dedicated table for daily snapshots ──────────
@@ -78,21 +86,30 @@ ALTER TABLE radscheduler_backups ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "backups_select" ON radscheduler_backups FOR SELECT
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = practice_id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   );
 
-CREATE POLICY "backups_write" ON radscheduler_backups FOR ALL
+CREATE POLICY "backups_insert" ON radscheduler_backups FOR INSERT
+  WITH CHECK (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
+  );
+
+CREATE POLICY "backups_update" ON radscheduler_backups FOR UPDATE
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = practice_id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   )
   WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'superuser') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin') OR
-    ((auth.jwt() -> 'app_metadata' ->> 'practiceId') = practice_id)
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
+  );
+
+CREATE POLICY "backups_delete" ON radscheduler_backups FOR DELETE
+  USING (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   );
 
 -- Seed: the default 'main' practice row so the app has somewhere to land
