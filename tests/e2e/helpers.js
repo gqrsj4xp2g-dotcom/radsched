@@ -36,11 +36,13 @@ async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mf
     const mockRows = [];
     const mockAuditRows = [];
     const mockBackupRows = [];
+    const mockTelemetryRows = [];
     let currentAal = aal || 'aal2';
     const factors = mfaFactors || [{ id: 'e2e-totp', factor_type: 'totp', status: 'verified' }];
     const rowsFor = tableName => {
       if (tableName === 'radscheduler_audit') return mockAuditRows;
       if (tableName === 'radscheduler_backups') return mockBackupRows;
+      if (tableName === 'radscheduler_telemetry') return mockTelemetryRows;
       if (tableName === 'radscheduler') return mockRows;
       return [];
     };
@@ -107,6 +109,7 @@ async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mf
       __rows: mockRows,
       __auditRows: mockAuditRows,
       __backupRows: mockBackupRows,
+      __telemetryRows: mockTelemetryRows,
       from(tableName) {
         return tableApi(tableName);
       },
