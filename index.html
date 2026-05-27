@@ -33767,7 +33767,7 @@ async function _fetchAuditFromSideTable(){
   try{
     const { data, error } = await _supabase
       .from('radscheduler_audit')
-      .select('ts, who, who_id, role, action, detail')
+      .select('ts, inserted_at, who, who_id, role, action, detail, actor_hash, prev_hash, entry_hash')
       .eq('practice_id', String(_ROW_ID))
       .order('ts', { ascending: false })
       .limit(1000);
@@ -33784,6 +33784,10 @@ async function _fetchAuditFromSideTable(){
       role: r.role || null,
       action: r.action || '',
       detail: r.detail || {},
+      actorHash: r.actor_hash || '',
+      prevHash: r.prev_hash || '',
+      entryHash: r.entry_hash || '',
+      insertedAt: r.inserted_at || null,
     }));
   }catch(e){
     console.warn('[audit] side-table read threw:', e);
@@ -33893,12 +33897,13 @@ function renderAuditLog(){
   };
   el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries from ${escHtml(source)} (most recent first)${filter ? ` matching <strong>"${escHtml(filter)}"</strong>` : ''}</div>
     <table class="tbl" style="font-size:11.5px"><thead><tr>
-      <th style="width:140px">When</th><th style="width:160px">Action</th><th>Detail</th>
+      <th style="width:140px">When</th><th style="width:160px">Action</th><th>Detail</th><th style="width:96px">Hash</th>
     </tr></thead><tbody>${rows.slice(0, 200).map(r => `
       <tr>
         <td style="font-family:ui-monospace,monospace;color:var(--rs-ink-2)">${highlight((r.ts||'').replace('T',' ').slice(0,19), filter)}</td>
         <td><span class="tag" style="font-size:10px;background:var(--rs-accent-soft);color:var(--rs-accent)">${highlight(r.action||'', filter)}</span></td>
         <td style="font-family:ui-monospace,monospace;font-size:10.5px;color:var(--rs-ink-2);word-break:break-all">${highlight(JSON.stringify(r.detail||{}), filter)}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:10px;color:var(--rs-ink-3);word-break:break-all" title="${escHtml(r.entryHash || 'Hash not available on this row')}">${escHtml(r.entryHash ? r.entryHash.slice(0, 12) : 'pending')}</td>
       </tr>`).join('')}</tbody></table>`;
 }
 async function _auditRowsForExport(){
@@ -33912,10 +33917,10 @@ async function _auditRowsForExport(){
 }
 async function exportAuditLog(){
   const rows = await _auditRowsForExport();
-  const csv = ['Timestamp,Who,Role,Action,Detail']
+  const csv = ['Timestamp,Who,Role,Action,Detail,ActorHash,PrevHash,EntryHash']
     .concat(rows.map(r => {
       const d = JSON.stringify(r.detail || {}).replace(/"/g, '""');
-      return `"${(r.ts||'').replace(/"/g,'""')}","${(r.who||'').replace(/"/g,'""')}","${(r.role||'').replace(/"/g,'""')}","${(r.action||'').replace(/"/g,'""')}","${d}"`;
+      return `"${(r.ts||'').replace(/"/g,'""')}","${(r.who||'').replace(/"/g,'""')}","${(r.role||'').replace(/"/g,'""')}","${(r.action||'').replace(/"/g,'""')}","${d}","${(r.actorHash||'').replace(/"/g,'""')}","${(r.prevHash||'').replace(/"/g,'""')}","${(r.entryHash||'').replace(/"/g,'""')}"`;
     })).join('\n');
   try{
     const blob = new Blob([csv], {type:'text/csv'});
