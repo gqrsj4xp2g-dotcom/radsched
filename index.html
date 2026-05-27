@@ -11838,7 +11838,9 @@ function _showSwUpdateBanner(version){
 }
 // Fire-and-forget on script load. Doesn't block anything; if registration
 // fails or sw.js doesn't exist, the app behaves exactly as before.
-try{ _registerServiceWorker(); }catch(_){}
+try{
+  if(!window.__RS_E2E_DISABLE_SW) _registerServiceWorker();
+}catch(_){}
 
 function _initLeaderElection(){
   if(typeof BroadcastChannel === 'undefined'){
