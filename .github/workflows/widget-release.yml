@@ -13,8 +13,8 @@ jobs:
   mac:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -23,7 +23,7 @@ jobs:
         working-directory: widget
       - run: npx electron-builder --mac --publish never
         working-directory: widget
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac-dmg
           path: widget/dist/*.dmg
@@ -32,8 +32,8 @@ jobs:
   win:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -42,7 +42,7 @@ jobs:
         working-directory: widget
       - run: npx electron-builder --win --publish never
         working-directory: widget
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: win-exe
           path: widget/dist/*.exe
@@ -52,11 +52,11 @@ jobs:
     needs: [mac, win]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mac-dmg
           path: ./assets
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: win-exe
           path: ./assets

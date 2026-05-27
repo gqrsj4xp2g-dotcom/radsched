@@ -11553,69 +11553,26 @@ function _runLeaderElection(){
 // admin can download from Settings, deploy beside index.html, and the registration
 // below picks it up automatically on next launch.
 //
-// Bumping _SW_VERSION invalidates the cache. Old shells get evicted on the
-// next 'activate' event the moment the new SW takes control.
-const _SW_VERSION = 'rs-v1';
-const _SW_SOURCE = `// RadScheduler service worker — version ${'rs-v1'}
-// Cache strategy: stale-while-revalidate for the index.html shell so the
-// user sees a working app instantly and the next visit gets the freshest
-// version. Cross-origin requests (Supabase, Google Maps, GitHub) bypass
-// the cache entirely so live data is never served stale.
-const CACHE_NAME = 'radsched-${'rs-v1'}';
-const SHELL = ['/', '/index.html'];
+// Download support fetches the deployed sibling sw.js so Settings cannot hand
+// admins an obsolete embedded worker. Keep this fallback empty on purpose:
+// if sw.js is missing, the correct fix is to deploy it beside index.html.
+const _SW_VERSION = 'rs-v84';
+const _SW_SOURCE = '';
 
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(c => c.addAll(SHELL).catch(() => {}))
-      .then(() => self.skipWaiting())
-  );
-});
+async function _serviceWorkerSourceForDownload(){
+  try{
+    const r = await fetch(_serviceWorkerScriptUrlWithBust(), {cache:'no-store'});
+    if(r.ok) return await r.text();
+  }catch(_){}
+  if(_SW_SOURCE) return _SW_SOURCE;
+  throw new Error('Could not fetch sw.js. Open RadScheduler from a host where sw.js is deployed beside index.html, then retry.');
+}
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // Only handle same-origin GETs. Anything else (Supabase API, Maps,
-  // POST mutations, websockets) bypasses the cache entirely.
-  if(e.request.method !== 'GET') return;
-  if(url.origin !== self.location.origin) return;
-
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      const network = fetch(e.request).then(resp => {
-        // Cache successful 200 responses for next visit.
-        if(resp && resp.status === 200 && resp.type === 'basic'){
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then(c => c.put(e.request, copy)).catch(() => {});
-        }
-        return resp;
-      }).catch(() => cached || Promise.reject(new Error('offline')));
-      // stale-while-revalidate: return cached immediately if we have it,
-      // refresh in background.
-      return cached || network;
-    })
-  );
-});
-
-// Manual cache-bust message from the page (used by the "Re-check" button).
-self.addEventListener('message', e => {
-  if(e.data === 'rs:clear-cache'){
-    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k))))
-      .then(() => self.clients.matchAll().then(cs => cs.forEach(c => c.postMessage('rs:cache-cleared'))));
-  }
-});
-`;
-
-function downloadServiceWorker(){
+async function downloadServiceWorker(){
   if(!_adminOnly('download service worker')) return;
   try{
-    const blob = new Blob([_SW_SOURCE], {type: 'application/javascript'});
+    const source = await _serviceWorkerSourceForDownload();
+    const blob = new Blob([source], {type: 'application/javascript'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'sw.js';
