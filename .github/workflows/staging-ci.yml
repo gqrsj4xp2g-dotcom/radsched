@@ -1,0 +1,33 @@
+name: Staging Validation
+
+on:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Staging CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: ./tools/parsecheck.sh
+      - run: ./tools/check-toc.sh
+      - run: npm run test:sql-rls
+      - run: npm run test:migration-drift
+      - run: node tools/smoke-check.js
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run test:rollback-drill
