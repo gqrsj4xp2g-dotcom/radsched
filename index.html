@@ -46516,12 +46516,21 @@ function _parsePickWorkbook(rows, prev, sheetName){
   const dedupShifts = shiftRecs.filter(s => {
     // Exact-duplicate path: same phys+date+shift — silent dedup.
     if((S.drShifts || []).some(ex => ex.physId === s.physId && ex.date === s.date && ex.shift === s.shift)) return false;
-    // Any-other-booking path: phys has SOME shift/call on this date.
-    const existing = (typeof _physBookingsOnDate === 'function')
-      ? _physBookingsOnDate(s.physId, s.date)
-      : (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date)
-          .map(ex => ({ kind: 'DR ' + ex.shift }));
-    if(existing.length){
+    // Conflict check. We classify two ways:
+    //   - Vacation-Sold-Back Home shifts will be REPLACED at apply
+    //     time, so they're NOT a preview-time conflict. Let the row
+    //     pass through; apply path handles the replacement.
+    //   - Anything else (1st shift, IR shift, IR call, weekend call)
+    //     is a real conflict that apply-time will skip. Show it in
+    //     the preview's conflict table.
+    const conflictingDR = (S.drShifts || []).filter(ex => ex.physId === s.physId && ex.date === s.date);
+    const conflictingNonDR = (typeof _physBookingsOnDate === 'function')
+      ? _physBookingsOnDate(s.physId, s.date).filter(b => !(b.kind || '').startsWith('DR '))
+      : [];
+    const isVSBHome = ex => ex.shift === 'Home' && (ex.soldBack === true || /vacation sold back/i.test(ex.notes || ''));
+    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isVSBHome) && conflictingNonDR.length === 0;
+    if(onlyVSBHome) return true; // will be REPLACED at apply — let it through
+    if(conflictingDR.length || conflictingNonDR.length){
       shiftConflictRows.push({
         physId: s.physId, date: s.date, shift: s.shift,
         conflicts: existing.map(e => e.kind || `DR ${e.shift}`),
