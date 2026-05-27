@@ -47,7 +47,20 @@ Policies now present:
 - `radscheduler_insert_scoped`
 - `radscheduler_update_scoped`
 - `radscheduler_backups_select_scoped`
-- `radscheduler_backups_modify_scoped`
+- `radscheduler_backups_insert_scoped`
+- `radscheduler_backups_update_scoped`
+- `radscheduler_backups_delete_scoped`
+
+Follow-up hardening applied:
+
+- `docs/sql/04-rls-advisor-hardening.sql`
+- Supabase migration name: `rls_advisor_hardening`
+- RLS policies now wrap `auth.jwt()` as `(select auth.jwt())` to avoid
+  per-row init-plan overhead.
+- Backup policies are action-specific instead of one broad `FOR ALL` policy.
+- `_radscheduler_shifts_touch()` has a fixed `search_path`.
+- Public execution was revoked from the internal `rls_auto_enable()` security
+  definer function.
 
 ## Auth Metadata
 
@@ -81,9 +94,9 @@ Shift side table:
 
 Audit side table:
 
-- Rows: 341
+- Rows: 343
 - Oldest row: `2026-05-10T00:03:02.088Z`
-- Newest row: `2026-05-27T17:01:22.725Z`
+- Newest row: `2026-05-27T17:07:40.622Z`
 
 ## Edge Functions
 
@@ -140,6 +153,8 @@ are required for launch.
 
 - The audit side table is present, but live authenticated UI verification still
   depends on a real superuser session.
+- Supabase Auth leaked-password protection is disabled. Enable it from the
+  Supabase dashboard under Auth password security.
 - The authenticated live System Health browser run still needs real credentials.
   Run it with:
 
