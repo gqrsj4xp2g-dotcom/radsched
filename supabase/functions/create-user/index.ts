@@ -71,6 +71,22 @@ function normalizeAuthRole(value: unknown, fallback = "user"): string | null {
   return AUTH_ROLES.has(raw) ? raw : null;
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return {};
+    const padded = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
+    return JSON.parse(atob(padded));
+  } catch (_e) {
+    return {};
+  }
+}
+
+function hasAal2(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  return String(payload.aal || "").toLowerCase() === "aal2";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -142,6 +158,13 @@ serve(async (req) => {
       return json({
         error: "Caller is not an admin or superuser (app_metadata.role: " + (appMeta.role || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",
         caller_email: caller.email,
+      }, 403);
+    }
+
+    if (!hasAal2(token)) {
+      return json({
+        error: "Admin MFA verification is required before user-management actions. Verify this session to aal2, then retry.",
+        mfa_required: true,
       }, 403);
     }
 
