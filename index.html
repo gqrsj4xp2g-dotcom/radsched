@@ -38689,6 +38689,18 @@ function _removeHolidayIRCall(physId, date){
   else{callType='daily';callDate=date;}
   S.irCalls=S.irCalls.filter(c=>
     !(c.physId===physId&&c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
+  // Also remove any auto-paired IR daily shift created by the
+  // _syncHolidayToIRCall counterpart (rs-v82). Same notes-prefix
+  // identifier the helper uses. Weekend call has no paired shift
+  // to clean up.
+  if(callType === 'daily'){
+    S.irShifts = (S.irShifts || []).filter(s => !(
+      s.physId === physId &&
+      s.date === callDate &&
+      typeof s.notes === 'string' &&
+      s.notes.startsWith('Auto-paired with IR call')
+    ));
+  }
 }
 
 // Return the IR call physician(s) covering a given date (daily exact or within weekend span)
