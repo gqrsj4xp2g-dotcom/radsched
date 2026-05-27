@@ -146,9 +146,9 @@ These are LOW-RISK changes that pay off at scale:
       per shift cell — N×M lookups. Switched to memoized `_physById()`
       Map lookup (O(1) per call). Same change pattern available for
       other render functions if they show up hot.
-- [ ] Add a "Performance" tab to Tools that shows render times +
-      payload size + the largest arrays (PARTIAL — stress test gives
-      most of this; still want a continuous monitor)
+- [x] Add a Tools → Logs & ops Performance Monitor that shows payload
+      size, largest arrays, selected render timings, side-table state,
+      realtime state, save status, and retry counters.
 
 ## When to migrate the auditLog out of the JSON blob
 
@@ -159,35 +159,26 @@ Trigger: when `S.auditLog.length > 50000` OR the row payload exceeds
 - Add admin actions × 50 admins × 100 actions/yr ≈ 5,000 more
 
 So the audit-log split is the FIRST data migration we'll need at scale.
-The migration SQL ships in `docs/sql/01-audit-log-side-table.sql` —
-ready to apply via the Supabase SQL editor.
+The migration SQL ships in `docs/sql/01-audit-log-side-table.sql` and
+has been applied to production. Re-running it is safe.
 
 ### Migration sequence (when ready)
 
 1. **Run the SQL** at `docs/sql/01-audit-log-side-table.sql` in the
    Supabase dashboard → SQL editor. Creates `public.radscheduler_audit`
-   with practice-scoped indexes + RLS that mirrors the existing
-   table policy.
+   with practice-scoped indexes, scoped RLS, a retry/backfill dedupe
+   index, and an idempotent backfill.
 
-2. **Deploy the dual-write client adapter** (TODO — not yet wired):
-   - `_audit()` writes BOTH to `S.auditLog` (in-blob, for reads) AND
-     to the side table (via service role through an edge function or
-     direct supabase-js insert). Eliminates the read-your-writes
-     consistency problem during the migration.
-   - This phase lasts ~1 week so any client still reading from the
-     blob still sees recent entries.
+2. **Dual-write client adapter**: `_audit()` writes BOTH to `S.auditLog`
+   (short offline fallback) and to `public.radscheduler_audit` (canonical
+   long-term store).
 
-3. **Backfill existing entries** by uncommenting + running the
-   `INSERT INTO public.radscheduler_audit ... FROM jsonb_array_elements(...)`
-   block at the bottom of the SQL file. Idempotent.
+3. **Read/export from side table**: `renderAuditLog()` and
+   `exportAuditLog()` prefer `radscheduler_audit`, falling back to
+   `S.auditLog` only when the table/network/session is unavailable.
 
-4. **Switch reads to the side table**: `renderAuditLog` queries
-   `radscheduler_audit` ORDER BY ts DESC LIMIT 200 instead of
-   reading `S.auditLog`. The blob copy stops being touched.
-
-5. **Trim the blob copy**: reduce `_AUDIT_LOG_MAX` from 5000 to e.g.
-   100 (just the most recent for offline-cache use). The next save
-   to Supabase prunes the blob.
+4. **Trimmed blob copy**: `_AUDIT_LOG_MAX` is 100, keeping offline
+   history useful without bloating the practice blob.
 
 Each step is reversible. Total estimated effort: ~150 lines of
 client code + 1 SQL file (already written). Pick this up when
