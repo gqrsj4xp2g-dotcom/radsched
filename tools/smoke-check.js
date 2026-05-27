@@ -154,6 +154,7 @@ if (edgePathsLiteral) {
 // both "admin" and "superuser" as privileged roles; exact-role drift is easy.
 const srcDash = read('src/parts/js-render-dash.js');
 const createUser = read('supabase/functions/create-user/index.ts');
+const adminOps = read('supabase/functions/admin-ops/index.ts');
 check('Dashboard source uses admin-or-superuser gate', /_isAdminOrSU\(\)/.test(srcDash), 'src/parts/js-render-dash.js');
 check('Dashboard source does not use admin-only isAdm', !/const\s+isAdm\s*=\s*CU\.role\s*={2,3}\s*['"]admin['"]/.test(srcDash));
 check('Practice switcher uses admin-or-superuser gate', /renderPracticesPage[\s\S]{0,1800}_isAdminOrSU\(\)/.test(index));
@@ -174,12 +175,21 @@ check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
 check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
+check('create-user requires admin MFA/AAL2', /function\s+hasAal2/.test(createUser) && /mfa_required/.test(createUser));
 check('create-user protects superuser mutation paths', [
   /Only a superuser can modify another superuser account/,
   /Only a superuser can grant the superuser role/,
   /Only a superuser can create another superuser account/,
   /Only a superuser can delete another superuser account/,
 ].every(re => re.test(createUser)));
+check('admin-ops restores through service-role wrapper with audit evidence', [
+  /restore-backup/.test(adminOps),
+  /function\s+hasAal2/.test(adminOps),
+  /radscheduler_backups/.test(adminOps),
+  /radscheduler_audit/.test(adminOps),
+  /radscheduler_telemetry/.test(adminOps),
+].every(Boolean));
+check('Edge monitor probes admin-ops', /probe admin-ops POST/.test(read('tools/check-edge-functions.sh')));
 
 // Navigation sanity: every sidebar data-pg should have a matching page, except
 // superuser pseudo-pages that render through shared superuser code.
