@@ -12,6 +12,8 @@ inventory, required secrets, and live data health for RadScheduler.
   are privileged; regular users are scoped to their `app_metadata.practiceId`.
 - The legacy fallback that let authenticated users without a practice id read
   the `main` practice row has been removed.
+- The canonical audit side table `public.radscheduler_audit` is present,
+  populated, and protected by practice-scoped RLS.
 - Edge functions are deployed and reachable enough to return expected 400/401
   responses without privileged credentials.
 - The live practice data row, backup history, and shift side table contain
@@ -29,6 +31,7 @@ Tables checked:
 | `public.radscheduler` | enabled | Policy set recreated for scoped select/insert/update. |
 | `public.radscheduler_backups` | enabled | Policy set recreated for scoped select and scoped modify. |
 | `public.radscheduler_shifts` | enabled | Existing policies already included `admin` and `superuser`. |
+| `public.radscheduler_audit` | enabled | Scoped insert/select policies for own practice plus admin/superuser access. |
 
 Migration applied:
 
@@ -75,6 +78,12 @@ Shift side table:
 
 - Rows: 3532
 - Newest row: `2026-05-27T16:45:21Z`
+
+Audit side table:
+
+- Rows: 341
+- Oldest row: `2026-05-10T00:03:02.088Z`
+- Newest row: `2026-05-27T17:01:22.725Z`
 
 ## Edge Functions
 
@@ -129,9 +138,8 @@ are required for launch.
 
 ## Residual Risks
 
-- `radscheduler_audit_log` is not present in production. The app still keeps an
-  in-blob audit trail, but the side-table audit schema should be applied before
-  relying on long-term centralized audit exports.
+- The audit side table is present, but live authenticated UI verification still
+  depends on a real superuser session.
 - The authenticated live System Health browser run still needs real credentials.
   Run it with:
 
