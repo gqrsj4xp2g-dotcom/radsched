@@ -71,13 +71,14 @@ write authorization.
 
 ## Edge function security
 
-Regular requests to `send-notification` require
-`Authorization: Bearer <Supabase JWT>`. The function calls
-`supabase.auth.getUser(jwt)` and rejects 401 if the token is invalid
-or expired. The scheduled `digest-run` path is the only exception: it
-may use `x-rs-cron-secret` so pg_cron can invoke it without a browser
-session. Without these internal checks, the function URL is a free SMS /
-email / push relay for anyone who guesses it.
+Regular requests to edge functions require
+`Authorization: Bearer <Supabase JWT>`. Functions that perform privileged
+work check `app_metadata.role`; service-role admin functions such as
+`create-user` and `admin-ops` also require the JWT `aal` claim to be
+`aal2`. The scheduled `send-notification` `digest-run` path is the only
+exception: it may use `x-rs-cron-secret` so pg_cron can invoke it without a
+browser session. Without these internal checks, function URLs become public
+service-role/admin relays for anyone who guesses them.
 
 ### Secrets
 
@@ -98,7 +99,7 @@ If you suspect a leak:
 
 1. Generate new credentials in the relevant provider (Resend, Twilio, etc.).
 2. `supabase secrets set NEW_KEY=…`.
-3. Re-deploy the edge function: `supabase functions deploy send-notification --no-verify-jwt`.
+3. Re-deploy affected edge functions, for example `supabase functions deploy admin-ops --no-verify-jwt`.
 4. Invalidate the old credentials in the provider console.
 
 ## XSS prevention
