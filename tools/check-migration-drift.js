@@ -30,6 +30,10 @@ function rejectMatch(scope, label, pattern) {
 
 const hardeningScope = { name: 'docs/sql/04-rls-advisor-hardening.sql', text: hardening };
 const allScope = { name: 'docs/sql/*.sql', text: allSql };
+const hardeningSqlOnly = hardening
+  .split(/\r?\n/)
+  .filter(line => !line.trim().startsWith('--'))
+  .join('\n');
 
 const policyChecks = [
   ['practices_select_scoped policy', /CREATE\s+POLICY\s+practices_select_scoped\s+ON\s+public\.practices[\s\S]*?FOR\s+SELECT\s+TO\s+authenticated/i],
@@ -68,8 +72,15 @@ for (const [label, pattern] of objectChecks) {
 }
 
 rejectMatch(hardeningScope, 'broad FOR ALL authenticated policy still present in hardening migration', /CREATE\s+POLICY[\s\S]*?\bFOR\s+ALL\s+TO\s+authenticated/i);
-rejectMatch(hardeningScope, 'unoptimized auth.jwt() call in hardening migration', /(?<!select\s)auth\.jwt\(\)/i);
 rejectMatch(hardeningScope, 'broad TRUE RLS predicate in hardening migration', /\b(USING|WITH\s+CHECK)\s*\(\s*TRUE\s*\)/i);
+
+for (const match of hardeningSqlOnly.matchAll(/auth\.jwt\(\)/gi)) {
+  const before = hardeningSqlOnly.slice(Math.max(0, match.index - 24), match.index);
+  if (!/select\s*$/i.test(before)) {
+    failures.push('docs/sql/04-rls-advisor-hardening.sql: unoptimized auth.jwt() call in hardening migration');
+    break;
+  }
+}
 
 if (failures.length) {
   console.error('Migration drift check failed:');
