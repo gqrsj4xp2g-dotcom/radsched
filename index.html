@@ -46533,7 +46533,10 @@ function _parsePickWorkbook(rows, prev, sheetName){
     if(conflictingDR.length || conflictingNonDR.length){
       shiftConflictRows.push({
         physId: s.physId, date: s.date, shift: s.shift,
-        conflicts: existing.map(e => e.kind || `DR ${e.shift}`),
+        conflicts: [
+          ...conflictingDR.map(ex => `DR ${ex.shift}`),
+          ...conflictingNonDR.map(b => b.kind || 'other'),
+        ],
         sourceRaw: s.sourceRaw || '',
       });
       return false;
