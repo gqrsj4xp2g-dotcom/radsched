@@ -30099,6 +30099,50 @@ function renderDRCal(){
   // existing rendering below runs unconditionally.
   const vm=vacMap();const cells=buildCal(ym);const today=fmtDate(new Date());
   const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  // ── Filter-hides-records banner ─────────────────────────────────
+  // The 4 DR-calendar filters (phys / shift / site / sub) persist in
+  // localStorage across navigations. Users often forget they left
+  // a filter set, then import new shifts and panic that "nothing
+  // shows up" — for example a stuck `shift=1st` filter hides every
+  // 2nd/3rd shift even after a fresh import. This banner counts
+  // how many shifts in the current month would show with no filters
+  // active vs. how many do show under the active filters, and offers
+  // a one-click clear. Only renders when filters actually hide
+  // something — never gets in the way of normal use.
+  try{
+    const _bannerEl = document.getElementById('drc-filter-banner');
+    if(_bannerEl){
+      const monthAll = (S.drShifts || []).filter(s => s.date && s.date.startsWith(ym));
+      const monthShown = monthAll.filter(_matchDRShift);
+      const hidden = monthAll.length - monthShown.length;
+      const anyFilterActive = !!(fpid || fsh || fsite || fsub);
+      if(hidden > 0 && anyFilterActive){
+        // Tally what's being hidden so the message is actionable.
+        const hiddenSet = new Set(monthAll.filter(s => !_matchDRShift(s)).map(s => s.shift));
+        const kindsList = [...hiddenSet].join(', ');
+        const filterBits = [];
+        if(fpid) filterBits.push('physician');
+        if(fsh) filterBits.push(`shift=${fsh}`);
+        if(fsite) filterBits.push(`site=${fsite}`);
+        if(fsub) filterBits.push(`sub=${fsub}`);
+        _bannerEl.innerHTML = `
+          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#78350f">
+            <span style="font-size:16px">⚠</span>
+            <div style="flex:1">
+              <strong>${hidden}</strong> shift${hidden===1?'':'s'} hidden by active filters (${escHtml(filterBits.join(', '))})
+              ${kindsList ? `<br><span style="font-size:11.5px;opacity:0.85">Hidden shift types: ${escHtml(kindsList)}</span>` : ''}
+            </div>
+            <button onclick="_drcClearFilters()" style="background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
+          </div>`;
+        _bannerEl.style.display = '';
+      } else {
+        _bannerEl.style.display = 'none';
+        _bannerEl.innerHTML = '';
+      }
+    }
+  }catch(e){
+    if(typeof _logError === 'function') _logError('drc-filter-banner', e?.message||String(e), e);
+  }
   document.getElementById('drc-head').innerHTML=DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('');
   document.getElementById('drc-body').innerHTML=cells.map(c=>{
     if(!c.day) return '<div class="cal-day other"></div>';
