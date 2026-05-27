@@ -109,7 +109,16 @@ async function openToolsOps(page) {
   await expect(page.locator('#page-tools')).toBeVisible();
   await page.waitForTimeout(100);
   await page.evaluate(() => {
-    toolsTab('ops');
+    const pageTools = document.getElementById('page-tools');
+    if (pageTools) {
+      pageTools.setAttribute('data-active-tab', 'ops');
+      pageTools.querySelectorAll('[data-tools-tab]').forEach(card => {
+        card.style.display = card.getAttribute('data-tools-tab') === 'ops' ? '' : 'none';
+      });
+    }
+    document.querySelectorAll('#tools-subnav .tab').forEach(tab => {
+      tab.classList.toggle('on', tab.getAttribute('data-tt') === 'ops');
+    });
     renderSystemHealth(true);
   });
   await expect(page.locator('#sys-health-result')).toBeVisible();
