@@ -32723,6 +32723,7 @@ async function renderGoLiveChecklist(){
     _goLiveStatus(expected && expected === htmlSw ? 'ok' : 'fail', 'Build/version alignment', expected ? `HTML ${expected}; expected service worker ${htmlSw || 'missing'}.` : 'Missing app build marker.'),
     _goLiveStatus(cfgUrl && cfgKey ? 'ok' : 'fail', 'Supabase configuration', cfgUrl && cfgKey ? `Configured for ${cfgUrl.replace(/^https?:\/\//,'')}.` : 'Missing Supabase project URL or anon key.'),
     _goLiveStatus(session ? 'ok' : 'warn', 'Authenticated health test', session ? `Signed in as ${session.user?.email || 'current user'}.` : 'Run npm run test:e2e:live with RAD_E2E_EMAIL and RAD_E2E_PASSWORD before launch.'),
+    _goLiveStatus(!_isAdminOrSU() || _adminMfaOk() ? 'ok' : 'fail', 'Admin MFA enforcement', !_isAdminOrSU() ? 'Current session is not an admin session.' : (_adminMfaOk() ? `Admin session is ${_MFA_STATUS?.currentLevel || 'aal2'}.` : 'Admin tools are blocked until this session reaches aal2.')),
     _goLiveStatus('warn', 'Supabase leaked-password protection', 'Verify Auth > Security > Leaked password protection is enabled in the Supabase dashboard; public clients cannot introspect this setting.'),
     _goLiveStatus('ok', 'Migration drift guard', 'CI runs npm run test:migration-drift to catch missing hardening policies before deploy.'),
     _goLiveStatus(unsaved ? 'warn' : 'ok', 'Save queue', unsaved ? 'Unsaved changes are queued; wait for save/sync before launch.' : 'No unsaved browser edits are queued.'),
