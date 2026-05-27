@@ -47486,25 +47486,88 @@ async function applyPickImport(){
     vacAdded++;
   });
   // 2nd / 3rd shifts — site is forced to "At Home / Remote" (matches the
-  // app's home-only policy for these shift types). De-duplicated upstream.
-  // Apply-time also re-checks for any OTHER booking on phys+date — this
-  // catches Vacation Sold Back's just-created Home shifts and prevents
-  // double-booking when the source Excel has both an Off and a 2nd shift
-  // for the same physician/day. The preview-time dedup only sees S as
-  // it was BEFORE vacations were applied; this check sees the live state.
+  // app's home-only policy for these shift types).
+  //
+  // Policy on conflicts (re-worked rs-v77):
+  //
+  //   1. Exact duplicate (same phys+date+shift) → silent skip
+  //   2. Conflict with a Vacation-Sold-Back auto-generated Home shift
+  //      → REPLACE the Home shift with the 2nd/3rd shift. The Home
+  //        shift was just a placeholder ("phys is at home today");
+  //        the 2nd/3rd shift is the actual schedule. Without this
+  //        override, the user kept seeing "0 second shifts imported"
+  //        even though the file had them — every 2nd shift was
+  //        getting silently blocked by the VSB Home shift.
+  //   3. Conflict with anything else (1st in-person shift, IR shift,
+  //      IR call, weekend call) → SKIP (true scheduling conflict)
+  //
+  // The replacement path also fires when a previous import had
+  // already created the Home shift (e.g. Vacation Sold Back imported
+  // last month, 2nd shift imported this month) so 2nd shifts come
+  // through cleanly even across separate import sessions.
+  let shReplaced = 0;
   sh.forEach(r => {
     const dup = (S.drShifts || []).find(s => s.physId === r.physId && s.date === r.date && s.shift === r.shift);
     if(dup){ shSkipped++; return; }
-    const existing = (typeof _physBookingsOnDate === 'function')
-      ? _physBookingsOnDate(r.physId, r.date)
-      : (S.drShifts || []).filter(s => s.physId === r.physId && s.date === r.date)
-          .map(s => ({ kind: 'DR ' + s.shift }));
-    if(existing.length){
+    // Find the actual conflicting DR shift records (so we can decide
+    // whether to replace or skip). _physBookingsOnDate returns a
+    // summary array; we need the underlying objects here.
+    const conflictingDR = (S.drShifts || []).filter(s => s.physId === r.physId && s.date === r.date);
+    const conflictingIR = (S.irShifts || []).filter(s => s.physId === r.physId && s.date === r.date);
+    const conflictingIRCalls = (S.irCalls || []).filter(c =>
+      c.physId === r.physId && (
+        (c.callType === 'daily' && c.date === r.date) ||
+        (c.callType === 'weekend' && [c.date, addDays(c.date,1), addDays(c.date,2), addDays(c.date,3)].includes(r.date))
+      )
+    );
+    const conflictingWE = (S.weekendCalls || []).filter(w =>
+      w.physId === r.physId && (w.satDate === r.date || w.sunDate === r.date || w.date === r.date)
+    );
+    // Replaceable iff every conflicting DR record is a Vacation
+    // Sold Back auto-generated Home shift AND there are no IR /
+    // call conflicts. Identify VSB Home shifts by either:
+    //   - explicit soldBack:true flag (set by the auto-fill)
+    //   - notes containing "Vacation Sold Back"
+    const isVSBHome = s =>
+      s.shift === 'Home' &&
+      (s.soldBack === true || /vacation sold back/i.test(s.notes || ''));
+    const onlyVSBHomeConflicts =
+      conflictingDR.length > 0 &&
+      conflictingDR.every(isVSBHome) &&
+      conflictingIR.length === 0 &&
+      conflictingIRCalls.length === 0 &&
+      conflictingWE.length === 0;
+    if(onlyVSBHomeConflicts){
+      // Remove the VSB Home shift(s) and add the 2nd/3rd. The Vacation
+      // record itself is untouched — only the auto-generated Home
+      // placeholder gets replaced.
+      const removedIds = new Set(conflictingDR.map(s => s.id));
+      S.drShifts = S.drShifts.filter(s => !removedIds.has(s.id));
+      S.drShifts.push({
+        id: S.nextId++, physId: r.physId, date: r.date, shift: r.shift,
+        site: r.site || 'At Home / Remote', sub: r.sub || '',
+        notes: r.notes || '', autoHome: false,
+      });
+      shReplaced++;
+      if(typeof _audit === 'function') _audit('import.replaceVSBHome', {
+        physId: r.physId, date: r.date, newShift: r.shift,
+        removedHomeIds: [...removedIds],
+        sourceRaw: r.sourceRaw || '',
+      });
+      return;
+    }
+    // True conflict (1st shift / IR / call) — skip + audit.
+    const realConflicts = [
+      ...conflictingDR.map(s => `DR ${s.shift}`),
+      ...conflictingIR.map(s => `IR ${s.shift || 'shift'}`),
+      ...conflictingIRCalls.map(c => `IR ${c.callType||'call'}`),
+      ...conflictingWE.map(_ => 'Weekend call'),
+    ];
+    if(realConflicts.length){
       shConflict++;
-      // Audit each skip so an admin can answer "why didn't Lucas get 2nd shift?".
       if(typeof _audit === 'function') _audit('import.skipConflict', {
         physId: r.physId, date: r.date, shift: r.shift,
-        conflictsWith: existing.map(e => e.kind || `DR ${e.shift}`).join(', '),
+        conflictsWith: realConflicts.join(', '),
         sourceRaw: r.sourceRaw || '',
       });
       return;
