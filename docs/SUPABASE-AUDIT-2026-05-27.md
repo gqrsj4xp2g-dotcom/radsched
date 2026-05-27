@@ -33,8 +33,8 @@ Tables checked:
 | `public.practices` | enabled | Policy set recreated for scoped select plus privileged insert/update. |
 | `public.radscheduler` | enabled | Policy set recreated for scoped select/insert/update. |
 | `public.radscheduler_backups` | enabled | Policy set recreated for scoped select and scoped modify. |
-| `public.radscheduler_shifts` | enabled | Existing policies already included `admin` and `superuser`. |
-| `public.radscheduler_audit` | enabled | Scoped insert/select policies for own practice plus admin/superuser access. |
+| `public.radscheduler_shifts` | enabled | Scoped policies for own practice plus AAL2 privileged access. |
+| `public.radscheduler_audit` | enabled | Scoped insert/select policies for own practice plus AAL2 privileged access. |
 | `public.radscheduler_telemetry` | enabled | Scoped insert/select policies for own practice plus AAL2 privileged access. |
 
 Migrations applied:
