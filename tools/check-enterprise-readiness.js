@@ -5,11 +5,15 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const required = [
   ['CodeQL workflow', '.github/workflows/codeql.yml', /github\/codeql-action\/(init|analyze)@v\d+/],
+  ['Security scan workflow', '.github/workflows/security-scan.yml', /npm audit --audit-level=high[\s\S]*test:security-headers/],
   ['Staging CI workflow', '.github/workflows/staging-ci.yml', /npm run test:e2e/],
   ['Dependabot config', '.github/dependabot.yml', /package-ecosystem:\s*npm/],
   ['Enterprise readiness docs', 'docs/ENTERPRISE-READINESS.md', /NIST CSF 2\.0[\s\S]*OWASP ASVS/],
   ['Environment docs', 'docs/ENVIRONMENTS.md', /staging[\s\S]*production/i],
+  ['RBAC matrix docs', 'docs/RBAC.md', /app_metadata\.role[\s\S]*aal2/],
+  ['SSO/SCIM readiness docs', 'docs/SSO-SCIM.md', /SAML[\s\S]*SCIM/],
   ['Telemetry migration', 'docs/sql/06-enterprise-telemetry.sql', /CREATE TABLE IF NOT EXISTS public\.radscheduler_telemetry/],
+  ['Immutable audit migration', 'docs/sql/07-immutable-audit-chain.sql', /radscheduler_audit_hash_before_insert/],
   ['Admin MFA migration', 'docs/sql/05-admin-mfa-aal2-hardening.sql', /radscheduler_admin_aal2/],
 ];
 
