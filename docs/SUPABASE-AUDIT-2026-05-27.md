@@ -13,7 +13,8 @@ inventory, required secrets, and live data health for RadScheduler.
 - The legacy fallback that let authenticated users without a practice id read
   the `main` practice row has been removed.
 - The canonical audit side table `public.radscheduler_audit` is present,
-  populated, and protected by practice-scoped RLS.
+  populated, protected by practice-scoped RLS, and hardened with append-only
+  hash-chain columns/triggers.
 - Enterprise hardening is now active: privileged cross-practice database
   paths require JWT `aal2`, and `public.radscheduler_telemetry` is present
   for durable operational evidence.
@@ -45,6 +46,8 @@ Migrations applied:
 - Supabase migration name: `admin_mfa_aal2_hardening`
 - `docs/sql/06-enterprise-telemetry.sql`
 - Supabase migration name: `enterprise_telemetry`
+- `docs/sql/07-immutable-audit-chain.sql`
+- Applied via linked production SQL query on 2026-05-27.
 
 Policies now present:
 
@@ -105,6 +108,12 @@ Audit side table:
 - Rows: 343
 - Oldest row: `2026-05-10T00:03:02.088Z`
 - Newest row: `2026-05-27T17:07:40.622Z`
+- Hash-chain columns verified: `actor_hash`, `prev_hash`, `entry_hash`,
+  `inserted_at`.
+- Append-only triggers verified:
+  `radscheduler_audit_hash_before_insert_trg`,
+  `radscheduler_audit_prevent_update_trg`,
+  `radscheduler_audit_prevent_delete_trg`.
 
 ## Edge Functions
 
@@ -112,15 +121,15 @@ Deployed functions:
 
 | Function | Version | Status |
 | --- | ---: | --- |
-| `create-user` | 42 | active |
-| `admin-ops` | 2 | active |
+| `create-user` | 45 | active |
+| `admin-ops` | 5 | active |
 | `maps-proxy` | 17 | active |
 | `auto-refresh-traffic` | 20 | active |
 | `ai-proxy` | 13 | active |
 | `SendFx` | 8 | active |
 | `send-notification` | 11 | active |
 | `calendar-feed` | 4 | active |
-| `widget-data` | 75 | active |
+| `widget-data` | 101 | active |
 
 Unauthenticated reachability probes:
 
@@ -163,10 +172,10 @@ are required for launch.
 
 ## Residual Risks
 
-- The audit side table is present, but live authenticated UI verification still
-  depends on a real superuser session.
-- Supabase Auth leaked-password protection is disabled. Enable it from the
-  Supabase dashboard under Auth password security.
+- Live authenticated UI verification still depends on a real superuser session.
+- Supabase Auth leaked-password protection is disabled because the current
+  Supabase organization is on Free; Supabase documents this feature as Pro and
+  above.
 - The authenticated live System Health browser run still needs real credentials.
   Run it with:
 
