@@ -218,9 +218,17 @@ Hold off until the core features stabilize.
 `.github/workflows/deploy.yml` runs:
 1. Parse check
 2. TOC check
-3. Manifest JSON validation
-4. Shell smoke check
-5. Edge Function TypeScript bundle validation
+3. CSP/security header check
+4. Environment separation check
+5. RBAC matrix check
+6. SQL/RLS lint and migration drift
+7. Enterprise readiness evidence check
+8. Offline load profile
+9. Manifest JSON validation
+10. Shell smoke check
+11. Playwright E2E
+12. Rollback drill
+13. Edge Function TypeScript bundle validation
 
 Failures block the deploy. See the workflow file for current state.
 
