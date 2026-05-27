@@ -11064,6 +11064,32 @@ async function doLogin(){
   }
 }
 
+async function doSSOLogin(){
+  const sb=_initAuthClient();
+  if(!sb){
+    showErr('Supabase is not configured. Add the project URL and anon key first.');
+    return;
+  }
+  let domain=_getSsoDomain();
+  if(!domain){
+    domain=(prompt('Enter your company email domain for SSO (example: hospital.org)')||'').trim().toLowerCase().replace(/^@/,'');
+    if(!domain) return;
+    _setSsoDomain(domain);
+    const ssoEl=document.getElementById('auth-sso-domain');
+    if(ssoEl) ssoEl.value=domain;
+  }
+  showErr('');
+  try{
+    const redirectTo = (window.location.origin && window.location.origin !== 'null')
+      ? window.location.origin + window.location.pathname
+      : window.location.href.split('#')[0].split('?')[0];
+    const { error } = await sb.auth.signInWithSSO({ domain, options:{ redirectTo } });
+    if(error) throw error;
+  }catch(e){
+    showErr('SSO start failed: ' + (e?.message || e));
+  }
+}
+
 async function doRegister(){
   const first=document.getElementById('rf-first').value.trim();
   const last=document.getElementById('rf-last').value.trim();
