@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # RadScheduler — disk-watch GitHub autosync
 #
-# Watches index.html in the parent directory for changes; commits + pushes
-# to the configured remote any time the file is modified. Debounces 3 sec
-# so rapid successive saves cluster into one commit.
+# Watches the repository for changes; commits + pushes any unignored Git
+# change to the configured remote. Debounces 3 sec so rapid successive saves
+# cluster into one commit.
 #
 # Run from launchd (recommended) or manually for one-shot:
 #   bash ~/RadApp/.git-autopush.sh
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 REPO_DIR="${HOME}/RadApp"
-WATCH_FILE="index.html"
+WATCH_PATH="."
 DEBOUNCE_SECONDS=3
 LOCK_FILE="${REPO_DIR}/.git-autopush.lock"
 
@@ -56,27 +56,34 @@ if ! git remote get-url origin >/dev/null 2>&1; then
 fi
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-log "▶ Watching ${REPO_DIR}/${WATCH_FILE} → origin/${CURRENT_BRANCH}"
+log "▶ Watching ${REPO_DIR}/${WATCH_PATH} → origin/${CURRENT_BRANCH}"
 
 # fswatch outputs one line per change. -l 1 sets the latency to 1s so we
 # don't fire on every micro-write of a save. Read in a loop with a debounce
 # so a flurry of writes still produces one commit.
-fswatch --one-per-batch --latency 1 "${WATCH_FILE}" | while read -r _; do
+fswatch --one-per-batch --latency 1 \
+  --exclude='(^|/)\.git(/|$)' \
+  --exclude='(^|/)\.git-autopush\.lock$' \
+  --exclude='(^|/)node_modules(/|$)' \
+  --exclude='(^|/)dist(/|$)' \
+  --exclude='(^|/)supabase/\.temp(/|$)' \
+  --exclude='(^|/)\.DS_Store$' \
+  "${WATCH_PATH}" | while read -r _; do
   sleep "${DEBOUNCE_SECONDS}"
   # fswatch's --one-per-batch already coalesces rapid successive writes
   # into a single line on the pipe, so an explicit drain loop isn't
   # needed (and `read -t 0.01` isn't reliable on macOS Bash 3.2 anyway).
 
-  # Only push if the file actually differs from HEAD. fswatch fires on
-  # touch / metadata-only changes too, which we want to ignore.
-  if git diff --quiet HEAD -- "${WATCH_FILE}" 2>/dev/null; then
-    log "  no content change — skipping"
+  # Only push if Git sees an actual unignored change. fswatch fires on touch
+  # and metadata-only events too, which we want to ignore.
+  if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+    log "  no git-visible change — skipping"
     continue
   fi
 
   STAMP="$(date '+%Y-%m-%d %H:%M:%S')"
   log "  detected change → committing"
-  if git add "${WATCH_FILE}" \
+  if git add -A -- . \
      && git commit -m "rs: disk autosave ${STAMP}" >/dev/null 2>&1; then
     if git push origin "${CURRENT_BRANCH}" 2>&1; then
       log "  ✓ pushed to origin/${CURRENT_BRANCH}"
