@@ -1,0 +1,31 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main, staging]
+  schedule:
+    - cron: '41 10 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-guardrails:
+    name: Static security guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test:security-headers
+      - run: npm run test:rbac
+      - run: npm run test:environment
+      - run: npm run test:sql-rls
+      - run: npm run test:migration-drift
