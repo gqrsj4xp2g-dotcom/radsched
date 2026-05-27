@@ -6342,12 +6342,24 @@ window.addEventListener('error', function(ev){
     }
   } catch(_e){}
 });
+
+function _isExpectedServiceWorkerUpdateError(reason){
+  const msg = ((reason && reason.message) || String(reason || '')).toLowerCase();
+  return msg.includes('failed to update a serviceworker') ||
+         (msg.includes('serviceworker') && msg.includes('fetching the script'));
+}
+
 // Unhandled Promise rejection — async functions swallow errors otherwise.
 window.addEventListener('unhandledrejection', function(ev){
   try {
     const reason = ev.reason;
     const msg = (reason && reason.message) || String(reason);
     const stk = (reason && reason.stack) ? reason.stack.split('\n').slice(0,4).join('\n') : '';
+    if(_isExpectedServiceWorkerUpdateError(reason)){
+      console.warn('[RS] Service worker update skipped:', msg);
+      ev.preventDefault?.();
+      return;
+    }
     console.error('[RS-UnhandledRejection]', reason);
     alert('⚠ RadScheduler async error:\n' + msg + (stk ? '\n\n' + stk : ''));
   } catch(_e){}
@@ -9044,6 +9056,7 @@ if(typeof window !== 'undefined' && !window._rsErrorCaptureInstalled){
   });
   window.addEventListener('unhandledrejection', (ev) => {
     const r = ev?.reason;
+    if(typeof _isExpectedServiceWorkerUpdateError === 'function' && _isExpectedServiceWorkerUpdateError(r)) return;
     const e = r instanceof Error ? r : new Error(typeof r === 'string' ? r : JSON.stringify(r).slice(0, 400));
     _captureGlobal('unhandled-rejection', e.message, e);
   });
@@ -11537,7 +11550,7 @@ function _runLeaderElection(){
 // browser caches the shell so the app loads instantly even when offline.
 // We DON'T bundle the SW source as a Blob URL — Safari rejects those, and
 // scope binding is brittle. Instead the source lives here as a string the
-// admin can download from Settings, deploy to /sw.js, and the registration
+// admin can download from Settings, deploy beside index.html, and the registration
 // below picks it up automatically on next launch.
 //
 // Bumping _SW_VERSION invalidates the cache. Old shells get evicted on the
@@ -11635,7 +11648,7 @@ async function checkServiceWorkerStatus(){
       el.textContent = `✓ Registered (${state}) — scope: ${reg.scope}`;
       el.style.color = 'var(--green-t)';
     } else {
-      el.textContent = '⚠ Not registered yet — make sure /sw.js exists at your origin';
+      el.textContent = '⚠ Not registered yet — make sure sw.js exists beside index.html';
       el.style.color = 'var(--amber,#d97706)';
     }
   }catch(e){
@@ -11663,17 +11676,45 @@ async function unregisterServiceWorker(){
   }
 }
 
+function _serviceWorkerScriptUrl(){
+  return new URL('sw.js', location.href).toString();
+}
+
+function _serviceWorkerScriptUrlWithBust(){
+  const url = new URL(_serviceWorkerScriptUrl());
+  url.searchParams.set('_', String(Date.now()));
+  return url.toString();
+}
+
+function _safeServiceWorkerUpdate(reg){
+  try{
+    const p = reg?.update?.();
+    if(p && typeof p.catch === 'function'){
+      p.catch(err => {
+        if(_isExpectedServiceWorkerUpdateError(err)){
+          console.warn('[RS] Service worker update skipped:', err.message || err);
+          return;
+        }
+        console.warn('[RS] Service worker update failed:', err);
+      });
+    }
+  }catch(err){
+    console.warn('[RS] Service worker update failed:', err);
+  }
+}
+
 // One-shot registration on launch. Silently no-op if:
 //   • Service workers aren't supported
 //   • Page is loaded over file:// (SWs require https or localhost)
-//   • /sw.js doesn't exist (admin hasn't deployed it yet)
+//   • sw.js doesn't exist beside index.html (admin hasn't deployed it yet)
 function _registerServiceWorker(){
   if(!('serviceWorker' in navigator)) return;
   if(location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
+  const swUrl = _serviceWorkerScriptUrl();
   // Probe the sw.js URL first so we don't generate a console error if it 404s.
   // The HEAD request is cheap and the result reveals whether the admin has
   // deployed the SW yet.
-  fetch('/sw.js?_=' + Date.now(), {method:'HEAD', cache:'no-store'}).then(resp => {
+  fetch(_serviceWorkerScriptUrlWithBust(), {method:'HEAD', cache:'no-store'}).then(resp => {
     if(!resp.ok) return; // not deployed yet — silent
     // updateViaCache:'none' tells the browser to NEVER serve sw.js from
     // HTTP cache when checking for SW updates. Without this, a CDN-
@@ -11681,15 +11722,15 @@ function _registerServiceWorker(){
     // (user force-reloads, browser still sees old sw.js, no update
     // detected, old SW keeps serving cached shell — user reports "the
     // new version isn't showing up no matter how many times I reload").
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+    navigator.serviceWorker.register(swUrl, { updateViaCache: 'none' })
       .then(reg => {
         console.log('[RS] Service worker registered ✓ scope:', reg.scope);
         // Aggressively check for a new SW on this page load and again
         // every 60s while the tab is open. Cheap (just a HEAD on sw.js
         // when nothing changed) and means deploys propagate to long-
         // lived tabs without the user having to do anything.
-        try{ reg.update(); }catch(_){}
-        setInterval(() => { try{ reg.update(); }catch(_){} }, 60_000);
+        _safeServiceWorkerUpdate(reg);
+        setInterval(() => _safeServiceWorkerUpdate(reg), 60_000);
         // When a new SW reaches "installed" state with another SW
         // currently in control, that's an update. Tell it to skip
         // waiting so it activates immediately, then the
@@ -11751,7 +11792,7 @@ function _showSwUpdateBanner(version){
   document.body.appendChild(banner);
 }
 // Fire-and-forget on script load. Doesn't block anything; if registration
-// fails or /sw.js doesn't exist, the app behaves exactly as before.
+// fails or sw.js doesn't exist, the app behaves exactly as before.
 try{ _registerServiceWorker(); }catch(_){}
 
 function _initLeaderElection(){
@@ -12917,7 +12958,7 @@ function _toggleMobileNav(force){
 // pageshow) so a hard reload lands the user at the same scroll position.
 // Resolves the deployed SW's CACHE_VERSION at runtime so the bottom-
 // right build pill never drifts from sw.js again (this used to be
-// hardcoded and silently fell 26 bumps behind). One fetch of /sw.js on
+// hardcoded and silently fell 26 bumps behind). One fetch of sw.js on
 // boot; the response is HTTP-cached by the browser. The result is
 // written into _RS_BUILD_TAG and the pill's textContent is updated in
 // place if the pill has already mounted.
@@ -12939,7 +12980,10 @@ let _RS_BUILD_TAG = '…';
     // now (see sw.js fetch handler) so this hits the origin every
     // time. Without both layers, the pill showed last-deployed
     // version even after a fresh deploy.
-    const r = await fetch('/sw.js?_=' + Date.now(), { cache: 'no-store' });
+    const swProbeUrl = (typeof _serviceWorkerScriptUrlWithBust === 'function')
+      ? _serviceWorkerScriptUrlWithBust()
+      : new URL('sw.js', location.href).toString();
+    const r = await fetch(swProbeUrl, { cache: 'no-store' });
     if(!r.ok) return;
     const t = await r.text();
     const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(t);
@@ -31312,7 +31356,7 @@ async function subscribeToWebPush(){
     }
   }
   // Need an active SW registration. The earlier _registerServiceWorker
-  // already attempted this; if /sw.js wasn't deployed it's a no-op.
+  // already attempted this; if sw.js wasn't deployed it's a no-op.
   let reg;
   try{ reg = await navigator.serviceWorker.ready; }
   catch(_){
