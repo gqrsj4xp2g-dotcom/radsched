@@ -172,6 +172,7 @@ check('Monthly report recipients include superusers', /role\s*={2,3}\s*['"]admin
 check('User management has protected superuser edit guard', /function\s+_canEditUserRecord\(u\)/.test(index) && /_isSU\(\)/.test(extractFunctionWindow(index, '_canEditUserRecord', 300)));
 check('System health card exists in ops tools', /id="sys-health-result"/.test(index) && /function\s+renderSystemHealth\(/.test(index));
 check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index) && /Rollback timeline/.test(index));
+check('SSO login entry point exists', /function\s+doSSOLogin\(/.test(index) && /signInWithSSO/.test(index) && /auth-sso-domain/.test(index));
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
 check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
