@@ -662,13 +662,20 @@
        page. The card disappears once everything is checked. */
     .rs-quickstart {
       border-radius: var(--rs-r-lg);
-      border: 1px solid var(--rs-line);
+      border: 1px solid var(--rs-line-strong);
       background:
-        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 100%),
+        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 58%),
         var(--bg2, #fff);
-      padding: 22px;
+      padding: 20px;
       margin-bottom: 16px;
-      box-shadow: var(--rs-elev-1);
+      box-shadow: var(--rs-elev-2);
+    }
+    .rs-quickstart-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
     }
     .rs-quickstart-title {
       font-size: 16px;
@@ -679,20 +686,62 @@
     .rs-quickstart-sub {
       font-size: 12.5px;
       color: var(--rs-ink-3);
-      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+    .rs-quickstart-count {
+      min-width: 54px;
+      text-align: right;
+      color: var(--rs-accent);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0;
+      line-height: 1.1;
+    }
+    .rs-quickstart-optional-count {
+      color: var(--rs-accent);
+      font-weight: 600;
+    }
+    .rs-quickstart-progress {
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--rs-line);
+      margin-bottom: 12px;
+    }
+    .rs-quickstart-progress span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--rs-accent);
+      transition: width var(--rs-base-d) var(--rs-ease);
     }
     .rs-quickstart-step {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 9px 12px;
+      min-height: 38px;
+      padding: 8px 11px;
       border-radius: var(--rs-r-md);
+      border: 1px solid transparent;
       cursor: pointer;
-      transition: background var(--rs-fast) var(--rs-ease);
+      transition: background var(--rs-fast) var(--rs-ease),
+                  border-color var(--rs-fast) var(--rs-ease);
       font-size: 13.5px;
       letter-spacing: -0.005em;
     }
-    .rs-quickstart-step:hover { background: var(--rs-accent-soft); }
+    .rs-quickstart-step:hover {
+      background: var(--rs-accent-soft);
+      border-color: var(--rs-line);
+    }
+    .rs-quickstart-step:focus-visible {
+      outline: 2px solid var(--rs-accent-ring);
+      outline-offset: 2px;
+    }
+    .rs-quickstart-step.done {
+      cursor: default;
+      background: rgba(20, 184, 166, 0.07);
+    }
+    .rs-quickstart-step.optional:not(.done) { opacity: 0.88; }
     .rs-quickstart-check {
       width: 20px; height: 20px;
       border-radius: 50%;
@@ -712,8 +761,32 @@
       text-decoration: line-through;
       text-decoration-thickness: 1px;
     }
-    .rs-quickstart-name { flex: 1; }
-    .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
+    .rs-quickstart-name {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .rs-quickstart-arrow {
+      width: 18px;
+      text-align: right;
+      color: var(--rs-ink-3);
+      font-size: 14px;
+    }
+    .rs-quickstart-section-label {
+      margin-top: 12px;
+      padding: 2px 0 4px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--rs-ink-3);
+    }
+    @media (max-width: 640px) {
+      .rs-quickstart { padding: 16px; }
+      .rs-quickstart-head { gap: 10px; }
+      .rs-quickstart-count { font-size: 17px; min-width: 46px; }
+      .rs-quickstart-step { align-items: flex-start; }
+    }
 
     /* ── Sticky calendar toolbar ──────────────────────────────────────
        Keeps the month picker / filter chips visible as the calendar

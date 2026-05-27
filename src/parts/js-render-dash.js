@@ -9,8 +9,9 @@ function renderDash(){
   // Null guard — renderDash can fire from page transitions before
   // the dashboard DOM is mounted (rare but documented in the field).
   const gr=document.getElementById('dash-greet');
-  if(gr) gr.textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
-  const isAdm=CU.role==='admin';
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():(CU.role==='admin'||CU.role==='superuser');
+  const viewLabel=CU.role==='superuser'?'Superuser view.':(isAdm?'Admin view.':'');
+  if(gr) gr.textContent=[`Welcome back, ${CU.first}.`, viewLabel].filter(Boolean).join(' ');
   // The "More analytics" details wrapper is what gets toggled now —
   // dash-admin-section lives INSIDE it. Setting block on the inner
   // section would override <details> open/closed behavior.
@@ -85,20 +86,27 @@ function renderDash(){
       ];
       const completedCount = steps.filter(s => s.done).length;
       const optDone = optionalSteps.filter(s => s.done).length;
+      const progressPct = Math.round((completedCount / steps.length) * 100);
       setupBanner.style.display = '';
       setupBanner.innerHTML = `
         <div class="rs-quickstart">
-          <div class="rs-quickstart-title">Set up your practice</div>
-          <div class="rs-quickstart-sub">${completedCount} of ${steps.length} required complete · <span style="color:var(--rs-accent);font-weight:500">${optDone}/${optionalSteps.length} optional</span></div>
+          <div class="rs-quickstart-head">
+            <div>
+              <div class="rs-quickstart-title">Set up your practice</div>
+              <div class="rs-quickstart-sub">${completedCount} of ${steps.length} required complete · <span class="rs-quickstart-optional-count">${optDone}/${optionalSteps.length} optional</span></div>
+            </div>
+            <div class="rs-quickstart-count">${progressPct}%</div>
+          </div>
+          <div class="rs-quickstart-progress" aria-label="${completedCount} of ${steps.length} required complete"><span style="width:${progressPct}%"></span></div>
           ${steps.map((s,i) => `
             <div class="rs-quickstart-step ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
               <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
               <div class="rs-quickstart-name">${escHtml(s.label)}</div>
               <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
             </div>`).join('')}
-          <div style="margin-top:10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--rs-ink-3)">Recommended next</div>
+          <div class="rs-quickstart-section-label">Recommended next</div>
           ${optionalSteps.map((s,i) => `
-            <div class="rs-quickstart-step ${s.done?'done':''}" style="opacity:${s.done?1:0.85}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
+            <div class="rs-quickstart-step optional ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
               <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
               <div class="rs-quickstart-name">${escHtml(s.label)}</div>
               <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>

@@ -62,6 +62,15 @@ async function findUserByEmail(admin: any, email: string): Promise<any | null> {
   return null;
 }
 
+const AUTH_ROLES = new Set(["user", "admin", "superuser"]);
+
+function normalizeAuthRole(value: unknown, fallback = "user"): string | null {
+  const raw = value === undefined || value === null || value === ""
+    ? fallback
+    : String(value).trim().toLowerCase();
+  return AUTH_ROLES.has(raw) ? raw : null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -95,25 +104,26 @@ serve(async (req) => {
     // self-promote and then mint admin accounts / change their own
     // practiceId (defeating multi-tenant RLS). app_metadata is
     // server-side-only and powers the RLS policies — use it strictly.
-    let callerRole = appMeta.role;
+    let callerRole = normalizeAuthRole(appMeta.role, "") || "";
 
     // Need an admin client for bootstrap detection + privileged ops.
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // BOOTSTRAP fallback: if NO admin exists yet system-wide AND the
-    // caller claims user_metadata.role==="admin", give them a one-time
-    // pass AND promote their app_metadata.role to admin so the next
-    // call uses the strict path. This is the only path that lets a
+    // BOOTSTRAP fallback: if NO privileged account exists yet system-wide
+    // AND the caller claims user_metadata.role==="admin", give them a
+    // one-time pass AND promote their app_metadata.role to admin so the
+    // next call uses the strict path. This is the only path that lets a
     // brand-new project bootstrap its first admin without manual SQL.
-    if (callerRole !== "admin" && userMeta.role === "admin") {
+    if (callerRole !== "admin" && callerRole !== "superuser" && normalizeAuthRole(userMeta.role, "") === "admin") {
       try {
         const list = await admin.auth.admin.listUsers({ page: 1, perPage: 50 });
-        const adminCount = (list.data?.users || []).filter(
-          (u: any) => (u.app_metadata?.role) === "admin"
-        ).length;
-        if (adminCount === 0) {
+        const privilegedCount = (list.data?.users || []).filter((u: any) => {
+          const role = normalizeAuthRole(u.app_metadata?.role, "");
+          return role === "admin" || role === "superuser";
+        }).length;
+        if (privilegedCount === 0) {
           await admin.auth.admin.updateUserById(caller.id, {
             app_metadata: {
               ...appMeta,
@@ -130,7 +140,7 @@ serve(async (req) => {
 
     if (callerRole !== "admin" && callerRole !== "superuser") {
       return json({
-        error: "Caller is not an admin (app_metadata.role: " + (appMeta.role || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",
+        error: "Caller is not an admin or superuser (app_metadata.role: " + (appMeta.role || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",
         caller_email: caller.email,
       }, 403);
     }
@@ -140,6 +150,13 @@ serve(async (req) => {
 
     if (action === "delete") {
       if (!body.userId) return json({ error: "userId required for delete" }, 400);
+      if (body.userId === caller.id) return json({ error: "Use the Supabase dashboard to delete your own account." }, 400);
+      const { data: target, error: targetErr } = await admin.auth.admin.getUserById(body.userId);
+      if (targetErr) return json({ error: "Delete fetch failed: " + targetErr.message }, 500);
+      const targetRole = normalizeAuthRole(target?.user?.app_metadata?.role, "user");
+      if (targetRole === "superuser" && callerRole !== "superuser") {
+        return json({ error: "Only a superuser can delete another superuser account." }, 403);
+      }
       const delRes = await admin.auth.admin.deleteUser(body.userId);
       if (delRes.error) return json({ error: "Delete failed: " + delRes.error.message }, 500);
       return json({ ok: true, deleted: body.userId });
@@ -151,8 +168,22 @@ serve(async (req) => {
       if (fetchErr) return json({ error: "Update fetch failed: " + fetchErr.message }, 500);
       const existingMeta = (existing?.user?.user_metadata as Record<string, unknown>) || {};
       const existingApp  = (existing?.user?.app_metadata  as Record<string, unknown>) || {};
+      const existingRole = normalizeAuthRole(existingApp.role, "user");
+      const requestedRole = body.role !== undefined ? normalizeAuthRole(body.role, "") : undefined;
+      if (body.role !== undefined && !requestedRole) {
+        return json({ error: "role must be one of: user, admin, superuser" }, 400);
+      }
+      if (existingRole === "superuser" && callerRole !== "superuser") {
+        return json({ error: "Only a superuser can modify another superuser account." }, 403);
+      }
+      if (requestedRole === "superuser" && callerRole !== "superuser") {
+        return json({ error: "Only a superuser can grant the superuser role." }, 403);
+      }
+      if (body.userId === caller.id && requestedRole !== undefined && requestedRole !== callerRole) {
+        return json({ error: "Use the Supabase dashboard to change your own privileged role." }, 400);
+      }
       const patch: Record<string, unknown> = { ...existingMeta };
-      if (body.role !== undefined) patch.role = body.role;
+      if (requestedRole !== undefined) patch.role = requestedRole;
       if (body.physId !== undefined) patch.physId = body.physId == null ? null : body.physId;
       if (body.first !== undefined) patch.first = body.first;
       if (body.last !== undefined) patch.last = body.last;
@@ -163,7 +194,7 @@ serve(async (req) => {
       // user-facing fields.
       const appPatch: Record<string, unknown> = { ...existingApp };
       let appChanged = false;
-      if (body.role !== undefined)       { appPatch.role       = body.role;       appChanged = true; }
+      if (requestedRole !== undefined)   { appPatch.role       = requestedRole;   appChanged = true; }
       if (body.practiceId !== undefined) { appPatch.practiceId = body.practiceId; appChanged = true; }
       const upPayload: Record<string, unknown> = { user_metadata: patch };
       if (appChanged) upPayload.app_metadata = appPatch;
@@ -199,17 +230,22 @@ serve(async (req) => {
     const { email, password, first, last, role, physId, practiceId } = body;
     if (!email || !password) return json({ error: "email and password required" }, 400);
     if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);
+    const requestedCreateRole = normalizeAuthRole(role, "user");
+    if (!requestedCreateRole) return json({ error: "role must be one of: user, admin, superuser" }, 400);
+    if (requestedCreateRole === "superuser" && callerRole !== "superuser") {
+      return json({ error: "Only a superuser can create another superuser account." }, 403);
+    }
 
     const createRes = await admin.auth.admin.createUser({
       email: email,
       password: password,
       email_confirm: true,
       app_metadata: {
-        role: role || "user",
+        role: requestedCreateRole,
         practiceId: practiceId || "main",
       },
       user_metadata: {
-        role: role || "user",
+        role: requestedCreateRole,
         first: first || "",
         last: last || "",
         physId: physId == null ? null : physId,

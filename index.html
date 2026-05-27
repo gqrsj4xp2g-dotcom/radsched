@@ -1615,13 +1615,20 @@ tbody tr:hover{background:var(--bg3)}
        page. The card disappears once everything is checked. */
     .rs-quickstart {
       border-radius: var(--rs-r-lg);
-      border: 1px solid var(--rs-line);
+      border: 1px solid var(--rs-line-strong);
       background:
-        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 100%),
+        linear-gradient(180deg, var(--rs-accent-soft) 0%, transparent 58%),
         var(--bg2, #fff);
-      padding: 22px;
+      padding: 20px;
       margin-bottom: 16px;
-      box-shadow: var(--rs-elev-1);
+      box-shadow: var(--rs-elev-2);
+    }
+    .rs-quickstart-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
     }
     .rs-quickstart-title {
       font-size: 16px;
@@ -1632,20 +1639,62 @@ tbody tr:hover{background:var(--bg3)}
     .rs-quickstart-sub {
       font-size: 12.5px;
       color: var(--rs-ink-3);
-      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+    .rs-quickstart-count {
+      min-width: 54px;
+      text-align: right;
+      color: var(--rs-accent);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0;
+      line-height: 1.1;
+    }
+    .rs-quickstart-optional-count {
+      color: var(--rs-accent);
+      font-weight: 600;
+    }
+    .rs-quickstart-progress {
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--rs-line);
+      margin-bottom: 12px;
+    }
+    .rs-quickstart-progress span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--rs-accent);
+      transition: width var(--rs-base-d) var(--rs-ease);
     }
     .rs-quickstart-step {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 9px 12px;
+      min-height: 38px;
+      padding: 8px 11px;
       border-radius: var(--rs-r-md);
+      border: 1px solid transparent;
       cursor: pointer;
-      transition: background var(--rs-fast) var(--rs-ease);
+      transition: background var(--rs-fast) var(--rs-ease),
+                  border-color var(--rs-fast) var(--rs-ease);
       font-size: 13.5px;
       letter-spacing: -0.005em;
     }
-    .rs-quickstart-step:hover { background: var(--rs-accent-soft); }
+    .rs-quickstart-step:hover {
+      background: var(--rs-accent-soft);
+      border-color: var(--rs-line);
+    }
+    .rs-quickstart-step:focus-visible {
+      outline: 2px solid var(--rs-accent-ring);
+      outline-offset: 2px;
+    }
+    .rs-quickstart-step.done {
+      cursor: default;
+      background: rgba(20, 184, 166, 0.07);
+    }
+    .rs-quickstart-step.optional:not(.done) { opacity: 0.88; }
     .rs-quickstart-check {
       width: 20px; height: 20px;
       border-radius: 50%;
@@ -1665,8 +1714,32 @@ tbody tr:hover{background:var(--bg3)}
       text-decoration: line-through;
       text-decoration-thickness: 1px;
     }
-    .rs-quickstart-name { flex: 1; }
-    .rs-quickstart-arrow { color: var(--rs-ink-3); font-size: 14px; }
+    .rs-quickstart-name {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .rs-quickstart-arrow {
+      width: 18px;
+      text-align: right;
+      color: var(--rs-ink-3);
+      font-size: 14px;
+    }
+    .rs-quickstart-section-label {
+      margin-top: 12px;
+      padding: 2px 0 4px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--rs-ink-3);
+    }
+    @media (max-width: 640px) {
+      .rs-quickstart { padding: 16px; }
+      .rs-quickstart-head { gap: 10px; }
+      .rs-quickstart-count { font-size: 17px; min-width: 46px; }
+      .rs-quickstart-step { align-items: flex-start; }
+    }
 
     /* ── Sticky calendar toolbar ──────────────────────────────────────
        Keeps the month picker / filter chips visible as the calendar
@@ -4335,12 +4408,12 @@ tbody tr:hover{background:var(--bg3)}
         To create physician accounts directly (so they can log in without self-registering),
         you need a Supabase Edge Function with admin privileges. This function runs with the
         <strong>service role key</strong> so it can create auth users on your behalf, and verifies
-        the caller is an admin before doing so.
+        the caller is an admin or superuser before doing so.
       </div>
       <div style="background:var(--amber-bg,#fffbeb);border:1px solid #fde68a;color:var(--amber-t,#92400e);padding:8px 10px;border-radius:var(--r);font-size:11px;margin-bottom:10px;line-height:1.55">
         <strong>⚠ Security:</strong> This function uses your service role key, which bypasses
-        Row-Level Security. The function verifies the caller is an admin by checking the caller's
-        <code>app_metadata.role === 'admin'</code> (NOT <code>user_metadata</code>, which users can
+        Row-Level Security. The function verifies the caller is privileged by checking the caller's
+        <code>app_metadata.role</code> for <code>admin</code> or <code>superuser</code> (NOT <code>user_metadata</code>, which users can
         edit). Never expose the service role key in the browser — it only lives as a secret on the
         edge function.
       </div>
@@ -6105,7 +6178,7 @@ Once set, ask me anything about your schedule!</div>
 </div>
 
 </main>
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script>
 /* ═══════════════════════════════════════════════════════════════════════
    RadScheduler — main application script
    ═══════════════════════════════════════════════════════════════════════
@@ -11556,7 +11629,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v85';
+const _SW_VERSION = 'rs-v86';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -12647,17 +12720,17 @@ async function renderPracticesPage(){
     const cur=p.id===_PRACTICE_ID;
     const escName=(s)=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
     html+=`<tr>
-      <td><code>${p.id}</code></td>
-      <td style="font-weight:600">${p.name}</td>
+      <td><code>${escHtml(p.id)}</code></td>
+      <td style="font-weight:600">${escHtml(p.name)}</td>
       <td style="text-align:center">${cur?'<span class="tag tg">Active</span>':
-        (CU&&CU.role==='admin'?`<button class="ba bsm" onclick="switchPractice('${escName(p.id)}','${escName(p.name)}')">Switch</button>`:'')}</td>
+        (_isAdminOrSU()?`<button class="ba bsm" onclick="switchPractice('${escName(p.id)}','${escName(p.name)}')">Switch</button>`:'')}</td>
     </tr>`;
   });
   html+='</tbody></table>';
   el.innerHTML=html;
-  // Show/hide create card (admin only)
+  // Show/hide create card (admin/superuser only)
   const cc=document.getElementById('create-practice-card');
-  if(cc)cc.style.display=(CU&&CU.role==='admin')?'':'none';
+  if(cc)cc.style.display=_isAdminOrSU()?'':'none';
 }
 
 async function createPractice(){
@@ -12927,7 +13000,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v85';
+const _RS_HTML_BUILD = 'rs-v86';
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
@@ -13326,8 +13399,9 @@ function renderDash(){
   // Null guard — renderDash can fire from page transitions before
   // the dashboard DOM is mounted (rare but documented in the field).
   const gr=document.getElementById('dash-greet');
-  if(gr) gr.textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
-  const isAdm=CU.role==='admin';
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():(CU.role==='admin'||CU.role==='superuser');
+  const viewLabel=CU.role==='superuser'?'Superuser view.':(isAdm?'Admin view.':'');
+  if(gr) gr.textContent=[`Welcome back, ${CU.first}.`, viewLabel].filter(Boolean).join(' ');
   // The "More analytics" details wrapper is what gets toggled now —
   // dash-admin-section lives INSIDE it. Setting block on the inner
   // section would override <details> open/closed behavior.
@@ -13402,20 +13476,27 @@ function renderDash(){
       ];
       const completedCount = steps.filter(s => s.done).length;
       const optDone = optionalSteps.filter(s => s.done).length;
+      const progressPct = Math.round((completedCount / steps.length) * 100);
       setupBanner.style.display = '';
       setupBanner.innerHTML = `
         <div class="rs-quickstart">
-          <div class="rs-quickstart-title">Set up your practice</div>
-          <div class="rs-quickstart-sub">${completedCount} of ${steps.length} required complete · <span style="color:var(--rs-accent);font-weight:500">${optDone}/${optionalSteps.length} optional</span></div>
+          <div class="rs-quickstart-head">
+            <div>
+              <div class="rs-quickstart-title">Set up your practice</div>
+              <div class="rs-quickstart-sub">${completedCount} of ${steps.length} required complete · <span class="rs-quickstart-optional-count">${optDone}/${optionalSteps.length} optional</span></div>
+            </div>
+            <div class="rs-quickstart-count">${progressPct}%</div>
+          </div>
+          <div class="rs-quickstart-progress" aria-label="${completedCount} of ${steps.length} required complete"><span style="width:${progressPct}%"></span></div>
           ${steps.map((s,i) => `
             <div class="rs-quickstart-step ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
               <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
               <div class="rs-quickstart-name">${escHtml(s.label)}</div>
               <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
             </div>`).join('')}
-          <div style="margin-top:10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--rs-ink-3)">Recommended next</div>
+          <div class="rs-quickstart-section-label">Recommended next</div>
           ${optionalSteps.map((s,i) => `
-            <div class="rs-quickstart-step ${s.done?'done':''}" style="opacity:${s.done?1:0.85}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
+            <div class="rs-quickstart-step optional ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
               <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
               <div class="rs-quickstart-name">${escHtml(s.label)}</div>
               <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
@@ -13946,29 +14027,35 @@ function mySchedStepFocus(step){
 /* @JS_RENDER_MY_SCHED_END */
 
 /* ─── PROFILES ─── */
+function _canEditUserRecord(u){
+  return !!u && (u.role !== 'superuser' || _isSU());
+}
 function renderProfiles(){
   const isAdm=_isAdminOrSU();
   const list=isAdm?USERS:[USERS.find(u=>u.id===CU?.id)].filter(Boolean);
   document.getElementById('profiles-list').innerHTML=list.map(u=>{
     const p=u.physId?S.physicians.find(x=>x.id===u.physId):null;
     const pracName=(_PRACTICES||[]).find(pr=>pr.id===(u.practiceId||'main'))?.name||(u.practiceId||'main');
-    const avBg=u.role==='admin'?'var(--navy)':'var(--blue)';
+    const roleIsPriv=u.role==='admin'||u.role==='superuser';
+    const canEditTarget=_canEditUserRecord(u);
+    const avBg=roleIsPriv?'var(--navy)':'var(--blue)';
     // Escape every user-controlled text field — first/last/email come from
     // the auth metadata and could contain HTML metacharacters. The avatar
     // initial is sliced so doesn't need escape (single char of an alpha).
     return `<div class="profile-card">
       <div class="av" style="background:${avBg};color:#fff;width:44px;height:44px;font-size:14px">${((u.first||'?')[0]+(u.last||'?')[0]).toUpperCase()}</div>
       <div style="flex:1">
-        <div style="font-weight:800;font-size:14px">${escHtml(u.first||'')} ${escHtml(u.last||'')} <span class="tag ${u.role==='admin'?'tgr':''}" style="${u.role==='admin'?'background:var(--navy);color:#fff':''}">${escHtml(u.role||'')}</span></div>
+        <div style="font-weight:800;font-size:14px">${escHtml(u.first||'')} ${escHtml(u.last||'')} <span class="tag ${roleIsPriv?'tgr':''}" style="${roleIsPriv?'background:var(--navy);color:#fff':''}">${escHtml(u.role||'')}</span></div>
         <div style="font-size:11px;color:var(--txt2);margin-top:2px">${escHtml(u.email||'')}</div>
         <div style="font-size:10px;color:var(--txt3);margin-top:1px">Linked: ${p?escHtml(p.last+', '+p.first+' ('+(p.role||'')+')'):'None'} | Joined: ${escHtml(u.joined||'')}</div>
       </div>
-      ${isAdm?`<button class="bsm" onclick="openLinkModal(${JSON.stringify(String(u.id)).replace(/"/g,'&quot;')})">Link Physician</button>`:''}
+      ${isAdm?(canEditTarget?`<button class="bsm" onclick="openLinkModal(${JSON.stringify(String(u.id)).replace(/"/g,'&quot;')})">Link Physician</button>`:'<button class="bsm" disabled title="Superuser access is managed through protected auth metadata">Link Physician</button>'):''}
     </div>`;
   }).join('');
 }
 function openLinkModal(uid){
   const u=USERS.find(x=>x.id===uid);if(!u) return;
+  if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');return;}
   // escHtml every interpolated physician field — names/roles can in
   // principle contain HTML metacharacters (apostrophes, &, <), and any
   // user with row-level write access could otherwise stage XSS that
@@ -13989,6 +14076,7 @@ function openLinkModal(uid){
 }
 function doLink(uid){
   const u=USERS.find(x=>x.id===uid);if(!u) return;
+  if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');return;}
   u.physId=parseInt(document.getElementById('lm-sel').value)||null;
   triggerSave();
   closeModal('link-modal');
@@ -14129,7 +14217,7 @@ function renderUserMgmt(){
   // current value pre-selected via markup so the dropdown opens on the right
   // entry without extra DOM work.
   const physOptsFor = (curId) => '<option value="">— no link —</option>' +
-    S.physicians.map(p => `<option value="${p.id}"${curId==p.id?' selected':''}>${escHtml(p.last+', '+p.first)} (${p.role})</option>`).join('');
+    S.physicians.map(p => `<option value="${p.id}"${curId==p.id?' selected':''}>${escHtml(p.last+', '+p.first)} (${escHtml(p.role)})</option>`).join('');
 
   document.getElementById('user-mgmt-list').innerHTML='<div class="card"><div class="card-title">Registered Users ('+USERS.length+')</div>'+
     '<div class="note ni" style="font-size:11px;margin-bottom:10px">📬 <strong>Delivery Email</strong> is where notifications actually go. Leave blank to use the login email. First/last name and physician link can be edited inline — changes save on blur. Login email is managed by the auth provider and can only change at the auth layer.</div>'+
@@ -14142,18 +14230,24 @@ function renderUserMgmt(){
     const placeholderWarn = _looksPlaceholder(u.notifyEmail||u.email||'')
       ? ` <span title="This address looks like a placeholder and will be skipped" style="color:var(--amber-t)">⚠</span>` : '';
     const uidLit = escHtml(JSON.stringify(u.id));
+    const canEditTarget = _canEditUserRecord(u);
+    const editDisabled = canEditTarget ? '' : ' disabled title="Superuser access is managed through protected auth metadata"';
+    const roleIsPriv = u.role === 'admin' || u.role === 'superuser';
+    const roleToggle = u.role === 'superuser'
+      ? '<button class="bxs" disabled title="Superuser access is managed through protected auth metadata">Superuser</button>'
+      : `<button class="bxs" onclick="toggleRole(${uidLit})">${u.role==='admin'?'↓User':'↑Admin'}</button>`;
     return`<tr>
-    <td><input class="um-edit" id="um-first-${escHtml(u.id)}" value="${escHtml(u.first||'')}" style="font-size:11px;width:90px" onblur="saveUserField(${uidLit},'first',this.value)"></td>
-    <td><input class="um-edit" id="um-last-${escHtml(u.id)}" value="${escHtml(u.last||'')}" style="font-size:11px;width:110px" onblur="saveUserField(${uidLit},'last',this.value)"></td>
+    <td><input class="um-edit" id="um-first-${escHtml(u.id)}" value="${escHtml(u.first||'')}" style="font-size:11px;width:90px" onblur="saveUserField(${uidLit},'first',this.value)"${editDisabled}></td>
+    <td><input class="um-edit" id="um-last-${escHtml(u.id)}" value="${escHtml(u.last||'')}" style="font-size:11px;width:110px" onblur="saveUserField(${uidLit},'last',this.value)"${editDisabled}></td>
     <td style="font-size:11px;color:var(--txt3)" title="Managed by auth provider — not editable here">${escHtml(u.email||'')}</td>
-    <td>${addrDisplay}${placeholderWarn} <button class="bxs" title="Edit delivery email" onclick="openDeliveryEmailEditor(${uidLit})">✎</button></td>
-    <td><span class="tag ${u.role==='admin'?'tnv':''}">${u.role}</span></td>
-    <td><select class="um-edit" id="um-phys-${escHtml(u.id)}" style="font-size:11px;max-width:180px" onchange="saveUserField(${uidLit},'physId',this.value)">${physOptsFor(u.physId)}</select></td>
-    <td style="font-size:11px;color:var(--txt3)">${u.joined||''}</td>
+    <td>${addrDisplay}${placeholderWarn} <button class="bxs" title="Edit delivery email" onclick="openDeliveryEmailEditor(${uidLit})"${editDisabled}>✎</button></td>
+    <td><span class="tag ${roleIsPriv?'tnv':''}">${escHtml(u.role||'')}</span></td>
+    <td><select class="um-edit" id="um-phys-${escHtml(u.id)}" style="font-size:11px;max-width:180px" onchange="saveUserField(${uidLit},'physId',this.value)"${editDisabled}>${physOptsFor(u.physId)}</select></td>
+    <td style="font-size:11px;color:var(--txt3)">${escHtml(u.joined||'')}</td>
     <td style="display:flex;gap:4px">
-      <button class="bxs" onclick="openLinkModal(${uidLit})" title="Richer link UI (also sets physician)">Link</button>
-      <button class="bxs" onclick="toggleRole(${uidLit})">${u.role==='admin'?'↓User':'↑Admin'}</button>
-      ${u.id!==CU?.id?`<button class="br bxs" onclick="delUser(${uidLit})">Del</button>`:''}
+      <button class="bxs" onclick="openLinkModal(${uidLit})" title="Richer link UI (also sets physician)"${editDisabled}>Link</button>
+      ${roleToggle}
+      ${u.id!==CU?.id?(canEditTarget?`<button class="br bxs" onclick="delUser(${uidLit})">Del</button>`:'<button class="br bxs" disabled title="Superuser access is managed through protected auth metadata">Del</button>'):''}
     </td></tr>`;}).join('')+'</tbody></table></div></div>';
 }
 
@@ -14164,6 +14258,7 @@ function renderUserMgmt(){
 function saveUserField(uid, field, val){
   if(!_adminOnly('edit user')) return;
   const u = USERS.find(x=>x.id===uid); if(!u) return;
+  if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');renderUserMgmt();return;}
   val = (val==null ? '' : String(val)).trim();
   if(field === 'first' || field === 'last'){
     // Sanitize: strip HTML metacharacters, trim, preserve case & apostrophes
@@ -14200,6 +14295,7 @@ async function openDeliveryEmailEditor(uid){
   if(!_adminOnly('edit delivery email')) return;
   const u=USERS.find(x=>x.id===uid);
   if(!u) return;
+  if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');return;}
   const current = u.notifyEmail || '';
   const label = `${u.first||''} ${u.last||''}`.trim() || u.email;
   // Use _rsConfirm with an inline input instead of the native
@@ -14261,12 +14357,13 @@ async function openDeliveryEmailEditor(uid){
   }
 }
 
-function toggleRole(uid){if(!_adminOnly('change roles'))return;const u=USERS.find(x=>x.id===uid);if(!u||u.id===CU?.id)return;u.role=u.role==='admin'?'user':'admin';triggerSave();renderUserMgmt();_updateUserAuthMeta(u.id,{role:u.role}).catch(()=>{});}
+function toggleRole(uid){if(!_adminOnly('change roles'))return;const u=USERS.find(x=>x.id===uid);if(!u||u.id===CU?.id)return;if(u.role==='superuser'){alert('Superuser access is managed through protected auth metadata.');return;}u.role=u.role==='admin'?'user':'admin';triggerSave();renderUserMgmt();_updateUserAuthMeta(u.id,{role:u.role}).catch(()=>{});}
 function delUser(uid){
   if(!_adminOnly('delete users'))return;
   const u=USERS.find(x=>x.id===uid);
   if(!u){alert('User not found.');return;}
   if(u.id===CU?.id){alert('You cannot delete your own account.');return;}
+  if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');return;}
   // Swaps reference physId (not userId), so they're cleaned up by removePhys, not here.
   const msgCount=(S.chatMessages||[]).filter(m=>m.userId===uid||m.toUserId===uid).length;
   const groupMemberships=(S.chatGroups||[]).filter(g=>(g.memberIds||[]).includes(uid)).length;
@@ -21250,8 +21347,8 @@ function openChatGroupEditor(groupId){
     const p=S.physicians.find(x=>x.id===u.physId);
     const label=p?p.last+', '+p.first:(u.first+' '+u.last).trim()||u.email;
     return`<label style="display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer;font-size:12px">
-      <input type="checkbox" value="${u.id}" ${checked} style="accent-color:var(--navy)"> ${label}
-      <span class="tag ${u.role==='admin'?'tb':'tg'}" style="font-size:9px">${u.role}</span>
+      <input type="checkbox" value="${escHtml(u.id)}" ${checked} style="accent-color:var(--navy)"> ${escHtml(label)}
+      <span class="tag ${u.role==='admin'||u.role==='superuser'?'tb':'tg'}" style="font-size:9px">${escHtml(u.role||'user')}</span>
     </label>`;
   }).join('')||'<div style="font-size:11px;color:var(--txt3)">No other users yet</div>';
   modal.style.display='flex';
@@ -26098,20 +26195,20 @@ const _EDGE_FN_SOURCES = {
     '    // role assignments happen via this function with the proper check.',
     '    const callerRole = appMeta.role;',
     '    // Boot-strap fallback: a user with user_metadata.role==="admin" AND',
-    '    // no admins yet in the system gets a one-time pass. Detected by',
-    '    // counting app_metadata.role==="admin" users — zero means we are',
-    '    // bootstrapping. Mark this account by also writing role to app_meta',
+    '    // no privileged account yet in the system gets a one-time pass.',
+    '    // Count app_metadata.role values of admin/superuser — zero means',
+    '    // we are bootstrapping. Mark this account by also writing role to app_meta',
     '    // before returning so the next call uses the strict path.',
     '    const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {',
     '      auth: { autoRefreshToken: false, persistSession: false },',
     '    });',
-    '    let allowed = callerRole === "admin";',
+    '    let allowed = callerRole === "admin" || callerRole === "superuser";',
     '    if (!allowed && userMeta.role === "admin") {',
     '      // Count existing admins. Limit the listUsers scan to a single',
     '      // page (50 by default) which is plenty for the bootstrap check.',
     '      const list = await adminClient.auth.admin.listUsers({ page: 1, perPage: 50 });',
-    '      const adminCount = (list.data?.users || []).filter(u => (u.app_metadata?.role) === "admin").length;',
-    '      if (adminCount === 0) {',
+    '      const privilegedCount = (list.data?.users || []).filter(u => ["admin","superuser"].includes(String(u.app_metadata?.role || "").toLowerCase())).length;',
+    '      if (privilegedCount === 0) {',
     '        // No admins yet — promote this caller and proceed.',
     '        await adminClient.auth.admin.updateUserById(caller.id, {',
     '          app_metadata: { ...appMeta, role: "admin", practiceId: appMeta.practiceId || userMeta.practiceId || "main" },',
@@ -26121,7 +26218,7 @@ const _EDGE_FN_SOURCES = {
     '    }',
     '    if (!allowed) {',
     '      return json({',
-    '        error: "Caller is not an admin (app_metadata.role=" + (callerRole || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",',
+    '        error: "Caller is not an admin or superuser (app_metadata.role=" + (callerRole || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",',
     '      }, 403);',
     '    }',
     '',
@@ -26924,8 +27021,8 @@ function saveCommPrefs(){
 function _broadcastAudience(){
   const aud=document.getElementById('bc-audience')?.value||'all';
   const inPractice = USERS.filter(u => !u.practiceId || u.practiceId===_PRACTICE_ID || u.practiceId==='main');
-  if(aud==='admins')     return inPractice.filter(u=>u.role==='admin');
-  if(aud==='physicians') return inPractice.filter(u=>u.role!=='admin' || u.physId!=null);
+  if(aud==='admins')     return inPractice.filter(u=>u.role==='admin'||u.role==='superuser');
+  if(aud==='physicians') return inPractice.filter(u=>(u.role!=='admin'&&u.role!=='superuser') || u.physId!=null);
   if(aud==='dr'){
     return inPractice.filter(u=>{
       if(u.physId==null) return false;
@@ -41058,7 +41155,7 @@ function acknowledgeOnCall(physId, ds){
   if(typeof triggerSave === 'function') triggerSave();
   if(typeof _afterMutation === 'function') _afterMutation();
   if(typeof _toast === 'function') _toast('On-call confirmed for tonight.', 'ok');
-  try{ _renderOnCallConfirmation(CU?.role === 'admin'); }catch(_){}
+  try{ _renderOnCallConfirmation((typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : CU?.role === 'admin'); }catch(_){}
 }
 
 // ───── Local notification scheduler (fires ~1 h before on-call start) ─
@@ -42106,7 +42203,7 @@ function _copyInstallKitText(physId, days){
 
 // Render the widget page: physician dropdown + active pairings list.
 function renderWidgetPage(){
-  if(!CU || CU.role !== 'admin') return;
+  if(!CU || !((typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : CU.role === 'admin')) return;
   // Load configured download URLs into the form fields.
   if(typeof loadWidgetDownloadUrls === 'function') loadWidgetDownloadUrls();
   const physSelect = document.getElementById('wpair-phys');
@@ -43990,10 +44087,10 @@ async function sendMonthlyReportCard(){
     out.innerHTML = `<div class="card" style="background:var(--bg2);font-family:ui-monospace,monospace;font-size:11.5px;white-space:pre-wrap">${escHtml(md)}</div>`;
   }
   if(!wantEmail) return;
-  // Recipients: every active admin user with a confirmed email.
-  const adminUsers = (USERS || []).filter(u => u.role === 'admin' && u.email);
+  // Recipients: every privileged practice admin with a confirmed email.
+  const adminUsers = (USERS || []).filter(u => (u.role === 'admin' || u.role === 'superuser') && u.email);
   if(!adminUsers.length){
-    alert('No admin users with email addresses found. Add admins under Tools → Account management first.');
+    alert('No admin or superuser accounts with email addresses found. Add admins under Tools → Account management first.');
     return;
   }
   try{
@@ -44006,7 +44103,7 @@ async function sendMonthlyReportCard(){
     if(typeof _audit === 'function')
       _audit('reportCard.sent', { ym, recipients: adminUsers.length });
     if(typeof _toast === 'function')
-      _toast(`Report card emailed to ${adminUsers.length} admin(s).`, 'ok');
+      _toast(`Report card emailed to ${adminUsers.length} privileged recipient(s).`, 'ok');
   }catch(e){
     alert(`Report card send failed: ${e.message || e}\n\nMake sure the send-notification edge function is deployed and RESEND_API_KEY is set.`);
   }
