@@ -35,7 +35,22 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
   await page.evaluate(({ session }) => {
     const mockRows = [];
     const mockAuditRows = [];
-    const queryResult = async () => ({ data: null, error: { message: 'mocked no row' } });
+    const mockBackupRows = [];
+    const rowsFor = tableName => {
+      if (tableName === 'radscheduler_audit') return mockAuditRows;
+      if (tableName === 'radscheduler_backups') return mockBackupRows;
+      if (tableName === 'radscheduler') return mockRows;
+      return [];
+    };
+    const replaceById = (store, row) => {
+      if (!row || row.id === undefined || row.id === null) {
+        store.push(row);
+        return;
+      }
+      const idx = store.findIndex(existing => String(existing?.id) === String(row.id));
+      if (idx >= 0) store[idx] = { ...store[idx], ...row };
+      else store.push(row);
+    };
     const makeQuery = initialRows => {
       let rows = (initialRows || []).slice();
       const api = {
@@ -52,36 +67,44 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
           return api;
         },
         limit: async n => ({ data: rows.slice(0, n), error: null }),
-        single: queryResult,
-        maybeSingle: async () => ({ data: rows[0] || null, error: rows[0] ? null : { message: 'mocked no row' } }),
+        single: async () => ({ data: rows[0] || null, error: rows[0] ? null : { message: 'mocked no row' } }),
+        maybeSingle: async () => ({ data: rows[0] || null, error: null }),
       };
       return api;
     };
     const tableApi = tableName => ({
       select() {
-        return makeQuery(tableName === 'radscheduler_audit' ? mockAuditRows : []);
+        return makeQuery(rowsFor(tableName));
       },
       order: async () => ({ data: [], error: null }),
       limit: async () => ({ data: [], error: null }),
       insert: async payload => {
         const rows = Array.isArray(payload) ? payload : [payload];
-        if (tableName === 'radscheduler_audit') mockAuditRows.push(...rows);
-        else mockRows.push(...rows);
+        rowsFor(tableName).push(...rows);
         return { data: payload, error: null };
       },
       upsert: async payload => {
-        mockRows.push(payload);
+        const rows = Array.isArray(payload) ? payload : [payload];
+        const store = rowsFor(tableName);
+        rows.forEach(row => replaceById(store, row));
         return { data: payload, error: null };
       },
       delete() {
         return {
-          eq: async () => ({ data: null, error: null }),
+          eq: async (column, value) => {
+            const store = rowsFor(tableName);
+            for (let i = store.length - 1; i >= 0; i--) {
+              if (String(store[i]?.[column]) === String(value)) store.splice(i, 1);
+            }
+            return { data: null, error: null };
+          },
         };
       },
     });
     const mock = {
       __rows: mockRows,
       __auditRows: mockAuditRows,
+      __backupRows: mockBackupRows,
       from(tableName) {
         return tableApi(tableName);
       },
