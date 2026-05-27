@@ -6510,7 +6510,7 @@ window.addEventListener('unhandledrejection', function(ev){
     const msg = (reason && reason.message) || String(reason);
     const stk = (reason && reason.stack) ? reason.stack.split('\n').slice(0,4).join('\n') : '';
     if(_isExpectedServiceWorkerUpdateError(reason)){
-      console.warn('[RS] Service worker update skipped:', msg);
+      console.info('[RS] Service worker update skipped:', msg);
       ev.preventDefault?.();
       return;
     }
@@ -11815,7 +11815,7 @@ function _safeServiceWorkerUpdate(reg){
     if(p && typeof p.catch === 'function'){
       p.catch(err => {
         if(_isExpectedServiceWorkerUpdateError(err)){
-          console.warn('[RS] Service worker update skipped:', err.message || err);
+          console.info('[RS] Service worker update skipped:', err.message || err);
           return;
         }
         console.warn('[RS] Service worker update failed:', err);
@@ -11868,7 +11868,13 @@ function _registerServiceWorker(){
           });
         });
       })
-      .catch(err => { console.warn('[RS] Service worker registration failed:', err); });
+      .catch(err => {
+        if(_isExpectedServiceWorkerUpdateError(err)){
+          console.info('[RS] Service worker registration skipped:', err.message || err);
+          return;
+        }
+        console.warn('[RS] Service worker registration failed:', err);
+      });
   }).catch(() => { /* probe failed — likely network error or no sw.js, silent */ });
   // When the SW posts an update notification, surface a non-blocking
   // banner offering to reload. Without this, users sit on the OLD HTML
