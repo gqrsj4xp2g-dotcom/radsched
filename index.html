@@ -35840,7 +35840,11 @@ function addIRCallManual(){
   if(isIRCallBlackout(physId,date)){alert(pname(physId)+' has an IR call blackout on '+date+'.');return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');return;}
   if(callType==='daily'&&_has2ndOr3rdShift(physId,date)){alert(pname(physId)+' is on a 2nd/3rd shift on '+date+' and cannot take IR call.');return;}
-  if(callType==='daily'&&!_hasIRShiftOnDate(physId,date)){alert(pname(physId)+' has no IR procedure shift on '+date+'. Assign an IR shift first before assigning daily call.');return;}
+  // Pre-rs-v82 this BLOCKED the call assignment with an alert if no
+  // IR shift existed. Per user policy that's now AUTO-CREATED: when
+  // someone takes daily call they're also working their procedure
+  // shift that day. The _ensureIRShiftForCall helper runs below
+  // after the call push lands, so this hard-block is removed.
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===irGroup&&ic.callType==='daily')&&!confirm('Daily call already assigned for this group/date. Add anyway?'))return;
   const callSite=callType==='daily'?'':site;
   // Full physician-rule check — routes to ir-call or ir-weekend context
