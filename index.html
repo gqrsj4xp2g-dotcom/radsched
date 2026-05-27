@@ -46527,8 +46527,29 @@ function _parsePickWorkbook(rows, prev, sheetName){
     const conflictingNonDR = (typeof _physBookingsOnDate === 'function')
       ? _physBookingsOnDate(s.physId, s.date).filter(b => !(b.kind || '').startsWith('DR '))
       : [];
-    const isVSBHome = ex => ex.shift === 'Home' && (ex.soldBack === true || /vacation sold back/i.test(ex.notes || ''));
-    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isVSBHome) && conflictingNonDR.length === 0;
+    // ── Replaceable-Home identification (rs-v78 broadened) ──
+    // A Home shift is "replaceable" by an incoming 2nd/3rd shift if
+    // it was auto-generated rather than manually placed. There are
+    // three common auto-generators:
+    //
+    //   1. Vacation Sold Back fill (soldBack:true / notes='Vacation Sold Back')
+    //   2. Auto-assign Home overflow (autoHome:true / notes='Auto-home')
+    //   3. fillDRHomeShifts mop-up (also produces Home with notes
+    //      like 'Bulk-filled Home' or empty notes — caught by autoHome:true)
+    //
+    // Manual Home shifts (admin clicked "Add Home" in the builder)
+    // have autoHome:false AND no soldBack flag AND no notes match —
+    // those are NOT replaced silently; they show as a real conflict.
+    //
+    // rs-v77 missed cases #2 and #3 — most practices run auto-assign
+    // before importing 2nd/3rd shifts, so this was the actual cause of
+    // "2nd shifts still not importing" reports.
+    const isReplaceableHome = ex => ex.shift === 'Home' && (
+      ex.soldBack === true ||
+      ex.autoHome === true ||
+      /vacation sold back|auto[- ]home/i.test(ex.notes || '')
+    );
+    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isReplaceableHome) && conflictingNonDR.length === 0;
     if(onlyVSBHome) return true; // will be REPLACED at apply — let it through
     if(conflictingDR.length || conflictingNonDR.length){
       shiftConflictRows.push({
@@ -47321,8 +47342,29 @@ function rematchPickImport(){
     const conflictingNonDR = (typeof _physBookingsOnDate === 'function')
       ? _physBookingsOnDate(s.physId, s.date).filter(b => !(b.kind || '').startsWith('DR '))
       : [];
-    const isVSBHome = ex => ex.shift === 'Home' && (ex.soldBack === true || /vacation sold back/i.test(ex.notes || ''));
-    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isVSBHome) && conflictingNonDR.length === 0;
+    // ── Replaceable-Home identification (rs-v78 broadened) ──
+    // A Home shift is "replaceable" by an incoming 2nd/3rd shift if
+    // it was auto-generated rather than manually placed. There are
+    // three common auto-generators:
+    //
+    //   1. Vacation Sold Back fill (soldBack:true / notes='Vacation Sold Back')
+    //   2. Auto-assign Home overflow (autoHome:true / notes='Auto-home')
+    //   3. fillDRHomeShifts mop-up (also produces Home with notes
+    //      like 'Bulk-filled Home' or empty notes — caught by autoHome:true)
+    //
+    // Manual Home shifts (admin clicked "Add Home" in the builder)
+    // have autoHome:false AND no soldBack flag AND no notes match —
+    // those are NOT replaced silently; they show as a real conflict.
+    //
+    // rs-v77 missed cases #2 and #3 — most practices run auto-assign
+    // before importing 2nd/3rd shifts, so this was the actual cause of
+    // "2nd shifts still not importing" reports.
+    const isReplaceableHome = ex => ex.shift === 'Home' && (
+      ex.soldBack === true ||
+      ex.autoHome === true ||
+      /vacation sold back|auto[- ]home/i.test(ex.notes || '')
+    );
+    const onlyVSBHome = conflictingDR.length > 0 && conflictingDR.every(isReplaceableHome) && conflictingNonDR.length === 0;
     if(onlyVSBHome) return true;
     if(conflictingDR.length || conflictingNonDR.length){
       _rematchConflicts.push({
