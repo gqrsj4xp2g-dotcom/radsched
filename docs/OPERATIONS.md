@@ -114,14 +114,17 @@ If the live Supabase row is corrupted:
 
 ### Alerting
 
-There is no automated alerting in the box. Set up your own:
+The repository includes `.github/workflows/ops-monitor.yml`, which runs
+`npm run test:edge-monitor` every 30 minutes and on demand. Treat GitHub
+Actions failure notifications as the first-line alert for deployed edge
+function reachability.
 
 - Supabase: configure Slack/email notifications in project settings
   for downtime + auth failures.
 - Resend / Twilio: enable bounce / failure webhooks pointing to
   the `send-notification` edge function (`kind: 'webhook'`).
 - Uptime: set up an external monitor (e.g. Better Uptime, UptimeRobot)
-  pinging the app URL every 5 minutes.
+  pinging the app URL every 5 minutes for coverage outside GitHub Actions.
 
 ## Capacity planning
 
