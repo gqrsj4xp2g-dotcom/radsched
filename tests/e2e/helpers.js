@@ -104,7 +104,9 @@ async function launchSyntheticUser(page, role = 'superuser') {
 async function openToolsOps(page) {
   await page.evaluate(() => {
     localStorage.setItem('rs.toolsTab', 'ops');
-    window.nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    toolsTab('ops');
+    renderSystemHealth(true);
   });
   await expect(page.locator('#page-tools')).toBeVisible();
   await expect(page.locator('#sys-health-result')).toBeVisible();
