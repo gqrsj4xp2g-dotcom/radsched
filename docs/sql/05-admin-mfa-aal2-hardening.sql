@@ -23,9 +23,7 @@ LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $$
-  SELECT
-    coalesce(((select auth.jwt()) -> 'app_metadata' ->> 'role'), 'user') NOT IN ('admin','superuser')
-    AND target_practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId');
+  SELECT target_practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId');
 $$;
 
 -- Practices
