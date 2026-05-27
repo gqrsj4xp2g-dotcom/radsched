@@ -90,6 +90,41 @@ test('role matrix allows only admin and superuser into Tools ops', async ({ brow
   }
 });
 
+test('admin MFA gate blocks privileged navigation until aal2 verification', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=admin-mfa');
+  await launchSyntheticUser(page, 'admin', { aal: 'aal1' });
+
+  let dialogText = '';
+  page.once('dialog', async dialog => {
+    dialogText = dialog.message();
+    await dialog.dismiss();
+  });
+  await page.evaluate(() => {
+    const navFn = globalThis.nav || Function('return typeof nav === "function" ? nav : null')();
+    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+  });
+  await expect(page.locator('#page-tools')).toBeHidden();
+  expect(dialogText).toContain('MFA');
+  await expect(page.locator('#rs-admin-mfa-gate')).toBeVisible();
+
+  page.once('dialog', async dialog => {
+    expect(dialog.type()).toBe('prompt');
+    await dialog.accept('123456');
+  });
+  const verified = await page.evaluate(async () => {
+    const verify = globalThis._mfaChallengeAdmin || Function('return typeof _mfaChallengeAdmin === "function" ? _mfaChallengeAdmin : null')();
+    return verify();
+  });
+  expect(verified).toBe(true);
+
+  await page.evaluate(() => {
+    const navFn = globalThis.nav || Function('return typeof nav === "function" ? nav : null')();
+    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+  });
+  await expect(page.locator('#page-tools')).toBeVisible();
+  await expect(page.locator('#rs-admin-mfa-gate')).toHaveCount(0);
+});
+
 test('go-live readiness checklist surfaces launch guardrails', async ({ page }) => {
   await openApp(page, '/index.html?e2e=golive');
   await launchSyntheticUser(page, 'superuser');
