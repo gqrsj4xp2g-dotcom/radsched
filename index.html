@@ -35860,13 +35860,25 @@ function addIRCallManual(){
   }
   const _newId = S.nextId++;
   S.irCalls.push({id:_newId,physId,date,callType,irGroup,site:callSite,notes:document.getElementById('ird-notes').value});
-  if(typeof _audit==='function') _audit('irCall.add', {id:_newId, physId, date, callType, irGroup, site:callSite});
+  // Auto-pair: daily call always gets a matching IR procedure shift.
+  // Weekend call covers Fri→Mon; we don't auto-create weekend
+  // procedure shifts because most practices don't schedule weekend
+  // IR procedures by default — admins who want them can add manually.
+  let _autoPairedShift = null;
+  if(callType === 'daily'){
+    _autoPairedShift = _ensureIRShiftForCall(physId, date, irGroup, callSite, 'manual-add');
+  }
+  if(typeof _audit==='function') _audit('irCall.add', {
+    id:_newId, physId, date, callType, irGroup, site:callSite,
+    autoPairedShiftId: _autoPairedShift?.id || null,
+  });
   triggerSave();
   _afterMutation();
   // Re-render any IR call surfaces so the addition appears immediately
   if(typeof renderIRList === 'function') try{ renderIRList(); }catch(_){}
   if(typeof renderIRWeekBuilder === 'function') try{ renderIRWeekBuilder(); }catch(_){}
-  _toast('Added. Refresh the list tab to see all entries.', 'ok');
+  const _pairNote = _autoPairedShift ? ' (auto-paired with IR daily shift)' : '';
+  _toast('Added.' + _pairNote, 'ok');
 }
 
 function removeIRCall(id){
