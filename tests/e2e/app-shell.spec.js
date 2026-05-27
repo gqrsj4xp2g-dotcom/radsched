@@ -36,6 +36,7 @@ test('superuser can open Tools ops and run quick and deep system health', async 
   await page.getByRole('button', { name: '▶ Run health check' }).click();
   await expect(page.locator('#sys-health-result')).toContainText('Service worker source');
   await expect(page.locator('#sys-health-result')).toContainText('PWA manifest and icons');
+  await expect(page.locator('#sys-health-result')).toContainText('Audit side table');
 });
 
 test('non-admin role gate blocks Tools access', async ({ page }) => {
@@ -110,4 +111,41 @@ test('basic Supabase save path writes the active practice row through the client
   expect(result.rowId).toBe('main');
   expect(result.hasSavedAt).toBe(true);
   expect(result.physicianCount).toBe(1);
+});
+
+test('audit log dual-writes to the side table and exports canonical rows', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=audit');
+  await launchSyntheticUser(page, 'admin');
+
+  const auditWrite = await page.evaluate(async () => {
+    const audit = globalThis._audit || Function('return typeof _audit === "function" ? _audit : null')();
+    audit('e2e.audit.write', { physId: 99001, note: 'side table row' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return {
+      sideRows: window.__rsMockSupabase.__auditRows.length,
+      blobRows: S.auditLog.length,
+      action: window.__rsMockSupabase.__auditRows[0]?.action || '',
+      practiceId: window.__rsMockSupabase.__auditRows[0]?.practice_id || '',
+    };
+  });
+
+  expect(auditWrite.sideRows).toBe(1);
+  expect(auditWrite.blobRows).toBe(1);
+  expect(auditWrite.action).toBe('e2e.audit.write');
+  expect(auditWrite.practiceId).toBe('main');
+
+  await openToolsOps(page);
+  await page.evaluate(() => {
+    const render = globalThis.renderAuditLog || Function('return typeof renderAuditLog === "function" ? renderAuditLog : null')();
+    render();
+  });
+  await expect(page.locator('#al-result')).toContainText('side table');
+  await expect(page.locator('#al-result')).toContainText('e2e.audit.write');
+
+  const exportRows = await page.evaluate(async () => {
+    const rowsForExport = globalThis._auditRowsForExport || Function('return typeof _auditRowsForExport === "function" ? _auditRowsForExport : null')();
+    return rowsForExport();
+  });
+  expect(exportRows).toHaveLength(1);
+  expect(exportRows[0].action).toBe('e2e.audit.write');
 });
