@@ -97,6 +97,7 @@ async function launchSyntheticUser(page, role = 'superuser') {
     _ROW_ID = 'main';
     _PRACTICE_ID = 'main';
     _PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
+    window.launchApp._running = false;
     await window.launchApp();
   }, role);
 }
