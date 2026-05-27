@@ -28,6 +28,7 @@ None. The app is hands-off.
    If approaching free-tier limits, consider upgrading.
 4. **Run the regression suite** (Tools → run-tests). Failures usually
    indicate environment drift (e.g. timezone change).
+5. **Run the rollback drill dry-run**: `npm run test:rollback-drill`.
 
 ## Monthly tasks
 

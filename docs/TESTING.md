@@ -10,13 +10,15 @@
 | Parse check | CLI (`tools/parsecheck.sh`) | Syntax + simple structural checks |
 | Shell smoke check | CLI (`tools/smoke-check.js`) | PWA assets, build/SW version sync, edge source links, privileged gate drift |
 | Regression suite | In-app (Tools → run-tests) | Pure-function correctness |
+| Playwright E2E | CLI / CI (`npm run test:e2e`) | Auth shell, role gates, system health, mobile layout, service worker, mocked sync |
 | Manual smoke | Checklist below | UI/UX + end-to-end flows |
 | Integration | Manual against staging Supabase | Auth + persistence + Realtime |
 
 There is no full automated end-to-end test framework yet. The single-file
 deployment makes browser-based assertion harder than usual; the shell
-smoke check covers deploy-critical wiring, and the in-app regression
-suite covers the deterministic parts.
+smoke check covers deploy-critical wiring, Playwright covers the critical
+app-shell journeys, and the in-app regression suite covers the deterministic
+parts.
 
 ## Parse check
 
@@ -77,6 +79,26 @@ _addTest('descriptive name', () => {
 });
 ```
 
+## Playwright E2E
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The default tests are synthetic and read-only: they mock Supabase network
+paths and exercise app-shell behavior without writing production data.
+
+For a real authenticated health check:
+
+```bash
+RAD_E2E_LIVE=1 \
+RAD_E2E_EMAIL='admin@example.com' \
+RAD_E2E_PASSWORD='...' \
+npm run test:e2e:live
+```
+
 ## Manual smoke checklist
 
 Run before any release. ~10 minutes.
@@ -116,6 +138,7 @@ Run before any release. ~10 minutes.
 - [ ] Deep check reports service worker, manifest, icon, Supabase, and
   edge-function reachability without unexpected failures.
 - [ ] Rollback timeline opens and shows recent snapshots when available.
+- [ ] `npm run test:rollback-drill` passes before a release.
 
 ### Mobile
 - [ ] iOS Safari: viewport correct, no horizontal scroll.
