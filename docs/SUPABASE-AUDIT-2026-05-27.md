@@ -14,6 +14,9 @@ inventory, required secrets, and live data health for RadScheduler.
   the `main` practice row has been removed.
 - The canonical audit side table `public.radscheduler_audit` is present,
   populated, and protected by practice-scoped RLS.
+- Enterprise hardening is now active: privileged cross-practice database
+  paths require JWT `aal2`, and `public.radscheduler_telemetry` is present
+  for durable operational evidence.
 - Edge functions are deployed and reachable enough to return expected 400/401
   responses without privileged credentials.
 - The live practice data row, backup history, and shift side table contain
@@ -32,11 +35,16 @@ Tables checked:
 | `public.radscheduler_backups` | enabled | Policy set recreated for scoped select and scoped modify. |
 | `public.radscheduler_shifts` | enabled | Existing policies already included `admin` and `superuser`. |
 | `public.radscheduler_audit` | enabled | Scoped insert/select policies for own practice plus admin/superuser access. |
+| `public.radscheduler_telemetry` | enabled | Scoped insert/select policies for own practice plus AAL2 privileged access. |
 
-Migration applied:
+Migrations applied:
 
 - `docs/sql/03-rls-superuser-alignment.sql`
 - Supabase migration name: `align_rls_superuser_access`
+- `docs/sql/05-admin-mfa-aal2-hardening.sql`
+- Supabase migration name: `admin_mfa_aal2_hardening`
+- `docs/sql/06-enterprise-telemetry.sql`
+- Supabase migration name: `enterprise_telemetry`
 
 Policies now present:
 
@@ -104,23 +112,27 @@ Deployed functions:
 
 | Function | Version | Status |
 | --- | ---: | --- |
-| `create-user` | 40 | active |
+| `create-user` | 42 | active |
+| `admin-ops` | 2 | active |
 | `maps-proxy` | 17 | active |
 | `auto-refresh-traffic` | 20 | active |
 | `ai-proxy` | 13 | active |
 | `SendFx` | 8 | active |
 | `send-notification` | 11 | active |
 | `calendar-feed` | 4 | active |
-| `widget-data` | 20 | active |
+| `widget-data` | 75 | active |
 
 Unauthenticated reachability probes:
 
 | Endpoint | Probe Result | Interpretation |
 | --- | --- | --- |
 | `create-user` | HTTP 401 | Expected without service credentials. |
+| `admin-ops` | HTTP 401 | Expected without a valid admin JWT. |
 | `send-notification` | HTTP 400 | Function reachable; request was missing required kind/body. |
 | `widget-data` | HTTP 401 | Expected without a valid token. |
 | `calendar-feed` | HTTP 401 | Expected without a valid token. |
+| `maps-proxy` | HTTP 401 | Expected without a valid token. |
+| `ai-proxy` | HTTP 401 | Expected without a valid token. |
 
 ## Secrets
 
