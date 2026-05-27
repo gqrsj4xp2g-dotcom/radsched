@@ -47302,10 +47302,12 @@ function _shiftsInvalidateReadCache(){ _shiftsReadCache.clear(); }
 function renderSettingsSupabaseStatus(){
   const urlEl=document.getElementById('sb-url');
   const keyEl=document.getElementById('sb-key');
+  const ssoEl=document.getElementById('sb-sso-domain');
   const statusEl=document.getElementById('sb-status-text');
   const url=_getUrl();const key=_getKey();
   if(urlEl&&url)urlEl.value=url;
   if(keyEl&&key)keyEl.value=key;
+  if(ssoEl)ssoEl.value=_getSsoDomain();
   if(statusEl){
     if(url&&key){
       statusEl.textContent=_supabase?'Connected ✓':'Configured (connect on next login)';
@@ -47321,6 +47323,7 @@ async function saveSupabaseConfig(){
   try{
     const url=document.getElementById('sb-url')?.value.trim();
     const key=document.getElementById('sb-key')?.value.trim();
+    const sso=document.getElementById('sb-sso-domain')?.value.trim()||'';
     const msgEl=document.getElementById('sb-msg');
     if(!url||!key){if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Both URL and key are required.</span>';return;}
     // Save to localStorage (for this device). Wrap in try/catch — quota
@@ -47333,6 +47336,7 @@ async function saveSupabaseConfig(){
       console.warn('[RS] saveSupabaseConfig: localStorage write failed', lsErr);
       if(msgEl) msgEl.innerHTML = '<span style="color:var(--amber,#d97706)">⚠ Saved for this session only (localStorage unavailable — Private mode? Quota?).</span>';
     }
+    _setSsoDomain(sso);
     _SB_CFG.url=url;_SB_CFG.key=key;
     _supabase=null;
     if(msgEl)msgEl.innerHTML='<span style="color:var(--txt2)">Testing connection…</span>';
