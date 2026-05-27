@@ -6,10 +6,10 @@ metadata URL/file is available.
 
 Current official Supabase references:
 
-- Supabase project SAML SSO supports SAML 2.0 and is configured with the
-  Supabase CLI using `supabase sso` commands.
-- Supabase documents project SAML SSO as available on Pro and above.
-- Supabase leaked-password protection is also documented as Pro and above.
+- Project SAML SSO:
+  <https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml>
+- Password security and leaked-password protection:
+  <https://supabase.com/docs/guides/auth/password-security>
 
 ## SAML SSO implementation path
 
