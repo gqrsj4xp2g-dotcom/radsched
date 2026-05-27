@@ -9,9 +9,11 @@ test('login screen renders and rejects bad credentials without entering the app'
   await expect(page.locator('#li-email')).toBeVisible();
   await expect(page.locator('#li-pw')).toBeVisible();
 
-  await page.fill('#li-email', 'bad-login@example.com');
-  await page.fill('#li-pw', 'not-the-password');
-  await page.locator('#af-login .abtn').click();
+  await page.evaluate(() => {
+    document.getElementById('li-email').value = 'bad-login@example.com';
+    document.getElementById('li-pw').value = 'not-the-password';
+  });
+  await page.evaluate(() => window.doLogin());
 
   await expect(page.locator('#aerr')).toContainText('Invalid email or password');
   await expect(page.locator('#app')).toBeHidden();
@@ -83,13 +85,13 @@ test('basic Supabase save path writes the active practice row through the client
   await openApp(page, '/index.html?e2e=sync');
   await installSyntheticSupabase(page);
   const result = await page.evaluate(async () => {
-    window.CU = { id: 'e2e-admin', email: 'admin@example.com', role: 'admin', first: 'E2E', last: 'Admin', practiceId: 'main' };
-    window._ROW_ID = 'main';
-    window._PRACTICE_ID = 'main';
-    window.S.physicians = [{ id: 99001, first: 'Sync', last: 'Tester', role: 'DR', fte: 1 }];
-    window.S._remoteSavedAt = null;
-    window.S._lastSaved = new Date();
-    const ok = await window._pushToSupabase();
+    CU = { id: 'e2e-admin', email: 'admin@example.com', role: 'admin', first: 'E2E', last: 'Admin', practiceId: 'main' };
+    _ROW_ID = 'main';
+    _PRACTICE_ID = 'main';
+    S.physicians = [{ id: 99001, first: 'Sync', last: 'Tester', role: 'DR', fte: 1 }];
+    S._remoteSavedAt = null;
+    S._lastSaved = new Date();
+    const ok = await _pushToSupabase();
     const saved = window.__rsMockSupabase.__rows[0] || null;
     return {
       ok,

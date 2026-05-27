@@ -75,16 +75,16 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
       },
     };
     window.__rsMockSupabase = mock;
-    window._supabase = mock;
-    window._initSupabase = () => mock;
-    window._initAuthClient = () => mock;
-    window._pullFromSupabase = async () => null;
-    window._initLeaderElection = () => {};
-    window._initPresence = () => {};
-    window._startAutoRefreshTrafficLoop = () => {};
-    window._bootOnCallReminders = () => {};
-    window.fsTryRestoreAutosave = () => {};
-    window._runDailyBackupIfDue = () => {};
+    _supabase = mock;
+    _initSupabase = () => mock;
+    _initAuthClient = () => mock;
+    _pullFromSupabase = async () => null;
+    _initLeaderElection = () => {};
+    _initPresence = () => {};
+    _startAutoRefreshTrafficLoop = () => {};
+    _bootOnCallReminders = () => {};
+    fsTryRestoreAutosave = () => {};
+    _runDailyBackupIfDue = () => {};
   }, { session });
 }
 
@@ -92,12 +92,12 @@ async function launchSyntheticUser(page, role = 'superuser') {
   await installSyntheticSupabase(page);
   await page.evaluate(async role => {
     const fallback = { id: 'e2e-user', email: 'e2e@example.com', role, first: 'E2E', last: 'User', practiceId: 'main' };
-    const base = (window.USERS || []).find(u => u.role === role) || (window.USERS || [])[0] || fallback;
-    window.CU = { ...base, role, first: base.first || 'E2E', last: base.last || 'User', practiceId: 'main' };
-    window._ROW_ID = 'main';
-    window._PRACTICE_ID = 'main';
-    window._PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
-    await window.launchApp();
+    const base = (USERS || []).find(u => u.role === role) || (USERS || [])[0] || fallback;
+    CU = { ...base, role, first: base.first || 'E2E', last: base.last || 'User', practiceId: 'main' };
+    _ROW_ID = 'main';
+    _PRACTICE_ID = 'main';
+    _PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
+    await launchApp();
   }, role);
 }
 
