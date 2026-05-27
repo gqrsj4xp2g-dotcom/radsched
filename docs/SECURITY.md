@@ -33,6 +33,8 @@ It **is** built to defend against:
 - Session refresh runs every 60 minutes; a re-login modal appears if
   the refresh fails.
 - Sign-out clears `localStorage` and forces a page reload.
+- Enable Supabase Auth leaked-password protection before production
+  go-live: **Authentication → Providers → Email → Password security**.
 
 ## Authorization
 
