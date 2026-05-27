@@ -31,11 +31,13 @@ async function openApp(page, path = '/index.html?e2e=1', options = {}) {
   await page.waitForFunction(() => typeof window.launchApp === 'function' && typeof window.renderSystemHealth === 'function');
 }
 
-async function installSyntheticSupabase(page, { session = null } = {}) {
-  await page.evaluate(({ session }) => {
+async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mfaFactors = null } = {}) {
+  await page.evaluate(({ session, aal, mfaFactors }) => {
     const mockRows = [];
     const mockAuditRows = [];
     const mockBackupRows = [];
+    let currentAal = aal || 'aal2';
+    const factors = mfaFactors || [{ id: 'e2e-totp', factor_type: 'totp', status: 'verified' }];
     const rowsFor = tableName => {
       if (tableName === 'radscheduler_audit') return mockAuditRows;
       if (tableName === 'radscheduler_backups') return mockBackupRows;
@@ -118,8 +120,36 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
       auth: {
         getSession: async () => ({ data: { session }, error: null }),
         refreshSession: async () => ({ data: { session }, error: null }),
+        mfa: {
+          getAuthenticatorAssuranceLevel: async () => ({
+            data: { currentLevel: currentAal, nextLevel: 'aal2' },
+            error: null,
+          }),
+          listFactors: async () => ({
+            data: { totp: factors.filter(f => (f.factor_type || 'totp') === 'totp') },
+            error: null,
+          }),
+          challenge: async ({ factorId }) => ({
+            data: { id: `challenge-${factorId || 'factor'}` },
+            error: null,
+          }),
+          verify: async ({ code }) => {
+            if (code !== '123456') return { data: null, error: { message: 'Invalid MFA code' } };
+            currentAal = 'aal2';
+            return { data: { access_token: 'mock-token' }, error: null };
+          },
+          enroll: async () => ({
+            data: {
+              id: 'e2e-enrolled',
+              type: 'totp',
+              totp: { qr_code: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E', secret: 'E2ESECRET' },
+            },
+            error: null,
+          }),
+        },
       },
     };
+    mock.__setAal = next => { currentAal = next; };
     window.__rsMockSupabase = mock;
     _supabase = mock;
     _initSupabase = () => mock;
@@ -132,11 +162,11 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
     _bootOnCallReminders = () => {};
     fsTryRestoreAutosave = () => {};
     _runDailyBackupIfDue = () => {};
-  }, { session });
+  }, { session, aal, mfaFactors });
 }
 
-async function launchSyntheticUser(page, role = 'superuser') {
-  await installSyntheticSupabase(page);
+async function launchSyntheticUser(page, role = 'superuser', options = {}) {
+  await installSyntheticSupabase(page, options);
   await page.evaluate(async role => {
     const fallback = { id: 'e2e-user', email: 'e2e@example.com', role, first: 'E2E', last: 'User', practiceId: 'main' };
     const base = (USERS || []).find(u => u.role === role) || (USERS || [])[0] || fallback;
