@@ -91,8 +91,9 @@ CREATE TRIGGER radscheduler_shifts_touch_trg
 
 -- ── 2. Row Level Security ────────────────────────────────────────
 -- Same policy shape as radscheduler_audit: authenticated users can
--- read/write their practice's rows; the widget reads via the
--- service-role edge function (bypasses RLS).
+-- read/write their own practice's rows; admins and superusers can
+-- read/write every practice. The widget reads via the service-role
+-- edge function (bypasses RLS).
 ALTER TABLE public.radscheduler_shifts ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS shifts_insert_authed ON public.radscheduler_shifts;
@@ -100,29 +101,44 @@ CREATE POLICY shifts_insert_authed
   ON public.radscheduler_shifts
   FOR INSERT
   TO authenticated
-  WITH CHECK (true);
+  WITH CHECK (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
 DROP POLICY IF EXISTS shifts_update_authed ON public.radscheduler_shifts;
 CREATE POLICY shifts_update_authed
   ON public.radscheduler_shifts
   FOR UPDATE
   TO authenticated
-  USING (true)
-  WITH CHECK (true);
+  USING (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  )
+  WITH CHECK (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
 DROP POLICY IF EXISTS shifts_delete_authed ON public.radscheduler_shifts;
 CREATE POLICY shifts_delete_authed
   ON public.radscheduler_shifts
   FOR DELETE
   TO authenticated
-  USING (true);
+  USING (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
 DROP POLICY IF EXISTS shifts_select_authed ON public.radscheduler_shifts;
 CREATE POLICY shifts_select_authed
   ON public.radscheduler_shifts
   FOR SELECT
   TO authenticated
-  USING (true);
+  USING (
+    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+  );
 
 -- ── 3. Backfill helper (manual, one-time per practice) ──────────
 -- After applying the table + deploying the dual-write client, run
