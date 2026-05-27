@@ -47587,24 +47587,29 @@ async function applyPickImport(){
     const conflictingWE = (S.weekendCalls || []).filter(w =>
       w.physId === r.physId && (w.satDate === r.date || w.sunDate === r.date || w.date === r.date)
     );
-    // Replaceable iff every conflicting DR record is a Vacation
-    // Sold Back auto-generated Home shift AND there are no IR /
-    // call conflicts. Identify VSB Home shifts by either:
-    //   - explicit soldBack:true flag (set by the auto-fill)
-    //   - notes containing "Vacation Sold Back"
-    const isVSBHome = s =>
-      s.shift === 'Home' &&
-      (s.soldBack === true || /vacation sold back/i.test(s.notes || ''));
+    // Replaceable iff every conflicting DR record is an
+    // auto-generated Home shift AND there are no IR / call
+    // conflicts. rs-v78 broadened this beyond Vacation Sold Back
+    // to cover the auto-assign overflow path (autoHome:true) and
+    // fillDRHomeShifts mop-up — those are by far the most common
+    // sources of "phantom" Home shifts that blocked legitimate
+    // 2nd/3rd shift imports.
+    const isReplaceableHome = s =>
+      s.shift === 'Home' && (
+        s.soldBack === true ||
+        s.autoHome === true ||
+        /vacation sold back|auto[- ]home/i.test(s.notes || '')
+      );
     const onlyVSBHomeConflicts =
       conflictingDR.length > 0 &&
-      conflictingDR.every(isVSBHome) &&
+      conflictingDR.every(isReplaceableHome) &&
       conflictingIR.length === 0 &&
       conflictingIRCalls.length === 0 &&
       conflictingWE.length === 0;
     if(onlyVSBHomeConflicts){
-      // Remove the VSB Home shift(s) and add the 2nd/3rd. The Vacation
-      // record itself is untouched — only the auto-generated Home
-      // placeholder gets replaced.
+      // Remove the auto-Home shift(s) and add the 2nd/3rd. The
+      // Vacation record itself is untouched — only the auto-
+      // generated Home placeholder gets replaced.
       const removedIds = new Set(conflictingDR.map(s => s.id));
       S.drShifts = S.drShifts.filter(s => !removedIds.has(s.id));
       S.drShifts.push({
@@ -47613,7 +47618,7 @@ async function applyPickImport(){
         notes: r.notes || '', autoHome: false,
       });
       shReplaced++;
-      if(typeof _audit === 'function') _audit('import.replaceVSBHome', {
+      if(typeof _audit === 'function') _audit('import.replaceAutoHome', {
         physId: r.physId, date: r.date, newShift: r.shift,
         removedHomeIds: [...removedIds],
         sourceRaw: r.sourceRaw || '',
