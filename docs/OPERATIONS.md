@@ -99,7 +99,8 @@ If the live Supabase row is corrupted:
 
 ### What we capture
 
-- Audit log: every admin mutation, capped at 500 entries.
+- Audit log: every admin mutation in `radscheduler_audit`; the in-blob copy
+  remains a capped offline fallback.
 - Error log: uncaught errors + render warnings, capped at 100.
 - System health: app shell versioning, Supabase/auth reachability,
   edge function reachability, save status, PWA assets, and data sanity.
