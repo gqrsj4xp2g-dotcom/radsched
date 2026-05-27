@@ -8976,8 +8976,37 @@ async function restoreFromBackup(backupId){
       `backed up if you want to be able to roll back.`
     );
     if(!ok) return false;
-    // 4. Write the backup payload over the current row. Tag savedAt with NOW
-    //    so a poll on another device sees a newer timestamp and re-pulls.
+    // 4. Prefer the service-role edge wrapper for the destructive write. It
+    //    verifies the caller's admin role and AAL2 session server-side, writes
+    //    the row, and records side-table audit/telemetry evidence.
+    try{
+      const result = await _invokeEdgeFn('admin-ops', {
+        action: 'restore-backup',
+        backupId,
+        practiceId: _ROW_ID,
+      });
+      const restored = (result?.payload && typeof result.payload === 'object') ? result.payload : {
+        ...parsed,
+        savedAt: result?.savedAt || new Date().toISOString(),
+        _restoredFromBackup: backupId,
+        _restoredAt: result?.savedAt || new Date().toISOString(),
+      };
+      _applyRemoteData(restored);
+      if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+      if(Array.isArray(result?.warnings) && result.warnings.length){
+        console.warn('[RS] admin-ops restore warnings:', result.warnings);
+      }
+      if(typeof _toast === 'function') _toast(`✓ Restored from backup ${backupId}`, 'ok');
+      return true;
+    }catch(edgeErr){
+      const missingFunction = edgeErr?.status === 404 || edgeErr?.status === 405;
+      const authBlocked = edgeErr?.status === 401 || edgeErr?.status === 403 || edgeErr?.body?.mfa_required;
+      if(authBlocked || !missingFunction) throw edgeErr;
+      console.warn('[RS] admin-ops restore wrapper is not deployed; falling back to direct RLS write.', edgeErr);
+    }
+
+    // 5. Backward-compatible fallback for installs that have not deployed
+    //    admin-ops yet. RLS still enforces the active practice and AAL2 policy.
     parsed.savedAt = new Date().toISOString();
     parsed._restoredFromBackup = backupId;
     parsed._restoredAt = parsed.savedAt;
@@ -8986,8 +9015,8 @@ async function restoreFromBackup(backupId){
       data: JSON.stringify(parsed),
     });
     if(writeErr) throw writeErr;
-    if(typeof _audit === 'function') _audit('admin.restoreBackup', {backupId, savedAt: parsed.savedAt});
-    // 5. Re-apply locally so the current session reflects the restore without a reload.
+    if(typeof _audit === 'function') _audit('admin.restoreBackup', {backupId, savedAt: parsed.savedAt, via:'direct-fallback'});
+    // 6. Re-apply locally so the current session reflects the restore without a reload.
     _applyRemoteData(parsed);
     if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
     if(typeof _toast === 'function') _toast(`✓ Restored from backup ${backupId}`, 'ok');
