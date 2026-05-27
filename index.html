@@ -8325,18 +8325,30 @@ BEGIN
   FOR t IN SELECT unnest(ARRAY['rs_physicians','rs_dr_shifts','rs_ir_shifts','rs_ir_calls','rs_weekend_calls','rs_vacations','rs_holidays','rs_sites'])
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I_practice_select ON %I', t, t);
-    EXECUTE format('DROP POLICY IF EXISTS %I_practice_modify ON %I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS %I_practice_insert ON %I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS %I_practice_update ON %I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS %I_practice_delete ON %I', t, t);
     EXECUTE format(
       'CREATE POLICY %I_practice_select ON %I FOR SELECT TO authenticated USING ('
-      || '((auth.jwt() -> ''app_metadata'' ->> ''role'') = ''admin'') OR '
-      || '((auth.jwt() -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''role'') IN (''admin'',''superuser'')) OR '
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
       t, t);
     EXECUTE format(
-      'CREATE POLICY %I_practice_modify ON %I FOR ALL TO authenticated USING ('
-      || '((auth.jwt() -> ''app_metadata'' ->> ''role'') = ''admin'') OR '
-      || '((auth.jwt() -> ''app_metadata'' ->> ''practiceId'') = practice_id)) WITH CHECK ('
-      || '((auth.jwt() -> ''app_metadata'' ->> ''role'') = ''admin'') OR '
-      || '((auth.jwt() -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
+      'CREATE POLICY %I_practice_insert ON %I FOR INSERT TO authenticated WITH CHECK ('
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''role'') IN (''admin'',''superuser'')) OR '
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
+      t, t);
+    EXECUTE format(
+      'CREATE POLICY %I_practice_update ON %I FOR UPDATE TO authenticated USING ('
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''role'') IN (''admin'',''superuser'')) OR '
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''practiceId'') = practice_id)) WITH CHECK ('
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''role'') IN (''admin'',''superuser'')) OR '
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
+      t, t);
+    EXECUTE format(
+      'CREATE POLICY %I_practice_delete ON %I FOR DELETE TO authenticated USING ('
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''role'') IN (''admin'',''superuser'')) OR '
+      || '(((select auth.jwt()) -> ''app_metadata'' ->> ''practiceId'') = practice_id))',
       t, t);
   END LOOP;
 END$$;
