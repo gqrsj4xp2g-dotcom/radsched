@@ -35908,8 +35908,27 @@ function removeIRCall(id){
   // used by deleteDRShift / deleteIRShift / deleteVacation — the audit
   // flagged this function as the odd one out (no confirm, no undo).
   const snapshot = {...ic};
+  // Also snapshot + remove any auto-paired IR daily shift created when
+  // this call was added (rs-v82). Identify by the notes prefix the
+  // _ensureIRShiftForCall helper stamps. Stored on the snapshot so
+  // the undo path can resurrect it together with the call.
+  let pairedSnapshot = null;
+  if(ic.callType === 'daily'){
+    pairedSnapshot = (S.irShifts || []).find(s =>
+      s.physId === ic.physId &&
+      s.date === ic.date &&
+      typeof s.notes === 'string' &&
+      s.notes.startsWith('Auto-paired with IR call')
+    ) || null;
+    if(pairedSnapshot){
+      S.irShifts = S.irShifts.filter(s => s.id !== pairedSnapshot.id);
+    }
+  }
   S.irCalls = S.irCalls.filter(x => x.id !== id);
-  if(typeof _audit==='function') _audit('irCall.remove', {id, physId:ic.physId, date:ic.date, callType:ic.callType});
+  if(typeof _audit==='function') _audit('irCall.remove', {
+    id, physId:ic.physId, date:ic.date, callType:ic.callType,
+    removedPairedShiftId: pairedSnapshot?.id || null,
+  });
   triggerSave();
   _afterMutation();
   if(typeof _toastUndoDelete === 'function'){
@@ -35917,6 +35936,9 @@ function removeIRCall(id){
       `IR call removed — ${pname(ic.physId)} · ${ic.date}`,
       () => {
         S.irCalls = [...(S.irCalls||[]), snapshot];
+        if(pairedSnapshot){
+          S.irShifts = [...(S.irShifts||[]), pairedSnapshot];
+        }
         if(typeof _audit==='function') _audit('irCall.undelete', {id});
         triggerSave();
         _afterMutation();
