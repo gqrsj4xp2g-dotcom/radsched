@@ -31,7 +31,7 @@ test('superuser can open Tools ops and run quick and deep system health', async 
   await expect(page.locator('#sys-health-result')).toContainText('Quick health');
   await expect(page.locator('#sys-health-result')).toContainText('App build marker');
   await expect(page.locator('#sys-health-result')).toContainText('Data sanity');
-  await expect(page.getByRole('button', { name: /Rollback timeline/i })).toHaveCount(2);
+  await expect(page.getByRole('button', { name: /Rollback timeline/i })).toBeVisible();
 
   await page.getByRole('button', { name: '▶ Run health check' }).click();
   await expect(page.locator('#sys-health-result')).toContainText('Service worker source');
