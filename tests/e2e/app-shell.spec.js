@@ -24,7 +24,10 @@ test('superuser can open Tools ops and run quick and deep system health', async 
   await launchSyntheticUser(page, 'superuser');
   await openToolsOps(page);
 
-  await page.evaluate(() => window.renderSystemHealth(true));
+  await page.evaluate(() => {
+    const renderHealth = globalThis.renderSystemHealth || Function('return typeof renderSystemHealth === "function" ? renderSystemHealth : null')();
+    renderHealth(true);
+  });
   await expect(page.locator('#sys-health-result')).toContainText('Quick health');
   await expect(page.locator('#sys-health-result')).toContainText('App build marker');
   await expect(page.locator('#sys-health-result')).toContainText('Data sanity');
@@ -46,7 +49,8 @@ test('non-admin role gate blocks Tools access', async ({ page }) => {
   });
 
   await page.evaluate(() => {
-    window.nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    const navFn = globalThis.nav || Function('return typeof nav === "function" ? nav : null')();
+    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
   });
 
   await expect(page.locator('#page-tools')).toBeHidden();
@@ -91,7 +95,8 @@ test('basic Supabase save path writes the active practice row through the client
     S.physicians = [{ id: 99001, first: 'Sync', last: 'Tester', role: 'DR', fte: 1 }];
     S._remoteSavedAt = null;
     S._lastSaved = new Date();
-    const ok = await window._pushToSupabase();
+    const push = globalThis._pushToSupabase || Function('return typeof _pushToSupabase === "function" ? _pushToSupabase : null')();
+    const ok = await push();
     const saved = window.__rsMockSupabase.__rows[0] || null;
     return {
       ok,

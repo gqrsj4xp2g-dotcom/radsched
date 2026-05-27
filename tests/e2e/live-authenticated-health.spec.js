@@ -12,7 +12,8 @@ test('real authenticated superuser deep System Health is clean enough for go-liv
   await expect(page.locator('#app')).toBeVisible({ timeout: 20_000 });
   await page.evaluate(() => {
     localStorage.setItem('rs.toolsTab', 'ops');
-    window.nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+    const navFn = globalThis.nav || Function('return typeof nav === "function" ? nav : null')();
+    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
   });
   await page.getByRole('button', { name: '▶ Run health check' }).click();
   await expect(page.locator('#sys-health-result')).toContainText('System health');

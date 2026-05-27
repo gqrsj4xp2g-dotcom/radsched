@@ -11,7 +11,8 @@ test('Tools System Health has no horizontal overflow on mobile', async ({ page }
   await launchSyntheticUser(page, 'superuser');
   await openToolsOps(page);
   await page.evaluate(() => {
-    window.renderSystemHealth(true);
+    const renderHealth = globalThis.renderSystemHealth || Function('return typeof renderSystemHealth === "function" ? renderSystemHealth : null')();
+    renderHealth(true);
     document.getElementById('sys-health-result')?.scrollIntoView({ block: 'start' });
   });
 
