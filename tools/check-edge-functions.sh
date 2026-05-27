@@ -30,12 +30,12 @@ probe() {
   local method="$2"
   local allowed="$3"
   local url="$SUPABASE_URL/functions/v1/$name"
-  local body_arg=()
+  local curl_args=(-sS -m 12 -o "$TMP" -w '%{http_code}' -X "$method")
   if [ "$method" != "GET" ]; then
-    body_arg=(-H 'Content-Type: application/json' --data '{}')
+    curl_args+=(-H 'Content-Type: application/json' --data '{}')
   fi
   local status
-  status="$(curl -sS -m 12 -o "$TMP" -w '%{http_code}' -X "$method" "${body_arg[@]}" "$url" || true)"
+  status="$(curl "${curl_args[@]}" "$url" || true)"
   if printf ',%s,' "$allowed" | grep -q ",$status,"; then
     echo "OK   $name returned HTTP $status"
   else
