@@ -69,7 +69,7 @@ test('service worker source and registration use the current app shell version',
   expect(htmlBuild).toBe(htmlSw);
   expect(htmlSw).toBe(swVersion);
 
-  await openApp(page, '/index.html?e2e=sw');
+  await openApp(page, '/index.html?e2e=sw', { serviceWorker: true });
   const registration = await page.evaluate(async () => {
     if (!('serviceWorker' in navigator)) return { supported: false };
     const reg = await navigator.serviceWorker.register('/sw.js');
