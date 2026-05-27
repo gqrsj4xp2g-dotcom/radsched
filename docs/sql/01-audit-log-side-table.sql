@@ -78,8 +78,8 @@ CREATE POLICY audit_insert_scoped
   FOR INSERT
   TO authenticated
   WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 DROP POLICY IF EXISTS audit_select_authed ON public.radscheduler_audit;
@@ -89,8 +89,8 @@ CREATE POLICY audit_select_scoped
   FOR SELECT
   TO authenticated
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 -- ── 3. Backfill helper ───────────────────────────────────────────
