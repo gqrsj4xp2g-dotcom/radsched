@@ -29,6 +29,8 @@ It **is** built to defend against:
 ## Authentication
 
 - Supabase Auth (email + password). Magic links are also supported.
+- SAML SSO is wired through `supabase.auth.signInWithSSO()` and can be
+  enabled after the Supabase project plan and IdP metadata are ready.
 - Sessions are managed by the Supabase JS SDK using `localStorage`.
 - Session refresh runs every 60 minutes; a re-login modal appears if
   the refresh fails.
