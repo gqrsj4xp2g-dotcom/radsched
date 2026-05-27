@@ -64,6 +64,7 @@ const objectChecks = [
   ['audit dedupe unique index', /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+radscheduler_audit_dedupe_idx/i],
   ['shift touch function with fixed search_path', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\._radscheduler_shifts_touch\(\)[\s\S]*?SET\s+search_path\s*=\s*public,\s*pg_temp/i],
   ['rls_auto_enable public execute revoked', /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+authenticated/i],
+  ['admin AAL2 RLS helper', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.radscheduler_admin_aal2\(\)[\s\S]*?coalesce\(\(select auth\.jwt\(\)\)\s*->>\s*'aal'/i],
   ['radscheduler_shifts touch trigger', /CREATE\s+TRIGGER\s+radscheduler_shifts_touch_trg/i],
   ['audit table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_audit\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
   ['shift table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_shifts\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
