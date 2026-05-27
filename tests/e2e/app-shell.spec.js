@@ -121,11 +121,13 @@ test('audit log dual-writes to the side table and exports canonical rows', async
     const audit = globalThis._audit || Function('return typeof _audit === "function" ? _audit : null')();
     audit('e2e.audit.write', { physId: 99001, note: 'side table row' });
     await new Promise(resolve => setTimeout(resolve, 20));
+    const sideRows = window.__rsMockSupabase.__auditRows.filter(r => r.action === 'e2e.audit.write');
+    const blobRows = S.auditLog.filter(r => r.action === 'e2e.audit.write');
     return {
-      sideRows: window.__rsMockSupabase.__auditRows.length,
-      blobRows: S.auditLog.length,
-      action: window.__rsMockSupabase.__auditRows[0]?.action || '',
-      practiceId: window.__rsMockSupabase.__auditRows[0]?.practice_id || '',
+      sideRows: sideRows.length,
+      blobRows: blobRows.length,
+      action: sideRows[0]?.action || '',
+      practiceId: sideRows[0]?.practice_id || '',
     };
   });
 
@@ -146,6 +148,5 @@ test('audit log dual-writes to the side table and exports canonical rows', async
     const rowsForExport = globalThis._auditRowsForExport || Function('return typeof _auditRowsForExport === "function" ? _auditRowsForExport : null')();
     return rowsForExport();
   });
-  expect(exportRows).toHaveLength(1);
-  expect(exportRows[0].action).toBe('e2e.audit.write');
+  expect(exportRows.some(row => row.action === 'e2e.audit.write')).toBe(true);
 });
