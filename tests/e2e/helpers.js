@@ -20,8 +20,13 @@ async function installNetworkMocks(page) {
   }));
 }
 
-async function openApp(page, path = '/index.html?e2e=1') {
+async function openApp(page, path = '/index.html?e2e=1', options = {}) {
   await installNetworkMocks(page);
+  if (!options.serviceWorker) {
+    await page.addInitScript(() => {
+      window.__RS_E2E_DISABLE_SW = true;
+    });
+  }
   await page.goto(path, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.launchApp === 'function' && typeof window.renderSystemHealth === 'function');
 }
