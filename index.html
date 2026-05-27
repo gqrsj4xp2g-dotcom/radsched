@@ -20973,6 +20973,16 @@ function unclaimShift(oid){
   S.drShifts=S.drShifts.filter(s=>!(s.physId===o.claimedBy&&s.date===o.date&&s.notes==='Claimed'));
   S.irCalls=S.irCalls.filter(s=>!(s.physId===o.claimedBy&&s.date===o.date&&s.notes==='Claimed'));
   S.weekendCalls=S.weekendCalls.filter(s=>!(s.physId===o.claimedBy&&(s.satDate||s.date)===o.date&&s.notes==='Claimed'));
+  // Also remove any auto-paired IR daily shift created when the call
+  // was claimed. Identify by the notes prefix the helper stamps.
+  // Without this the unclaim leaves the procedure shift orphaned and
+  // the physician still shows up on the IR calendar for that day.
+  S.irShifts=(S.irShifts||[]).filter(s => !(
+    s.physId === o.claimedBy &&
+    s.date === o.date &&
+    typeof s.notes === 'string' &&
+    s.notes.startsWith('Auto-paired with IR call')
+  ));
   o.claimedBy=null;triggerSave();renderOpenShifts();
 }
 function addOpenShift(){
