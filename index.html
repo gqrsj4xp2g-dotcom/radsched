@@ -5513,6 +5513,22 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
     </details>
   </div>
 
+  <!-- Admin MFA -->
+  <div class="card" style="margin-bottom:14px;border:2px solid var(--amber,#d97706)">
+    <div class="card-title">Admin MFA</div>
+    <div class="note ni" style="font-size:11px;margin-bottom:10px">
+      Enterprise mode requires administrators and superusers to reach Supabase
+      Auth assurance level <code>aal2</code> before privileged pages, backups,
+      user management, publishing, and destructive tools unlock.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="bp bsm" onclick="_mfaChallengeAdmin()">Verify now</button>
+      <button class="bsm" onclick="_mfaEnrollTotp()">Enroll authenticator</button>
+      <button class="bsm" onclick="renderMfaSettings()">Refresh status</button>
+    </div>
+    <div id="mfa-settings-result" style="font-size:12px"></div>
+  </div>
+
   <!-- ─── OFFLINE SUPPORT (SERVICE WORKER) ────────────────────────────────
        The app is a single-file HTML hosted on radsched.org. To enable
        offline-load (so an admin without internet can still review a
