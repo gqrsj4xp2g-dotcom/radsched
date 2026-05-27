@@ -70,6 +70,10 @@ const objectChecks = [
   ['shift table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_shifts\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
   ['telemetry table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_telemetry\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
   ['telemetry practice index', /CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+radscheduler_telemetry_practice_created_idx/i],
+  ['audit immutable entry hash column', /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+entry_hash\s+text/i],
+  ['audit hash trigger', /CREATE\s+TRIGGER\s+radscheduler_audit_hash_before_insert_trg/i],
+  ['audit append-only mutation trigger', /CREATE\s+TRIGGER\s+radscheduler_audit_prevent_update_trg/i],
+  ['audit update delete revoked', /REVOKE\s+UPDATE,\s+DELETE\s+ON\s+public\.radscheduler_audit\s+FROM\s+authenticated/i],
 ];
 
 for (const [label, pattern] of objectChecks) {
