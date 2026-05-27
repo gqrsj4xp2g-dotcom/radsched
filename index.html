@@ -11143,29 +11143,22 @@ async function launchApp(){
     // Apply the user's saved font scale, if any
     if(typeof _applyFontScale==='function') _applyFontScale(CU?.fontScale || 1);
     const isSU = CU.role==='superuser';
-    const adm = CU.role==='admin' || isSU;  // superusers get all admin UI + more
+    const roleAdmin = CU.role==='admin' || isSU;  // superusers get all admin UI + more after MFA
+    if(roleAdmin && typeof _refreshMfaStatus === 'function'){
+      try{ await _refreshMfaStatus(); }catch(_){}
+    }
+    const adm = roleAdmin && _adminMfaOk();
   document.getElementById('tb-nm').textContent=CU.first+' '+CU.last;
-  document.getElementById('tb-rl').textContent=isSU?'Superuser (all practices)':adm?'Administrator':'Physician / User';
-  // Show the superuser section in the sidebar only for superusers
-  document.querySelectorAll('.su-only').forEach(el=>{
-    el.style.display = isSU ? '' : 'none';
-  });
+  document.getElementById('tb-rl').textContent=isSU?(_adminMfaOk()?'Superuser (all practices)':'Superuser (MFA required)'):roleAdmin?(_adminMfaOk()?'Administrator':'Administrator (MFA required)'):'Physician / User';
   const tbPrac=document.getElementById('tb-practice');
   // Preliminary label using just the practice ID until _PRACTICES is loaded from DB (below);
   // then we re-label with the proper practice name. Prevents "RadScheduler" placeholder flicker.
   if(tbPrac) tbPrac.textContent=_PRACTICE_ID&&_PRACTICE_ID!=='main'?_PRACTICE_ID:'';
   document.getElementById('tb-av').textContent=((CU.first||'?')[0]+(CU.last||'?')[0]).toUpperCase();
-  document.querySelectorAll('.admin-only').forEach(el=>{
-    // Pages are controlled by .page.on — never set inline display on them, or we'd 
-    // un-hide ALL admin pages at once. For admins, simply clear any residual inline 
-    // style so the CSS-cascade .page / .page.on rules take over.
-    if(el.classList.contains('page')){
-      if(adm) el.style.display=''; // clear inline style; .page.on rules apply
-      else     el.style.display='none'; // keep hidden for non-admins
-      return;
-    }
-    el.style.display=adm?'block':'none';
-  });
+  _applyPrivilegedVisibility();
+  if(roleAdmin && !adm){
+    setTimeout(() => { try{ _showAdminMfaGate(); }catch(_){} }, 350);
+  }
   const si=document.getElementById('save-indicator');
   const now=new Date();
   _dashYm=fmtDate(new Date(now.getFullYear(),now.getMonth(),1)).slice(0,7);
