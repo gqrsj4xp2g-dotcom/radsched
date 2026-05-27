@@ -12,6 +12,62 @@ function renderDash(){
   const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():(CU.role==='admin'||CU.role==='superuser');
   const viewLabel=CU.role==='superuser'?'Superuser view.':(isAdm?'Admin view.':'');
   if(gr) gr.textContent=[`Welcome back, ${CU.first}.`, viewLabel].filter(Boolean).join(' ');
+  const roleHome = document.getElementById('dash-role-home');
+  if(roleHome){
+    const today = fmtDate(new Date());
+    const openCount = (S.openShifts||[]).filter(o=>!o.claimedBy).length;
+    const pendingSwaps = (S.swapRequests||[]).filter(s => !s.status || s.status === 'pending').length;
+    const runtimeErrors = (typeof _errorLog !== 'undefined' && Array.isArray(_errorLog)) ? _errorLog.length : 0;
+    const mkCard = (label, value, detail, action) => `<div class="rs-role-card"${action ? ` style="cursor:pointer" onclick="${action}"` : ''}>
+      <div class="rs-role-label">${escHtml(label)}</div>
+      <div class="rs-role-value">${escHtml(String(value))}</div>
+      <div class="rs-role-detail">${escHtml(detail||'')}</div>
+    </div>`;
+    if(isAdm){
+      roleHome.style.display = '';
+      roleHome.innerHTML = `<div class="rs-role-panel">
+        <div class="rs-role-head">
+          <div>
+            <div class="rs-role-title">Operations snapshot</div>
+            <div class="rs-role-sub">The few things most likely to need attention today.</div>
+          </div>
+          <button class="bsm" onclick="nav('tools',document.querySelector('.snav-item[data-pg=&quot;tools&quot;]'),'ops')">System health</button>
+        </div>
+        <div class="rs-role-grid">
+          ${mkCard('Open shifts', openCount, 'Unclaimed coverage slots', `nav('open-shifts',document.querySelector('.snav-item[data-pg=&quot;open-shifts&quot;]'))`)}
+          ${mkCard('Pending swaps', pendingSwaps, 'Requests awaiting review', `nav('swaps',document.querySelector('.snav-item[data-pg=&quot;swaps&quot;]'))`)}
+          ${mkCard('Runtime errors', runtimeErrors, runtimeErrors ? 'Review the error log' : 'No captured browser errors', `nav('tools',document.querySelector('.snav-item[data-pg=&quot;tools&quot;]'),'ops')`)}
+          ${mkCard('Last saved', S?._lastSaved ? S._lastSaved.toLocaleTimeString() : 'not yet', _hasUnsavedChanges ? 'Unsaved edits are queued' : 'Save queue is clear', '')}
+        </div>
+      </div>`;
+    } else {
+      const myId = CU?.physId;
+      const items = [];
+      if(myId != null){
+        (S.drShifts||[]).forEach(s => { if(s.physId === myId && s.date >= today) items.push({date:s.date, label:`${s.shift||''} DR`, detail:s.site||s.sub||''}); });
+        (S.irShifts||[]).forEach(s => { if(s.physId === myId && s.date >= today) items.push({date:s.date, label:`${s.shift||''} IR`, detail:s.site||''}); });
+        (S.irCalls||[]).forEach(c => { if(c.physId === myId && c.date >= today) items.push({date:c.date, label:'IR call', detail:c.callType||c.irGroup||''}); });
+        (S.weekendCalls||[]).forEach(w => { if(w.physId === myId && (w.satDate||w.date||'') >= today) items.push({date:w.satDate||w.date, label:'Weekend call', detail:w.site||''}); });
+      }
+      items.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+      const next = items[0];
+      roleHome.style.display = '';
+      roleHome.innerHTML = `<div class="rs-role-panel">
+        <div class="rs-role-head">
+          <div>
+            <div class="rs-role-title">Your schedule at a glance</div>
+            <div class="rs-role-sub">${next ? `Next assignment is ${escHtml(next.date)}.` : 'No upcoming assignments found.'}</div>
+          </div>
+          <button class="bsm" onclick="nav('my-schedule',document.querySelector('.snav-item[data-pg=&quot;my-schedule&quot;]'))">My schedule</button>
+        </div>
+        <div class="rs-role-grid">
+          ${mkCard('Next assignment', next ? next.date : 'clear', next ? `${next.label}${next.detail ? ' · ' + next.detail : ''}` : 'Enjoy the quiet calendar', `nav('my-schedule',document.querySelector('.snav-item[data-pg=&quot;my-schedule&quot;]'))`)}
+          ${mkCard('Open shifts', openCount, openCount ? 'Available to claim' : 'No open shifts right now', `nav('open-shifts',document.querySelector('.snav-item[data-pg=&quot;open-shifts&quot;]'))`)}
+          ${mkCard('Swaps', pendingSwaps, pendingSwaps ? 'Practice requests in progress' : 'No pending swaps', `nav('swaps',document.querySelector('.snav-item[data-pg=&quot;swaps&quot;]'))`)}
+        </div>
+      </div>`;
+    }
+  }
   // The "More analytics" details wrapper is what gets toggled now —
   // dash-admin-section lives INSIDE it. Setting block on the inner
   // section would override <details> open/closed behavior.
