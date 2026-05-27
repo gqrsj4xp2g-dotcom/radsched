@@ -38,6 +38,8 @@ None. The app is hands-off.
    recurring entries.
 3. **Verify backups exist** (Settings → Backups → list). Daily backup
    should be ≤ 24 hours old.
+4. **Open Enterprise ops dashboard** from Tools → Logs & ops to review
+   telemetry volume, audit hash coverage, browser errors, and save queue.
 
 ## Quarterly tasks
 
@@ -48,6 +50,7 @@ None. The app is hands-off.
 3. **Snapshot retention review**: Tools → Power tools → "Prune old
    snapshots". Default retention is 90 days; adjust via
    `S.cfg.snapshotRetainDays`.
+4. **RBAC review**: compare live roles to `docs/RBAC.md`.
 
 ## Annual tasks
 
@@ -100,10 +103,13 @@ If the live Supabase row is corrupted:
 ### What we capture
 
 - Audit log: every admin mutation in `radscheduler_audit`; the in-blob copy
-  remains a capped offline fallback.
+  remains a capped offline fallback. With migration `07`, side-table rows are
+  hash-chained and append-only for authenticated app paths.
 - Error log: uncaught errors + render warnings, capped at 100.
 - System health: app shell versioning, Supabase/auth reachability,
   edge function reachability, save status, PWA assets, and data sanity.
+- Enterprise ops dashboard: telemetry counts, audit hash-chain coverage,
+  runtime errors, and save queue.
 - Supabase logs: query patterns, edge function invocations.
 - Service worker logs: install/activate/fetch events (per-browser).
 
@@ -161,6 +167,7 @@ If you have an on-call rotation, the on-call should know:
 3. How to roll back: `git revert + git push`.
 4. How to flip the kill switch: see `docs/INCIDENT.md`.
 5. Vendor support contacts (Resend, Twilio).
+6. How to run the disaster recovery flow: see `docs/DISASTER-RECOVERY.md`.
 
 ## Compliance + audit
 
