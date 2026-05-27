@@ -410,21 +410,34 @@ Deno.serve(async (req: Request) => {
     return jsonResp({ data: practice });
   }
 
-  // Stringify before writing back — the column is text. supabase-js
-  // would happily UPDATE with an object value (it auto-serializes),
-  // but explicit is safer + cheaper to reason about.
-  function writeBack() {
+  async function loadFreshPracticeForWrite(): Promise<any> {
+    const { data: freshRow, error: freshErr } = await sb
+      .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+    if (freshErr) throw new Error('practice refresh failed: ' + freshErr.message);
+    if (!freshRow) throw new Error('practice not found');
+    const fresh = parsePracticeData((freshRow as any).data);
+    const freshSecret = (fresh && fresh.cfg && typeof fresh.cfg._widgetSecret === 'string')
+      ? fresh.cfg._widgetSecret : null;
+    await _verifyHmac(payload, freshSecret, 'widget');
+    if (!Array.isArray(fresh.physicianCredits)) fresh.physicianCredits = [];
+    return fresh;
+  }
+
+  async function writePracticeData(nextPractice: any) {
     return sb.from('radscheduler')
-      .update({ data: JSON.stringify(practice) })
+      .update({ data: JSON.stringify(nextPractice) })
       .eq('id', payload.practiceId);
   }
 
-  // Helper: bump nextId once per write so add-credit gets a fresh ID
-  // even if the main app is between saves. nextId is the same field
-  // the main app uses for client-side ID allocation.
-  function allocateId(): number {
-    const next = (+practice.nextId || 100) + 1;
-    practice.nextId = next;
+  // Helper: allocate against the freshest practice row so a widget write
+  // doesn't reuse a stale nextId after the main app has saved newer changes.
+  function allocateId(target: any): number {
+    const creditMax = (target.physicianCredits || []).reduce(
+      (max: number, c: any) => Math.max(max, +c?.id || 0),
+      0,
+    );
+    const next = Math.max(+target.nextId || 100, creditMax) + 1;
+    target.nextId = next;
     return next;
   }
 
@@ -436,12 +449,15 @@ Deno.serve(async (req: Request) => {
     const ts = (c.ts || new Date().toISOString()).toString().slice(0, 40);
     if (!hours || hours <= 0 || hours > 24) return jsonResp({ error: 'hours must be in (0, 24]' }, 400);
     if (!reason) return jsonResp({ error: 'reason is required' }, 400);
+    let latest: any;
+    try { latest = await loadFreshPracticeForWrite(); }
+    catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
     // Soft cap on credit history per physician — protects against
     // accidental flood (e.g. a buggy widget retry loop).
-    const myCreditCount = practice.physicianCredits.filter((c: any) => c.physId === payload.physId).length;
+    const myCreditCount = latest.physicianCredits.filter((c: any) => c.physId === payload.physId).length;
     if (myCreditCount > 1000) return jsonResp({ error: 'credit history limit reached for this physician (1000)' }, 429);
     const credit = {
-      id: allocateId(),
+      id: allocateId(latest),
       physId: payload.physId,
       ts,
       hours,
@@ -449,8 +465,8 @@ Deno.serve(async (req: Request) => {
       createdBy: payload.physId,
       createdAt: new Date().toISOString(),
     };
-    practice.physicianCredits.push(credit);
-    const { error: wrErr } = await writeBack();
+    latest.physicianCredits.push(credit);
+    const { error: wrErr } = await writePracticeData(latest);
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true, credit });
   }
@@ -460,9 +476,12 @@ Deno.serve(async (req: Request) => {
     const id = +body.creditId;
     const patch = body.patch || {};
     if (!id) return jsonResp({ error: 'creditId required' }, 400);
-    const idx = practice.physicianCredits.findIndex((c: any) => c.id === id);
+    let latest: any;
+    try { latest = await loadFreshPracticeForWrite(); }
+    catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
+    const idx = latest.physicianCredits.findIndex((c: any) => c.id === id);
     if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
-    const credit = practice.physicianCredits[idx];
+    const credit = latest.physicianCredits[idx];
     if (credit.physId !== payload.physId) return jsonResp({ error: 'cannot edit another physician\'s credit' }, 403);
     if (patch.hours != null) {
       const h = +patch.hours;
@@ -476,8 +495,8 @@ Deno.serve(async (req: Request) => {
     }
     if (patch.ts != null) credit.ts = String(patch.ts).slice(0, 40);
     credit.updatedAt = new Date().toISOString();
-    practice.physicianCredits[idx] = credit;
-    const { error: wrErr } = await writeBack();
+    latest.physicianCredits[idx] = credit;
+    const { error: wrErr } = await writePracticeData(latest);
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true, credit });
   }
@@ -486,13 +505,16 @@ Deno.serve(async (req: Request) => {
   if (action === 'delete-credit') {
     const id = +body.creditId;
     if (!id) return jsonResp({ error: 'creditId required' }, 400);
-    const idx = practice.physicianCredits.findIndex((c: any) => c.id === id);
+    let latest: any;
+    try { latest = await loadFreshPracticeForWrite(); }
+    catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
+    const idx = latest.physicianCredits.findIndex((c: any) => c.id === id);
     if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
-    if (practice.physicianCredits[idx].physId !== payload.physId) {
+    if (latest.physicianCredits[idx].physId !== payload.physId) {
       return jsonResp({ error: 'cannot delete another physician\'s credit' }, 403);
     }
-    practice.physicianCredits.splice(idx, 1);
-    const { error: wrErr } = await writeBack();
+    latest.physicianCredits.splice(idx, 1);
+    const { error: wrErr } = await writePracticeData(latest);
     if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
     return jsonResp({ ok: true });
   }
