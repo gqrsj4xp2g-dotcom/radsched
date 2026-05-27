@@ -47503,6 +47503,30 @@ function _pickSetMapping(rawName, physIdStr){
   if(!_xlPickData.nameMap) return;
   const physId = parseInt(physIdStr, 10) || null;
   _xlPickData.nameMap[rawName] = { physId, score: physId ? 1.0 : 0, status: physId ? 'manual' : 'unmatched' };
+  // Critical: regenerate the staged record arrays so the change
+  // propagates to the next Apply. Without this, the user picks
+  // "— skip —" (or remaps a name to a different physician), the
+  // dropdown updates the nameMap entry, but _xlPickData.vacations
+  // and _xlPickData.shifts still hold records derived from the
+  // OLD nameMap. Apply then writes those stale records — the
+  // skip request gets silently ignored. rematchPickImport() walks
+  // allWeeks under the current nameMap and rebuilds the arrays,
+  // dropping any record whose physician now resolves to null.
+  if(typeof rematchPickImport === 'function'){
+    try{ rematchPickImport(); }catch(e){
+      if(typeof _logError === 'function') _logError('_pickSetMapping rematch', e?.message||String(e), e);
+    }
+  }
+  // User-visible confirmation — without this the dropdown change
+  // was silent and admins couldn't tell if the skip "took".
+  if(typeof _toast === 'function'){
+    const p = physId ? _physById(physId) : null;
+    if(physId && p){
+      _toast(`Mapped "${rawName}" → ${p.last}, ${p.first}.`, 'ok');
+    } else {
+      _toast(`Skipped "${rawName}" — records will not be imported.`, 'info');
+    }
+  }
 }
 
 // ── Per-cell classification override ──────────────────────────────
