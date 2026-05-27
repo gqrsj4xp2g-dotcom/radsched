@@ -78,6 +78,7 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
     _supabase = mock;
     _initSupabase = () => mock;
     _initAuthClient = () => mock;
+    doLogout = async () => {};
     _pullFromSupabase = async () => null;
     _initLeaderElection = () => {};
     _initPresence = () => {};
