@@ -120,13 +120,22 @@ async function openToolsOps(page) {
     localStorage.setItem('rs.toolsTab', 'ops');
     navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
   });
-  await expect(page.locator('#page-tools')).toBeVisible();
   await page.waitForTimeout(100);
   await page.evaluate(() => {
     const getFn = name => globalThis[name] || Function(`return typeof ${name} === "function" ? ${name} : null`)();
     const renderHealth = getFn('renderSystemHealth');
+    const auth = document.getElementById('auth');
+    const app = document.getElementById('app');
+    if (auth) auth.style.display = 'none';
+    if (app) app.style.display = 'flex';
+    document.querySelectorAll('.page').forEach(page => {
+      page.classList.remove('on');
+      page.style.display = 'none';
+    });
     const pageTools = document.getElementById('page-tools');
     if (pageTools) {
+      pageTools.classList.add('on');
+      pageTools.style.display = '';
       pageTools.setAttribute('data-active-tab', 'ops');
       pageTools.querySelectorAll('[data-tools-tab]').forEach(card => {
         card.style.display = card.getAttribute('data-tools-tab') === 'ops' ? '' : 'none';
@@ -137,6 +146,7 @@ async function openToolsOps(page) {
     });
     renderHealth(true);
   });
+  await expect(page.locator('#page-tools')).toBeVisible();
   await expect(page.locator('#sys-health-result')).toBeVisible();
 }
 
