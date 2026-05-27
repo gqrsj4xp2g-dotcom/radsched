@@ -8,13 +8,15 @@
 | Layer | Where | Coverage |
 |-------|-------|----------|
 | Parse check | CLI (`tools/parsecheck.sh`) | Syntax + simple structural checks |
+| Shell smoke check | CLI (`tools/smoke-check.js`) | PWA assets, build/SW version sync, edge source links, privileged gate drift |
 | Regression suite | In-app (Tools → run-tests) | Pure-function correctness |
 | Manual smoke | Checklist below | UI/UX + end-to-end flows |
 | Integration | Manual against staging Supabase | Auth + persistence + Realtime |
 
-There is no automated end-to-end test framework. The single-file
-deployment makes browser-based assertion harder than usual; the
-in-app regression suite covers the deterministic parts.
+There is no full automated end-to-end test framework yet. The single-file
+deployment makes browser-based assertion harder than usual; the shell
+smoke check covers deploy-critical wiring, and the in-app regression
+suite covers the deterministic parts.
 
 ## Parse check
 
@@ -27,6 +29,26 @@ syntactic validity. Run via:
 
 This catches typos, missing brackets, malformed templates, and
 invalid escape sequences. It runs in CI (see `.github/workflows`).
+
+## Shell smoke check
+
+The smoke check catches issues that parse-check cannot see:
+
+```bash
+node tools/smoke-check.js
+```
+
+It verifies:
+
+- `index.html` build markers match `sw.js` cache version.
+- Manifest and service-worker assets exist.
+- The setup panels load edge function source from repo files.
+- Known privileged surfaces still treat `superuser` as privileged.
+- Superuser mutation protections remain in `create-user`.
+- Sidebar and manifest shortcut targets resolve to real pages.
+- No injected Cloudflare email-decoder script is present.
+
+This runs in CI before every GitHub Pages deploy.
 
 ## In-app regression suite
 
@@ -138,7 +160,10 @@ Hold off until the core features stabilize.
 
 `.github/workflows/deploy.yml` runs:
 1. Parse check
-2. (Optional) Lighthouse CI on the deployed URL
+2. TOC check
+3. Manifest JSON validation
+4. Shell smoke check
+5. Edge Function TypeScript bundle validation
 
 Failures block the deploy. See the workflow file for current state.
 
@@ -150,4 +175,5 @@ ln -s ../../tools/precommit.sh .git/hooks/pre-commit
 chmod +x tools/precommit.sh
 ```
 
-Runs the parse check before allowing the commit.
+Runs parse and shell smoke checks before allowing the commit when the
+deployable shell, managed source parts, or edge functions are staged.
