@@ -56,6 +56,10 @@ CREATE POLICY radscheduler_update_scoped ON public.radscheduler
 
 DROP POLICY IF EXISTS radscheduler_backups_select ON public.radscheduler_backups;
 DROP POLICY IF EXISTS radscheduler_backups_modify ON public.radscheduler_backups;
+DROP POLICY IF EXISTS radscheduler_backups_modify_scoped ON public.radscheduler_backups;
+DROP POLICY IF EXISTS radscheduler_backups_insert_scoped ON public.radscheduler_backups;
+DROP POLICY IF EXISTS radscheduler_backups_update_scoped ON public.radscheduler_backups;
+DROP POLICY IF EXISTS radscheduler_backups_delete_scoped ON public.radscheduler_backups;
 
 CREATE POLICY radscheduler_backups_select_scoped ON public.radscheduler_backups
   FOR SELECT TO authenticated
@@ -64,13 +68,27 @@ CREATE POLICY radscheduler_backups_select_scoped ON public.radscheduler_backups
     (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   );
 
-CREATE POLICY radscheduler_backups_modify_scoped ON public.radscheduler_backups
-  FOR ALL TO authenticated
+CREATE POLICY radscheduler_backups_insert_scoped ON public.radscheduler_backups
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
+  );
+
+CREATE POLICY radscheduler_backups_update_scoped ON public.radscheduler_backups
+  FOR UPDATE TO authenticated
   USING (
     (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
     (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   )
   WITH CHECK (
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
+  );
+
+CREATE POLICY radscheduler_backups_delete_scoped ON public.radscheduler_backups
+  FOR DELETE TO authenticated
+  USING (
     (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
     (((select auth.jwt()) -> 'app_metadata' ->> 'practiceId') = practice_id)
   );
