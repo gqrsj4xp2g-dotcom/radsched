@@ -102,8 +102,8 @@ CREATE POLICY shifts_insert_authed
   FOR INSERT
   TO authenticated
   WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 DROP POLICY IF EXISTS shifts_update_authed ON public.radscheduler_shifts;
@@ -112,12 +112,12 @@ CREATE POLICY shifts_update_authed
   FOR UPDATE
   TO authenticated
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   )
   WITH CHECK (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 DROP POLICY IF EXISTS shifts_delete_authed ON public.radscheduler_shifts;
@@ -126,8 +126,8 @@ CREATE POLICY shifts_delete_authed
   FOR DELETE
   TO authenticated
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 DROP POLICY IF EXISTS shifts_select_authed ON public.radscheduler_shifts;
@@ -136,8 +136,8 @@ CREATE POLICY shifts_select_authed
   FOR SELECT
   TO authenticated
   USING (
-    ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
-    (practice_id = (auth.jwt() -> 'app_metadata' ->> 'practiceId'))
+    (((select auth.jwt()) -> 'app_metadata' ->> 'role') IN ('admin','superuser')) OR
+    (practice_id = ((select auth.jwt()) -> 'app_metadata' ->> 'practiceId'))
   );
 
 -- ── 3. Backfill helper (manual, one-time per practice) ──────────
