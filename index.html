@@ -44538,7 +44538,10 @@ async function _invokeEdgeFn(name, body){
   let result = null;
   try{ result = await resp.json(); }catch(_){}
   if(!resp.ok){
-    throw new Error(`${name} returned ${resp.status}: ${result?.error || 'unknown'}`);
+    const err = new Error(`${name} returned ${resp.status}: ${result?.error || 'unknown'}`);
+    err.status = resp.status;
+    err.body = result;
+    throw err;
   }
   return result;
 }
