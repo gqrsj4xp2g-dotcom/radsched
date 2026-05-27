@@ -1,5 +1,21 @@
 # RadScheduler — Testing
+## Enterprise guardrails
 
+Run these before release or after changing auth, RLS, deployment, or
+security headers:
+
+```bash
+npm run test:security-headers
+npm run test:environment
+npm run test:rbac
+npm run test:migration-drift
+npm run test:load
+```
+
+`test:security-headers` validates CSP/header drift, `test:environment`
+guards staging/production separation, `test:rbac` keeps the role matrix in
+sync with app/edge/SQL gates, and `test:load` profiles the offline 200
+physician scale case.
 > One-file deployment means most testing happens in the browser. This
 > doc maps what's covered, what isn't, and how to add coverage.
 
