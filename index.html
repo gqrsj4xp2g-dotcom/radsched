@@ -33258,9 +33258,11 @@ function renderAuditLog(){
   // fetch fails (table missing, RLS denied, network), fall back to
   // S.auditLog so the panel still shows something useful.
   let rows;
+  let source = 'offline fallback';
   if(_auditSideCache.rows && (Date.now() - _auditSideCache.fetchedAt) < 10000){
     // Cached — use the existing cache for fast filter typing.
     rows = _auditSideCache.rows.slice();
+    source = 'side table';
   } else {
     rows = (S.auditLog || []).slice().reverse();
     // Kick off an async refresh; re-render when it completes.
@@ -33333,7 +33335,7 @@ function renderAuditLog(){
     if(!_hlRe) return escs;
     return escs.replace(_hlRe, '<mark style="background:#fef08a;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
   };
-  el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries (most recent first)${filter ? ` matching <strong>"${escHtml(filter)}"</strong>` : ''}</div>
+  el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries from ${escHtml(source)} (most recent first)${filter ? ` matching <strong>"${escHtml(filter)}"</strong>` : ''}</div>
     <table class="tbl" style="font-size:11.5px"><thead><tr>
       <th style="width:140px">When</th><th style="width:160px">Action</th><th>Detail</th>
     </tr></thead><tbody>${rows.slice(0, 200).map(r => `
@@ -33343,12 +33345,21 @@ function renderAuditLog(){
         <td style="font-family:ui-monospace,monospace;font-size:10.5px;color:var(--rs-ink-2);word-break:break-all">${highlight(JSON.stringify(r.detail||{}), filter)}</td>
       </tr>`).join('')}</tbody></table>`;
 }
-function exportAuditLog(){
-  const rows = (S.auditLog || []).slice().reverse();
-  const csv = ['Timestamp,Action,Detail']
+async function _auditRowsForExport(){
+  const sideRows = await _fetchAuditFromSideTable();
+  if(sideRows){
+    _auditSideCache = { rows: sideRows, fetchedAt: Date.now() };
+    return sideRows;
+  }
+  if(_auditSideCache.rows && _auditSideCache.rows.length) return _auditSideCache.rows.slice();
+  return (S.auditLog || []).slice().reverse();
+}
+async function exportAuditLog(){
+  const rows = await _auditRowsForExport();
+  const csv = ['Timestamp,Who,Role,Action,Detail']
     .concat(rows.map(r => {
       const d = JSON.stringify(r.detail || {}).replace(/"/g, '""');
-      return `"${(r.ts||'').replace(/"/g,'""')}","${(r.action||'').replace(/"/g,'""')}","${d}"`;
+      return `"${(r.ts||'').replace(/"/g,'""')}","${(r.who||'').replace(/"/g,'""')}","${(r.role||'').replace(/"/g,'""')}","${(r.action||'').replace(/"/g,'""')}","${d}"`;
     })).join('\n');
   try{
     const blob = new Blob([csv], {type:'text/csv'});
