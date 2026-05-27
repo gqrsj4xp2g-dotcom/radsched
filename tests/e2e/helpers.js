@@ -34,24 +34,41 @@ async function openApp(page, path = '/index.html?e2e=1', options = {}) {
 async function installSyntheticSupabase(page, { session = null } = {}) {
   await page.evaluate(({ session }) => {
     const mockRows = [];
+    const mockAuditRows = [];
     const queryResult = async () => ({ data: null, error: { message: 'mocked no row' } });
-    const tableApi = {
+    const makeQuery = initialRows => {
+      let rows = (initialRows || []).slice();
+      const api = {
+        eq(column, value) {
+          rows = rows.filter(row => String(row?.[column]) === String(value));
+          return api;
+        },
+        order(column, opts = {}) {
+          rows = rows.slice().sort((a, b) => {
+            const av = a?.[column] || '';
+            const bv = b?.[column] || '';
+            return opts.ascending ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+          });
+          return api;
+        },
+        limit: async n => ({ data: rows.slice(0, n), error: null }),
+        single: queryResult,
+        maybeSingle: async () => ({ data: rows[0] || null, error: rows[0] ? null : { message: 'mocked no row' } }),
+      };
+      return api;
+    };
+    const tableApi = tableName => ({
       select() {
-        return {
-          order: async () => ({ data: [], error: null }),
-          limit: async () => ({ data: [], error: null }),
-          eq() {
-            return {
-              single: queryResult,
-              maybeSingle: queryResult,
-              order: async () => ({ data: [], error: null }),
-              limit: async () => ({ data: [], error: null }),
-            };
-          },
-        };
+        return makeQuery(tableName === 'radscheduler_audit' ? mockAuditRows : []);
       },
       order: async () => ({ data: [], error: null }),
       limit: async () => ({ data: [], error: null }),
+      insert: async payload => {
+        const rows = Array.isArray(payload) ? payload : [payload];
+        if (tableName === 'radscheduler_audit') mockAuditRows.push(...rows);
+        else mockRows.push(...rows);
+        return { data: payload, error: null };
+      },
       upsert: async payload => {
         mockRows.push(payload);
         return { data: payload, error: null };
@@ -61,11 +78,12 @@ async function installSyntheticSupabase(page, { session = null } = {}) {
           eq: async () => ({ data: null, error: null }),
         };
       },
-    };
+    });
     const mock = {
       __rows: mockRows,
-      from() {
-        return tableApi;
+      __auditRows: mockAuditRows,
+      from(tableName) {
+        return tableApi(tableName);
       },
       channel() {
         return {
