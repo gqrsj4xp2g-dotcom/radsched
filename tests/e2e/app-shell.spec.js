@@ -139,6 +139,24 @@ test('go-live readiness checklist surfaces launch guardrails', async ({ page }) 
   await expect(page.locator('#golive-result')).toContainText('Edge function monitoring');
 });
 
+test('enterprise readiness writes and renders telemetry evidence', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=enterprise');
+  await launchSyntheticUser(page, 'superuser');
+  await openToolsOps(page);
+
+  await page.getByRole('button', { name: 'Run enterprise check' }).click();
+  await expect(page.locator('#enterprise-result')).toContainText('Enterprise readiness');
+  await expect(page.locator('#enterprise-result')).toContainText('Privileged MFA');
+  await expect(page.locator('#enterprise-result')).toContainText('Security pipeline');
+  await expect(page.locator('#enterprise-result')).toContainText('Telemetry table');
+
+  const telemetryCount = await page.evaluate(() => window.__rsMockSupabase.__telemetryRows.length);
+  expect(telemetryCount).toBeGreaterThanOrEqual(1);
+
+  await page.getByRole('button', { name: 'Telemetry events' }).click();
+  await expect(page.locator('#enterprise-result')).toContainText('enterprise.readiness_run');
+});
+
 test('service worker source and registration use the current app shell version', async ({ page, request }) => {
   const [html, sw] = await Promise.all([
     request.get('/index.html').then(r => r.text()),
