@@ -55,6 +55,19 @@ function normalizeRole(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
+const RATE_BUCKETS = new Map<string, { n: number; t: number }>();
+function rateLimit(key: string, capPerMinute: number): boolean {
+  const now = Date.now();
+  const current = RATE_BUCKETS.get(key);
+  if (!current || now - current.t > 60_000) {
+    RATE_BUCKETS.set(key, { n: 1, t: now });
+    return true;
+  }
+  if (current.n >= capPerMinute) return false;
+  current.n++;
+  return true;
+}
+
 function parseBackupPayload(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
     if (new TextEncoder().encode(value).length > MAX_BACKUP_BYTES) {
@@ -147,6 +160,9 @@ serve(async (req) => {
     const callerRole = normalizeRole(appMeta.role);
     if (!PRIVILEGED_ROLES.has(callerRole)) {
       return json({ error: "Caller is not an admin or superuser.", caller_email: caller.email }, 403);
+    }
+    if (!rateLimit(String(caller.id || caller.email || "unknown"), 10)) {
+      return json({ error: "Too many admin operation requests; slow down." }, 429);
     }
     if (!hasAal2(token)) {
       return json({
