@@ -33472,6 +33472,24 @@ function _gatherManualRuleViolations(p, ctx){
   const out = [];
   if(!p || !ctx) return out;
 
+  // Allowlist check (rs-v84): p.allowedSites is the admin-set list
+  // of sites this physician can work at. Empty list = no restriction.
+  // Non-empty list = restricted. The check applies to in-person
+  // assignments only; 'At Home / Remote' is never restricted because
+  // it's a pseudo-site. Mini-anchor / fill-in IR designations
+  // override the allowlist (those are explicit per-site grants).
+  if(ctx.site && ctx.site !== 'At Home / Remote'){
+    const allowed = Array.isArray(p.allowedSites) ? p.allowedSites : [];
+    if(allowed.length && !allowed.includes(ctx.site)){
+      const site = (S.sites || []).find(s => s && s.name === ctx.site);
+      const isAnchor = site && Array.isArray(site.irAnchors) && site.irAnchors.includes(p.id);
+      const isFillin = site && Array.isArray(site.irFillins) && site.irFillins.includes(p.id);
+      if(!isAnchor && !isFillin){
+        out.push(`${p.last} is not allowed at ${ctx.site} (allowed sites: ${allowed.join(', ') || 'none set'})`);
+      }
+    }
+  }
+
   // Site rules — site limits / blackouts / shift whitelist / per-period caps.
   // Route to the appropriate predicate:
   //   ir-shift → irSiteRuleOk (checks 'ir-shift' or legacy 'ir')
