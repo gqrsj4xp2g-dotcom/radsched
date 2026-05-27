@@ -240,6 +240,30 @@ test('backup restore drill validates and applies a Supabase backup row', async (
     });
     window.confirm = () => true;
     window.alert = msg => { window.__lastAlert = msg; };
+    window.__lastAdminOpsCall = null;
+    window._invokeEdgeFn = async (name, body) => {
+      window.__lastAdminOpsCall = { name, body };
+      if (name !== 'admin-ops') throw new Error('Unexpected edge function: ' + name);
+      const backup = window.__rsMockSupabase.__backupRows.find(row => row.id === body.backupId);
+      if (!backup) throw new Error('Mock backup not found');
+      const restored = {
+        ...JSON.parse(backup.data),
+        savedAt: '2026-05-27T12:01:00.000Z',
+        _restoredFromBackup: body.backupId,
+        _restoredAt: '2026-05-27T12:01:00.000Z',
+      };
+      const store = window.__rsMockSupabase.__rows;
+      const idx = store.findIndex(row => row.id === body.practiceId);
+      const nextRow = { id: body.practiceId, data: JSON.stringify(restored) };
+      if (idx >= 0) store[idx] = nextRow;
+      else store.push(nextRow);
+      window.__rsMockSupabase.__auditRows.push({
+        practice_id: body.practiceId,
+        action: 'admin.restoreBackup',
+        detail: { backupId: body.backupId, via: 'admin-ops' },
+      });
+      return { ok: true, payload: restored, savedAt: restored.savedAt, warnings: [] };
+    };
 
     const ok = await restore('main_backup_e2e');
     await new Promise(resolve => setTimeout(resolve, 30));
@@ -251,6 +275,8 @@ test('backup restore drill validates and applies a Supabase backup row', async (
       currentFirst: S.physicians[0]?.first || '',
       savedRestoredFromBackup: savedData._restoredFromBackup || '',
       sideAuditRows: window.__rsMockSupabase.__auditRows.filter(row => row.action === 'admin.restoreBackup').length,
+      edgeFunctionName: window.__lastAdminOpsCall?.name || '',
+      edgeAction: window.__lastAdminOpsCall?.body?.action || '',
     };
   });
 
@@ -259,6 +285,8 @@ test('backup restore drill validates and applies a Supabase backup row', async (
   expect(result.currentFirst).toBe('Restored');
   expect(result.savedRestoredFromBackup).toBe('main_backup_e2e');
   expect(result.sideAuditRows).toBeGreaterThanOrEqual(1);
+  expect(result.edgeFunctionName).toBe('admin-ops');
+  expect(result.edgeAction).toBe('restore-backup');
 });
 
 test('audit log dual-writes to the side table and exports canonical rows', async ({ page }) => {
