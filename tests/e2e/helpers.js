@@ -105,10 +105,13 @@ async function openToolsOps(page) {
   await page.evaluate(() => {
     localStorage.setItem('rs.toolsTab', 'ops');
     nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
+  });
+  await expect(page.locator('#page-tools')).toBeVisible();
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
     toolsTab('ops');
     renderSystemHealth(true);
   });
-  await expect(page.locator('#page-tools')).toBeVisible();
   await expect(page.locator('#sys-health-result')).toBeVisible();
 }
 
