@@ -82,6 +82,10 @@ exception: it may use `x-rs-cron-secret` so pg_cron can invoke it without a
 browser session. Without these internal checks, function URLs become public
 service-role/admin relays for anyone who guesses them.
 
+Privileged edge functions also maintain per-caller in-memory rate limits.
+These are not a substitute for platform/network rate limits, but they stop
+accidental loops and casual abuse inside a warm edge isolate.
+
 ### Secrets
 
 | Secret | Where | What if leaked |
@@ -126,14 +130,17 @@ Content Security Policy is set in:
 Recommended baseline:
 
 ```
-Content-Security-Policy: default-src 'self';
-  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://*.supabase.co;
+Content-Security-Policy: default-src 'self' data: blob:;
+  script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh;
   style-src 'self' 'unsafe-inline';
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://api.github.com;
-  img-src 'self' data: https:;
+  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://maps.googleapis.com https://api.github.com https://raw.githubusercontent.com;
+  img-src 'self' data: blob: https://maps.googleapis.com;
   font-src 'self' data:;
   manifest-src 'self';
   worker-src 'self' blob:;
+  object-src 'none';
+  base-uri 'self';
+  form-action 'none';
 ```
 
 `'unsafe-inline'` is unfortunately required for the inline `<script>`
@@ -180,8 +187,9 @@ sensor APIs. If a future feature does, document it here first.
 - The XLSX parser uses SheetJS via CDN. We pin a version (`0.18.5`)
   but a CDN-level compromise would inject code. Mitigation: SRI
   (Subresource Integrity) hashes — TODO.
-- The audit log is per-tab in-memory plus persisted via the normal
-  save path. A crashed tab loses unflushed entries.
+- The audit log is hash-chained in `radscheduler_audit` after
+  `docs/sql/07-immutable-audit-chain.sql`; the in-blob copy remains a
+  capped offline fallback.
 - The undo ring is per-tab and not synced across tabs.
 - Web Push tokens never expire; if a physician changes browsers,
   they need to re-opt-in. There's no automatic cleanup of stale tokens.
