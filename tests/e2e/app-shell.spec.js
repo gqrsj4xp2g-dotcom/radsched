@@ -90,6 +90,22 @@ test('role matrix allows only admin and superuser into Tools ops', async ({ brow
   }
 });
 
+test('dashboard shows role-aware home panel', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=role-home');
+  await launchSyntheticUser(page, 'admin');
+
+  await page.evaluate(() => {
+    S.openShifts = [{ id: 990, date: '2026-05-28', shiftType: '1st', claimedBy: null }];
+    S.swapRequests = [{ id: 991, status: 'pending' }];
+    const render = globalThis.renderDash || Function('return typeof renderDash === "function" ? renderDash : null')();
+    render();
+  });
+
+  await expect(page.locator('#dash-role-home')).toContainText('Operations snapshot');
+  await expect(page.locator('#dash-role-home')).toContainText('Open shifts');
+  await expect(page.locator('#dash-role-home')).toContainText('Pending swaps');
+});
+
 test('admin MFA gate blocks privileged navigation until aal2 verification', async ({ page }) => {
   await openApp(page, '/index.html?e2e=admin-mfa');
   await launchSyntheticUser(page, 'admin', { aal: 'aal1' });
