@@ -116,13 +116,15 @@ async function launchSyntheticUser(page, role = 'superuser') {
 async function openToolsOps(page) {
   await page.evaluate(() => {
     const getFn = name => globalThis[name] || Function(`return typeof ${name} === "function" ? ${name} : null`)();
-    const navFn = getFn('nav');
+    const fallback = { id: 'e2e-user', email: 'e2e@example.com', role: 'superuser', first: 'E2E', last: 'User', practiceId: 'main' };
+    const base = (USERS || [])[0] || fallback;
     localStorage.setItem('rs.toolsTab', 'ops');
-    navFn('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops');
-  });
-  await page.waitForTimeout(100);
-  await page.evaluate(() => {
-    const getFn = name => globalThis[name] || Function(`return typeof ${name} === "function" ? ${name} : null`)();
+
+    CU = { ...base, role: 'superuser', first: base.first || 'E2E', last: base.last || 'User', practiceId: 'main' };
+    _ROW_ID = 'main';
+    _PRACTICE_ID = 'main';
+    _PRACTICES = [{ id: 'main', name: 'E2E Practice' }];
+
     const renderHealth = getFn('renderSystemHealth');
     const auth = document.getElementById('auth');
     const app = document.getElementById('app');
@@ -141,6 +143,9 @@ async function openToolsOps(page) {
         card.style.display = card.getAttribute('data-tools-tab') === 'ops' ? '' : 'none';
       });
     }
+    document.querySelectorAll('.snav-item').forEach(item => {
+      item.classList.toggle('on', item.getAttribute('data-pg') === 'tools');
+    });
     document.querySelectorAll('#tools-subnav .tab').forEach(tab => {
       tab.classList.toggle('on', tab.getAttribute('data-tt') === 'ops');
     });
