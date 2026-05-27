@@ -20954,7 +20954,15 @@ function claimShift(oid,pid){
   }
   o.claimedBy=pid;
   o.claimedAt = new Date().toISOString();
-  if(o.group==='IR')S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'',site:o.site,notes:'Claimed'});
+  if(o.group==='IR'){
+    S.irCalls.push({id:S.nextId++,physId:pid,date:o.date,callType:'daily',irGroup:p.irGroup||'',site:o.site,notes:'Claimed'});
+    // Auto-pair with a daily IR shift — same policy as the manual
+    // and auto-assign paths (rs-v82). The physician claiming the
+    // open IR call needs to be scheduled to work that day too.
+    if(typeof _ensureIRShiftForCall === 'function'){
+      _ensureIRShiftForCall(pid, o.date, p.irGroup||'', o.site, 'open-shift-claim');
+    }
+  }
   else if(_isWeekend)S.weekendCalls.push({id:S.nextId++,physId:pid,satDate:o.date,sunDate:addDays(o.date,1),sub:o.sub,site:o.site,ctype:'Primary',notes:'Claimed'});
   else S.drShifts.push({id:S.nextId++,physId:pid,date:o.date,shift:'1st',site:o.site,sub:o.sub,notes:'Claimed',autoHome:false});
   if(typeof _audit==='function') _audit('openShift.claim', {oid, pid, group:o.group, date:o.date, site:o.site});
