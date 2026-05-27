@@ -65,6 +65,7 @@ const objectChecks = [
   ['shift touch function with fixed search_path', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\._radscheduler_shifts_touch\(\)[\s\S]*?SET\s+search_path\s*=\s*public,\s*pg_temp/i],
   ['rls_auto_enable public execute revoked', /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+authenticated/i],
   ['admin AAL2 RLS helper', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.radscheduler_admin_aal2\(\)[\s\S]*?coalesce\(\(select auth\.jwt\(\)\)\s*->>\s*'aal'/i],
+  ['same-practice access helper permits same-practice admins at aal1', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.radscheduler_non_admin_same_practice\(target_practice_id\s+text\)[\s\S]*?SELECT\s+target_practice_id\s*=\s*\(\(select\s+auth\.jwt\(\)\)\s*->\s*'app_metadata'\s*->>\s*'practiceId'\)/i],
   ['radscheduler_shifts touch trigger', /CREATE\s+TRIGGER\s+radscheduler_shifts_touch_trg/i],
   ['audit table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_audit\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
   ['shift table RLS enabled', /ALTER\s+TABLE\s+public\.radscheduler_shifts\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i],
