@@ -154,8 +154,9 @@ restoring another practice unless they are superusers.
 supabase functions deploy admin-ops --no-verify-jwt
 ```
 
-The function source lives in **Settings → Edge Functions → Function source
-preview** inside the app.
+The function sources live under `supabase/functions/`; the app's setup
+panels load those repo files so copied source cannot drift from the deployed
+source.
 
 #### `send-notification` (optional)
 
