@@ -6523,6 +6523,7 @@ window.addEventListener('error', function(ev){
     const stk = (ev.error && ev.error.stack) ? ev.error.stack.split('\n').slice(0,4).join('\n') : '';
     const src = ev.filename ? `\n(at ${ev.filename}:${ev.lineno||'?'}:${ev.colno||'?'})` : '';
     console.error('[RS-GlobalError]', ev.error || ev.message, stk);
+    try{ if(typeof _telemetry === 'function') _telemetry('runtime.error', {message:msg, source:ev.filename||'', line:ev.lineno||null}, 'error'); }catch(_){}
     // Only alert for errors from our own inline script (not extensions, ad blockers, etc.)
     if(!ev.filename || ev.filename.includes(location.pathname) || ev.filename === ''){
       alert('⚠ RadScheduler error:\n' + msg + src + (stk ? '\n\n' + stk : ''));
@@ -6548,6 +6549,7 @@ window.addEventListener('unhandledrejection', function(ev){
       return;
     }
     console.error('[RS-UnhandledRejection]', reason);
+    try{ if(typeof _telemetry === 'function') _telemetry('runtime.unhandled_rejection', {message:msg}, 'error'); }catch(_){}
     alert('⚠ RadScheduler async error:\n' + msg + (stk ? '\n\n' + stk : ''));
   } catch(_e){}
 });
