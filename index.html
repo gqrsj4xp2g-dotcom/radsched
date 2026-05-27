@@ -13535,8 +13535,18 @@ function nav(pg, el, subTab, opts){
     alert('That page is restricted to administrators.');
     return;
   }
+  if(pageEl && pageEl.classList.contains('admin-only') && !_adminMfaOk()){
+    alert(_mfaAdminBlockMessage() || 'Admin MFA verification is required.');
+    _showAdminMfaGate();
+    return;
+  }
   if(pageEl && pageEl.classList.contains('su-only') && !_isSU()){
     alert('That page is restricted to superusers.');
+    return;
+  }
+  if(pageEl && pageEl.classList.contains('su-only') && !_adminMfaOk()){
+    alert(_mfaAdminBlockMessage() || 'Superuser MFA verification is required.');
+    _showAdminMfaGate();
     return;
   }
   // Optional sub-tab argument lets a sidebar shortcut land on a specific
