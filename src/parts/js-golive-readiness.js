@@ -14,6 +14,18 @@ async function _goLiveAuditSideTableItem(sb){
     return _goLiveStatus('warn', 'Audit side table', e?.message || String(e));
   }
 }
+async function _goLiveAuditChainItem(sb){
+  if(!sb || !_ROW_ID) return _goLiveStatus('warn', 'Immutable audit chain', 'Sign in to a practice before checking audit hash-chain columns.');
+  try{
+    const { error } = await sb.from('radscheduler_audit')
+      .select('entry_hash, prev_hash, actor_hash')
+      .eq('practice_id', String(_ROW_ID))
+      .limit(1);
+    return _goLiveStatus(!error ? 'ok' : 'warn', 'Immutable audit chain', !error ? 'Audit hash-chain columns are reachable.' : (error?.message || 'Apply docs/sql/07-immutable-audit-chain.sql.'));
+  }catch(e){
+    return _goLiveStatus('warn', 'Immutable audit chain', e?.message || String(e));
+  }
+}
 async function _goLiveBackupItem(sb){
   if(!sb || !_ROW_ID) return _goLiveStatus('warn', 'Backup restore confidence', 'Sign in to a practice before checking backup inventory.');
   try{
@@ -96,6 +108,7 @@ async function renderGoLiveChecklist(){
 
   items.push(await _goLiveManifestItem());
   items.push(await _goLiveAuditSideTableItem(sb));
+  items.push(await _goLiveAuditChainItem(sb));
   items.push(await _goLiveBackupItem(sb));
   items.push(await _goLiveEdgeFunctionsItem(cfgUrl));
   try{ localStorage.setItem('rs.golive.lastRun', new Date().toISOString()); }catch(_){}
