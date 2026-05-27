@@ -17,6 +17,10 @@ Before inviting real users, open **Authentication → Security** and enable
 leaked-password protection. This dashboard setting is not exposed to the
 public browser client, so treat it as a required manual go-live check.
 
+Enterprise deployments should apply every file in `docs/sql/` in order.
+`07-immutable-audit-chain.sql` is the append-only/hash-chain hardening layer
+for `radscheduler_audit`, so run it only after the audit side table exists.
+
 ### Run the SQL
 
 Open **SQL Editor** → **New query**, paste, run:
