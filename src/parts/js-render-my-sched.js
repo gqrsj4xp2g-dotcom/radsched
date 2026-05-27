@@ -222,15 +222,18 @@ function renderMySched(){
         </div>`;
       } else {
         const irShLbl=s.shift==='1st'?'Day Shift':s.shift+' Shift';
-        evs+=`<div class="ev ${shCls}" title="IR ${irShLbl} @ ${s.site}${s.sub?' ('+s.sub+')':''}${s.slotLabel?' · '+s.slotLabel:''}">
-          <div style="font-weight:700;font-size:11px">${irShLbl}</div>
-          <div style="font-size:9px;opacity:.85">IR · ${siteSh}</div>
-          <div style="font-size:9px;opacity:.7">${s.sub?s.sub.slice(0,6):''}</div>
+        // Title attribute interpolation requires escaping — a site/sub
+        // with " in it otherwise breaks out of the attribute. Same
+        // reason for the inner div content.
+        evs+=`<div class="ev ${shCls}" title="IR ${escHtml(irShLbl)} @ ${escHtml(s.site||'')}${s.sub?' ('+escHtml(s.sub)+')':''}${s.slotLabel?' · '+escHtml(s.slotLabel):''}">
+          <div style="font-weight:700;font-size:11px">${escHtml(irShLbl)}</div>
+          <div style="font-size:9px;opacity:.85">IR · ${escHtml(siteSh||'')}</div>
+          <div style="font-size:9px;opacity:.7">${s.sub?escHtml(s.sub.slice(0,6)):''}</div>
           ${_irSlotBadge}
         </div>`;
       }
     });
-    hols.filter(h=>h.date===c.date).forEach(h=>evs+=`<div class="ev ehol" title="${h.name}">🏖</div>`);
+    hols.filter(h=>h.date===c.date).forEach(h=>evs+=`<div class="ev ehol" title="${escHtml(h.name||'')}">🏖</div>`);
     if(vacSet.has(c.date)) evs+=`<div class="ev evac" title="Off">Off</div>`;
     const isSB=S.vacations.some(v=>v.physId===p.id&&v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
     html+=`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${isSB?' sold-back':''}" style="min-height:58px"><div class="cal-num">${c.day}</div>${evs}</div>`;
@@ -255,7 +258,10 @@ function renderMySched(){
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
     html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${allEvts.length} item${allEvts.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>`;
-    html+=allEvts.map(a=>`<tr><td>${a.date}</td><td><span class="tag ${a.col}">${a.type}</span></td><td>${a.site}</td><td>${a.detail}</td></tr>`).join('');
+    // Escape every cell — type/site/detail are concatenated from
+    // admin-editable strings (h.name, s.sub, s.slotLabel, etc.) and
+    // can contain HTML metacharacters or worse.
+    html+=allEvts.map(a=>`<tr><td>${escHtml(a.date)}</td><td><span class="tag ${a.col}">${escHtml(a.type)}</span></td><td>${escHtml(a.site)}</td><td>${escHtml(a.detail)}</td></tr>`).join('');
     html+='</tbody></table></div></div>';
   } else html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)}</div><div class="note ni">No shifts assigned this week. Step ‹ › to browse other weeks.</div></div>`;
   html += `</div>`;  // close mysched-list-section

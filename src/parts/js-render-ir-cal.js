@@ -1,6 +1,6 @@
 /* ─── IR CALENDAR ─── */
 function renderIRCal(){
-  const ym=document.getElementById('irc-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('irc-mo').value||_todayLocalYM();
   const fg=document.getElementById('irc-grp')?.value||'';
   const fpid=+document.getElementById('irc-phys')?.value||0;
   const fsite=document.getElementById('irc-site')?.value||'';
@@ -85,6 +85,64 @@ function renderIRCal(){
   const today=fmtDate(new Date());
   const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const irShifts=S.irShifts||[];
+
+  // ── Filter-hides-records banner ─────────────────────────────────
+  // Same UX pattern as the DR calendar (rs-v79). Active IR-cal
+  // filters (group / phys / site / view-type) silently hide records
+  // that exist in the month — admins regularly imported IR shifts
+  // and panicked that "nothing shows" when a stale group=North
+  // filter was hiding their freshly-imported South-group records.
+  // Banner counts hidden vs. visible for the current month and
+  // offers one-click clear.
+  try{
+    const _bannerEl = document.getElementById('irc-filter-banner');
+    if(_bannerEl){
+      // Pool of records relevant to this calendar (filtered to month):
+      //   - irCalls (any callType, dated in month) when view ∈ {both, call}
+      //   - irShifts (dated in month) when view ∈ {both, shifts}
+      // 'view' itself acts as a record-type filter and is included in
+      // the "active filter" count so users see when toggling it
+      // hid things.
+      const monthCalls = (S.irCalls || []).filter(c => c.date && c.date.startsWith(ym));
+      const monthShifts = (S.irShifts || []).filter(s => s.date && s.date.startsWith(ym));
+      const monthAll = monthCalls.length + monthShifts.length;
+      const shownCalls = (view === 'shifts') ? 0 : monthCalls.filter(_matchIRCall).length;
+      const shownShifts = (view === 'call') ? 0 : monthShifts.filter(_matchIRShift).length;
+      const monthShown = shownCalls + shownShifts;
+      const hidden = monthAll - monthShown;
+      const anyFilterActive = !!(fg || fpid || fsite || (view && view !== 'both'));
+      if(hidden > 0 && anyFilterActive){
+        const filterBits = [];
+        if(fg) filterBits.push(`group=${fg}`);
+        if(fpid){
+          const p = _physById(fpid);
+          filterBits.push(`physician=${p ? p.last : '#'+fpid}`);
+        }
+        if(fsite) filterBits.push(`site=${fsite}`);
+        if(view && view !== 'both') filterBits.push(`view=${view === 'call' ? 'call only' : 'shifts only'}`);
+        const kindBits = [];
+        if(view === 'shifts') kindBits.push(`${monthCalls.length} call${monthCalls.length===1?'':'s'}`);
+        if(view === 'call')   kindBits.push(`${monthShifts.length} daily shift${monthShifts.length===1?'':'s'}`);
+        const kindLine = kindBits.length
+          ? `<br><span style="font-size:11.5px;opacity:0.85">Hidden: ${kindBits.join(' + ')}</span>` : '';
+        _bannerEl.innerHTML = `
+          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#78350f">
+            <span style="font-size:16px">⚠</span>
+            <div style="flex:1">
+              <strong>${hidden}</strong> IR record${hidden===1?'':'s'} hidden by active filters (${escHtml(filterBits.join(', '))})
+              ${kindLine}
+            </div>
+            <button onclick="_ircClearFilters()" style="background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
+          </div>`;
+        _bannerEl.style.display = '';
+      } else {
+        _bannerEl.style.display = 'none';
+        _bannerEl.innerHTML = '';
+      }
+    }
+  }catch(e){
+    if(typeof _logError === 'function') _logError('irc-filter-banner', e?.message||String(e), e);
+  }
 
   document.getElementById('irc-head').innerHTML=DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('');
   document.getElementById('irc-body').innerHTML=cells.map(c=>{
@@ -182,7 +240,7 @@ function renderIRCal(){
       // Previously this only surfaced autoHome shifts, hiding legitimate regular
       // DR assignments made via the Schedule Builder or import.
       _shiftsOnDate('dr', c.date).filter(s=>(!fpid||s.physId===fpid)).forEach(s=>{
-        const p=S.physicians.find(x=>x.id===s.physId);
+        const p=_physById(s.physId);
         if(!p||p.irFte===0)return;             // only IR-eligible physicians
         if(fg&&p.irGroup!==fg)return;          // respect IR group filter
 
@@ -238,13 +296,13 @@ function renderIRCal(){
           }
           if(fpid && !participantIds.includes(fpid)) return;
           const irParticipants = participantIds.filter(pid => {
-            const pp = S.physicians.find(x => x.id === pid);
+            const pp = _physById(pid);
             return pp && (pp.irFte > 0);
           });
           if(!irParticipants.length) return;
           if(fg){
             const hasGroupMatch = irParticipants.some(pid => {
-              const pp = S.physicians.find(x => x.id === pid);
+              const pp = _physById(pid);
               return pp && pp.irGroup === fg;
             });
             if(!hasGroupMatch) return;
@@ -280,7 +338,7 @@ function renderIRCal(){
         // falls back to the physician's current irGroup.
         const _m = /^IR-(.+)$/.exec(h.group||'');
         if(_m) return _m[1] === fg;
-        const ph=S.physicians.find(x=>x.id===h.physId);
+        const ph=_physById(h.physId);
         return ph?.irGroup===fg;
       }
       return true;
@@ -292,8 +350,8 @@ function renderIRCal(){
       </div>`;
     });
     (vm[c.date]||[]).filter(pid=>{
-      const p=S.physicians.find(x=>x.id===pid&&x.irFte>0);
-      return p&&(!fg||p.irGroup===fg)&&(!fpid||pid===fpid);
+      const p=_physById(pid);
+      return p && p.irFte>0 && (!fg||p.irGroup===fg) && (!fpid||pid===fpid);
     }).forEach(pid=>{
       metaEvs+=`<div class="ev evac" title="${pnameHtml(pid)} — Vacation/Time Off">
         <div style="font-weight:700;font-size:11px">${pshort(pid)}</div>

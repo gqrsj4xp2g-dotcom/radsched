@@ -25,6 +25,7 @@
 //
 // Request body (JSON):
 //   { kind: 'email',   to: 'user@example.com', subject: '...', body: '...', html: '...' }
+//   { kind: 'broadcast', recipients: [{ email, name }], subject: '...', body: '...' }
 //   { kind: 'sms',     to: '+15551234567',     body: '...' }
 //   { kind: 'push',    userId: '<auth-user-id>', title: '...', body: '...', url?: '...' }
 //   { kind: 'webhook', url: 'https://...', payload: { eventName: '...', ...} }
@@ -37,7 +38,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import webpush from 'https://esm.sh/web-push@3.6.7';
 
 interface Body {
-  kind: 'email' | 'sms' | 'push' | 'webhook' | 'digest-run';
+  kind: string;
   to?: string;
   userId?: string;
   subject?: string;
@@ -45,6 +46,8 @@ interface Body {
   html?: string;
   title?: string;
   url?: string;
+  recipients?: Array<{ email?: string; name?: string; first?: string; last?: string }>;
+  from_practice?: string;
   payload?: Record<string, unknown>;
 }
 
@@ -64,6 +67,14 @@ function err(status: number, message: string) {
     status,
     headers: { 'content-type': 'application/json', ...corsHeaders },
   });
+}
+
+function resendFrom(): string {
+  const explicit = Deno.env.get('RESEND_FROM_EMAIL');
+  if (explicit) return explicit;
+  const email = Deno.env.get('FROM_EMAIL');
+  const name = Deno.env.get('FROM_NAME') || 'RadScheduler';
+  return email ? `${name} <${email}>` : 'noreply@example.com';
 }
 
 // ── Per-caller in-memory rate limit ──────────────────────────────────
@@ -156,10 +167,15 @@ Deno.serve(async (req) => {
         const cronHdr = req.headers.get('x-rs-cron-secret') || '';
         const cronSecret = Deno.env.get('RS_CRON_SECRET') || '';
         const isCron = !!cronSecret && cronHdr === cronSecret;
-        if (!isCron && callerRole !== 'admin') return err(403, 'Admin role or cron secret required');
+        if (!isCron && callerRole !== 'admin' && callerRole !== 'superuser') return err(403, 'Admin role or cron secret required');
         return ok(await runDigest(sbUrl, sbService));
       }
-      default:        return err(400, `Unknown kind: ${body.kind}`);
+      default: {
+        if (Array.isArray(body.recipients) && body.recipients.length && body.subject && body.body) {
+          return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
+        }
+        return err(400, `Unknown kind: ${body.kind}`);
+      }
     }
   } catch (e) {
     console.error(`[send-notification] ${body.kind} failed:`, e instanceof Error ? e.message : String(e));
@@ -181,15 +197,20 @@ async function _recipientInPractice(
   const sb = createClient(sbUrl, sbService);
   const { data, error } = await sb.from('radscheduler').select('data').eq('id', practiceId).single();
   if (error || !data) return false;
-  let practice: { users?: Array<{ email?: string; phone?: string }>; physicians?: Array<{ email?: string; phone?: string }> } = {};
+  let practice: {
+    cfg?: { adminAlertEmail?: string };
+    users?: Array<{ email?: string; notifyEmail?: string; phone?: string }>;
+    physicians?: Array<{ email?: string; phone?: string }>;
+  } = {};
   try { practice = JSON.parse((data as any).data); } catch { return false; }
   const needle = String(value).trim().toLowerCase();
   const norm = (s: string|undefined) => String(s||'').trim().toLowerCase();
   const users = practice.users || [];
   const physes = practice.physicians || [];
   if (field === 'email') {
-    return users.some(u => norm(u.email) === needle) ||
-           physes.some(p => norm(p.email) === needle);
+    return users.some(u => norm(u.email) === needle || norm(u.notifyEmail) === needle) ||
+           physes.some(p => norm(p.email) === needle) ||
+           norm(practice.cfg?.adminAlertEmail) === needle;
   } else {
     // Phone match — strip non-digits for comparison.
     const digits = (s: string|undefined) => String(s||'').replace(/\D/g, '');
@@ -218,7 +239,7 @@ function escHtml(s: string): string {
 // ─── Email via Resend ──────────────────────────────────────────────────
 async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?: string) {
   const apiKey = Deno.env.get('RESEND_API_KEY');
-  const from = Deno.env.get('RESEND_FROM_EMAIL') || 'noreply@example.com';
+  const from = resendFrom();
   if (!apiKey) throw new Error('RESEND_API_KEY not configured');
   if (!b.to || !b.subject) throw new Error('email requires { to, subject }');
   if (typeof b.to !== 'string' || b.to.length > 254) throw new Error('email "to" invalid');
@@ -248,6 +269,43 @@ async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?
   });
   if (!resp.ok) throw new Error(`Resend ${resp.status}: ${await resp.text()}`);
   return { ok: true, kind: 'email', detail: await resp.json() };
+}
+
+async function sendEmailBatch(b: Body, sbUrl: string, sbService: string, callerPid: string) {
+  if (!b.subject || !b.body) throw new Error('batch email requires { subject, body, recipients[] }');
+  if (!Array.isArray(b.recipients) || !b.recipients.length) throw new Error('batch email requires recipients[]');
+  if (b.recipients.length > 250) throw new Error('batch email recipient limit is 250');
+
+  const seen = new Set<string>();
+  const results: Array<Record<string, unknown>> = [];
+  let sent = 0;
+  let failed = 0;
+
+  for (const r of b.recipients) {
+    const email = String(r?.email || '').trim().toLowerCase();
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    try {
+      const detail = await sendEmail({
+        kind: 'email',
+        to: email,
+        subject: b.subject,
+        body: b.body,
+        html: b.html,
+      }, sbUrl, sbService, callerPid);
+      sent++;
+      results.push({ email, ok: true, detail });
+    } catch (e) {
+      failed++;
+      results.push({ email, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  if (sent === 0 && failed > 0) {
+    const firstError = String(results.find(r => r.ok === false)?.error || 'all recipients failed');
+    throw new Error(firstError);
+  }
+  return { ok: failed === 0, kind: 'email-batch', originalKind: b.kind, sent, failed, results };
 }
 
 // ─── SMS via Twilio ────────────────────────────────────────────────────
@@ -332,7 +390,7 @@ async function sendWebhook(b: Body, callerRole?: string) {
   // Only admins can configure + invoke webhooks. Without this gate, a
   // physician-tier user could POST to any URL the practice's edge
   // function can reach — a vector for SSRF / pivot / spam.
-  if (callerRole !== 'admin') throw new Error('Webhook delivery requires admin role.');
+  if (callerRole !== 'admin' && callerRole !== 'superuser') throw new Error('Webhook delivery requires admin role.');
   // SSRF guard — block private/loopback/metadata destinations.
   let parsed: URL;
   try { parsed = new URL(b.url); }
@@ -389,7 +447,7 @@ async function runDigest(sbUrl: string, sbService: string) {
     // Cadence + hour gate — pg_cron should already fire near the right
     // hour, but recheck so a user toggling off mid-run is respected.
     const users = (practice.users || []) as Array<{
-      id: string; email?: string; physId?: number;
+      id: string; email?: string; notifyEmail?: string; physId?: number;
       notifPrefs?: { master?: boolean; digest?: boolean };
     }>;
     const physicians = (practice.physicians || []) as Array<{ id: number; last?: string; first?: string }>;
@@ -398,7 +456,8 @@ async function runDigest(sbUrl: string, sbService: string) {
     const irCalls  = (practice.irCalls  || []) as Array<{ physId: number; date: string; callType: string }>;
     const wknds    = (practice.weekendCalls || []) as Array<{ physId: number; satDate?: string; date?: string }>;
     for (const u of users) {
-      if (!u.email || !u.physId) { skipped++; continue; }
+      const deliveryEmail = (u.notifyEmail || u.email || '').trim().toLowerCase();
+      if (!deliveryEmail || !u.physId) { skipped++; continue; }
       if (u.notifPrefs?.master === false || u.notifPrefs?.digest === false) { skipped++; continue; }
       const phys = physicians.find(p => p.id === u.physId);
       const myShifts = [
@@ -416,13 +475,13 @@ async function runDigest(sbUrl: string, sbService: string) {
       try {
         await sendEmail({
           kind: 'email',
-          to: u.email,
+          to: deliveryEmail,
           subject: `Your RadScheduler week — ${today}`,
           body: lines.join('\n'),
         });
         sent++;
       } catch (e) {
-        console.warn('digest send failed for', u.email, e);
+        console.warn('digest send failed for', deliveryEmail, e);
       }
     }
   }

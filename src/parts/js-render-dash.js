@@ -6,7 +6,10 @@ function renderDash(){
   const[y,m]=ym.split('-').map(Number);
   const monthName=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
   const ml=document.getElementById('dash-month-label');if(ml)ml.textContent=monthName;
-  document.getElementById('dash-greet').textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
+  // Null guard — renderDash can fire from page transitions before
+  // the dashboard DOM is mounted (rare but documented in the field).
+  const gr=document.getElementById('dash-greet');
+  if(gr) gr.textContent=`Welcome back, ${CU.first}. ${CU.role==='admin'?'Admin view.':''}`;
   const isAdm=CU.role==='admin';
   // The "More analytics" details wrapper is what gets toggled now —
   // dash-admin-section lives INSIDE it. Setting block on the inner
@@ -54,23 +57,48 @@ function renderDash(){
     const hasSubs = (S.drSubs||[]).length > 0 || (S.irSubs||[]).length > 0;
     const cfg = S.cfg || {};
     const hasCaps = (cfg.wdMax > 0 || cfg.irDailyMax > 0);
-    const allDone = realSites.length && hasPhys && hasSubs && hasCaps;
+    // ── Additional onboarding signals (audit gap fix) ───────────────
+    // Without these, the wizard reported "complete" while the
+    // auto-assigner silently produced 'No shifts could be generated'.
+    // Each signal is a cheap O(1) count on existing state.
+    const hasDRSlots = Object.keys(S.siteSlots||{}).some(k => +S.siteSlots[k] > 0);
+    const hasIRSlots = Object.keys(S.irShiftSlots||{}).some(k => +S.irShiftSlots[k] > 0);
+    const hasHolidayDefs = ((S.holidayDefs||[]).length > 0);
+    const hasAnchors = (S.physicians||[]).some(p => p.anchorSite);
+    const allDone = realSites.length && hasPhys && hasSubs && hasCaps && hasDRSlots && hasIRSlots;
     if(isAdm && !allDone){
       const steps = [
-        {done: realSites.length>0,        label:'Add your hospital sites',       target:'site-slots'},
-        {done: (S.irGroups||[]).length>0, label:'Configure IR groups',           target:'ir-slots'},
-        {done: hasSubs,                   label:'Define your sub-specialties',   target:'settings'},
-        {done: hasPhys,                   label:'Add your physicians',           target:'physicians'},
-        {done: hasCaps,                   label:'Set monthly shift caps',        target:'settings'},
+        {done: realSites.length>0,        label:'Add your hospital sites',         target:'site-slots'},
+        {done: (S.irGroups||[]).length>0, label:'Configure IR groups',             target:'ir-slots'},
+        {done: hasSubs,                   label:'Define your sub-specialties',     target:'settings'},
+        {done: hasPhys,                   label:'Add your physicians',             target:'physicians'},
+        {done: hasDRSlots,                label:'Configure DR shift slots per site', target:'site-slots'},
+        {done: hasIRSlots,                label:'Configure IR shift slots per group', target:'ir-shift-slots'},
+        {done: hasCaps,                   label:'Set monthly shift caps',          target:'settings'},
+      ];
+      // "Encouraged" follow-up steps — surfaced after the required
+      // checklist so admins know they aren't done-done yet. These don't
+      // block `allDone` because the practice IS usable without them.
+      const optionalSteps = [
+        {done: hasHolidayDefs, label:'Define holidays for the current year', target:'holidays'},
+        {done: hasAnchors,     label:'Set anchor sites on physicians (for compliance)', target:'physicians'},
       ];
       const completedCount = steps.filter(s => s.done).length;
+      const optDone = optionalSteps.filter(s => s.done).length;
       setupBanner.style.display = '';
       setupBanner.innerHTML = `
         <div class="rs-quickstart">
           <div class="rs-quickstart-title">Set up your practice</div>
-          <div class="rs-quickstart-sub">${completedCount} of ${steps.length} complete · <span style="color:var(--rs-accent);font-weight:500">Each step takes about a minute</span></div>
+          <div class="rs-quickstart-sub">${completedCount} of ${steps.length} required complete · <span style="color:var(--rs-accent);font-weight:500">${optDone}/${optionalSteps.length} optional</span></div>
           ${steps.map((s,i) => `
             <div class="rs-quickstart-step ${s.done?'done':''}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
+              <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
+              <div class="rs-quickstart-name">${escHtml(s.label)}</div>
+              <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
+            </div>`).join('')}
+          <div style="margin-top:10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--rs-ink-3)">Recommended next</div>
+          ${optionalSteps.map((s,i) => `
+            <div class="rs-quickstart-step ${s.done?'done':''}" style="opacity:${s.done?1:0.85}" onclick="${s.done?'':`nav('${s.target}',document.querySelector('.snav-item[data-pg=&quot;${s.target}&quot;]'))`}">
               <div class="rs-quickstart-check">${s.done ? '✓' : ''}</div>
               <div class="rs-quickstart-name">${escHtml(s.label)}</div>
               <div class="rs-quickstart-arrow">${s.done ? '' : '→'}</div>
@@ -86,8 +114,10 @@ function renderDash(){
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
-  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations']);
-  document.getElementById('dash-metrics').innerHTML=[
+  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
+  // Null guard — see dash-greet comment above.
+  const dm=document.getElementById('dash-metrics');
+  if(dm) dm.innerHTML=[
     {l:'DR Physicians',v:drPs.length,s:'incl. mixed',pg:'physicians'},
     {l:'IR Physicians',v:irPs.length,s:'incl. mixed',pg:'ir-cal'},
     {l:'Open Shifts',v:open,s:'unclaimed',pg:'open-shifts'},
@@ -123,7 +153,13 @@ function renderDash(){
       <span style="font-size:12px;flex:1">${escHtml(o.date)}</span><span class="tag ta">${escHtml(o.shiftType)}</span>
       <span style="color:var(--txt3);font-size:11px">${escHtml(o.sub||'')}</span></div>`
   ).join('')||'<p style="color:var(--green-t);font-size:12px">All covered!</p>';
-  document.getElementById('dash-vac').innerHTML=S.vacations.filter(v=>v.start>=ym+'-01').sort((a,b)=>a.start>b.start?1:-1).slice(0,4).map(v=>
+  // Dashboard vacation widget: was full-array sort on every render
+  // (dashboard renders 6+ times/minute on a busy admin tab). Filter
+  // first to upcoming-only, THEN sort the smaller subset. A 500-row
+  // S.vacations cuts to typically ~20 upcoming, sort cost drops 95%.
+  const _vacUpcoming = (S.vacations || []).filter(v => v.start >= ym + '-01');
+  _vacUpcoming.sort((a, b) => a.start > b.start ? 1 : -1);
+  document.getElementById('dash-vac').innerHTML = _vacUpcoming.slice(0,4).map(v=>
     `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(v.start)}</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None upcoming.</p>';
   if(isAdm){

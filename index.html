@@ -16090,7 +16090,7 @@ async function _mapsProxyCall(origins, destinations, departureTime, trafficModel
     if(departureTime) { body.departureTime=departureTime; body.trafficModel=trafficModel||'best_guess'; }
     const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:await _edgeAuthHeaders(),
       body:JSON.stringify(body)
     });
     const data=await res.json();
@@ -16298,7 +16298,7 @@ async function _mapsProxyCallRT(origins, destinations, departureTime){
     if(!key) throw new Error('No Google Maps API key. Add it in Settings \u2192 Drive Times.');
     const res=await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:await _edgeAuthHeaders(),
       body:JSON.stringify({origins,destinations,mapsKey:key,departureTime})
     });
     const data=await res.json();
@@ -16452,7 +16452,7 @@ async function _mapsProxyCallWithTimestamp(origins, destinations, depTimestamp){
   if(!key) throw new Error('No Google Maps API key');
   const res = await fetch(`${_getUrl()}/functions/v1/maps-proxy`,{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
+    headers:await _edgeAuthHeaders(),
     body:JSON.stringify({
       origins, destinations, mapsKey:key,
       departureTime: depTimestamp === 'now' ? 'now' : String(depTimestamp),
@@ -16626,6 +16626,7 @@ function _autoRefreshTrafficCfg(){
 async function _autoRefreshTrafficIfDue(){
   try{
     if(!CU) return;                       // not logged in
+    if(typeof _isAdminOrSU === 'function' && !_isAdminOrSU()) return;
     const cfg = _autoRefreshTrafficCfg();
     if(!cfg.enabled) return;
     if(!_getGMapsKey()){
@@ -25669,11 +25670,7 @@ Admin access is required for data-changing operations. The current user role is:
       // Route through Supabase edge function (handles CORS + API key server-side)
       const resp = await fetch(`${_getUrl()}/functions/v1/ai-proxy`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': _getKey(),
-          'Authorization': `Bearer ${_getKey()}`
-        },
+        headers: await _edgeAuthHeaders(),
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 4096,
@@ -26294,6 +26291,24 @@ function _deliveryEmail(u){
   return e || null;
 }
 
+async function _edgeAuthHeaders(){
+  const url = (typeof _getUrl === 'function') ? _getUrl() : '';
+  const key = (typeof _getKey === 'function') ? _getKey() : '';
+  if(!url || !key) throw new Error('Supabase is not configured.');
+  const sb = (typeof _initAuthClient === 'function' && _initAuthClient())
+          || (typeof _initSupabase === 'function' && _initSupabase())
+          || _supabase;
+  if(!sb?.auth?.getSession) throw new Error('Supabase auth is not initialized.');
+  const {data:{session}={}} = await sb.auth.getSession();
+  const jwt = session?.access_token;
+  if(!jwt) throw new Error('Not authenticated. Sign in again and retry.');
+  return {
+    'Content-Type':'application/json',
+    'apikey':key,
+    'Authorization':`Bearer ${jwt}`
+  };
+}
+
 // Looks like an email placeholder that won't reach a real inbox
 // (e.g., @rad.com, @example.com, @test, @local). Purely heuristic.
 function _looksPlaceholder(email){
@@ -26417,11 +26432,7 @@ async function _notify(kind, opts){
     try{
       res = await fetch(`${url}/functions/v1/send-notification`, {
         method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'apikey':key,
-          'Authorization':`Bearer ${key}`
-        },
+        headers:await _edgeAuthHeaders(),
         body: JSON.stringify({
           kind,
           subject: opts.subject,
@@ -26475,11 +26486,7 @@ async function sendTestNotification(){
   try{
     const res = await fetch(`${url}/functions/v1/send-notification`, {
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'apikey':key,
-        'Authorization':`Bearer ${key}`
-      },
+      headers:await _edgeAuthHeaders(),
       body: JSON.stringify({
         kind: 'test',
         subject: 'RadScheduler notification test',
@@ -27015,7 +27022,7 @@ async function sendBroadcast(){
     }
     const res=await fetch(`${url}/functions/v1/send-notification`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+      headers:await _edgeAuthHeaders(),
       body:JSON.stringify({
         kind:'broadcast',
         subject, body,
@@ -27063,7 +27070,7 @@ async function sendBroadcastTest(){
     if(!url||!key) throw new Error('Supabase not configured.');
     const res=await fetch(`${url}/functions/v1/send-notification`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+      headers:await _edgeAuthHeaders(),
       body:JSON.stringify({
         kind:'broadcast-test',
         subject:'[TEST] '+subject, body,
@@ -29021,7 +29028,7 @@ async function sendPublish(){
     try{
       const res = await fetch(`${url}/functions/v1/send-notification`,{
         method:'POST',
-        headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},
+        headers:await _edgeAuthHeaders(),
         body:JSON.stringify({
           kind:'schedulePublish',
           subject, body,
@@ -43648,14 +43655,11 @@ function webhookPreset(flavor){
 //   • Adds the standard headers
 //   • Returns parsed JSON response or throws on non-2xx
 async function _invokeEdgeFn(name, body){
-  if(!_supabase) throw new Error('Supabase not configured');
-  const { data: session } = await _supabase.auth.getSession();
-  const jwt = session?.session?.access_token;
-  if(!jwt) throw new Error('Not authenticated');
   const url = (typeof _getUrl === 'function' ? _getUrl() : '') + '/functions/v1/' + name;
+  const headers = await _edgeAuthHeaders();
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+    headers,
     body: JSON.stringify(body || {}),
   });
   let result = null;
@@ -48459,6 +48463,9 @@ async function sendWeeklyMagicLinks(weekStart){
   }
   const session = (typeof getSupabaseSession === 'function') ? await getSupabaseSession() : null;
   if(!session?.access_token){ if(typeof _toast === 'function') _toast('Sign in to send digests.', 'warn'); return; }
+  let headers;
+  try{ headers = await _edgeAuthHeaders(); }
+  catch(e){ if(typeof _toast === 'function') _toast(e.message || String(e), 'warn'); return; }
   const physicians = (S.physicians || []).filter(p => p.email);
   if(!physicians.length){ if(typeof _toast === 'function') _toast('No physicians have email addresses set.', 'info'); return; }
   let sent = 0, failed = 0;
@@ -48475,9 +48482,9 @@ async function sendWeeklyMagicLinks(weekStart){
     }catch(_){ tok = btoa(tokRaw).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c])); }
     const link = `${location.origin}/?guest=${encodeURIComponent(tok)}&phys=${p.id}&week=${weekStart}`;
     try{
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
+      const r = await fetch(`${_getUrl()}/functions/v1/send-notification`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        headers,
         body: JSON.stringify({
           kind: 'email',
           to: p.email,

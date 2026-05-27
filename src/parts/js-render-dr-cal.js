@@ -1,6 +1,6 @@
 /* ─── DR CALENDAR ─── */
 function renderDRCal(){
-  const ym=document.getElementById('drc-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('drc-mo').value||_todayLocalYM();
   const fp=document.getElementById('drc-phys');
   if(fp&&fp.options.length<2){
     // Include DR + MIXED + any IR physician who has at least one existing DR
@@ -105,6 +105,50 @@ function renderDRCal(){
   // existing rendering below runs unconditionally.
   const vm=vacMap();const cells=buildCal(ym);const today=fmtDate(new Date());
   const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  // ── Filter-hides-records banner ─────────────────────────────────
+  // The 4 DR-calendar filters (phys / shift / site / sub) persist in
+  // localStorage across navigations. Users often forget they left
+  // a filter set, then import new shifts and panic that "nothing
+  // shows up" — for example a stuck `shift=1st` filter hides every
+  // 2nd/3rd shift even after a fresh import. This banner counts
+  // how many shifts in the current month would show with no filters
+  // active vs. how many do show under the active filters, and offers
+  // a one-click clear. Only renders when filters actually hide
+  // something — never gets in the way of normal use.
+  try{
+    const _bannerEl = document.getElementById('drc-filter-banner');
+    if(_bannerEl){
+      const monthAll = (S.drShifts || []).filter(s => s.date && s.date.startsWith(ym));
+      const monthShown = monthAll.filter(_matchDRShift);
+      const hidden = monthAll.length - monthShown.length;
+      const anyFilterActive = !!(fpid || fsh || fsite || fsub);
+      if(hidden > 0 && anyFilterActive){
+        // Tally what's being hidden so the message is actionable.
+        const hiddenSet = new Set(monthAll.filter(s => !_matchDRShift(s)).map(s => s.shift));
+        const kindsList = [...hiddenSet].join(', ');
+        const filterBits = [];
+        if(fpid) filterBits.push('physician');
+        if(fsh) filterBits.push(`shift=${fsh}`);
+        if(fsite) filterBits.push(`site=${fsite}`);
+        if(fsub) filterBits.push(`sub=${fsub}`);
+        _bannerEl.innerHTML = `
+          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#78350f">
+            <span style="font-size:16px">⚠</span>
+            <div style="flex:1">
+              <strong>${hidden}</strong> shift${hidden===1?'':'s'} hidden by active filters (${escHtml(filterBits.join(', '))})
+              ${kindsList ? `<br><span style="font-size:11.5px;opacity:0.85">Hidden shift types: ${escHtml(kindsList)}</span>` : ''}
+            </div>
+            <button onclick="_drcClearFilters()" style="background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
+          </div>`;
+        _bannerEl.style.display = '';
+      } else {
+        _bannerEl.style.display = 'none';
+        _bannerEl.innerHTML = '';
+      }
+    }
+  }catch(e){
+    if(typeof _logError === 'function') _logError('drc-filter-banner', e?.message||String(e), e);
+  }
   document.getElementById('drc-head').innerHTML=DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('');
   document.getElementById('drc-body').innerHTML=cells.map(c=>{
     if(!c.day) return '<div class="cal-day other"></div>';
@@ -325,4 +369,176 @@ function drcStepFocus(step){
   else if(view === 'list')  next = addDays(cur, 7 * step);   // list is week-scoped → step by week
   else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
   drcSetFocus(next);
+}
+// Reset all four DR-calendar filters. Triggered by the
+// "Clear filters" button on the filter-hides-records banner.
+// Also clears the persisted localStorage values so the reset
+// survives a page reload.
+function _drcClearFilters(){
+  ['drc-phys','drc-shift','drc-site','drc-sub'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){ el.value = ''; try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  });
+  ['rs.drc.f.phys','rs.drc.f.shift','rs.drc.f.site','rs.drc.f.sub'].forEach(k => {
+    try{ localStorage.removeItem(k); }catch(_){}
+  });
+  if(typeof renderDRCal === 'function') renderDRCal();
+  if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
+}
+// One-click diagnostic for "I imported 2nd/3rd shifts but I can't
+// find them on the calendar" reports. Shows everything we need to
+// know in a modal — what's in S, what month the cal is on, what
+// filters are active, and a colored verdict on the most likely
+// cause. No console required.
+function _diagnoseDRImports(){
+  const all = (S.drShifts || []);
+  const byType = { '1st':[], '2nd':[], '3rd':[], 'Home':[], other:[] };
+  all.forEach(s => { (byType[s.shift] || byType.other).push(s); });
+  const ymView = document.getElementById('drc-mo')?.value || _todayLocalYM();
+  const inMonth = type => byType[type].filter(s => (s.date||'').startsWith(ymView));
+  const monthsWithType = type => {
+    const ms = new Set(byType[type].map(s => (s.date||'').slice(0,7)).filter(Boolean));
+    return [...ms].sort();
+  };
+  const fpid  = document.getElementById('drc-phys')?.value || '';
+  const fsh   = document.getElementById('drc-shift')?.value || '';
+  const fsite = document.getElementById('drc-site')?.value || '';
+  const fsub  = document.getElementById('drc-sub')?.value || '';
+  const hasFilter = !!(fpid || fsh || fsite || fsub);
+  const monthAll = all.filter(s => (s.date||'').startsWith(ymView));
+  const monthShown = monthAll.filter(s => {
+    if(fpid && s.physId !== +fpid) return false;
+    if(fsh && s.shift !== fsh) return false;
+    if(fsite && s.site !== fsite) return false;
+    if(fsub && s.sub !== fsub) return false;
+    return true;
+  });
+  // Verdict logic — pick the single most likely cause
+  let verdictHtml = '';
+  if(monthAll.length === 0 && all.length > 0){
+    // Records exist, but none in this month
+    const ms2 = monthsWithType('2nd');
+    const ms3 = monthsWithType('3rd');
+    const allMonths = [...new Set([...ms2, ...ms3])].sort();
+    verdictHtml = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;color:#78350f">
+      <strong>⚠ Most likely cause: viewing the wrong month.</strong><br>
+      The calendar is showing <strong>${escHtml(ymView)}</strong> but no DR shifts exist for that month.
+      ${allMonths.length ? `<br>2nd/3rd shifts exist for these months: <strong>${escHtml(allMonths.join(', '))}</strong> — change the Month picker above to one of those.` : '<br>You have DR shifts in other months but no 2nd/3rd in your data — confirm the import actually included those rows.'}
+    </div>`;
+  } else if(monthAll.length > monthShown.length && hasFilter){
+    verdictHtml = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;color:#78350f">
+      <strong>⚠ Most likely cause: active filters are hiding records.</strong><br>
+      ${monthAll.length - monthShown.length} of ${monthAll.length} shifts in ${escHtml(ymView)} are hidden.
+      <br>Click <strong>Clear filters</strong> at the top of the calendar (yellow banner) to fix.
+    </div>`;
+  } else if(monthAll.length === 0 && all.length === 0){
+    verdictHtml = `<div style="background:#fee;border:1px solid #dc2626;border-radius:8px;padding:12px 14px;color:#7f1d1d">
+      <strong>✗ Critical: no DR shifts in S at all.</strong><br>
+      Either the import didn't write to local state, or local state was reset.
+      Check Settings → Backups for a recent restore point.
+    </div>`;
+  } else {
+    verdictHtml = `<div style="background:#d1fae5;border:1px solid #059669;border-radius:8px;padding:12px 14px;color:#065f46">
+      <strong>✓ Render path looks healthy.</strong><br>
+      ${monthShown.length} of ${monthAll.length} shifts in ${escHtml(ymView)} are visible.
+      If a specific record still isn't showing, paste its physId + date below.
+    </div>`;
+  }
+  // Sample records to show the user
+  const sample = (arr, n) => arr.slice(0, n).map(s => {
+    const p = _physById(s.physId);
+    const who = p ? `${p.last}, ${p.first}` : `#${s.physId}`;
+    return `<tr><td style="padding:4px 8px">${escHtml(s.date||'')}</td><td style="padding:4px 8px">${escHtml(who)}</td><td style="padding:4px 8px">${escHtml(s.site||'')}</td><td style="padding:4px 8px">${escHtml(s.sub||'—')}</td><td style="padding:4px 8px;font-family:ui-monospace,monospace;font-size:10.5px">${escHtml((s.notes||'').slice(0,40))}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" style="padding:6px;color:var(--txt3);text-align:center">(none)</td></tr>';
+  const html = `
+    <div style="font-size:13px;line-height:1.5">
+      ${verdictHtml}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+        <div>
+          <div style="font-weight:700;margin-bottom:6px">📊 Counts (entire S)</div>
+          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px;font-family:ui-monospace,monospace">
+            Total DR shifts: <strong>${all.length}</strong><br>
+            1st shifts: ${byType['1st'].length}<br>
+            <strong style="color:${byType['2nd'].length>0?'var(--green-t)':'var(--red-t)'}">2nd shifts: ${byType['2nd'].length}</strong><br>
+            <strong style="color:${byType['3rd'].length>0?'var(--green-t)':'var(--red-t)'}">3rd shifts: ${byType['3rd'].length}</strong><br>
+            Home shifts: ${byType['Home'].length}<br>
+            Other: ${byType.other.length}
+          </div>
+        </div>
+        <div>
+          <div style="font-weight:700;margin-bottom:6px">📅 Active month (${escHtml(ymView)})</div>
+          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px;font-family:ui-monospace,monospace">
+            In month total: <strong>${monthAll.length}</strong><br>
+            1st: ${inMonth('1st').length}<br>
+            <strong>2nd: ${inMonth('2nd').length}</strong><br>
+            <strong>3rd: ${inMonth('3rd').length}</strong><br>
+            Home: ${inMonth('Home').length}<br>
+            <span style="color:${hasFilter?'var(--amber,#d97706)':'var(--txt3)'}">Visible after filters: <strong>${monthShown.length}</strong></span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-weight:700;margin-bottom:6px">🎛 Active filters</div>
+        <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px">
+          Physician: <strong>${escHtml(fpid?(_physById(+fpid)?.last||'#'+fpid):'(all)')}</strong> &middot;
+          Shift: <strong>${escHtml(fsh||'(all)')}</strong> &middot;
+          Site: <strong>${escHtml(fsite||'(all)')}</strong> &middot;
+          Sub: <strong>${escHtml(fsub||'(all)')}</strong>
+          ${hasFilter ? '<br><button onclick="_drcClearFilters();document.querySelector(\'.modal-wrap.open .modal-close\')?.click()" style="margin-top:8px;background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear all filters now</button>' : ''}
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-weight:700;margin-bottom:6px">🔬 Sample 2nd-shift records (first 5)</div>
+        <div style="overflow-x:auto;background:var(--bg3);border-radius:6px">
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead><tr style="background:var(--bg4);text-align:left">
+              <th style="padding:4px 8px">Date</th><th style="padding:4px 8px">Physician</th><th style="padding:4px 8px">Site</th><th style="padding:4px 8px">Sub</th><th style="padding:4px 8px">Notes</th>
+            </tr></thead>
+            <tbody>${sample(byType['2nd'], 5)}</tbody>
+          </table>
+        </div>
+        <div style="font-weight:700;margin:14px 0 6px">🔬 Sample 3rd-shift records (first 5)</div>
+        <div style="overflow-x:auto;background:var(--bg3);border-radius:6px">
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead><tr style="background:var(--bg4);text-align:left">
+              <th style="padding:4px 8px">Date</th><th style="padding:4px 8px">Physician</th><th style="padding:4px 8px">Site</th><th style="padding:4px 8px">Sub</th><th style="padding:4px 8px">Notes</th>
+            </tr></thead>
+            <tbody>${sample(byType['3rd'], 5)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="margin-top:14px;font-size:11.5px;color:var(--rs-ink-3);font-style:italic">
+        If 2nd/3rd counts above are <strong>0</strong> but you expected imports, the rows never landed in S — re-run the Pick Sheet import and watch for errors in the success message. If counts are <strong>nonzero</strong> but visible-after-filters is 0, it's a filter problem.
+      </div>
+    </div>`;
+  if(typeof _rsConfirm === 'function'){
+    _rsConfirm({
+      title: '🔍 DR Import Diagnostic',
+      bodyHtml: html,
+      confirmLabel: 'Close',
+      cancelLabel: '',
+    });
+  } else {
+    alert('Diagnostic:\n\nTotal DR: ' + all.length + '\n2nd: ' + byType['2nd'].length + '\n3rd: ' + byType['3rd'].length + '\nMonth ' + ymView + ': ' + monthAll.length);
+  }
+}
+// Reset all four IR-calendar filters (group / phys / site / view).
+// `view` resets to 'both' rather than empty because the dropdown
+// has no blank state — its three options are both/call/shifts and
+// 'both' is the neutral choice. Same persistence-clear pattern as
+// the DR version.
+function _ircClearFilters(){
+  const grp = document.getElementById('irc-grp');
+  if(grp){ grp.value = ''; try{ grp.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const phys = document.getElementById('irc-phys');
+  if(phys){ phys.value = ''; try{ phys.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const site = document.getElementById('irc-site');
+  if(site){ site.value = ''; try{ site.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  const v = document.getElementById('irc-view');
+  if(v){ v.value = 'both'; try{ v.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  ['rs.irc.f.group','rs.irc.f.phys','rs.irc.f.site','rs.irc.f.view'].forEach(k => {
+    try{ localStorage.removeItem(k); }catch(_){}
+  });
+  if(typeof renderIRCal === 'function') renderIRCal();
+  if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
 }

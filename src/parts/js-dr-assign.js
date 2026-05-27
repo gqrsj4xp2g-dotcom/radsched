@@ -1,6 +1,6 @@
 function previewAA(){
   if(!_adminOnly('preview auto-assign')) return;
-  const ym=document.getElementById('aa-mo').value||new Date().toISOString().slice(0,7);
+  const ym=document.getElementById('aa-mo').value||_todayLocalYM();
   const typ=document.getElementById('aa-type').value;
   // Build period: 'month' (default), 'semi-1', or 'semi-2'. The half-month
   // options narrow the cell set so admins can fill the schedule in two
@@ -353,7 +353,7 @@ function previewAA(){
   if(hospPrev.length+wkPrev.length>0){
     html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Date</th><th>Type</th><th>Site</th><th>Anchor?</th></tr></thead><tbody>';
     [...hospPrev,...wkPrev].slice(0,30).forEach(a=>{
-      const p=S.physicians.find(x=>x.id===a.physId);
+      const p=_physById(a.physId);
       const site=a.site||''; const isAnc=p?.anchorSite===site;
       html+=`<tr><td>${pnameHtml(a.physId)}</td><td>${a.satDate||a.date}</td><td><span class="tag ${a.type==='wk'?'tg':'tb'}">${a.type==='wk'?'Weekend':a.shift}</span></td><td>${site}</td><td>${isAnc?'<span class="tag tg">✓</span>':'—'}</td></tr>`;
     });
@@ -375,6 +375,13 @@ function previewAA(){
     else
       S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome,slotLabel:a.slotLabel||''});
   });
-  triggerSave();document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
+  triggerSave();
+  // Same bug fix as applyIRShiftAA: push the full refresh fan-out
+  // so the calendar, dashboard, FTE monitor, fairness scoreboard,
+  // and unfilled-slots tab all reflect the new state on subsequent
+  // apply runs. Without this, the second-and-later applies looked
+  // like they did nothing on the calendar.
+  if(typeof _afterMutation === 'function') _afterMutation();
+  document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }

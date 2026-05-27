@@ -1,5 +1,23 @@
 function previewIRAA(){
   if(!_adminOnly('preview IR auto-assign')) return;
+  // Defer-shim: see previewIRShiftAA for the rationale. Greedy solver
+  // freezes the UI for 1-10s on large rosters; show an indeterminate
+  // bar first and yield a paint cycle.
+  if(!previewIRAA._deferred){
+    const _box = document.getElementById('ira-box');
+    if(_box && typeof _showProgress === 'function'){
+      _box.innerHTML = '<div id="iraa-progress" style="padding:24px;max-width:420px;margin:8px auto"></div>';
+      const _typ = document.getElementById('ira-type')?.value || 'both';
+      const _grp = document.getElementById('ira-grp')?.value || 'both';
+      _showProgress('iraa-progress', `Solving IR call assignments — ${_typ}, ${_grp === 'both' ? 'both groups' : _grp}…`);
+      previewIRAA._deferred = true;
+      setTimeout(() => {
+        try { previewIRAA(); }
+        finally { previewIRAA._deferred = false; }
+      }, 16);
+      return;
+    }
+  }
 
   // ─── INPUTS & SETUP ────────────────────────────────────────────────────
   const months    = _iraMonths();
@@ -543,7 +561,13 @@ function applyIRAA(){
     // site when on call (e.g. "Greene: IR call → must be at CHN"), we MUST
     // honor that. Using irSitePrim blindly (Riverview for Greene) creates a
     // shift that directly violates the rule we just created the call against.
-    if(a.callType==='daily'&&a.needsProcShift&&!_hasIRShiftOnDate(a.physId,a.date)){
+    //
+    // rs-v82: dropped the `a.needsProcShift` gate — daily call now ALWAYS
+    // auto-creates a paired shift when one doesn't exist. The `needsProcShift`
+    // flag was set by the preview path only for some configurations, leaving
+    // gaps where the user took call but had no procedure shift. Per policy
+    // every daily call gets a matching procedure shift.
+    if(a.callType==='daily'&&!_hasIRShiftOnDate(a.physId,a.date)){
       const p=S.physicians.find(x=>x.id===a.physId);
       if(!p) return;
       // ── 1. Figure out which sites are rule-valid for this phys+call combo.
