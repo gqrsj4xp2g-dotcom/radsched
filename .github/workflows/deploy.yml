@@ -43,6 +43,15 @@ jobs:
       - name: Verify TOC mentions all script sections
         run: ./tools/check-toc.sh
 
+      - name: Validate security headers and CSP
+        run: npm run test:security-headers
+
+      - name: Validate environment separation controls
+        run: npm run test:environment
+
+      - name: Validate RBAC matrix evidence
+        run: npm run test:rbac
+
       - name: Lint SQL/RLS examples and migrations
         run: npm run test:sql-rls
 
@@ -51,6 +60,9 @@ jobs:
 
       - name: Check enterprise readiness evidence
         run: npm run test:enterprise
+
+      - name: Run offline load profile
+        run: npm run test:load
 
       # Sanity-check the worker registration + manifest are still valid.
       - name: Validate manifest.webmanifest
