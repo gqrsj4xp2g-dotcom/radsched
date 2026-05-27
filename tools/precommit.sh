@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Only run if the deployable shell or its managed sources are staged.
-if ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/sql/.*|supabase/functions/.*|edge-functions/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-toc\.sh))$'; then
+if ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/sql/.*|supabase/functions/.*|edge-functions/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-migration-drift\.js|check-toc\.sh))$'; then
   exit 0
 fi
 
@@ -34,6 +34,12 @@ echo "→ pre-commit: checking script TOC…"
 echo "→ pre-commit: linting SQL/RLS examples…"
 node "$ROOT/tools/check-sql-rls.js" || {
   echo "✖ SQL/RLS lint failed. Fix broad or stale policy examples before committing." >&2
+  exit 1
+}
+
+echo "→ pre-commit: checking migration drift guardrails…"
+node "$ROOT/tools/check-migration-drift.js" || {
+  echo "✖ Migration drift check failed. Update hardening SQL or the expected policy set." >&2
   exit 1
 }
 

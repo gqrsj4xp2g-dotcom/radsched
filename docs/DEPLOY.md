@@ -13,6 +13,10 @@ with privileges.
 [supabase.com](https://supabase.com) → **New project**. Pick the closest
 region. Save the project URL and the **anon (public) key**.
 
+Before inviting real users, open **Authentication → Security** and enable
+leaked-password protection. This dashboard setting is not exposed to the
+public browser client, so treat it as a required manual go-live check.
+
 ### Run the SQL
 
 Open **SQL Editor** → **New query**, paste, run:
@@ -169,6 +173,8 @@ UPDATE auth.users
 
 Sign out and back in — the new JWT will have the admin claim and you'll
 see the full admin UI.
+
+Before production use, run the launch checklist in [GO-LIVE.md](GO-LIVE.md).
 
 ---
 
