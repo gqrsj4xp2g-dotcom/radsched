@@ -5453,9 +5453,41 @@ WHERE email = 'your-admin@example.com';</pre>
       <div style="margin-top:8px;font-size:11px;color:var(--txt2)">
         In your Supabase dashboard → <strong>SQL Editor</strong> → New query, paste and run:
       </div>
-      <pre style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 12px;font-size:11px;margin-top:6px;overflow-x:auto;white-space:pre">CREATE TABLE radscheduler (id TEXT PRIMARY KEY, data TEXT);
+      <pre style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 12px;font-size:11px;margin-top:6px;overflow-x:auto;white-space:pre">CREATE TABLE IF NOT EXISTS practices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT 'Main',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS radscheduler (
+  id TEXT PRIMARY KEY,
+  data TEXT NOT NULL
+);
+
+ALTER TABLE practices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE radscheduler ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "public_all" ON radscheduler FOR ALL USING (true) WITH CHECK (true);</pre>
+
+DROP POLICY IF EXISTS practices_select_scoped ON practices;
+CREATE POLICY practices_select_scoped ON practices FOR SELECT TO authenticated
+  USING ((((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'role') IN ('admin','superuser'))
+    OR id = ((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'practiceId'));
+
+DROP POLICY IF EXISTS radscheduler_select_scoped ON radscheduler;
+CREATE POLICY radscheduler_select_scoped ON radscheduler FOR SELECT TO authenticated
+  USING ((((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'role') IN ('admin','superuser'))
+    OR id = ((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'practiceId'));
+
+DROP POLICY IF EXISTS radscheduler_insert_scoped ON radscheduler;
+CREATE POLICY radscheduler_insert_scoped ON radscheduler FOR INSERT TO authenticated
+  WITH CHECK ((((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'role') IN ('admin','superuser'))
+    OR id = ((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'practiceId'));
+
+DROP POLICY IF EXISTS radscheduler_update_scoped ON radscheduler;
+CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authenticated
+  USING ((((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'role') IN ('admin','superuser'))
+    OR id = ((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'practiceId'))
+  WITH CHECK ((((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'role') IN ('admin','superuser'))
+    OR id = ((select auth.jwt()) -&gt; 'app_metadata' -&gt;&gt; 'practiceId'));</pre>
       <div style="margin-top:6px;font-size:11px;color:var(--txt3)">
         Then paste your Project URL and anon key above and click Save &amp; Connect.
       </div>
