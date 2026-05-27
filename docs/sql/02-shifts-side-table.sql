@@ -77,7 +77,10 @@ CREATE INDEX IF NOT EXISTS radscheduler_shifts_practice_phys_idx
 
 -- Touch-on-update trigger so updated_at stays accurate.
 CREATE OR REPLACE FUNCTION public._radscheduler_shifts_touch()
-RETURNS trigger LANGUAGE plpgsql AS $$
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
 BEGIN
   NEW.updated_at = now();
   RETURN NEW;
