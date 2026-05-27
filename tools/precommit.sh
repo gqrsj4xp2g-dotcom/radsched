@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Only run if the deployable shell or its managed sources are staged.
-if ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/.*|\.github/.*|supabase/functions/.*|edge-functions/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-migration-drift\.js|check-enterprise-readiness\.js|check-toc\.sh))$'; then
+if ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/.*|\.github/.*|supabase/functions/.*|edge-functions/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-migration-drift\.js|check-enterprise-readiness\.js|check-security-headers\.js|check-environment-config\.js|check-rbac-matrix\.js|check-toc\.sh))$'; then
   exit 0
 fi
 
@@ -28,6 +28,24 @@ node "$ROOT/tools/smoke-check.js" || {
 echo "→ pre-commit: checking script TOC…"
 "$ROOT/tools/check-toc.sh" || {
   echo "✖ TOC check failed. Update the MODULE TABLE OF CONTENTS block." >&2
+  exit 1
+}
+
+echo "→ pre-commit: checking security headers…"
+node "$ROOT/tools/check-security-headers.js" || {
+  echo "✖ Security header check failed. Fix CSP/header drift before committing." >&2
+  exit 1
+}
+
+echo "→ pre-commit: checking environment separation…"
+node "$ROOT/tools/check-environment-config.js" || {
+  echo "✖ Environment check failed. Fix staging/production drift before committing." >&2
+  exit 1
+}
+
+echo "→ pre-commit: checking RBAC matrix…"
+node "$ROOT/tools/check-rbac-matrix.js" || {
+  echo "✖ RBAC matrix check failed. Update docs, tests, or role gates." >&2
   exit 1
 }
 
