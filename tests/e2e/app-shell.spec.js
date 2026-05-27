@@ -148,6 +148,8 @@ test('enterprise readiness writes and renders telemetry evidence', async ({ page
   await expect(page.locator('#enterprise-result')).toContainText('Enterprise readiness');
   await expect(page.locator('#enterprise-result')).toContainText('Privileged MFA');
   await expect(page.locator('#enterprise-result')).toContainText('Security pipeline');
+  await expect(page.locator('#enterprise-result')).toContainText('RBAC matrix');
+  await expect(page.locator('#enterprise-result')).toContainText('Immutable audit chain');
   await expect(page.locator('#enterprise-result')).toContainText('Telemetry table');
 
   const telemetryCount = await page.evaluate(() => window.__rsMockSupabase.__telemetryRows.length);
@@ -155,6 +157,10 @@ test('enterprise readiness writes and renders telemetry evidence', async ({ page
 
   await page.getByRole('button', { name: 'Telemetry events' }).click();
   await expect(page.locator('#enterprise-result')).toContainText('enterprise.readiness_run');
+
+  await page.getByRole('button', { name: 'Ops dashboard' }).click();
+  await expect(page.locator('#enterprise-result')).toContainText('Telemetry events');
+  await expect(page.locator('#enterprise-result')).toContainText('Audit entries');
 });
 
 test('service worker source and registration use the current app shell version', async ({ page, request }) => {
