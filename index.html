@@ -6642,6 +6642,18 @@ let _supabase=null;
 // (caught silently in _getUrl), causing auto-login to fail for any user
 // whose URL/key were saved in localStorage rather than baked into the HTML.
 const _SB_CFG={url:'',key:''};
+const _SSO_DOMAIN_KEY='rs.sso.domain';
+function _getSsoDomain(){
+  try{ return (localStorage.getItem(_SSO_DOMAIN_KEY)||'').trim().toLowerCase(); }catch(_){ return ''; }
+}
+function _setSsoDomain(domain){
+  const clean = String(domain||'').trim().toLowerCase().replace(/^@/,'');
+  try{
+    if(clean) localStorage.setItem(_SSO_DOMAIN_KEY, clean);
+    else localStorage.removeItem(_SSO_DOMAIN_KEY);
+  }catch(_){}
+  return clean;
+}
 
 // Auth-screen Supabase config form. Lets the user enter URL + anon key
 // without being logged in — the in-app Settings → Supabase form is only
@@ -6650,6 +6662,7 @@ const _SB_CFG={url:'',key:''};
 function saveAuthSupabaseConfig(){
   const url=document.getElementById('auth-sb-url')?.value.trim()||'';
   const key=document.getElementById('auth-sb-key')?.value.trim()||'';
+  const sso=document.getElementById('auth-sso-domain')?.value.trim()||'';
   const msg=document.getElementById('auth-sb-msg');
   const setMsg=(t,c='var(--red-t)')=>{ if(msg){msg.textContent=t;msg.style.color=c;} };
   if(!url||!key){ setMsg('Both URL and anon key are required.'); return; }
@@ -6659,6 +6672,7 @@ function saveAuthSupabaseConfig(){
   }
   try{
     localStorage.setItem('radscheduler_sb_config', JSON.stringify({url,key}));
+    _setSsoDomain(sso);
     setMsg('✓ Saved — reloading…','var(--green-t)');
     setTimeout(()=>location.reload(), 600);
   }catch(e){
