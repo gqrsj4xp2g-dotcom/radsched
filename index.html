@@ -30369,6 +30369,21 @@ function drcStepFocus(step){
   else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
   drcSetFocus(next);
 }
+// Reset all four DR-calendar filters. Triggered by the
+// "Clear filters" button on the filter-hides-records banner.
+// Also clears the persisted localStorage values so the reset
+// survives a page reload.
+function _drcClearFilters(){
+  ['drc-phys','drc-shift','drc-site','drc-sub'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){ el.value = ''; try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(_){} }
+  });
+  ['rs.drc.f.phys','rs.drc.f.shift','rs.drc.f.site','rs.drc.f.sub'].forEach(k => {
+    try{ localStorage.removeItem(k); }catch(_){}
+  });
+  if(typeof renderDRCal === 'function') renderDRCal();
+  if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
+}
 
 /* @JS_RENDER_DR_CAL_END */
 
