@@ -4,10 +4,10 @@
 // to email (Resend), SMS (Twilio), Web Push (VAPID), or outbound webhooks
 // based on the request body's `kind` field.
 //
-// Auth: requires a valid Supabase JWT in Authorization: Bearer <token>.
-// The function verifies the JWT through Supabase's anon client; rejecting
-// unauthenticated requests prevents anyone with the function URL from
-// using your delivery credentials as an open relay.
+// Auth: regular client delivery requires a valid Supabase JWT in
+// Authorization: Bearer <token>. The digest fanout can also be invoked
+// by pg_cron with x-rs-cron-secret, because pg_cron cannot supply a user
+// session. The function enforces both paths internally.
 //
 // Required environment variables (set in Supabase dashboard → Edge
 // Functions → send-notification → Manage Secrets):
@@ -22,6 +22,7 @@
 //   VAPID_PUBLIC_KEY             — Web Push public (also lives in S.cfg)
 //   VAPID_PRIVATE_KEY            — Web Push private (server-only)
 //   VAPID_SUBJECT                — e.g. "mailto:admin@your-domain"
+//   RS_CRON_SECRET               — shared secret for scheduled digest fanout
 //
 // Request body (JSON):
 //   { kind: 'email',   to: 'user@example.com', subject: '...', body: '...', html: '...' }
@@ -53,7 +54,7 @@ interface Body {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-rs-cron-secret',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -121,37 +122,49 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (req.method !== 'POST') return err(405, 'POST only');
 
-  // Auth — verify the caller's JWT against Supabase. Caller is a
-  // RadScheduler client; we don't accept anonymous delivery requests.
-  const auth = req.headers.get('Authorization') || '';
-  const jwt = auth.replace(/^Bearer\s+/i, '');
-  if (!jwt) return err(401, 'Missing JWT');
   const sbUrl = Deno.env.get('SUPABASE_URL')!;
   const sbAnon = Deno.env.get('SUPABASE_ANON_KEY')!;
   const sbService = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const sbAuth = createClient(sbUrl, sbAnon);
-  const { data: userData, error: authErr } = await sbAuth.auth.getUser(jwt);
-  if (authErr || !userData?.user) return err(401, 'Invalid JWT');
-
-  // ── Caller identity & multi-tenant scoping ──────────────────────────
-  // Extract practiceId + role from server-issued app_metadata. Never
-  // trust user_metadata for authorization. Without this, any authed
-  // user from any practice could send arbitrary email/SMS/push/webhook
-  // (open relay) and could spoof another tenant's users (cross-tenant
-  // IDOR via the push handler's userId scan).
-  const callerUid = userData.user.id;
-  const appMeta = (userData.user.app_metadata || {}) as { role?: string; practiceId?: string };
-  const callerRole = appMeta.role || '';
-  const callerPid  = appMeta.practiceId || '';
-
-  // Rate limit per-caller — applies to all kinds except digest-run.
-  // digest-run is admin/cron only and already self-limiting (1×/day).
-  if (!rateLimit(callerUid, 60)) return err(429, 'Too many requests; slow down.');
 
   let body: Body;
   try { body = await req.json(); }
   catch { return err(400, 'Invalid JSON body'); }
   if (!body.kind) return err(400, 'Missing kind');
+
+  const cronHdr = req.headers.get('x-rs-cron-secret') || '';
+  const cronSecret = Deno.env.get('RS_CRON_SECRET') || '';
+  const isCronDigest = body.kind === 'digest-run' && !!cronSecret && cronHdr === cronSecret;
+
+  let callerUid = 'cron:digest-run';
+  let callerRole = 'cron';
+  let callerPid = '';
+
+  if (isCronDigest) {
+    if (!rateLimit(callerUid, 5)) return err(429, 'Too many digest requests; slow down.');
+  } else {
+    // Auth — verify the caller's JWT against Supabase. Caller is a
+    // RadScheduler client; we don't accept anonymous delivery requests.
+    const auth = req.headers.get('Authorization') || '';
+    const jwt = auth.replace(/^Bearer\s+/i, '');
+    if (!jwt) return err(401, 'Missing JWT');
+    const sbAuth = createClient(sbUrl, sbAnon);
+    const { data: userData, error: authErr } = await sbAuth.auth.getUser(jwt);
+    if (authErr || !userData?.user) return err(401, 'Invalid JWT');
+
+    // ── Caller identity & multi-tenant scoping ────────────────────────
+    // Extract practiceId + role from server-issued app_metadata. Never
+    // trust user_metadata for authorization. Without this, any authed
+    // user from any practice could send arbitrary email/SMS/push/webhook
+    // (open relay) and could spoof another tenant's users (cross-tenant
+    // IDOR via the push handler's userId scan).
+    callerUid = userData.user.id;
+    const appMeta = (userData.user.app_metadata || {}) as { role?: string; practiceId?: string };
+    callerRole = appMeta.role || '';
+    callerPid  = appMeta.practiceId || '';
+
+    // Rate limit per-caller — applies to all non-cron requests.
+    if (!rateLimit(callerUid, 60)) return err(429, 'Too many requests; slow down.');
+  }
 
   try {
     switch (body.kind) {
@@ -164,10 +177,7 @@ Deno.serve(async (req) => {
         //   (a) caller has admin role in their tenant (manual digest),
         //   (b) the special cron header is present + matches the env
         //       secret (pg_cron self-invocation).
-        const cronHdr = req.headers.get('x-rs-cron-secret') || '';
-        const cronSecret = Deno.env.get('RS_CRON_SECRET') || '';
-        const isCron = !!cronSecret && cronHdr === cronSecret;
-        if (!isCron && callerRole !== 'admin' && callerRole !== 'superuser') return err(403, 'Admin role or cron secret required');
+        if (!isCronDigest && callerRole !== 'admin' && callerRole !== 'superuser') return err(403, 'Admin role or cron secret required');
         return ok(await runDigest(sbUrl, sbService));
       }
       default: {

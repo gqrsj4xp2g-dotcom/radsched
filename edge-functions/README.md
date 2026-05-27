@@ -20,7 +20,7 @@ the right handler.
 
 ```bash
 # From the project root
-supabase functions deploy send-notification
+supabase functions deploy send-notification --no-verify-jwt
 
 # Set per-channel secrets
 supabase secrets set RESEND_API_KEY=re_xxx
@@ -31,9 +31,16 @@ supabase secrets set TWILIO_FROM_NUMBER=+15551234567
 supabase secrets set VAPID_PUBLIC_KEY=BJxxxxx
 supabase secrets set VAPID_PRIVATE_KEY=xxxxx
 supabase secrets set VAPID_SUBJECT='mailto:admin@your-domain'
+supabase secrets set RS_CRON_SECRET='generate-a-long-random-string'
 ```
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected.
+
+`send-notification` is deployed with Supabase gateway JWT verification
+disabled because the scheduled digest path is invoked by pg_cron, not by
+a signed-in browser session. The function still enforces auth internally:
+regular delivery requests require a valid user JWT, and only
+`kind: "digest-run"` can use `x-rs-cron-secret`.
 
 ## Generate VAPID keys
 
@@ -60,7 +67,10 @@ SELECT cron.schedule(
   $$
   SELECT net.http_post(
     url := 'https://YOUR-PROJECT.supabase.co/functions/v1/send-notification',
-    headers := '{"Authorization":"Bearer YOUR-SERVICE-ROLE-JWT","Content-Type":"application/json"}'::jsonb,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-rs-cron-secret', 'YOUR_RS_CRON_SECRET'
+    ),
     body   := '{"kind":"digest-run"}'::jsonb
   );
   $$
@@ -103,11 +113,14 @@ await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
 
 ## Auth model
 
-Every request requires a valid Supabase JWT. The function:
+Regular delivery requests require a valid Supabase JWT. The function:
 
 1. Verifies the JWT through `supabase.auth.getUser(jwt)`.
 2. Returns 401 if invalid.
 3. Otherwise routes to the channel-specific handler.
+
+The only exception is `kind: "digest-run"` with a matching
+`x-rs-cron-secret` header, which is used by pg_cron.
 
 This is intentional — without auth, anyone with the function URL could
 burn through your Twilio / Resend credits or spam users on Web Push.
@@ -124,8 +137,8 @@ curl -X POST https://YOUR-PROJECT.supabase.co/functions/v1/send-notification \
 
 # Test digest fanout
 curl -X POST https://YOUR-PROJECT.supabase.co/functions/v1/send-notification \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
+  -H "x-rs-cron-secret: YOUR_RS_CRON_SECRET" \
   -d '{"kind":"digest-run"}'
 ```
 

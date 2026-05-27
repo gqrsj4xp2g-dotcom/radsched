@@ -39,7 +39,7 @@ It **is** built to defend against:
 - **Roles** live in `app_metadata.role` on the Supabase user object.
   This is server-side and cannot be modified by the user. **Never**
   rely on `user_metadata` for security — it's user-writable.
-- Three roles: `super_user`, `admin`, `physician`.
+- Three account roles: `superuser`, `admin`, `user`.
 - Client-side checks (`_isAdminOrSU()`, `_adminOnly(label)`) are UX
   only. The source of truth is Row-Level Security (RLS) policies on
   the Supabase table.
@@ -51,15 +51,16 @@ It **is** built to defend against:
 CREATE POLICY "Read practice rows" ON practices
   FOR SELECT TO authenticated
   USING (
-    id = (auth.jwt() ->> 'app_metadata' ->> 'practice_id')::text
+    (auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
+    id = (auth.jwt() -> 'app_metadata' ->> 'practiceId')
   );
 
--- Write: only admin / super_user
-CREATE POLICY "Admin write" ON practices
+-- Write: authenticated practice members, plus admin / superuser
+CREATE POLICY "Practice write" ON practices
   FOR UPDATE TO authenticated
   USING (
-    (auth.jwt() ->> 'app_metadata' ->> 'role') IN ('admin','super_user')
-    AND id = (auth.jwt() ->> 'app_metadata' ->> 'practice_id')::text
+    (auth.jwt() -> 'app_metadata' ->> 'role') IN ('admin','superuser') OR
+    id = (auth.jwt() -> 'app_metadata' ->> 'practiceId')
   );
 ```
 
@@ -68,11 +69,13 @@ write authorization.
 
 ## Edge function security
 
-Every request to `send-notification` requires
+Regular requests to `send-notification` require
 `Authorization: Bearer <Supabase JWT>`. The function calls
 `supabase.auth.getUser(jwt)` and rejects 401 if the token is invalid
-or expired. Without this, the function URL is a free SMS / email /
-push relay for anyone who guesses it.
+or expired. The scheduled `digest-run` path is the only exception: it
+may use `x-rs-cron-secret` so pg_cron can invoke it without a browser
+session. Without these internal checks, the function URL is a free SMS /
+email / push relay for anyone who guesses it.
 
 ### Secrets
 
@@ -82,6 +85,7 @@ push relay for anyone who guesses it.
 | `RESEND_API_KEY` | Edge function env | Email send abuse — rotate. |
 | `TWILIO_AUTH_TOKEN` | Edge function env | SMS abuse — rotate. |
 | `VAPID_PRIVATE_KEY` | Edge function env | Push spoofing — rotate keys + re-subscribe users. |
+| `RS_CRON_SECRET` | Edge function env | Digest fanout abuse — rotate. |
 | `SUPABASE_ANON_KEY` | Bundled in `index.html` | Designed to be public. RLS is what protects data. |
 
 Never commit secrets to git. Use `supabase secrets set`.
@@ -92,7 +96,7 @@ If you suspect a leak:
 
 1. Generate new credentials in the relevant provider (Resend, Twilio, etc.).
 2. `supabase secrets set NEW_KEY=…`.
-3. Re-deploy the edge function: `supabase functions deploy send-notification`.
+3. Re-deploy the edge function: `supabase functions deploy send-notification --no-verify-jwt`.
 4. Invalidate the old credentials in the provider console.
 
 ## XSS prevention

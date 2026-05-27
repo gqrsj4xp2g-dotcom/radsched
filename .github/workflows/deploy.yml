@@ -45,19 +45,19 @@ jobs:
 
       - name: Validate edge function TypeScript syntax
         run: |
-          # Use the bundled TypeScript transpiler via npx; no install needed.
-          if [ -f edge-functions/send-notification/index.ts ]; then
-            npx --yes -p typescript@5 tsc \
-              --noEmit \
-              --target es2022 \
-              --module esnext \
-              --moduleResolution bundler \
-              --skipLibCheck \
-              --allowJs \
-              edge-functions/send-notification/index.ts || true
-            # `|| true` because Deno-specific imports trip tsc; this is a
-            # syntax-only check, not a full type check.
-          fi
+          set -euo pipefail
+          find edge-functions supabase/functions -type f -name index.ts -print0 |
+            while IFS= read -r -d '' fn; do
+              echo "Checking $fn"
+              npx --yes esbuild "$fn" \
+                --bundle \
+                --platform=neutral \
+                --format=esm \
+                --target=es2022 \
+                "--external:https://*" \
+                "--external:jsr:*" \
+                --outfile=/tmp/rs-edge-function-check.js >/dev/null
+            done
 
   build:
     name: Build + deploy

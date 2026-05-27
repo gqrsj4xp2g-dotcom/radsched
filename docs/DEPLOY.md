@@ -116,7 +116,7 @@ returns the new user's ID. The client UI invokes this from
 **User Management → Add User**.
 
 ```bash
-supabase functions deploy create-user
+supabase functions deploy create-user --no-verify-jwt
 ```
 
 The function source lives in **Settings → Edge Functions → Function source
@@ -127,6 +127,17 @@ preview** inside the app.
 If you want email notifications (chat mentions, swap responses, holiday
 assignments), wire `send-notification` to a transactional provider like
 Resend. Without it, the in-app notifications still work — just no email.
+
+```bash
+supabase functions deploy send-notification --no-verify-jwt
+supabase secrets set RESEND_API_KEY=re_xxx
+supabase secrets set RESEND_FROM_EMAIL='RadScheduler <noreply@your-domain>'
+supabase secrets set RS_CRON_SECRET='generate-a-long-random-string'
+```
+
+The function performs its own auth checks. Regular notification requests
+still require a signed-in user's JWT; the `RS_CRON_SECRET` path exists
+only for scheduled digest fanout.
 
 ### First admin
 

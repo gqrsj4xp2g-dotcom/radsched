@@ -40,7 +40,7 @@ cached content for ~24 hours.
 If `edge-functions/send-notification/index.ts` changes:
 
 ```bash
-supabase functions deploy send-notification
+supabase functions deploy send-notification --no-verify-jwt
 ```
 
 Edge function deploys are independent of the main app deploy.

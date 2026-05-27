@@ -2557,9 +2557,10 @@ tbody tr:hover{background:var(--bg3)}
         <li>Paste the Deno code below.</li>
         <li>In the function's <strong>Secrets</strong>, add:<br>
           <code>RESEND_API_KEY</code> = your Resend API key<br>
-          <code>FROM_EMAIL</code> = e.g. <code>scheduler@yourdomain.com</code> (must be a verified sender)
+          <code>RESEND_FROM_EMAIL</code> = e.g. <code>RadScheduler &lt;scheduler@yourdomain.com&gt;</code> (must be a verified sender)<br>
+          <code>RS_CRON_SECRET</code> = a long random string for scheduled digest runs
         </li>
-        <li>Deploy the function.</li>
+        <li>Deploy with gateway JWT verification disabled: <code>supabase functions deploy send-notification --no-verify-jwt</code>. The function still verifies user JWTs internally for every non-cron request.</li>
       </ol>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="font-size:11px;color:var(--txt3)">Deno source code:</div>
@@ -4361,9 +4362,8 @@ tbody tr:hover{background:var(--bg3)}
               <span style="font-size:10.5px;color:var(--txt3)">(Found in Project Settings → API → service_role secret — the one marked "secret")</span></li>
           </ul>
         </li>
-        <li>In function settings, ensure <strong>verify_jwt</strong> is enabled (default).</li>
-        <li>Deploy the function.</li>
-        <li>Make sure your own admin account in Supabase Auth has <code>role: 'admin'</code> in its user_metadata. If you're not sure, expand the "Bootstrap first admin" section below after deploying.</li>
+        <li>Deploy with gateway JWT verification disabled: <code>supabase functions deploy create-user --no-verify-jwt</code>. The function verifies the caller's user JWT internally before any admin action.</li>
+        <li>Make sure your own admin account in Supabase Auth has <code>"role": "admin"</code> and <code>"practiceId": "main"</code> in <code>app_metadata</code>. If you're not sure, expand the "Bootstrap first admin" section below after deploying.</li>
       </ol>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -4382,7 +4382,7 @@ tbody tr:hover{background:var(--bg3)}
     <div style="margin-top:10px;padding:12px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r)">
       <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
         If you're seeing <code>HTTP 403: Caller is not an admin</code> when creating users, your
-        Supabase Auth user is missing the <code>role: 'admin'</code> tag in its user_metadata.
+        Supabase Auth user is missing the <code>"role": "admin"</code> tag in its <code>app_metadata</code>.
         The app's local USERS array says you're an admin, but Supabase Auth doesn't know that.
         Fix it in one of three ways:
       </div>
@@ -4392,12 +4392,11 @@ tbody tr:hover{background:var(--bg3)}
         <ol style="padding-left:20px;margin-top:4px">
           <li>Go to Supabase dashboard → <strong>Authentication</strong> → <strong>Users</strong>.</li>
           <li>Find your admin email, click the row.</li>
-          <li>Scroll down to <strong>User Metadata</strong> (or "Raw User Meta Data").</li>
-          <li>Edit the JSON to include <code>"role": "admin"</code>. Example:
+          <li>Scroll down to <strong>App Metadata</strong> (or "Raw App Meta Data").</li>
+          <li>Edit the JSON to include <code>"role": "admin"</code> and <code>"practiceId": "main"</code>. Example:
             <pre style="background:var(--navy3);color:#e2e8f0;padding:8px 10px;border-radius:var(--r);font-size:10.5px;margin-top:4px">{
   "role": "admin",
-  "first": "Your",
-  "last": "Name"
+  "practiceId": "main"
 }</pre>
           </li>
           <li>Save. Then sign out of RadScheduler and sign back in so your new token carries the admin role.</li>
@@ -4406,9 +4405,9 @@ tbody tr:hover{background:var(--bg3)}
 
       <div style="font-size:12px;color:var(--txt2);line-height:1.65;margin-bottom:10px">
         <strong>Method B — SQL editor (if you have many admins):</strong>
-        <pre style="background:var(--navy3);color:#e2e8f0;padding:8px 10px;border-radius:var(--r);font-size:10.5px;overflow-x:auto">-- Run in Supabase → SQL Editor. Replace the email first.
+<pre style="background:var(--navy3);color:#e2e8f0;padding:8px 10px;border-radius:var(--r);font-size:10.5px;overflow-x:auto">-- Run in Supabase → SQL Editor. Replace the email first.
 UPDATE auth.users
-SET raw_user_meta_data = raw_user_meta_data || '{"role":"admin"}'::jsonb
+SET raw_app_meta_data = raw_app_meta_data || '{"role":"admin","practiceId":"main"}'::jsonb
 WHERE email = 'your-admin@example.com';</pre>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">Then sign out and sign back in.</div>
       </div>
@@ -6203,7 +6202,8 @@ Once set, ask me anything about your schedule!</div>
      is user-writable). Server-side Supabase RLS policies are the source
      of truth; client-side checks (_isAdminOrSU) are UX only.
    • Edge Function `send-notification` requires a valid Supabase JWT for
-     all delivery channels. Without auth the URL is useless.
+     all regular delivery channels. Scheduled digest fanout is the only
+     cron-secret path.
    • The XLSX parser sanitizes every imported cell through `escHtml`
      before display. Imported records flow into the same validators
      that gate manual entry.
@@ -11556,7 +11556,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v84';
+const _SW_VERSION = 'rs-v85';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -12927,7 +12927,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v84';
+const _RS_HTML_BUILD = 'rs-v85';
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
@@ -26208,10 +26208,37 @@ const _EDGE_FN_SOURCES = {
   ].join('\n'),
 };
 
+const _EDGE_FN_SOURCE_PATHS = {
+  'send-notification': 'edge-functions/send-notification/index.ts',
+  'create-user': 'supabase/functions/create-user/index.ts',
+};
+
+// Old builds embedded function source here, which drifted from the files
+// actually deployed to Supabase. Always load the current source from the
+// repo artifact instead, so the setup panel cannot hand admins stale code.
+for(const name of Object.keys(_EDGE_FN_SOURCE_PATHS)){
+  if(_EDGE_FN_SOURCES[name]) _EDGE_FN_SOURCES[name] = '';
+}
+
+async function _loadEdgeFnSource(fnName){
+  const path = _EDGE_FN_SOURCE_PATHS[fnName];
+  if(!path) throw new Error('Unknown function: '+fnName);
+  const resp = await fetch(path, { cache: 'no-store' });
+  if(!resp.ok) throw new Error(`Could not load ${path} (HTTP ${resp.status})`);
+  const src = await resp.text();
+  if(!src.trim()) throw new Error(`${path} is empty`);
+  return src;
+}
+
 // Populate the <pre> with raw source + wire the Copy button.
-function copyEdgeFuncCode(fnName, btn){
-  const src = _EDGE_FN_SOURCES[fnName];
-  if(!src){ alert('Unknown function: '+fnName); return; }
+async function copyEdgeFuncCode(fnName, btn){
+  let src;
+  try {
+    src = await _loadEdgeFnSource(fnName);
+  } catch(e) {
+    alert(`Could not load the current ${fnName} source: ${e.message || e}`);
+    return;
+  }
   // Use a textarea-based fallback for browsers without Clipboard API
   const doCopy = async () => {
     try{
@@ -26241,11 +26268,15 @@ function copyEdgeFuncCode(fnName, btn){
 
 // Render both code blocks when the containing page is shown (and once on load
 // so they're populated even if admins open the details before navigating).
-function _populateEdgeFnPres(){
-  for(const [name, src] of Object.entries(_EDGE_FN_SOURCES)){
+async function _populateEdgeFnPres(){
+  for(const name of Object.keys(_EDGE_FN_SOURCE_PATHS)){
     const el = document.getElementById('ef-'+name+'-code');
     if(el && el.textContent === 'Loading…'){
-      el.textContent = src; // textContent auto-escapes — no HTML injection
+      try{
+        el.textContent = await _loadEdgeFnSource(name); // textContent auto-escapes
+      }catch(e){
+        el.textContent = `Could not load current source for ${name}: ${e.message || e}`;
+      }
     }
   }
 }
@@ -26504,7 +26535,7 @@ async function sendTestNotification(){
       if(res.status===404){
         setStatus(`✕ Edge function <code>send-notification</code> not deployed. See Broadcast Email page for setup instructions.`, 'var(--red-t)');
       } else if(res.status===401||res.status===403){
-        setStatus(`✕ Auth rejected (HTTP ${res.status}). Check Supabase anon key and function's verify_jwt setting.`, 'var(--red-t)');
+        setStatus(`✕ Auth rejected (HTTP ${res.status}). Sign out and back in, then check the send-notification function logs.`, 'var(--red-t)');
       } else if(res.status===500){
         const em = errBody?.error || errBody?.message || errBody?.raw || `HTTP 500`;
         setStatus(`✕ Edge function error: ${escHtml(String(em).slice(0,200))}`, 'var(--red-t)');

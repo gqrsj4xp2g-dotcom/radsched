@@ -103,7 +103,7 @@ After rollback:
 **Stop. This is a data leak.**
 1. Pause writes immediately: `S.cfg.readOnly = true` in every tab.
 2. Verify `_ROW_ID` matches the user's expected practice ID.
-3. Check `app_metadata.practice_id` on their Supabase user.
+3. Check `app_metadata.practiceId` on their Supabase user.
 4. Check RLS policies — they should restrict by `practice_id`.
 5. Force sign-out for affected users.
 6. Treat as a security incident: document, report, fix the policy,

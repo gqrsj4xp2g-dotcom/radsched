@@ -158,14 +158,18 @@ no separate JS file ships.
 
 ## 7. Edge functions: Deno on Supabase
 
-`edge-functions/send-notification/index.ts` is the only edge function.
-It serves five `kind`s (email/sms/push/webhook/digest-run) because they
-share auth + rate limiting. Each `kind` has its own handler block.
+The main delivery edge function is
+`edge-functions/send-notification/index.ts`. It serves five `kind`s
+(email/sms/push/webhook/digest-run) because they share auth + rate
+limiting. Each `kind` has its own handler block. Additional Supabase
+functions live under `supabase/functions` for admin-only proxies such
+as account creation, Maps, AI, widget data, and calendar feeds.
 
-Auth model: every request requires `Authorization: Bearer <Supabase
-JWT>`. The function calls `supabase.auth.getUser(jwt)` and rejects
-401 if the token is invalid or expired. Without this, the function
-URL would be an open relay for anyone with the API URL.
+Auth model: regular delivery requests require `Authorization: Bearer
+<Supabase JWT>`. The function calls `supabase.auth.getUser(jwt)` and
+rejects 401 if the token is invalid or expired. Scheduled
+`digest-run` is the only cron-secret exception. Without these checks,
+the function URL would be an open relay for anyone with the API URL.
 
 Secrets are managed via `supabase secrets set` — they're scoped to the
 project and never appear in the source. The deploy README lists every
