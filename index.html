@@ -38644,6 +38644,14 @@ function _syncHolidayToIRCall(physId, date, holName){
     !(c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
   S.irCalls.push({id:S.nextId++,physId,date:callDate,callType,
     irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
+  // Auto-pair daily holiday call with an IR procedure shift on the
+  // same date so the assigned physician shows up correctly on the IR
+  // calendar as both on-call AND scheduled to work. Weekend holiday
+  // call (Fri→Mon span) intentionally skipped here — IR procedure
+  // shifts on weekends are unusual.
+  if(callType === 'daily' && typeof _ensureIRShiftForCall === 'function'){
+    _ensureIRShiftForCall(physId, callDate, p.irGroup, site, 'holiday-sync');
+  }
 }
 
 // Remove the IR call that was synced from a holiday assignment
