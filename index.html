@@ -6701,6 +6701,7 @@ const _SUPABASE_KEY=/*CREDS_KEY_START*/'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ
 const _ALLOW_LEGACY_AUTH=false; // disable legacy plaintext local auth by default
 const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
+let _MFA_STATUS={loaded:false,currentLevel:'unknown',nextLevel:'unknown',verified:false,unavailable:false,factors:[],message:''};
 
 // _SRC is set by a script block at the bottom of <body> once DOM is fully loaded
 
@@ -6710,6 +6711,203 @@ let _ROW_ID='main';          // set at login to the user's practiceId
 function _isSU(){ return CU?.role==='superuser'; }
 // Admin OR superuser — for UI gating and internal permission checks
 function _isAdminOrSU(){ return CU?.role==='admin'||CU?.role==='superuser'; }
+function _adminMfaRequired(){
+  return _isAdminOrSU() && !(S?.cfg?.requireAdminMfa === false);
+}
+function _adminMfaOk(){
+  if(!_adminMfaRequired()) return true;
+  return _MFA_STATUS?.verified === true || _MFA_STATUS?.currentLevel === 'aal2';
+}
+function _mfaFactorList(data){
+  if(!data) return [];
+  const out = [];
+  ['totp','phone','webauthn'].forEach(k => {
+    const arr = Array.isArray(data[k]) ? data[k] : [];
+    arr.forEach(f => out.push({...f, factor_type:f.factor_type || k}));
+  });
+  if(Array.isArray(data.all)) data.all.forEach(f => out.push(f));
+  if(Array.isArray(data.factors)) data.factors.forEach(f => out.push(f));
+  const seen = new Set();
+  return out.filter(f => {
+    const id = f?.id || f?.factorId;
+    if(!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+async function _refreshMfaStatus(){
+  const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+  const next = {loaded:true,currentLevel:'aal1',nextLevel:'aal1',verified:false,unavailable:false,factors:[],message:''};
+  if(!sb?.auth?.mfa){
+    next.unavailable = true;
+    next.message = 'Supabase MFA API is not available in this client.';
+    _MFA_STATUS = next;
+    return next;
+  }
+  try{
+    const aal = await sb.auth.mfa.getAuthenticatorAssuranceLevel?.();
+    if(aal?.error) throw aal.error;
+    const data = aal?.data || {};
+    next.currentLevel = data.currentLevel || data.current_level || data.currentAuthenticatorAssuranceLevel || 'aal1';
+    next.nextLevel = data.nextLevel || data.next_level || data.nextAuthenticatorAssuranceLevel || next.currentLevel;
+    next.verified = next.currentLevel === 'aal2';
+  }catch(e){
+    next.unavailable = true;
+    next.message = e?.message || String(e);
+  }
+  try{
+    const listed = await sb.auth.mfa.listFactors?.();
+    if(!listed?.error) next.factors = _mfaFactorList(listed?.data);
+  }catch(_){}
+  _MFA_STATUS = next;
+  return next;
+}
+function _applyPrivilegedVisibility(){
+  const roleAdmin = _isAdminOrSU();
+  const adminVisible = roleAdmin && _adminMfaOk();
+  const isSU = _isSU() && _adminMfaOk();
+  document.querySelectorAll('.su-only').forEach(el=>{
+    el.style.display = isSU ? '' : 'none';
+  });
+  document.querySelectorAll('.admin-only').forEach(el=>{
+    if(el.classList.contains('page')){
+      if(adminVisible) el.style.display='';
+      else el.style.display='none';
+      return;
+    }
+    el.style.display=adminVisible?'block':'none';
+  });
+  return adminVisible;
+}
+function _mfaAdminBlockMessage(){
+  if(!_adminMfaRequired()) return '';
+  if(_MFA_STATUS?.unavailable) return 'Admin MFA is required, but the Supabase MFA API could not be reached.';
+  if(!(_MFA_STATUS?.factors||[]).some(f => (f.status || '').toLowerCase() === 'verified')) return 'Admin MFA is required. Enroll an authenticator app before using admin tools.';
+  return 'Admin MFA verification is required before using admin tools.';
+}
+function _showAdminMfaGate(){
+  if(!_adminMfaRequired() || _adminMfaOk()) return;
+  let gate = document.getElementById('rs-admin-mfa-gate');
+  if(!gate){
+    gate = document.createElement('div');
+    gate.id = 'rs-admin-mfa-gate';
+    gate.style.cssText = 'position:fixed;inset:auto 18px 18px auto;max-width:min(420px,calc(100vw - 36px));background:var(--bg2);border:1px solid var(--amber,#d97706);box-shadow:0 18px 48px rgba(15,23,42,.22);border-radius:8px;padding:14px;z-index:9998;color:var(--txt);font-size:12px;line-height:1.45';
+    document.body.appendChild(gate);
+  }
+  const status = _MFA_STATUS || {};
+  const hasVerified = (status.factors||[]).some(f => (f.status || '').toLowerCase() === 'verified');
+  gate.innerHTML = `
+    <div style="font-weight:800;font-size:13px;margin-bottom:5px">Admin MFA required</div>
+    <div style="color:var(--txt2);margin-bottom:10px">${escHtml(_mfaAdminBlockMessage())}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${hasVerified ? '<button class="bp bsm" onclick="_mfaChallengeAdmin()">Verify now</button>' : '<button class="bp bsm" onclick="_mfaEnrollTotp()">Enroll authenticator</button>'}
+      <button class="bsm" onclick="renderMfaSettings?.()">Refresh</button>
+      <button class="bsm" onclick="this.closest('#rs-admin-mfa-gate')?.remove()">Dismiss</button>
+    </div>`;
+}
+function _hideAdminMfaGate(){
+  document.getElementById('rs-admin-mfa-gate')?.remove();
+}
+async function _mfaChallengeAdmin(){
+  const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+  if(!sb?.auth?.mfa){ alert('Supabase MFA is not available in this browser session.'); return false; }
+  await _refreshMfaStatus();
+  if(_adminMfaOk()){
+    _hideAdminMfaGate();
+    _applyPrivilegedVisibility();
+    renderMfaSettings?.();
+    return true;
+  }
+  const factor = (_MFA_STATUS.factors||[]).find(f => (f.status || '').toLowerCase() === 'verified') || (_MFA_STATUS.factors||[])[0];
+  if(!factor){
+    alert('No MFA factor is enrolled yet. Enroll an authenticator app first.');
+    return false;
+  }
+  try{
+    const factorId = factor.id || factor.factorId;
+    const challenge = await sb.auth.mfa.challenge({ factorId });
+    if(challenge?.error) throw challenge.error;
+    const challengeId = challenge?.data?.id || challenge?.data?.challengeId;
+    const code = (prompt('Enter the 6-digit MFA code from your authenticator app:') || '').trim();
+    if(!code) return false;
+    const verified = await sb.auth.mfa.verify({ factorId, challengeId, code });
+    if(verified?.error) throw verified.error;
+    await _refreshMfaStatus();
+    _MFA_STATUS.verified = true;
+    _hideAdminMfaGate();
+    _applyPrivilegedVisibility();
+    renderMfaSettings?.();
+    if(typeof _toast === 'function') _toast('Admin MFA verified.', 'ok');
+    return true;
+  }catch(e){
+    alert('MFA verification failed: ' + (e?.message || e));
+    return false;
+  }
+}
+async function _mfaEnrollTotp(){
+  const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+  if(!sb?.auth?.mfa){ alert('Supabase MFA is not available in this browser session.'); return false; }
+  try{
+    const enroll = await sb.auth.mfa.enroll({ factorType:'totp' });
+    if(enroll?.error) throw enroll.error;
+    const data = enroll?.data || {};
+    const factorId = data.id || data.factorId;
+    const qr = data.totp?.qr_code || data.totp?.qrCode || '';
+    const secret = data.totp?.secret || '';
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:grid;place-items:center;padding:18px';
+    holder.innerHTML = `<div style="max-width:440px;background:var(--bg2);border-radius:8px;padding:18px;border:1px solid var(--bdr);box-shadow:0 20px 60px rgba(0,0,0,.25);font-size:12px;line-height:1.45">
+      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Enroll authenticator app</div>
+      <div style="color:var(--txt2);margin-bottom:10px">Scan the QR code, then enter the 6-digit code to activate MFA for this admin session.</div>
+      ${qr ? `<div style="text-align:center;margin:10px 0"><img src="${qr}" alt="MFA QR code" style="max-width:220px;width:70%;background:#fff;padding:10px;border-radius:8px"></div>` : ''}
+      ${secret ? `<div style="font-family:ui-monospace,monospace;background:var(--bg3);padding:8px;border-radius:6px;overflow-wrap:anywhere;margin-bottom:10px">${escHtml(secret)}</div>` : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="bsm" onclick="this.closest('div[style*=fixed]')?.remove()">Cancel</button>
+        <button class="bp bsm" id="rs-mfa-enroll-verify">Verify code</button>
+      </div>
+    </div>`;
+    document.body.appendChild(holder);
+    holder.querySelector('#rs-mfa-enroll-verify')?.addEventListener('click', async () => {
+      const code = (prompt('Enter the 6-digit code from your authenticator app:') || '').trim();
+      if(!code) return;
+      try{
+        const challenge = await sb.auth.mfa.challenge({ factorId });
+        if(challenge?.error) throw challenge.error;
+        const challengeId = challenge?.data?.id || challenge?.data?.challengeId;
+        const verified = await sb.auth.mfa.verify({ factorId, challengeId, code });
+        if(verified?.error) throw verified.error;
+        holder.remove();
+        await _refreshMfaStatus();
+        _MFA_STATUS.verified = true;
+        _hideAdminMfaGate();
+        _applyPrivilegedVisibility();
+        renderMfaSettings?.();
+        if(typeof _toast === 'function') _toast('Authenticator enrolled and verified.', 'ok');
+      }catch(e){
+        alert('MFA enrollment verification failed: ' + (e?.message || e));
+      }
+    });
+    return true;
+  }catch(e){
+    alert('MFA enrollment failed: ' + (e?.message || e));
+    return false;
+  }
+}
+async function renderMfaSettings(){
+  const host = document.getElementById('mfa-settings-result');
+  if(!host) return;
+  host.innerHTML = '<div class="note ni">Checking MFA status...</div>';
+  const st = await _refreshMfaStatus();
+  const factors = st.factors || [];
+  const verified = factors.filter(f => (f.status || '').toLowerCase() === 'verified');
+  const color = _adminMfaOk() ? 'var(--green-t)' : 'var(--amber-t,#92400e)';
+  host.innerHTML = `<div style="border:1px solid var(--bdr);border-radius:8px;padding:10px;background:var(--bg2)">
+    <div style="font-weight:800;color:${color};margin-bottom:4px">Current session: ${escHtml(st.currentLevel || 'unknown')} ${_adminMfaOk() ? '(admin-ready)' : '(verification required)'}</div>
+    <div style="font-size:11.5px;color:var(--txt2);line-height:1.45">
+      Next possible level: ${escHtml(st.nextLevel || 'unknown')}. Verified factors: ${verified.length}. ${st.message ? escHtml(st.message) : ''}
+    </div>
+  </div>`;
+}
 
 function _adminOnly(action){
   if(!_isAdminOrSU()){
@@ -6719,6 +6917,11 @@ function _adminOnly(action){
     // triggered an OS-level dialog.
     if(typeof _toast === 'function') _toast('🔒 Admin only — can\'t ' + action + '.', 'warn');
     else alert('Only administrators can '+action+'.');
+    return false;
+  }
+  if(!_adminMfaOk()){
+    alert(_mfaAdminBlockMessage() || 'Admin MFA verification is required.');
+    _showAdminMfaGate();
     return false;
   }
   return true;
