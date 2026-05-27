@@ -9059,6 +9059,60 @@ async function restoreFromBackup(backupId){
   }
 }
 
+async function previewBackupRestore(backupId, targetElId){
+  if(!_adminOnly('preview backup restore')) return;
+  const target = document.getElementById(targetElId);
+  if(!target){ console.warn('[RS] previewBackupRestore: target element not found:', targetElId); return; }
+  if(!_supabase){ target.innerHTML = '<div class="note ne">Supabase is not configured.</div>'; return; }
+  target.innerHTML = '<div class="note ni">Loading backup preview...</div>';
+  try{
+    const { data, error } = await _supabase.from(_BACKUP_TABLE)
+      .select('data, created_at').eq('id', backupId).single();
+    if(error) throw error;
+    if(!data?.data) throw new Error('Backup row is empty.');
+    let parsed = null;
+    try{ parsed = JSON.parse(data.data); }catch(parseErr){ throw new Error('Backup is not valid JSON: ' + (parseErr.message||parseErr)); }
+    const validation = (typeof _validateRemotePayload === 'function')
+      ? _validateRemotePayload(parsed)
+      : {ok:true, fatal:false, problems:[]};
+    const stats = [
+      ['Physicians', (parsed.physicians||[]).length],
+      ['Sites', (parsed.sites||[]).length],
+      ['DR shifts', (parsed.drShifts||[]).length],
+      ['IR shifts', (parsed.irShifts||[]).length],
+      ['IR calls', (parsed.irCalls||[]).length],
+      ['Weekend calls', (parsed.weekendCalls||[]).length],
+      ['Holidays', (parsed.holidays||[]).length],
+      ['Vacations', (parsed.vacations||[]).length],
+    ];
+    const safeId = JSON.stringify(String(backupId)).replace(/"/g,'&quot;');
+    const safeTarget = JSON.stringify(String(targetElId)).replace(/"/g,'&quot;');
+    const restoreBtnId = 'rs-restore-confirm-' + Math.random().toString(36).slice(2);
+    target.innerHTML = `<div class="rs-restore-preview">
+      <div class="rs-restore-head">
+        <div>
+          <div class="rs-restore-title">Restore preview</div>
+          <div class="rs-restore-sub">${escHtml(backupId)} · ${escHtml(data.created_at ? new Date(data.created_at).toLocaleString() : (parsed.savedAt || 'timestamp unknown'))}</div>
+        </div>
+        <button class="bsm" onclick="renderBackupPicker(${safeTarget})">Back to list</button>
+      </div>
+      ${validation.ok || !validation.fatal
+        ? '<div class="note nw" style="margin-bottom:10px">Review the counts below. Restoring replaces the active practice row and requires admin MFA.</div>'
+        : `<div class="note ne" style="margin-bottom:10px">This backup failed validation: ${escHtml((validation.problems||[]).slice(0,4).join('; '))}</div>`}
+      <div class="rs-restore-grid">
+        ${stats.map(([label,value]) => `<div class="rs-restore-card"><div class="rs-restore-label">${escHtml(label)}</div><div class="rs-restore-value">${escHtml(String(value))}</div><div class="rs-restore-detail">Backup payload</div></div>`).join('')}
+      </div>
+      <div class="rs-restore-actions">
+        <label class="chk" style="border-radius:8px"><input type="checkbox" onchange="document.getElementById('${restoreBtnId}').disabled=!this.checked"> I understand this overwrites current data</label>
+        <button id="${restoreBtnId}" class="br bsm" disabled onclick="restoreFromBackup(${safeId}).then(ok=>{ if(ok) renderBackupPicker(${safeTarget}); })">Restore this backup</button>
+        <button class="bsm" onclick="renderBackupPicker(${safeTarget})">Cancel</button>
+      </div>
+    </div>`;
+  }catch(e){
+    target.innerHTML = '<div class="note ne">Failed to preview backup: '+escHtml(e.message||String(e))+'</div>';
+  }
+}
+
 // Convenience: render a backup picker into a target element. Admins can
 // invoke this from the Settings page or the dev console; the future
 // Backups tab can also call it directly.
@@ -9082,7 +9136,7 @@ async function renderBackupPicker(targetElId){
         <td style="font-weight:600">${escHtml(dateStr)}</td>
         <td style="color:var(--txt3);font-size:11px">${escHtml(created)}</td>
         <td style="font-family:monospace;font-size:10px;color:var(--txt3)">${escHtml(b.id)}</td>
-        <td><button class="bsm" onclick="restoreFromBackup(${safeId})">Restore</button></td>
+        <td><button class="bsm" onclick="previewBackupRestore(${safeId}, ${JSON.stringify(String(targetElId)).replace(/"/g,'&quot;')})">Preview</button></td>
       </tr>`;
     }).join('');
     target.innerHTML = `<div class="note nw" style="margin-bottom:8px">
