@@ -87,6 +87,19 @@ function hasAal2(token: string): boolean {
   return String(payload.aal || "").toLowerCase() === "aal2";
 }
 
+const RATE_BUCKETS = new Map<string, { n: number; t: number }>();
+function rateLimit(key: string, capPerMinute: number): boolean {
+  const now = Date.now();
+  const current = RATE_BUCKETS.get(key);
+  if (!current || now - current.t > 60_000) {
+    RATE_BUCKETS.set(key, { n: 1, t: now });
+    return true;
+  }
+  if (current.n >= capPerMinute) return false;
+  current.n++;
+  return true;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -159,6 +172,10 @@ serve(async (req) => {
         error: "Caller is not an admin or superuser (app_metadata.role: " + (appMeta.role || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",
         caller_email: caller.email,
       }, 403);
+    }
+
+    if (!rateLimit(String(caller.id || caller.email || "unknown"), 30)) {
+      return json({ error: "Too many user-management requests; slow down." }, 429);
     }
 
     if (!hasAal2(token)) {
