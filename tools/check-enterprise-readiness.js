@@ -7,7 +7,7 @@ const required = [
   ['CodeQL workflow', '.github/workflows/codeql.yml', /github\/codeql-action\/(init|analyze)@v\d+/],
   ['Staging CI workflow', '.github/workflows/staging-ci.yml', /npm run test:e2e/],
   ['Dependabot config', '.github/dependabot.yml', /package-ecosystem:\s*npm/],
-  ['Enterprise readiness docs', 'docs/ENTERPRISE-READINESS.md', /OWASP ASVS[\s\S]*NIST CSF 2\.0/],
+  ['Enterprise readiness docs', 'docs/ENTERPRISE-READINESS.md', /NIST CSF 2\.0[\s\S]*OWASP ASVS/],
   ['Environment docs', 'docs/ENVIRONMENTS.md', /staging[\s\S]*production/i],
   ['Telemetry migration', 'docs/sql/06-enterprise-telemetry.sql', /CREATE TABLE IF NOT EXISTS public\.radscheduler_telemetry/],
   ['Admin MFA migration', 'docs/sql/05-admin-mfa-aal2-hardening.sql', /radscheduler_admin_aal2/],
