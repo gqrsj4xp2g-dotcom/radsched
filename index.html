@@ -35735,6 +35735,14 @@ function addIRCallFromGrid(sel,date,callType,group){
   }
   // Daily call covers the entire group — no single hospital site
   S.irCalls.push({id:S.nextId++,physId,date,callType,irGroup:group,site:'',notes:''});
+  // Auto-pair: if this is a daily call, ensure the physician also has
+  // a matching IR daily shift on this date. Previously the Week
+  // Builder dropdown only created the call record; admins had to
+  // remember to manually add the procedure shift afterward and often
+  // forgot, leaving the physician on call but unscheduled to work.
+  if(callType === 'daily'){
+    _ensureIRShiftForCall(physId, date, group, '', 'week-builder');
+  }
   sel.value='';
   triggerSave();
   renderIRWeekBuilder();
