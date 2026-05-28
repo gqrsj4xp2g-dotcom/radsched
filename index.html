@@ -11380,12 +11380,12 @@ async function doLogout(){
   CU=null;
   USERS.length=0;
   _ROW_ID='main'; _PRACTICE_ID='main'; _PRACTICES.length=0;
-  // Invalidate the version-gated lookup caches + side-table read
-  // cache so the NEXT user to log in this tab can't see the
-  // previous practice's compiled shift-by-date / physician-by-id
-  // data. Same root cause as the switchPractice fix.
+  // Invalidate the version-gated lookup caches (_dateIdx via
+  // _shiftsOnDate, _physByIdMap via _physById) so the NEXT user to
+  // log in this tab can't see the previous practice's compiled
+  // shift-by-date / physician-by-id data. Same root cause as the
+  // switchPractice fix.
   if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
-  if(typeof _shiftsInvalidateReadCache === 'function') _shiftsInvalidateReadCache();
   // Re-arm the SW update banner so a deploy that lands during the
   // NEXT session still notifies (the flag was sticky across logout).
   try{ _swUpdateBannerShown = false; }catch(_){}
