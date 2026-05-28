@@ -27082,6 +27082,29 @@ async function _edgeAuthHeaders(){
   };
 }
 
+// fetch() with an AbortController timeout (rs-v97). The notification /
+// broadcast / publish edge-function calls had no timeout — a hung
+// edge function (slow region, rate-limited Resend, dead socket) would
+// block the caller forever, and in sendPublish's sequential loop it
+// would stall every subsequent recipient. Wraps fetch so a stuck
+// request rejects after `ms` (default 10s) with a clear AbortError
+// the caller's try/catch surfaces. Mirrors the inline pattern _notify
+// already uses, centralized so every edge call gets the same guard.
+async function _fetchWithTimeout(url, opts, ms){
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms || 10000);
+  try{
+    return await fetch(url, { ...(opts||{}), signal: ctrl.signal });
+  }catch(e){
+    if(e && e.name === 'AbortError'){
+      throw new Error('Request timed out after ' + Math.round((ms||10000)/1000) + 's — the server may be slow or unreachable. Try again.');
+    }
+    throw e;
+  }finally{
+    clearTimeout(t);
+  }
+}
+
 // Looks like an email placeholder that won't reach a real inbox
 // (e.g., @rad.com, @example.com, @test, @local). Purely heuristic.
 function _looksPlaceholder(email){
