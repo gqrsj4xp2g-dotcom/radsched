@@ -13388,6 +13388,19 @@ async function switchPractice(id,name){
     const d=await _pullFromSupabase();
     if(d){
       _applyRemoteData(d); // sets _isRestoring true/false internally, safe to nest
+      // ── Cross-practice cache invalidation (critical) ──
+      // _applyRemoteData runs under _isRestoring=true, which makes
+      // triggerSave() early-return WITHOUT bumping _dateIdxVersion.
+      // The version-gated caches (_dateIdx via _shiftsOnDate,
+      // _physByIdMap via _physById) therefore keep serving the
+      // PREVIOUS practice's data after a switch until some later
+      // mutation happens to bump the version — calendars/dashboard
+      // can render practice A's shifts + physician objects under
+      // practice B. Force a version bump here so both rebuild from
+      // the freshly-applied B state on next read. Also clear the
+      // side-table read cache (its own 30s TTL, not version-gated).
+      if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+      if(typeof _shiftsInvalidateReadCache === 'function') _shiftsInvalidateReadCache();
       // Practice id changed → leader election needs to rebind the channel
       // name (which is keyed off _ROW_ID). Tear down + re-init.
       _stopRealtimeAndPoll();
