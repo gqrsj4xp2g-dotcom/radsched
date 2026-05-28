@@ -22150,9 +22150,22 @@ function resolveSwap(id,status){
   const notifBody = `Your swap request for ${s.date} has been ${verdict.toLowerCase()} by ${resolver}.` +
     (s.reason?`\n\nOriginal note: ${s.reason}`:'') +
     `\n\nSee RadScheduler → Shift Swaps for details.`;
-  // Notify both physicians
-  if(s.fromPhysId) _notify('swapRes',{physId:s.fromPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody});
-  if(s.toPhysId&&s.toPhysId!==s.fromPhysId) _notify('swapRes',{physId:s.toPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody});
+  // Notify both physicians. resolveSwap is synchronous (callers don't
+  // await it), so we fire the notifies and attach a non-blocking
+  // failure handler rather than swallowing the result. Previously a
+  // failed/timed-out notify was completely silent — the swap resolved
+  // but neither party heard about it and the admin had no signal.
+  const _swapNotifs = [];
+  if(s.fromPhysId) _swapNotifs.push(_notify('swapRes',{physId:s.fromPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody}));
+  if(s.toPhysId&&s.toPhysId!==s.fromPhysId) _swapNotifs.push(_notify('swapRes',{physId:s.toPhysId,subject:`Swap request ${verdict.toLowerCase()}`,body:notifBody}));
+  if(_swapNotifs.length){
+    Promise.allSettled(_swapNotifs).then(results => {
+      const failed = results.filter(r => r.status === 'rejected' || (r.value && r.value.ok === false)).length;
+      if(failed && typeof _toast === 'function'){
+        _toast(`Swap resolved, but ${failed} notification${failed===1?'':'s'} failed to send. Parties may not have been emailed.`, 'warn');
+      }
+    });
+  }
 }
 
 /* ─── SETTINGS ─── */
