@@ -29816,6 +29816,7 @@ async function sendPublish(){
   if(!url || !key){ setStatus('✕ Supabase not configured.', 'var(--red-t)'); return; }
   const subject = _pubSubject(start, end);
   let sent = 0, failed = 0;
+  const _pubFailDetail = []; // addresses that failed — surfaced in the final status
   // Send sequentially to keep edge-function load reasonable; the audiences
   // here are small (single practice). For very large blasts, batch into the
   // recipient list of a single broadcast call instead.
