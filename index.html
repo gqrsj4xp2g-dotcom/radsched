@@ -29845,8 +29845,16 @@ async function sendPublish(){
     recipientCount: sent, failedCount: failed
   });
   triggerSave();
+  // Surface WHICH recipients failed so the admin can follow up, not
+  // just an opaque "(N failed)" count. Cap the inline list at 5 to
+  // keep the status line readable; the console has the full set.
+  let failNote = '';
+  if(failed){
+    const shown = _pubFailDetail.slice(0,5).join(', ');
+    failNote = ` (${failed} failed: ${shown}${_pubFailDetail.length>5?` +${_pubFailDetail.length-5} more`:''})`;
+  }
   setStatus(
-    `✓ Sent ${sent} of ${eligible.length}` + (failed?` (${failed} failed)`:''),
+    `✓ Sent ${sent} of ${eligible.length}` + failNote,
     failed ? 'var(--amber-t,#92400e)' : 'var(--green-t)'
   );
   _renderPubLog();
