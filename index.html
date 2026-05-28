@@ -29822,7 +29822,7 @@ async function sendPublish(){
   for(const {u, addr, digest} of eligible){
     const body = `Hi ${u.first||'there'},\n\nHere is your schedule for ${start} through ${end}:\n\n${digest.plain}\n\n—\nRadScheduler · published by ${(CU?.first||'')+' '+(CU?.last||'')}`;
     try{
-      const res = await fetch(`${url}/functions/v1/send-notification`,{
+      const res = await _fetchWithTimeout(`${url}/functions/v1/send-notification`,{
         method:'POST',
         headers:await _edgeAuthHeaders(),
         body:JSON.stringify({
@@ -29833,8 +29833,8 @@ async function sendPublish(){
         })
       });
       if(res.ok) sent++;
-      else { failed++; const e = await res.json().catch(()=>({})); console.warn('[RS publish] send failed', e); }
-    }catch(e){ failed++; console.warn('[RS publish] send error', e); }
+      else { failed++; const e = await res.json().catch(()=>({})); console.warn('[RS publish] send failed for '+addr, e); _pubFailDetail.push(addr); }
+    }catch(e){ failed++; console.warn('[RS publish] send error for '+addr, e); _pubFailDetail.push(addr); }
   }
   // Log the publish event
   if(!Array.isArray(S.publishLog)) S.publishLog = [];
