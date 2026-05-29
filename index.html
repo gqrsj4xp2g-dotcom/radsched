@@ -36706,8 +36706,14 @@ function renderIRWeekBuilder(){
   // ── UNSCHEDULED summary ──
   const irPhysAll=S.physicians.filter(p=>p.irFte>0&&(grp==='both'||p.irGroup===grp));
   const unscheduled=[];
+  // Build a {physId|date} Set once instead of S.irCalls.find() per
+  // (physician × day) — that inner find was O(M) over all IR calls,
+  // making the summary O(5 × N × M). At 40 IR phys + 500 calls that's
+  // ~100K comparisons per builder render; the Set makes lookups O(1).
+  const _calledSet = new Set();
+  (S.irCalls||[]).forEach(ic => { _calledSet.add(ic.physId + '|' + ic.date); });
   weekDates.slice(0,5).forEach(d=>{
-    irPhysAll.forEach(p=>{if(!S.irCalls.find(ic=>ic.physId===p.id&&ic.date===d))unscheduled.push({name:p.last,date:d});});
+    irPhysAll.forEach(p=>{ if(!_calledSet.has(p.id + '|' + d)) unscheduled.push({name:p.last,date:d}); });
   });
   if(unscheduled.length){
     html+=`<div class="note nw">
