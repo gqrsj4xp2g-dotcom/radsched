@@ -36721,6 +36721,19 @@ function _hasIRShiftOnDate(physId, date){
 function _ensureIRShiftForCall(physId, date, irGroup, callSite, noteSuffix){
   if(!physId || !date) return null;
   if(_hasIRShiftOnDate(physId, date)) return null; // already paired
+  // Don't auto-create an IR procedure shift if the physician is
+  // already committed to an in-person DR shift or a weekend call
+  // that day — that double-books them (one-shift-per-day rule). The
+  // IR daily call itself coexists with the paired IR shift (that's
+  // the intent), and a DR *Home* shift is replaceable, but a real
+  // DR 1st/2nd/3rd or a weekend call is a conflict the admin must
+  // resolve manually rather than have us silently stack onto.
+  const drConflict = (S.drShifts || []).some(s => s.physId === physId && s.date === date && s.shift !== 'Home');
+  const weConflict = (S.weekendCalls || []).some(w => w.physId === physId && (w.satDate === date || w.sunDate === date || w.date === date));
+  if(drConflict || weConflict){
+    if(typeof _audit === 'function') _audit('irCall.autoPairSkipped', { physId, date, reason: drConflict ? 'DR shift' : 'weekend call' });
+    return null;
+  }
   const p = _physById(physId);
   const resolvedSite = callSite
     || (p && p.irSitePrim)
