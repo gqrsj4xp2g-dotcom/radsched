@@ -43384,9 +43384,25 @@ function _emailInstallKit(physId, days){
 
 function _copyInstallKitText(physId, days){
   const text = _buildInstallKitEmailBody(physId, days);
-  navigator.clipboard.writeText(text).then(() => {
-    if(typeof _toast === 'function') _toast('Install-kit message copied. Paste into Slack/email/etc.', 'ok');
-  }).catch(() => alert('Copy failed — select the text in the email body and copy manually.'));
+  const ok = () => { if(typeof _toast === 'function') _toast('Install-kit message copied. Paste into Slack/email/etc.', 'ok'); };
+  const fail = () => alert('Copy failed — select the text in the email body and copy manually.');
+  // navigator.clipboard is undefined in non-secure contexts and some
+  // private-browsing modes; calling .writeText on it throws a
+  // TypeError synchronously, BEFORE any .catch can run. Guard the
+  // API presence and fall back to the execCommand textarea trick
+  // (same fallback copyEdgeFuncCode uses).
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(ok).catch(fail);
+    return;
+  }
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    const done = document.execCommand('copy');
+    document.body.removeChild(ta);
+    done ? ok() : fail();
+  }catch(_){ fail(); }
 }
 
 // Render the widget page: physician dropdown + active pairings list.
