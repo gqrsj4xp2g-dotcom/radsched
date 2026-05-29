@@ -49765,7 +49765,22 @@ async function sendWeeklyMagicLinks(weekStart){
   catch(e){ if(typeof _toast === 'function') _toast(e.message || String(e), 'warn'); return; }
   const physicians = (S.physicians || []).filter(p => p.email);
   if(!physicians.length){ if(typeof _toast === 'function') _toast('No physicians have email addresses set.', 'info'); return; }
+  // Double-send guard. Without this an accidental double-click (or a
+  // click before the result toast clears) fires 2N digest emails.
+  // In-flight flag blocks concurrent runs; the confirm catches the
+  // accidental single re-click and shows the blast size.
+  if(_weeklyDigestInFlight){
+    if(typeof _toast === 'function') _toast('Weekly digest already sending — wait for it to finish.', 'info');
+    return;
+  }
+  const _confirmSend = (typeof confirm === 'function')
+    ? confirm(`Send the week-of-${weekStart} schedule digest to ${physicians.length} physician${physicians.length===1?'':'s'}?`)
+    : true;
+  if(!_confirmSend) return;
+  _weeklyDigestInFlight = true;
+  const _digestWatchdog = setTimeout(() => { _weeklyDigestInFlight = false; }, 120000);
   let sent = 0, failed = 0;
+  try{
   for(const p of physicians){
     // Per-physician opaque token so they can open the page without
     // logging in. Verification happens server-side; we just generate
