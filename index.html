@@ -42323,6 +42323,15 @@ function _renderOnCallConfirmation(isAdmin){
 
 // ───── Mark an on-call shift acknowledged (audit + persist + re-render) ─
 function acknowledgeOnCall(physId, ds){
+  // Require an authenticated user — this can be reached from the
+  // service-worker notification-click bridge (rs:oncall-ack), which
+  // may fire when the tab is logged out. Recording an ack with
+  // ackBy:null pollutes the audit trail and may write to the wrong
+  // practice context. Bail with a prompt to sign in instead.
+  if(!CU || !CU.id){
+    if(typeof _toast === 'function') _toast('Sign in to confirm on-call.', 'err');
+    return;
+  }
   if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
   if(_hasOnCallAck(physId, ds)) return; // idempotent
   S.onCallAcks.push({
