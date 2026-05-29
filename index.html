@@ -49794,7 +49794,7 @@ async function sendWeeklyMagicLinks(weekStart){
     }catch(_){ tok = btoa(tokRaw).replace(/[+/=]/g, c => ({'+':'-','/':'_','=':''}[c])); }
     const link = `${location.origin}/?guest=${encodeURIComponent(tok)}&phys=${p.id}&week=${weekStart}`;
     try{
-      const r = await fetch(`${_getUrl()}/functions/v1/send-notification`, {
+      const r = await _fetchWithTimeout(`${_getUrl()}/functions/v1/send-notification`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -49809,7 +49809,12 @@ async function sendWeeklyMagicLinks(weekStart){
   }
   if(typeof _toast === 'function') _toast(`Weekly digest: ${sent} sent, ${failed} failed.`, failed ? 'warn' : 'ok');
   if(typeof _audit === 'function') _audit('digest.weeklyManual', { weekStart, sent, failed });
+  } finally {
+    _weeklyDigestInFlight = false;
+    clearTimeout(_digestWatchdog);
+  }
 }
+let _weeklyDigestInFlight = false;
 
 // ── H6. AI explainer on rule violations ────────────────────────────────
 // When the data-integrity scanner flags a violation, this packages the
