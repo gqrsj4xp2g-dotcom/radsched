@@ -11386,6 +11386,16 @@ async function doLogout(){
   // shift-by-date / physician-by-id data. Same root cause as the
   // switchPractice fix.
   if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+  // Clear in-memory caches that hold the previous user/practice's
+  // content so a different login in the same tab can't see it:
+  //   - AI conversation (history sent to the API + visible transcript
+  //     + its localStorage mirror) — could contain another practice's
+  //     physician names / schedule discussion.
+  //   - audit-log side-table cache (10s TTL) — another practice's
+  //     audit rows could flash for up to 10s after re-login.
+  try{ _aiHistory = []; _aiTranscript = []; }catch(_){}
+  try{ localStorage.removeItem(_AI_STORAGE_KEY); }catch(_){}
+  try{ _auditSideCache = { rows: null, fetchedAt: 0 }; }catch(_){}
   // Re-arm the SW update banner so a deploy that lands during the
   // NEXT session still notifies (the flag was sticky across logout).
   try{ _swUpdateBannerShown = false; }catch(_){}
