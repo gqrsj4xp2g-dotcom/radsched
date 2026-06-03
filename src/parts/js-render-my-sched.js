@@ -146,6 +146,18 @@ function renderMySched(){
     <div class="card-title">${monthLabel}</div>
     <div class="cal-grid" style="margin-bottom:4px">${DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('')}</div>
     <div class="cal-grid">`;
+  // Pre-compute this physician's Vacation-Sold-Back date set ONCE so
+  // the per-cell render below is an O(1) Set lookup instead of an
+  // S.vacations.some() full scan per calendar cell (was O(cells x
+  // vacations) -- roughly 15K scans/render at 500 vacations).
+  const _sbSet = new Set();
+  (S.vacations||[]).forEach(v => {
+    if(v.physId !== p.id || v.type !== 'Vacation Sold Back') return;
+    try{
+      let cur = parseDateLocal(v.start); const end = parseDateLocal(v.end || v.start);
+      while(cur <= end){ _sbSet.add(fmtDate(cur)); cur.setDate(cur.getDate()+1); }
+    }catch(_){}
+  });
   cells.forEach(c=>{
     if(!c.day){html+='<div class="cal-day other"></div>';return;}
     let evs='';
@@ -235,7 +247,7 @@ function renderMySched(){
     });
     hols.filter(h=>h.date===c.date).forEach(h=>evs+=`<div class="ev ehol" title="${escHtml(h.name||'')}">🏖</div>`);
     if(vacSet.has(c.date)) evs+=`<div class="ev evac" title="Off">Off</div>`;
-    const isSB=S.vacations.some(v=>v.physId===p.id&&v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
+    const isSB=_sbSet.has(c.date);
     html+=`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${isSB?' sold-back':''}" style="min-height:58px"><div class="cal-num">${c.day}</div>${evs}</div>`;
   });
   html+=`</div></div></div>`;  // close mysched-grid-section
