@@ -8,10 +8,12 @@
 // Auth model:
 //   1. The widget POSTs the full pairing code (the same base64 blob
 //      the admin generated in RadScheduler) as { code }.
-//   2. We decode + verify the HMAC-SHA256 signature using the anon key
-//      embedded in the payload as the shared secret. This proves the
-//      code was issued by someone with admin access to the practice.
-//   3. On verify-success we use the SERVICE ROLE key (server-side only)
+//   2. We decode + verify the HMAC-SHA256 signature. Legacy v1 codes use
+//      the anon key as the shared secret; v2+ codes use the server-side
+//      per-practice widget secret stored in the practice row.
+//   3. For v2+ codes, we also confirm the code is still present in the
+//      active widgetPairings list so admin revocation takes effect.
+//   4. On verify-success we use the SERVICE ROLE key (server-side only)
 //      to fetch / update the practice row. Bypasses RLS but only for
 //      codes we cryptographically verified.
 //
