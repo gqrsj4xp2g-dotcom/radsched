@@ -3,9 +3,9 @@
  * Boot flow:
  *   1. Try to load a stored pairing code via the preload bridge.
  *   2. If absent, show the pairing screen.
- *   3. Otherwise decode + verify the code, query Supabase for the
- *      practice's shared row (RLS-gated, anon-key read), filter to
- *      this physician's day, render dashboard.
+ *   3. Otherwise decode the code, query the widget-data edge function
+ *      for the practice row, filter to this physician's day, render
+ *      dashboard.
  *
  * Refresh: every 5 minutes + manual button.
  *
@@ -74,8 +74,16 @@ function decodePairingCode(code){
 }
 
 async function verifyPairing(payload){
-  if(!payload || !payload.sig || !payload.sbAnonKey) return false;
+  if(!payload || !payload.sig || !payload.sbAnonKey || !payload.sbUrl || !payload.practiceId || !payload.physId) return false;
   const { sig, ...rest } = payload;
+  const tokenVersion = +(payload.v || 1);
+  if(tokenVersion >= 2){
+    // v2+ codes are signed with a per-practice secret that is intentionally
+    // not shipped to the desktop widget. The widget can validate only the
+    // envelope shape locally; the widget-data edge function verifies the
+    // HMAC against the server-side practice secret before returning data.
+    return true;
+  }
   const body = JSON.stringify(rest);
   const expected = await hmacB64Url(rest.sbAnonKey, body);
   return expected === sig;
@@ -148,8 +156,8 @@ function _applyPhysicianAccent(hexColor){
 //
 // The edge function:
 //   1. Receives the full pairing code in the request body
-//   2. Verifies the HMAC signature with the anon key as shared secret
-//      (proves the code came from a RadScheduler admin)
+//   2. Verifies the HMAC signature. Legacy v1 codes use the anon key;
+//      v2+ codes use the server-side per-practice widget secret.
 //   3. Uses the SERVICE ROLE (server-side only) to fetch the row
 //   4. Returns the practice JSON wrapped as { data: {...} }
 //
@@ -591,7 +599,7 @@ async function onPairSubmit(){
   if(!code){ errEl.textContent = 'Paste a pairing code first.'; return; }
   const payload = decodePairingCode(code);
   if(!payload){ errEl.textContent = 'Code is malformed (could not decode).'; return; }
-  if(!await verifyPairing(payload)){ errEl.textContent = 'Code signature did not verify. Ask your admin to issue a fresh one.'; return; }
+  if(!await verifyPairing(payload)){ errEl.textContent = 'Code is missing required fields or its legacy signature did not verify. Ask your admin to issue a fresh one.'; return; }
   if(payload.exp && new Date(payload.exp).getTime() < Date.now()){
     errEl.textContent = 'This code expired ' + payload.exp.slice(0,10) + '. Request a new one.';
     return;
@@ -1094,7 +1102,7 @@ async function refresh(){
     if(!code){ renderPairing(); return; }
     const payload = decodePairingCode(code);
     if(!payload){ renderError('Stored pairing code is corrupt. Re-pair to fix.', true); return; }
-    if(!await verifyPairing(payload)){ renderError('Signature mismatch — pairing was tampered with or revoked.', true); return; }
+    if(!await verifyPairing(payload)){ renderError('Stored pairing code is missing required fields or its legacy signature did not verify. Re-pair to fix.', true); return; }
     if(payload.exp && new Date(payload.exp).getTime() < Date.now()){
       renderError('Pairing expired ' + payload.exp.slice(0,10) + '. Ask your admin for a new code.', true);
       return;
