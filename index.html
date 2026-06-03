@@ -43042,6 +43042,18 @@ function _getOrCreateWidgetSecret(){
   return S.cfg._widgetSecret;
 }
 
+async function _flushWidgetPairingSave(){
+  if(typeof _pushToSupabase !== 'function') return true;
+  if(!(_getUrl&&_getUrl()&&_getKey&&_getKey())) return true;
+  try{ clearTimeout(_saveTimeout); }catch(_){}
+  for(let attempt = 0; attempt < 3; attempt++){
+    const ok = await _pushToSupabase();
+    if(ok) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
 async function generateWidgetPairing(){
   if(!_adminOnly('generate widget pairing')) return;
   const physId = +document.getElementById('wpair-phys')?.value || 0;
@@ -43100,6 +43112,10 @@ async function generateWidgetPairing(){
   });
   if(typeof _audit === 'function') _audit('widget.pairing.generated', { physId, exp });
   if(typeof triggerSave === 'function') triggerSave();
+  const pairingSaved = await _flushWidgetPairingSave();
+  if(!pairingSaved && typeof _toast === 'function'){
+    _toast('Pairing code created, but Supabase sync is still pending. Wait for the save indicator before sending it.', 'warn');
+  }
   // Render result with copy button.
   const result = document.getElementById('wpair-result');
   if(result){
