@@ -61,6 +61,10 @@ function jsonResp(body: unknown, status = 200): Response {
   });
 }
 
+function codeFingerprint(code: string): string {
+  return String(code || '').trim().slice(-8);
+}
+
 // `purpose` differentiates two issuing flows that share the same
 // HMAC envelope: 'widget' (read+write — credits) vs 'cal-feed'
 // (read-only — ICS). The verifier enforces that the caller's
@@ -137,6 +141,26 @@ async function _verifyHmac(
   if (requiredPurpose !== 'any' && actual !== requiredPurpose) {
     throw new Error(`token purpose mismatch (got '${actual}', need '${requiredPurpose}')`);
   }
+}
+
+function assertActiveWidgetPairing(practice: any, payload: any, code: string): void {
+  const pairings = Array.isArray(practice?.widgetPairings) ? practice.widgetPairings : [];
+  if (!pairings.length) return; // legacy practices before active-pairing tracking.
+  const tokenVersion = +(payload?.v || 1);
+  if (tokenVersion < 2 && payload?.pairingId == null) return; // legacy anon-key tokens were not revocable.
+  const fp = codeFingerprint(code);
+  const pairingId = payload?.pairingId != null ? +payload.pairingId : null;
+  const now = Date.now();
+  const match = pairings.find((p: any) => {
+    if (!p) return false;
+    const idMatches = pairingId != null && +p.id === pairingId;
+    const fpMatches = pairingId == null && fp && p.fingerprint === fp;
+    if (!idMatches && !fpMatches) return false;
+    if (+p.physId !== +payload.physId) return false;
+    if (p.exp && new Date(p.exp).getTime() < now) return false;
+    return true;
+  });
+  if (!match) throw new Error('pairing revoked or not active — ask admin to issue a fresh code');
 }
 
 // Legacy wrapper kept for the GET ICS path which fetches the practice
@@ -403,6 +427,8 @@ Deno.serve(async (req: Request) => {
     ? practice.cfg._widgetSecret : null;
   try { await _verifyHmac(payload, practiceSecret, 'widget'); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
+  try { assertActiveWidgetPairing(practice, payload, body.code); }
+  catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   if (!Array.isArray(practice.physicianCredits)) practice.physicianCredits = [];
 
   // ── READ ────────────────────────────────────────────────────────
@@ -419,6 +445,7 @@ Deno.serve(async (req: Request) => {
     const freshSecret = (fresh && fresh.cfg && typeof fresh.cfg._widgetSecret === 'string')
       ? fresh.cfg._widgetSecret : null;
     await _verifyHmac(payload, freshSecret, 'widget');
+    assertActiveWidgetPairing(fresh, payload, body.code);
     if (!Array.isArray(fresh.physicianCredits)) fresh.physicianCredits = [];
     return fresh;
   }

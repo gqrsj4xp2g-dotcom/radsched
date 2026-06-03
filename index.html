@@ -43065,8 +43065,10 @@ async function generateWidgetPairing(){
   const clampedDays = Math.max(1, Math.min(days, 365));
   const issuedAt = new Date().toISOString();
   const exp = new Date(Date.now() + clampedDays * 86400000).toISOString();
+  const pairingId = S.nextId++;
   const payload = {
     v: 2,                          // bumped — v2 signs with practice secret, not anon key
+    pairingId,
     practiceId,
     physId,
     physLast: phys.last || '',
@@ -43089,7 +43091,7 @@ async function generateWidgetPairing(){
   // Store the active pairing record so admins can revoke + audit.
   if(!Array.isArray(S.widgetPairings)) S.widgetPairings = [];
   S.widgetPairings.push({
-    id: S.nextId++,
+    id: pairingId,
     physId,
     issuedAt,
     exp,
