@@ -14384,8 +14384,8 @@ function renderMySched(){
     <div class="cal-grid">`;
   // Pre-compute this physician's Vacation-Sold-Back date set ONCE so
   // the per-cell render below is an O(1) Set lookup instead of an
-  // S.vacations.some() full scan per calendar cell (was O(cells ×
-  // vacations) — ~15K scans/render at 500 vacations).
+  // S.vacations.some() full scan per calendar cell (was O(cells x
+  // vacations) -- roughly 15K scans/render at 500 vacations).
   const _sbSet = new Set();
   (S.vacations||[]).forEach(v => {
     if(v.physId !== p.id || v.type !== 'Vacation Sold Back') return;
