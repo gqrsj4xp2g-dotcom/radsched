@@ -49828,7 +49828,15 @@ async function sendWeeklyMagicLinks(weekStart){
     : true;
   if(!_confirmSend) return;
   _weeklyDigestInFlight = true;
-  const _digestWatchdog = setTimeout(() => { _weeklyDigestInFlight = false; }, 120000);
+  // No watchdog timer here: a fixed timeout (e.g. 120s) can fire
+  // WHILE the send loop is still running on a large/slow practice
+  // (each send is bounded by _fetchWithTimeout's 10s, so 50
+  // physicians can legitimately take >120s), clearing the in-flight
+  // flag mid-loop and letting a re-click start a concurrent second
+  // send → duplicate digests. The try/finally below already clears
+  // the flag on completion, return, or throw, and every await in
+  // the loop is bounded, so the flag can never get permanently
+  // stuck — the watchdog was both redundant and actively harmful.
   let sent = 0, failed = 0;
   try{
   for(const p of physicians){
