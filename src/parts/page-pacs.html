@@ -781,6 +781,242 @@ create table pacs_inbound (
     if(name==="activity") renderActivity();
   };
 
+  /* ─── live dictation ─────────────────────────────────────────────────
+     Two input paths:
+       (1) Web Speech API — uses the browser mic. Works on Chrome / Edge /
+           Safari today. Not a production PHI path; useful for demos and
+           on-device prototyping. Recognition is interrupted by extended
+           silence — we auto-restart so the user can pause.
+       (2) Fluency CAPD WebSocket — pasted URL connects to the dictation
+           vendor's interim-transcript stream. Same protocol the CDI nudges
+           use. The browser doesn't initiate any audio capture in this mode.
+     Both paths converge on `dictAppend(text, isFinal)` which keeps a
+     running transcript and periodically pipes it through the coding
+     engine (every 1500ms after a pause). The Coding tab's runPipeline is
+     reused — same data, same outputs, no duplicate logic.
+  ─────────────────────────────────────────────────────────────────────── */
+  let _recog = null;
+  let _capd = null;
+  let _recogActive = false;
+  let _baseTranscript = "";  // committed (final) text accumulated so far
+  let _debounceTimer = null;
+
+  function _setDictBtns(running){
+    const s = document.getElementById("dict-start");
+    const t = document.getElementById("dict-stop");
+    if(s) s.disabled = running;
+    if(t) t.disabled = !running;
+  }
+  function _dictStatus(msg,kind){
+    const el = document.getElementById("dict-status");
+    if(!el) return;
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828": kind==="info"?"#1d3a8a":"var(--txt3)";
+  }
+  function _capdStatus(msg,kind){
+    const el = document.getElementById("dict-capd-status");
+    if(!el) return;
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828":"var(--txt3)";
+  }
+
+  // Reuse the Coding tab's engine. runPipeline lives in the coding partial's IIFE,
+  // but we exposed it via window.__runPipeline implicitly through the closure of
+  // the coding script. Actually it's not exposed — we instead reuse codingAnalyze
+  // by routing through the textarea on the Coding tab if available, OR we read
+  // the live transcript and call a small inline analyzer that delegates.
+  // For decoupling, we surface a minimal `_analyze(text)` helper that drives the
+  // Coding tab's textarea + analyzer if loaded, and falls back to a no-op otherwise.
+  function _analyze(text){
+    if(!text.trim()) return null;
+    const codingInput = document.getElementById("coding-input");
+    if(codingInput){
+      codingInput.value = text;
+      if(typeof window.codingAnalyze === "function"){
+        try { window.codingAnalyze(); } catch(_){}
+      }
+      // Pull the rendered results back out
+      return _snapshotCodingResults();
+    }
+    return null;
+  }
+  function _snapshotCodingResults(){
+    // Read the Coding tab's summary card to extract totals — read-only.
+    const total = document.getElementById("coding-total")?.textContent || "$0.00";
+    const delta = document.getElementById("coding-delta")?.textContent || "$0.00";
+    // Read the suggestion cards
+    const results = document.getElementById("coding-results");
+    const cards = results ? [...results.querySelectorAll(".card")] : [];
+    const codes = cards.map(card=>{
+      const codeEl = card.querySelector('span[style*="font-weight:800"]');
+      const code = codeEl ? codeEl.textContent.trim() : "";
+      const descEl = card.querySelector('div[style*="font-size:12px"]');
+      const desc = descEl ? descEl.textContent.trim() : "";
+      const mods = [...card.querySelectorAll('span[style*="background:#e5edff"]')].map(m=>m.textContent.trim());
+      const blocked = card.style.opacity && parseFloat(card.style.opacity) < 1;
+      return {code,desc,mods,blocked};
+    }).filter(c=>c.code);
+    const ncciCount = document.querySelectorAll("#coding-ncci-body > div").length;
+    return {total, delta, codes, ncciCount};
+  }
+  function _renderDictSuggestions(snap){
+    const host = document.getElementById("dict-suggestions");
+    const sumCard = document.getElementById("dict-summary-card");
+    if(!host) return;
+    if(!snap || !snap.codes || !snap.codes.length){
+      host.innerHTML = `<div style="color:var(--txt3);font-size:12px">Speak or paste to see suggested codes appear here in real time.</div>`;
+      if(sumCard) sumCard.style.display = "none";
+      return;
+    }
+    if(sumCard) sumCard.style.display = "";
+    document.getElementById("dict-total").textContent = snap.total;
+    const dEl = document.getElementById("dict-delta");
+    dEl.textContent = snap.delta;
+    dEl.style.color = snap.delta && snap.delta.startsWith("+") ? "#22a06b" : (snap.delta && snap.delta.startsWith("-") ? "#a02828" : "var(--txt2)");
+    if(snap.ncciCount > 0){
+      document.getElementById("dict-ncci-flag").style.display = "";
+      document.getElementById("dict-ncci-count").textContent = snap.ncciCount;
+    } else {
+      document.getElementById("dict-ncci-flag").style.display = "none";
+    }
+    host.innerHTML = snap.codes.map(c=>{
+      const mods = c.mods.length ? `<span style="margin-left:6px;color:#1d3a8a;font-size:11px">${c.mods.join(" ")}</span>` : "";
+      const blocked = c.blocked ? `<span style="color:#a02828;font-size:10px;font-weight:700;margin-left:6px">BLOCKED</span>` : "";
+      return `<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;border-bottom:1px solid var(--bdr)">
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800;color:var(--blue);font-size:13px;min-width:55px">${c.code}</span>
+        <span style="font-size:12px;color:var(--txt);flex:1">${c.desc}${mods}${blocked}</span>
+      </div>`;
+    }).join("");
+  }
+
+  function _debouncedAnalyze(){
+    if(!document.getElementById("dict-live-coding")?.checked) return;
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(()=>{
+      const text = document.getElementById("dict-transcript").value;
+      const snap = _analyze(text);
+      _renderDictSuggestions(snap);
+    }, 1500);
+  }
+
+  function dictAppend(text, isFinal){
+    const ta = document.getElementById("dict-transcript");
+    if(!ta) return;
+    if(isFinal){
+      _baseTranscript = (_baseTranscript ? _baseTranscript + " " : "") + text.trim();
+      ta.value = _baseTranscript;
+    } else {
+      ta.value = (_baseTranscript ? _baseTranscript + " " : "") + text;
+    }
+    ta.scrollTop = ta.scrollHeight;
+    _debouncedAnalyze();
+  }
+  window.dictAppend = dictAppend;
+
+  window.dictStart = function(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){
+      _dictStatus("✗ Web Speech API not available in this browser. Try Chrome, Edge, or Safari — or paste the transcript manually.","error");
+      return;
+    }
+    if(_recogActive) return;
+    _baseTranscript = document.getElementById("dict-transcript").value.trim();
+    _recog = new SR();
+    _recog.continuous = true;
+    _recog.interimResults = true;
+    _recog.lang = "en-US";
+    _recog.onresult = (ev)=>{
+      let interim = "";
+      for(let i = ev.resultIndex; i < ev.results.length; i++){
+        const res = ev.results[i];
+        const txt = res[0].transcript;
+        if(res.isFinal) dictAppend(txt, true);
+        else interim += txt;
+      }
+      if(interim) dictAppend(interim, false);
+    };
+    _recog.onerror = (ev)=>{
+      _dictStatus("✗ "+ev.error+(ev.message?(": "+ev.message):""),"error");
+    };
+    _recog.onend = ()=>{
+      if(_recogActive){
+        // Auto-restart on natural timeout (Chrome ends after ~60s of silence)
+        try { _recog.start(); } catch(_){}
+      } else {
+        _setDictBtns(false);
+        _dictStatus("Stopped.","info");
+      }
+    };
+    try {
+      _recog.start();
+      _recogActive = true;
+      _setDictBtns(true);
+      _dictStatus("🎙️ Listening — speak. (Chrome may prompt for mic permission.)","ok");
+    } catch(e){
+      _dictStatus("✗ "+e.message,"error");
+    }
+  };
+
+  window.dictStop = function(){
+    _recogActive = false;
+    if(_recog){ try { _recog.stop(); } catch(_){} }
+    _setDictBtns(false);
+    _dictStatus("Stopped.","info");
+  };
+
+  window.dictClear = function(){
+    _baseTranscript = "";
+    document.getElementById("dict-transcript").value = "";
+    _renderDictSuggestions(null);
+    _dictStatus("","");
+  };
+
+  window.dictAnalyzeNow = function(){
+    const text = document.getElementById("dict-transcript").value;
+    const snap = _analyze(text);
+    _renderDictSuggestions(snap);
+    _dictStatus("Analyzed.","ok");
+  };
+
+  window.dictSendToCoding = function(){
+    const text = document.getElementById("dict-transcript").value;
+    const codingInput = document.getElementById("coding-input");
+    if(codingInput) codingInput.value = text;
+    if(typeof window.codingAnalyze === "function") {
+      try { window.codingAnalyze(); } catch(_){}
+    }
+    if(typeof window.nav === "function"){
+      const navItem = document.querySelector('.snav-item[data-pg="coding"]');
+      window.nav("coding", navItem || null);
+    }
+  };
+
+  /* CAPD WebSocket — connect to Fluency's interim-transcript stream */
+  window.dictCAPDConnect = function(){
+    const url = document.getElementById("dict-capd-url").value.trim();
+    const token = document.getElementById("dict-capd-token").value.trim();
+    if(!url){ _capdStatus("URL required.","error"); return; }
+    try {
+      _capd = token ? new WebSocket(url, [token]) : new WebSocket(url);
+    } catch(e){ _capdStatus("✗ "+e.message,"error"); return; }
+    _capd.onopen = ()=>{ _capdStatus("✓ Connected — waiting for interim transcripts.","ok"); _setDictBtns(true); };
+    _capd.onmessage = (ev)=>{
+      let msg;
+      try { msg = JSON.parse(ev.data); }
+      catch(_){ dictAppend(String(ev.data), true); return; }
+      // Expected shape: {type:"interim"|"final", text:"..."}
+      if(msg && typeof msg.text === "string"){
+        dictAppend(msg.text, msg.type === "final");
+      }
+    };
+    _capd.onerror = ()=>{ _capdStatus("✗ Connection error","error"); };
+    _capd.onclose = ()=>{ _capdStatus("Disconnected.","info"); _setDictBtns(false); };
+  };
+  window.dictCAPDDisconnect = function(){
+    if(_capd){ try { _capd.close(); } catch(_){} _capd = null; }
+    _capdStatus("Closed.","info");
+  };
+
   /* ─── boot ──────────────────────────────────────────────────────────── */
   function boot(){
     if(!document.getElementById("page-pacs")) return;
