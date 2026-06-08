@@ -11396,6 +11396,10 @@ async function doLogout(){
   try{ _aiHistory = []; _aiTranscript = []; }catch(_){}
   try{ localStorage.removeItem(_AI_STORAGE_KEY); }catch(_){}
   try{ _auditSideCache = { rows: null, fetchedAt: 0 }; }catch(_){}
+  // AI rule-violation explanations are keyed by violation hash and
+  // contain practice-specific rule text + data values — clear them
+  // too so a different login can't pull a cached Practice-A answer.
+  try{ if(typeof _aiExplainCache !== 'undefined' && _aiExplainCache.clear) _aiExplainCache.clear(); }catch(_){}
   // Re-arm the SW update banner so a deploy that lands during the
   // NEXT session still notifies (the flag was sticky across logout).
   try{ _swUpdateBannerShown = false; }catch(_){}
