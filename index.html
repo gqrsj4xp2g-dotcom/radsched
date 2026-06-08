@@ -7500,6 +7500,7 @@ IMPRESSION: Three-level lumbar kyphoplasty without complication.`,
   <!-- Subtab strip -->
   <div class="tabs" style="margin-bottom:14px">
     <div class="tab on" data-pacstab="connections" onclick="pacsTab('connections',this)">Connections</div>
+    <div class="tab" data-pacstab="dictate" onclick="pacsTab('dictate',this)">🎙️ Live dictation</div>
     <div class="tab" data-pacstab="ingest" onclick="pacsTab('ingest',this)">Inbound test</div>
     <div class="tab" data-pacstab="activity" onclick="pacsTab('activity',this)">Activity</div>
     <div class="tab" data-pacstab="api" onclick="pacsTab('api',this)">API reference</div>
@@ -7522,7 +7523,7 @@ IMPRESSION: Three-level lumbar kyphoplasty without complication.`,
         <div class="fg">
           <label>Vendor / protocol</label>
           <select id="pacs-vendor" onchange="pacsRenderConfig()">
-            <option value="fluency">M*Modal / Solventum Fluency for Imaging</option>
+            <option value="fluency">M*Modal / Solventum Fluency (dictation + signed report)</option>
             <option value="powerscribe">Nuance Powerscribe 360</option>
             <option value="epic_fhir">Epic Radiant + Cogito (FHIR R4)</option>
             <option value="hl7_listener">Generic HL7 v2 MLLP listener (ORU^R01)</option>
@@ -7547,6 +7548,89 @@ IMPRESSION: Three-level lumbar kyphoplasty without complication.`,
       <strong>Storage:</strong> connections are persisted to your browser (localStorage key <code>rs.pacs.connections</code>).
       For multi-user deployment, swap the storage adapter to Supabase — the table schema is
       mirrored in the API reference tab.
+    </div>
+  </div>
+
+  <!-- ─── TAB: live dictation ────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="dictate" style="display:none">
+    <div class="g2" style="gap:14px;align-items:start">
+      <div class="card">
+        <div class="card-title">🎙️ Live dictation → live coding</div>
+        <div style="font-size:12px;color:var(--txt2);line-height:1.55;margin-bottom:10px">
+          Two ways to drive this pane:
+          <ol style="margin:6px 0 0 18px;padding:0">
+            <li><strong>Browser mic</strong> — Web Speech API (Chrome / Edge / Safari). Useful prototype today, not for live PHI dictation.</li>
+            <li><strong>Fluency CAPD stream</strong> — paste the WebSocket URL from your Solventum config and we'll subscribe to interim transcripts. Same hook CDI nudges use.</li>
+          </ol>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <button class="bp" id="dict-start" onclick="dictStart()">🎙️ Start dictating</button>
+          <button class="bt bsm" id="dict-stop" onclick="dictStop()" disabled>⏹ Stop</button>
+          <button class="bt bxs" onclick="dictClear()">Clear</button>
+          <label style="font-size:11px;color:var(--txt3);margin-left:8px;display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="dict-live-coding" checked> live coding
+          </label>
+          <span id="dict-status" style="font-size:11px;color:var(--txt3);margin-left:auto"></span>
+        </div>
+
+        <div class="fg" style="margin-top:0">
+          <label>Transcript</label>
+          <textarea id="dict-transcript" rows="14" placeholder="Click ▶ Start dictating, then speak. Or paste an existing draft here." style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;resize:vertical;min-height:280px"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <button class="bt bsm" onclick="dictAnalyzeNow()">Code now</button>
+            <button class="bt bsm" onclick="dictSendToCoding()">Send to CPT Coding tab</button>
+            <span style="font-size:10.5px;color:var(--txt3)">Live coding analyzes every 1.5s after you pause.</span>
+          </div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-size:11.5px;font-weight:700;padding:6px 8px;background:var(--bg3);border-radius:4px">Connect to a Fluency CAPD stream</summary>
+          <div style="padding:10px;font-size:12px;line-height:1.55">
+            <div class="fg" style="margin-bottom:6px">
+              <label>WebSocket URL</label>
+              <input id="dict-capd-url" type="text" placeholder="wss://fluency-capd.riverview.local/stream/&lt;session_id&gt;" style="width:100%">
+            </div>
+            <div class="fg">
+              <label>Bearer token (optional)</label>
+              <input id="dict-capd-token" type="password" placeholder="will be sent as Sec-WebSocket-Protocol" style="width:100%">
+            </div>
+            <button class="bt bsm" onclick="dictCAPDConnect()">Connect</button>
+            <button class="bt bxs" onclick="dictCAPDDisconnect()">Disconnect</button>
+            <span id="dict-capd-status" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+            <div style="font-size:11px;color:var(--txt3);margin-top:8px;line-height:1.5">
+              Expected message shape (from Solventum docs):
+              <pre style="background:var(--bg2);padding:8px;border-radius:4px;font-size:11px;margin-top:4px">{"type":"interim"|"final","text":"...","speakerId":"radiologist","timestamp":"…"}</pre>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="card-title">Live suggestions</div>
+          <div id="dict-suggestions" style="font-size:12px;color:var(--txt3)">Speak or paste to see suggested codes appear here in real time.</div>
+        </div>
+        <div class="card" id="dict-summary-card" style="display:none">
+          <div class="card-title">Estimated reimbursement (live)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3);font-weight:700">Medicare allowable</div>
+              <div style="font-size:22px;font-weight:800;color:var(--blue);tabular-nums" id="dict-total">$0.00</div>
+            </div>
+            <div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3);font-weight:700">Δ vs naive</div>
+              <div style="font-size:22px;font-weight:800;tabular-nums" id="dict-delta">$0.00</div>
+            </div>
+          </div>
+          <div id="dict-ncci-flag" style="margin-top:8px;font-size:11px;color:#7a5a00;display:none">
+            ⚠ <span id="dict-ncci-count">0</span> NCCI warning(s) — check the CPT Coding tab.
+          </div>
+        </div>
+        <div class="note ni" style="margin-top:10px;font-size:11px;color:var(--txt3);line-height:1.55;padding:10px">
+          <strong>Why this matters for Fluency users:</strong> the radiologist sees CPT + modifier suggestions while still dictating, before the report is signed. If a modifier is missing or a -50 isn't supported, the suggestion box stays empty — that's the prompt to add the documentation now, not after the coder rejects it.
+        </div>
+      </div>
     </div>
   </div>
 
@@ -7662,14 +7746,17 @@ create table pacs_inbound (
 
     <div class="card" style="margin-top:14px">
       <div class="card-title">Vendor-specific wiring notes</div>
-      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">M*Modal / Solventum Fluency for Imaging</summary>
+      <details style="margin-top:6px" open><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">M*Modal / Solventum Fluency (dictation + signed report)</summary>
       <div style="padding:8px 10px;font-size:12px;line-height:1.6;color:var(--txt2)">
-        <ul style="margin:0;padding-left:20px">
-          <li>Fluency emits an HL7 v2 ORU^R01 message on signing — point its outbound MLLP feed at <code>/api/pacs/ingest</code> wrapped in an HL7-over-HTTPS adapter, OR run our MLLP receiver on the Fluency network.</li>
-          <li>For Fluency Catalyst (cloud): poll the FHIR <code>DiagnosticReport</code> endpoint instead. Request <em>read</em> scope.</li>
-          <li>OBX|TX segments carry the report body (one line per OBX). Our parser concatenates these in order.</li>
-          <li>MSH-10 → <code>accession</code>; PID-3 → <code>patient_mrn</code> (de-identify before storage in V1).</li>
-        </ul>
+        Three integration surfaces, each addressing a different moment in the workflow:
+        <ol style="margin:6px 0 0 18px;padding:0;line-height:1.7">
+          <li><strong>Signed report (after-the-fact)</strong> — Fluency emits an HL7 v2 ORU^R01 on signing. Point its outbound MLLP feed at <code>/api/pacs/ingest</code> wrapped in an HL7-over-HTTPS adapter, OR run our MLLP receiver on the Fluency network. OBX|TX segments carry the body. MSH-10 → accession; PID-3 → MRN (de-identify in V1).</li>
+          <li><strong>CAPD live stream (during dictation)</strong> — Fluency Direct and Catalyst expose a WebSocket of interim transcripts (the same hook CDI nudges use). Configure the URL in the connection card and in the Live Dictation pane; we subscribe and re-analyze every 1.5 s after the dictator pauses. This is how the radiologist sees CPT + modifier suggestions <em>before</em> signing, so missing documentation can be added in the same dictation.</li>
+          <li><strong>Catalyst FHIR (cloud)</strong> — newer Fluency Catalyst deployments expose a FHIR R4 <code>DiagnosticReport</code> endpoint. Poll it with the tenant ID configured on the connection. Body lives in <code>presentedForm[].data</code> (base64; usually RTF or HTML — strip before passing to the coder).</li>
+        </ol>
+        <div style="margin-top:8px;padding:8px 10px;background:#eef5ff;border-left:3px solid var(--blue);border-radius:3px">
+          <strong>Browser-mic prototype</strong> — for evaluation today (no Fluency yet), the Live Dictation pane uses the Web Speech API to capture from your laptop mic. Fine for synthetic / de-identified rehearsals; not a production PHI path.
+        </div>
       </div>
       </details>
       <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">Nuance Powerscribe 360</summary>
@@ -7707,8 +7794,16 @@ create table pacs_inbound (
   /* ─── connection schema per vendor ──────────────────────────────────── */
   const VENDOR_FIELDS = {
     fluency: [
-      {key:"endpoint",label:"Outbound endpoint",placeholder:"e.g. mllp://10.0.0.42:2575 or https://radapp/api/pacs/ingest"},
-      {key:"ack_mode",label:"ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"],["AE","Error on bad data (AE)"]]},
+      {key:"product",label:"Fluency edition",type:"select",options:[
+        ["fluency_for_imaging","Fluency for Imaging (workstation speech + structured reporting)"],
+        ["fluency_direct","Fluency Direct (general medical dictation)"],
+        ["fluency_catalyst","Fluency / Catalyst (cloud — FHIR + speech API)"],
+      ]},
+      {key:"workstation_host",label:"Workstation hostname (if on-prem)",placeholder:"e.g. RAD-WS-04.riverview.local",note:"Only needed for direct CAPD hooks into the dictation client."},
+      {key:"signed_endpoint",label:"Signed-report outbound endpoint",placeholder:"mllp://10.0.0.42:2575 or https://radapp/api/pacs/ingest",note:"Where Fluency posts the finalized ORU on signing. We tap this AND optionally the live stream below."},
+      {key:"capd_endpoint",label:"CAPD / live-speech endpoint (optional)",placeholder:"wss://fluency-capd.riverview.local/stream",note:"Real-time interim transcripts for the Live Dictation pane. Talk to your Solventum rep — this is the same hook CDI uses."},
+      {key:"catalyst_tenant",label:"Catalyst tenant ID (cloud)",placeholder:"e.g. riverview-rad-prod"},
+      {key:"ack_mode",label:"HL7 ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"],["AE","Error on bad data (AE)"]]},
       {key:"sender_ip",label:"Allowed sender IP / CIDR (optional)",placeholder:"10.0.0.0/24"},
       {key:"deid",label:"Strip MRN before storage?",type:"checkbox",default:true},
     ],
@@ -8167,6 +8262,242 @@ create table pacs_inbound (
       p.style.display = p.dataset.pacstabPane === name ? "" : "none";
     });
     if(name==="activity") renderActivity();
+  };
+
+  /* ─── live dictation ─────────────────────────────────────────────────
+     Two input paths:
+       (1) Web Speech API — uses the browser mic. Works on Chrome / Edge /
+           Safari today. Not a production PHI path; useful for demos and
+           on-device prototyping. Recognition is interrupted by extended
+           silence — we auto-restart so the user can pause.
+       (2) Fluency CAPD WebSocket — pasted URL connects to the dictation
+           vendor's interim-transcript stream. Same protocol the CDI nudges
+           use. The browser doesn't initiate any audio capture in this mode.
+     Both paths converge on `dictAppend(text, isFinal)` which keeps a
+     running transcript and periodically pipes it through the coding
+     engine (every 1500ms after a pause). The Coding tab's runPipeline is
+     reused — same data, same outputs, no duplicate logic.
+  ─────────────────────────────────────────────────────────────────────── */
+  let _recog = null;
+  let _capd = null;
+  let _recogActive = false;
+  let _baseTranscript = "";  // committed (final) text accumulated so far
+  let _debounceTimer = null;
+
+  function _setDictBtns(running){
+    const s = document.getElementById("dict-start");
+    const t = document.getElementById("dict-stop");
+    if(s) s.disabled = running;
+    if(t) t.disabled = !running;
+  }
+  function _dictStatus(msg,kind){
+    const el = document.getElementById("dict-status");
+    if(!el) return;
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828": kind==="info"?"#1d3a8a":"var(--txt3)";
+  }
+  function _capdStatus(msg,kind){
+    const el = document.getElementById("dict-capd-status");
+    if(!el) return;
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828":"var(--txt3)";
+  }
+
+  // Reuse the Coding tab's engine. runPipeline lives in the coding partial's IIFE,
+  // but we exposed it via window.__runPipeline implicitly through the closure of
+  // the coding script. Actually it's not exposed — we instead reuse codingAnalyze
+  // by routing through the textarea on the Coding tab if available, OR we read
+  // the live transcript and call a small inline analyzer that delegates.
+  // For decoupling, we surface a minimal `_analyze(text)` helper that drives the
+  // Coding tab's textarea + analyzer if loaded, and falls back to a no-op otherwise.
+  function _analyze(text){
+    if(!text.trim()) return null;
+    const codingInput = document.getElementById("coding-input");
+    if(codingInput){
+      codingInput.value = text;
+      if(typeof window.codingAnalyze === "function"){
+        try { window.codingAnalyze(); } catch(_){}
+      }
+      // Pull the rendered results back out
+      return _snapshotCodingResults();
+    }
+    return null;
+  }
+  function _snapshotCodingResults(){
+    // Read the Coding tab's summary card to extract totals — read-only.
+    const total = document.getElementById("coding-total")?.textContent || "$0.00";
+    const delta = document.getElementById("coding-delta")?.textContent || "$0.00";
+    // Read the suggestion cards
+    const results = document.getElementById("coding-results");
+    const cards = results ? [...results.querySelectorAll(".card")] : [];
+    const codes = cards.map(card=>{
+      const codeEl = card.querySelector('span[style*="font-weight:800"]');
+      const code = codeEl ? codeEl.textContent.trim() : "";
+      const descEl = card.querySelector('div[style*="font-size:12px"]');
+      const desc = descEl ? descEl.textContent.trim() : "";
+      const mods = [...card.querySelectorAll('span[style*="background:#e5edff"]')].map(m=>m.textContent.trim());
+      const blocked = card.style.opacity && parseFloat(card.style.opacity) < 1;
+      return {code,desc,mods,blocked};
+    }).filter(c=>c.code);
+    const ncciCount = document.querySelectorAll("#coding-ncci-body > div").length;
+    return {total, delta, codes, ncciCount};
+  }
+  function _renderDictSuggestions(snap){
+    const host = document.getElementById("dict-suggestions");
+    const sumCard = document.getElementById("dict-summary-card");
+    if(!host) return;
+    if(!snap || !snap.codes || !snap.codes.length){
+      host.innerHTML = `<div style="color:var(--txt3);font-size:12px">Speak or paste to see suggested codes appear here in real time.</div>`;
+      if(sumCard) sumCard.style.display = "none";
+      return;
+    }
+    if(sumCard) sumCard.style.display = "";
+    document.getElementById("dict-total").textContent = snap.total;
+    const dEl = document.getElementById("dict-delta");
+    dEl.textContent = snap.delta;
+    dEl.style.color = snap.delta && snap.delta.startsWith("+") ? "#22a06b" : (snap.delta && snap.delta.startsWith("-") ? "#a02828" : "var(--txt2)");
+    if(snap.ncciCount > 0){
+      document.getElementById("dict-ncci-flag").style.display = "";
+      document.getElementById("dict-ncci-count").textContent = snap.ncciCount;
+    } else {
+      document.getElementById("dict-ncci-flag").style.display = "none";
+    }
+    host.innerHTML = snap.codes.map(c=>{
+      const mods = c.mods.length ? `<span style="margin-left:6px;color:#1d3a8a;font-size:11px">${c.mods.join(" ")}</span>` : "";
+      const blocked = c.blocked ? `<span style="color:#a02828;font-size:10px;font-weight:700;margin-left:6px">BLOCKED</span>` : "";
+      return `<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;border-bottom:1px solid var(--bdr)">
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800;color:var(--blue);font-size:13px;min-width:55px">${c.code}</span>
+        <span style="font-size:12px;color:var(--txt);flex:1">${c.desc}${mods}${blocked}</span>
+      </div>`;
+    }).join("");
+  }
+
+  function _debouncedAnalyze(){
+    if(!document.getElementById("dict-live-coding")?.checked) return;
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(()=>{
+      const text = document.getElementById("dict-transcript").value;
+      const snap = _analyze(text);
+      _renderDictSuggestions(snap);
+    }, 1500);
+  }
+
+  function dictAppend(text, isFinal){
+    const ta = document.getElementById("dict-transcript");
+    if(!ta) return;
+    if(isFinal){
+      _baseTranscript = (_baseTranscript ? _baseTranscript + " " : "") + text.trim();
+      ta.value = _baseTranscript;
+    } else {
+      ta.value = (_baseTranscript ? _baseTranscript + " " : "") + text;
+    }
+    ta.scrollTop = ta.scrollHeight;
+    _debouncedAnalyze();
+  }
+  window.dictAppend = dictAppend;
+
+  window.dictStart = function(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){
+      _dictStatus("✗ Web Speech API not available in this browser. Try Chrome, Edge, or Safari — or paste the transcript manually.","error");
+      return;
+    }
+    if(_recogActive) return;
+    _baseTranscript = document.getElementById("dict-transcript").value.trim();
+    _recog = new SR();
+    _recog.continuous = true;
+    _recog.interimResults = true;
+    _recog.lang = "en-US";
+    _recog.onresult = (ev)=>{
+      let interim = "";
+      for(let i = ev.resultIndex; i < ev.results.length; i++){
+        const res = ev.results[i];
+        const txt = res[0].transcript;
+        if(res.isFinal) dictAppend(txt, true);
+        else interim += txt;
+      }
+      if(interim) dictAppend(interim, false);
+    };
+    _recog.onerror = (ev)=>{
+      _dictStatus("✗ "+ev.error+(ev.message?(": "+ev.message):""),"error");
+    };
+    _recog.onend = ()=>{
+      if(_recogActive){
+        // Auto-restart on natural timeout (Chrome ends after ~60s of silence)
+        try { _recog.start(); } catch(_){}
+      } else {
+        _setDictBtns(false);
+        _dictStatus("Stopped.","info");
+      }
+    };
+    try {
+      _recog.start();
+      _recogActive = true;
+      _setDictBtns(true);
+      _dictStatus("🎙️ Listening — speak. (Chrome may prompt for mic permission.)","ok");
+    } catch(e){
+      _dictStatus("✗ "+e.message,"error");
+    }
+  };
+
+  window.dictStop = function(){
+    _recogActive = false;
+    if(_recog){ try { _recog.stop(); } catch(_){} }
+    _setDictBtns(false);
+    _dictStatus("Stopped.","info");
+  };
+
+  window.dictClear = function(){
+    _baseTranscript = "";
+    document.getElementById("dict-transcript").value = "";
+    _renderDictSuggestions(null);
+    _dictStatus("","");
+  };
+
+  window.dictAnalyzeNow = function(){
+    const text = document.getElementById("dict-transcript").value;
+    const snap = _analyze(text);
+    _renderDictSuggestions(snap);
+    _dictStatus("Analyzed.","ok");
+  };
+
+  window.dictSendToCoding = function(){
+    const text = document.getElementById("dict-transcript").value;
+    const codingInput = document.getElementById("coding-input");
+    if(codingInput) codingInput.value = text;
+    if(typeof window.codingAnalyze === "function") {
+      try { window.codingAnalyze(); } catch(_){}
+    }
+    if(typeof window.nav === "function"){
+      const navItem = document.querySelector('.snav-item[data-pg="coding"]');
+      window.nav("coding", navItem || null);
+    }
+  };
+
+  /* CAPD WebSocket — connect to Fluency's interim-transcript stream */
+  window.dictCAPDConnect = function(){
+    const url = document.getElementById("dict-capd-url").value.trim();
+    const token = document.getElementById("dict-capd-token").value.trim();
+    if(!url){ _capdStatus("URL required.","error"); return; }
+    try {
+      _capd = token ? new WebSocket(url, [token]) : new WebSocket(url);
+    } catch(e){ _capdStatus("✗ "+e.message,"error"); return; }
+    _capd.onopen = ()=>{ _capdStatus("✓ Connected — waiting for interim transcripts.","ok"); _setDictBtns(true); };
+    _capd.onmessage = (ev)=>{
+      let msg;
+      try { msg = JSON.parse(ev.data); }
+      catch(_){ dictAppend(String(ev.data), true); return; }
+      // Expected shape: {type:"interim"|"final", text:"..."}
+      if(msg && typeof msg.text === "string"){
+        dictAppend(msg.text, msg.type === "final");
+      }
+    };
+    _capd.onerror = ()=>{ _capdStatus("✗ Connection error","error"); };
+    _capd.onclose = ()=>{ _capdStatus("Disconnected.","info"); _setDictBtns(false); };
+  };
+  window.dictCAPDDisconnect = function(){
+    if(_capd){ try { _capd.close(); } catch(_){} _capd = null; }
+    _capdStatus("Closed.","info");
   };
 
   /* ─── boot ──────────────────────────────────────────────────────────── */
