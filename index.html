@@ -13423,8 +13423,10 @@ async function switchPractice(id,name){
       // the freshly-applied B state on next read.
       if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
       // Also clear content caches that would otherwise carry practice
-      // A's data into B: AI conversation + audit-log side-table cache.
+      // A's data into B: AI conversation, AI explanation cache, and
+      // audit-log side-table cache.
       try{ _aiHistory = []; _aiTranscript = []; }catch(_){}
+      try{ if(typeof _aiExplainCache !== 'undefined' && _aiExplainCache.clear) _aiExplainCache.clear(); }catch(_){}
       try{ _auditSideCache = { rows: null, fetchedAt: 0 }; }catch(_){}
       // Practice id changed → leader election needs to rebind the channel
       // name (which is keyed off _ROW_ID). Tear down + re-init.
