@@ -228,8 +228,16 @@ create table pacs_inbound (
   /* ─── connection schema per vendor ──────────────────────────────────── */
   const VENDOR_FIELDS = {
     fluency: [
-      {key:"endpoint",label:"Outbound endpoint",placeholder:"e.g. mllp://10.0.0.42:2575 or https://radapp/api/pacs/ingest"},
-      {key:"ack_mode",label:"ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"],["AE","Error on bad data (AE)"]]},
+      {key:"product",label:"Fluency edition",type:"select",options:[
+        ["fluency_for_imaging","Fluency for Imaging (workstation speech + structured reporting)"],
+        ["fluency_direct","Fluency Direct (general medical dictation)"],
+        ["fluency_catalyst","Fluency / Catalyst (cloud — FHIR + speech API)"],
+      ]},
+      {key:"workstation_host",label:"Workstation hostname (if on-prem)",placeholder:"e.g. RAD-WS-04.riverview.local",note:"Only needed for direct CAPD hooks into the dictation client."},
+      {key:"signed_endpoint",label:"Signed-report outbound endpoint",placeholder:"mllp://10.0.0.42:2575 or https://radapp/api/pacs/ingest",note:"Where Fluency posts the finalized ORU on signing. We tap this AND optionally the live stream below."},
+      {key:"capd_endpoint",label:"CAPD / live-speech endpoint (optional)",placeholder:"wss://fluency-capd.riverview.local/stream",note:"Real-time interim transcripts for the Live Dictation pane. Talk to your Solventum rep — this is the same hook CDI uses."},
+      {key:"catalyst_tenant",label:"Catalyst tenant ID (cloud)",placeholder:"e.g. riverview-rad-prod"},
+      {key:"ack_mode",label:"HL7 ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"],["AE","Error on bad data (AE)"]]},
       {key:"sender_ip",label:"Allowed sender IP / CIDR (optional)",placeholder:"10.0.0.0/24"},
       {key:"deid",label:"Strip MRN before storage?",type:"checkbox",default:true},
     ],
