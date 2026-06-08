@@ -42240,7 +42240,7 @@ function _renderFairnessScoreboard(isAdmin){
   const holGroupCounts = {};
   const callGroupCounts = {};
   physList.forEach(p => { wkndPer[p.id] = 0; holPer[p.id] = 0; s2Per[p.id] = 0; s3Per[p.id] = 0; callPer[p.id] = 0; });
-  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(d >= yearStart && d <= yearEnd && wkndPer[w.physId] != null) wkndPer[w.physId]++; });
+  (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(d && d >= yearStart && d <= yearEnd && wkndPer[w.physId] != null) wkndPer[w.physId]++; });
   const seenHolidays = new Set();
   (S.holidays || []).forEach(h => {
     if(!h.date || h.date < yearStart || h.date > yearEnd || holPer[h.physId] == null) return;
@@ -42252,12 +42252,12 @@ function _renderFairnessScoreboard(isAdmin){
     holGroupCounts[group] = (holGroupCounts[group] || 0) + 1;
   });
   (S.drShifts || []).forEach(s => {
-    if(s.date < yearStart || s.date > yearEnd) return;
+    if(!s.date || s.date < yearStart || s.date > yearEnd) return;
     if(s.shift === '2nd' && s2Per[s.physId] != null) s2Per[s.physId]++;
     if(s.shift === '3rd' && s3Per[s.physId] != null) s3Per[s.physId]++;
   });
   (S.irCalls || []).forEach(c => {
-    if(c.date < yearStart || c.date > yearEnd || callPer[c.physId] == null) return;
+    if(!c.date || c.date < yearStart || c.date > yearEnd || callPer[c.physId] == null) return;
     if(c.callType !== 'daily') return;
     if(typeof _isHolidaySyncedCall === 'function' && _isHolidaySyncedCall(c)) return;
     const group = c.irGroup || 'IR';
