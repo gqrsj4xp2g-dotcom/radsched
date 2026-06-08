@@ -1,0 +1,703 @@
+<!-- ========================================================================
+     PACS / RIS Integration — connection scaffolding + ingest playground
+     ============================================================
+     Forward-looking integration UI for connecting RadApp's coding engine
+     to live PACS / RIS / dictation systems. V1 stores connection configs
+     in localStorage and parses pasted HL7 ORU / FHIR DiagnosticReport
+     payloads end-to-end (extracts report text → routes to CPT Coding).
+     Production deployment would replace the localStorage adapter with a
+     Supabase row + an edge function listener; the UI surface here is the
+     same one the prod path will use.
+     ======================================================================== -->
+<div id="page-pacs" class="page">
+  <div class="pg-title">🔌 PACS Connections</div>
+  <div class="pg-sub">
+    Configure how signed reports flow in from your PACS / RIS / dictation system.
+    Today: paste HL7 ORU or FHIR JSON to test ingestion against the coding engine. Save connection configs
+    for when the live listener is deployed.
+  </div>
+
+  <!-- Subtab strip -->
+  <div class="tabs" style="margin-bottom:14px">
+    <div class="tab on" data-pacstab="connections" onclick="pacsTab('connections',this)">Connections</div>
+    <div class="tab" data-pacstab="ingest" onclick="pacsTab('ingest',this)">Inbound test</div>
+    <div class="tab" data-pacstab="activity" onclick="pacsTab('activity',this)">Activity</div>
+    <div class="tab" data-pacstab="api" onclick="pacsTab('api',this)">API reference</div>
+  </div>
+
+  <!-- ─── TAB: connections ────────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="connections">
+    <div class="g2" style="gap:14px;align-items:start">
+      <div class="card">
+        <div class="card-title">Saved connections</div>
+        <div id="pacs-conn-list"><p style="color:var(--txt3);font-size:12px">No connections yet — add one on the right.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Add / edit connection</div>
+        <div class="fg">
+          <label>Name</label>
+          <input id="pacs-name" type="text" placeholder="e.g. Riverview Fluency Primary" style="width:100%">
+        </div>
+        <div class="fg">
+          <label>Vendor / protocol</label>
+          <select id="pacs-vendor" onchange="pacsRenderConfig()">
+            <option value="fluency">M*Modal / Solventum Fluency for Imaging</option>
+            <option value="powerscribe">Nuance Powerscribe 360</option>
+            <option value="epic_fhir">Epic Radiant + Cogito (FHIR R4)</option>
+            <option value="hl7_listener">Generic HL7 v2 MLLP listener (ORU^R01)</option>
+            <option value="webhook">Generic webhook (HTTPS POST)</option>
+            <option value="folder">Folder watcher (drop .txt/.html files)</option>
+            <option value="s3">S3 / GCS bucket polling</option>
+          </select>
+        </div>
+
+        <div id="pacs-config" style="margin-top:6px"></div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <button class="bp" onclick="pacsSaveConnection()">💾 Save connection</button>
+          <button class="bt bsm" onclick="pacsTestConnection()">▶ Test</button>
+          <button class="bt bxs" onclick="pacsResetForm()">Reset form</button>
+          <span id="pacs-conn-status" style="font-size:11px;color:var(--txt3);margin-left:auto"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="note ni" style="margin-top:14px;font-size:11px;color:var(--txt3);line-height:1.55">
+      <strong>Storage:</strong> connections are persisted to your browser (localStorage key <code>rs.pacs.connections</code>).
+      For multi-user deployment, swap the storage adapter to Supabase — the table schema is
+      mirrored in the API reference tab.
+    </div>
+  </div>
+
+  <!-- ─── TAB: ingest ─────────────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="ingest" style="display:none">
+    <div class="g2" style="gap:14px;align-items:start">
+      <div class="card">
+        <div class="card-title">Paste a message</div>
+        <div class="fg">
+          <label>Format</label>
+          <select id="pacs-ingest-format">
+            <option value="hl7">HL7 v2 ORU^R01 (radiology report)</option>
+            <option value="fhir">FHIR R4 DiagnosticReport (JSON)</option>
+            <option value="plain">Plain text (report only)</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>Payload</label>
+          <textarea id="pacs-ingest-body" rows="12" placeholder="Paste an HL7 ORU^R01 message, a FHIR DiagnosticReport JSON, or just the plain report text…" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;resize:vertical;min-height:280px"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+          <button class="bp" onclick="pacsIngest()">📥 Parse & route to Coding</button>
+          <button class="bt bsm" onclick="pacsLoadSample('hl7')">Sample HL7 ORU</button>
+          <button class="bt bsm" onclick="pacsLoadSample('fhir')">Sample FHIR JSON</button>
+          <button class="bt bxs" onclick="document.getElementById('pacs-ingest-body').value=''">Clear</button>
+          <span id="pacs-ingest-status" style="font-size:11px;color:var(--txt3);margin-left:auto"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Parsed metadata</div>
+        <div id="pacs-meta" class="note ni" style="font-size:12px;color:var(--txt3)">Paste a message and click <strong>Parse</strong> to see the extracted metadata + report body.</div>
+        <div id="pacs-extracted-wrap" style="display:none;margin-top:10px">
+          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3);font-weight:700;margin-bottom:4px">Extracted report</div>
+          <pre id="pacs-extracted" style="background:var(--bg2);padding:10px;border-radius:4px;font-size:11.5px;line-height:1.5;max-height:280px;overflow-y:auto;white-space:pre-wrap"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── TAB: activity ───────────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="activity" style="display:none">
+    <div class="card">
+      <div class="card-title">Recent ingestions</div>
+      <div id="pacs-activity-list"><p style="color:var(--txt3);font-size:12px">No activity yet — parse a message in the Inbound test tab.</p></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--txt3)">
+        Activity is kept in memory for this session. Production deployment writes to <code>pacs_inbound</code> table with full payload audit + de-id status.
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── TAB: API reference ─────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="api" style="display:none">
+    <div class="g2" style="gap:14px;align-items:start">
+      <div class="card">
+        <div class="card-title">Inbound API contract</div>
+        <p style="font-size:12px;line-height:1.55;color:var(--txt2);margin:0 0 10px">
+          The production listener exposes a single ingest endpoint. Each PACS connection points its outbound feed at the URL below with an Authorization header derived from the connection's API key.
+        </p>
+        <pre style="background:var(--bg2);padding:10px;border-radius:4px;font-size:11.5px;line-height:1.55;white-space:pre-wrap"><strong>POST</strong> /api/pacs/ingest
+Authorization: Bearer &lt;connection_api_key&gt;
+Content-Type: application/json   <em>(or text/hl7 for raw HL7)</em>
+
+<strong>Body</strong> — one of:
+{
+  "format": "hl7"    | "fhir" | "plain",
+  "payload":  &lt;string for hl7/plain, object for fhir&gt;,
+  "source":   "fluency-riverview",
+  "received_at": "2026-05-13T15:00:00Z"
+}
+
+<strong>Response</strong> 200 OK
+{
+  "report_id": 4231,
+  "accession": "ACC-001234",
+  "patient_mrn": "MRN-0009",
+  "coding_url": "/api/reports/4231"
+}
+</pre>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Connection schema</div>
+        <p style="font-size:12px;line-height:1.55;color:var(--txt2);margin:0 0 10px">
+          Each connection persists as a row. Swap the localStorage adapter for Supabase by enabling RLS on this table.
+        </p>
+        <pre style="background:var(--bg2);padding:10px;border-radius:4px;font-size:11.5px;line-height:1.55;white-space:pre-wrap">create table pacs_connections (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  vendor      text not null,   -- fluency|powerscribe|epic_fhir|hl7_listener|webhook|folder|s3
+  config      jsonb not null,
+  api_key     text not null,   -- bearer token the vendor sends with each post
+  status      text not null default 'configured', -- configured|active|paused|error
+  last_sync   timestamptz,
+  last_error  text,
+  practice_id uuid references practices(id),
+  created_at  timestamptz default now()
+);
+
+create table pacs_inbound (
+  id            bigserial primary key,
+  connection_id uuid references pacs_connections(id),
+  format        text not null,
+  payload       jsonb,
+  raw           text,           -- raw HL7 / FHIR / text for audit
+  accession     text,
+  patient_mrn   text,            -- de-identified before storage in V1
+  report_id     bigint references reports(id),
+  received_at   timestamptz default now()
+);</pre>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Vendor-specific wiring notes</div>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">M*Modal / Solventum Fluency for Imaging</summary>
+      <div style="padding:8px 10px;font-size:12px;line-height:1.6;color:var(--txt2)">
+        <ul style="margin:0;padding-left:20px">
+          <li>Fluency emits an HL7 v2 ORU^R01 message on signing — point its outbound MLLP feed at <code>/api/pacs/ingest</code> wrapped in an HL7-over-HTTPS adapter, OR run our MLLP receiver on the Fluency network.</li>
+          <li>For Fluency Catalyst (cloud): poll the FHIR <code>DiagnosticReport</code> endpoint instead. Request <em>read</em> scope.</li>
+          <li>OBX|TX segments carry the report body (one line per OBX). Our parser concatenates these in order.</li>
+          <li>MSH-10 → <code>accession</code>; PID-3 → <code>patient_mrn</code> (de-identify before storage in V1).</li>
+        </ul>
+      </div>
+      </details>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">Nuance Powerscribe 360</summary>
+      <div style="padding:8px 10px;font-size:12px;line-height:1.6;color:var(--txt2)">
+        <ul style="margin:0;padding-left:20px">
+          <li>Powerscribe stores signed reports in its SQL backend. Easiest path: ODBC read against the <code>Order</code> + <code>Report</code> tables joined on accession, scheduled every 5 min.</li>
+          <li>Alternative: enable the Powerscribe Outbound API (SOAP) and have it POST to our webhook for each finalized report.</li>
+          <li>For shops on Powerscribe One (cloud): use the FHIR DiagnosticReport endpoint via the Catalyst gateway.</li>
+        </ul>
+      </div>
+      </details>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">Epic Radiant + Cogito</summary>
+      <div style="padding:8px 10px;font-size:12px;line-height:1.6;color:var(--txt2)">
+        <ul style="margin:0;padding-left:20px">
+          <li>Two options: poll FHIR R4 <code>/DiagnosticReport?category=RAD&status=final&_lastUpdated=gt&lt;cursor&gt;</code> or subscribe via SMART backend services (Bulk Data Export).</li>
+          <li>OAuth2 client-credentials grant — Epic's <em>Backend Services</em> documentation covers JWT assertion.</li>
+          <li>Body content lives in <code>presentedForm[].data</code> (base64) — typically RTF or HTML; strip tags before passing to the coder.</li>
+        </ul>
+      </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   RadApp PACS — connection storage + ingest playground.
+   Self-contained. localStorage today; same UI works against /api/pacs/*
+   when the backend listener ships.
+═══════════════════════════════════════════════════════════════════════ */
+(function(){
+  if(window.__pacsLoaded) return;
+  window.__pacsLoaded = true;
+
+  /* ─── connection schema per vendor ──────────────────────────────────── */
+  const VENDOR_FIELDS = {
+    fluency: [
+      {key:"endpoint",label:"Outbound endpoint",placeholder:"e.g. mllp://10.0.0.42:2575 or https://radapp/api/pacs/ingest"},
+      {key:"ack_mode",label:"ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"],["AE","Error on bad data (AE)"]]},
+      {key:"sender_ip",label:"Allowed sender IP / CIDR (optional)",placeholder:"10.0.0.0/24"},
+      {key:"deid",label:"Strip MRN before storage?",type:"checkbox",default:true},
+    ],
+    powerscribe: [
+      {key:"db_host",label:"DB host",placeholder:"powerscribe-sql.local"},
+      {key:"db_name",label:"DB name",placeholder:"Commissure"},
+      {key:"db_user",label:"DB user",placeholder:"radapp_reader"},
+      {key:"poll_interval",label:"Poll interval (sec)",type:"number",default:300},
+      {key:"finalized_only",label:"Pull finalized reports only?",type:"checkbox",default:true},
+    ],
+    epic_fhir: [
+      {key:"base_url",label:"FHIR base URL",placeholder:"https://fhir.epic.example/api/FHIR/R4"},
+      {key:"client_id",label:"OAuth client ID"},
+      {key:"client_secret",label:"OAuth client secret",type:"password"},
+      {key:"scope",label:"Scope",default:"system/DiagnosticReport.read"},
+      {key:"category",label:"Category filter",default:"RAD"},
+      {key:"poll_interval",label:"Poll interval (sec)",type:"number",default:300},
+    ],
+    hl7_listener: [
+      {key:"bind_host",label:"Bind host",default:"0.0.0.0"},
+      {key:"bind_port",label:"Bind port",type:"number",default:2575},
+      {key:"ack_mode",label:"ACK mode",type:"select",options:[["AA","Always accept (AA)"],["AR","Reject on bad data (AR)"]]},
+      {key:"sender_app",label:"Expected sending application (MSH-3)",placeholder:"FLUENCY"},
+      {key:"sender_facility",label:"Expected sending facility (MSH-4)",placeholder:"RIVERVIEW"},
+    ],
+    webhook: [
+      {key:"url",label:"Inbound URL (read-only)",default:"https://radapp.example/api/pacs/ingest",readonly:true,note:"Generated when the connection is saved in production."},
+      {key:"api_key",label:"Bearer token (read-only)",default:"will-be-issued-on-save",readonly:true,note:"Provide this token to the vendor's outbound config."},
+      {key:"signature_secret",label:"HMAC signature secret (optional)"},
+    ],
+    folder: [
+      {key:"path",label:"Folder path on listener host",placeholder:"/var/spool/radapp/inbound"},
+      {key:"glob",label:"File glob",default:"*.txt"},
+      {key:"poll_interval",label:"Poll interval (sec)",type:"number",default:60},
+      {key:"move_after",label:"Move-after-ingest path",placeholder:"/var/spool/radapp/processed"},
+    ],
+    s3: [
+      {key:"bucket",label:"Bucket",placeholder:"radapp-reports"},
+      {key:"prefix",label:"Key prefix",placeholder:"riverview/"},
+      {key:"region",label:"Region",default:"us-east-2"},
+      {key:"access_key_id",label:"Access key ID"},
+      {key:"secret_access_key",label:"Secret access key",type:"password"},
+      {key:"poll_interval",label:"Poll interval (sec)",type:"number",default:120},
+    ],
+  };
+
+  const VENDOR_LABEL = {
+    fluency:"Fluency", powerscribe:"Powerscribe", epic_fhir:"Epic FHIR",
+    hl7_listener:"HL7 listener", webhook:"Webhook", folder:"Folder", s3:"S3",
+  };
+
+  /* ─── localStorage adapter ──────────────────────────────────────────── */
+  const STORAGE_KEY = "rs.pacs.connections";
+  function loadConnections(){
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+    catch(_){ return []; }
+  }
+  function saveConnections(arr){
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); } catch(_){}
+  }
+  function newId(){
+    return "conn_" + Math.random().toString(36).slice(2,10);
+  }
+
+  /* ─── form rendering ────────────────────────────────────────────────── */
+  let editingId = null;
+
+  function escapeHTML(s){ return (s||"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch])); }
+
+  window.pacsRenderConfig = function(){
+    const vendor = document.getElementById("pacs-vendor").value;
+    const fields = VENDOR_FIELDS[vendor] || [];
+    const host = document.getElementById("pacs-config");
+    host.innerHTML = fields.map(f=>{
+      const id = "pacs-cfg-" + f.key;
+      const val = f.default !== undefined ? f.default : "";
+      if(f.type==="select"){
+        const opts = (f.options||[]).map(([v,lbl])=>`<option value="${escapeHTML(v)}">${escapeHTML(lbl)}</option>`).join("");
+        return `<div class="fg"><label>${escapeHTML(f.label)}</label><select id="${id}" data-key="${f.key}">${opts}</select></div>`;
+      }
+      if(f.type==="checkbox"){
+        return `<div class="fg" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="${id}" data-key="${f.key}" ${f.default?"checked":""}><label for="${id}" style="display:inline;cursor:pointer">${escapeHTML(f.label)}</label></div>`;
+      }
+      const type = f.type || "text";
+      const ro = f.readonly ? "readonly style=\"background:var(--bg3);color:var(--txt3)\"" : "";
+      const note = f.note ? `<div style="font-size:10.5px;color:var(--txt3);margin-top:3px">${escapeHTML(f.note)}</div>` : "";
+      return `<div class="fg"><label>${escapeHTML(f.label)}</label><input type="${type}" id="${id}" data-key="${f.key}" value="${escapeHTML(String(val))}" placeholder="${escapeHTML(f.placeholder||"")}" ${ro} style="width:100%">${note}</div>`;
+    }).join("");
+  };
+
+  function readConfigForm(){
+    const vendor = document.getElementById("pacs-vendor").value;
+    const fields = VENDOR_FIELDS[vendor] || [];
+    const cfg = {};
+    fields.forEach(f=>{
+      const el = document.getElementById("pacs-cfg-" + f.key);
+      if(!el) return;
+      cfg[f.key] = f.type === "checkbox" ? !!el.checked : el.value;
+    });
+    return {vendor,cfg};
+  }
+
+  function statusBadge(status){
+    const bg = {configured:"#e5edff",active:"#d1fae5",paused:"#fef3c7",error:"#fee2e2"}[status] || "#eef";
+    const fg = {configured:"#1d3a8a",active:"#055045",paused:"#854d0e",error:"#991b1b"}[status] || "#444";
+    return `<span style="background:${bg};color:${fg};font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.04em">${status}</span>`;
+  }
+
+  function renderConnections(){
+    const host = document.getElementById("pacs-conn-list");
+    const conns = loadConnections();
+    if(!conns.length){
+      host.innerHTML = `<p style="color:var(--txt3);font-size:12px">No connections yet — add one on the right.</p>`;
+      return;
+    }
+    host.innerHTML = conns.map(c=>{
+      const vendorLbl = VENDOR_LABEL[c.vendor] || c.vendor;
+      const last = c.lastSync ? new Date(c.lastSync).toLocaleString() : "—";
+      return `<div class="card" style="padding:10px 12px;border:1px solid var(--bdr);margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <div style="font-weight:700">${escapeHTML(c.name||"(unnamed)")}</div>
+              ${statusBadge(c.status||"configured")}
+              <span style="font-size:10.5px;color:var(--txt3)">${escapeHTML(vendorLbl)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:3px">Last sync: ${escapeHTML(last)}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="bt bxs" onclick="pacsEditConnection('${c.id}')">Edit</button>
+            <button class="bt bxs" onclick="pacsDeleteConnection('${c.id}')" style="color:#a02828">Delete</button>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  window.pacsSaveConnection = function(){
+    const name = document.getElementById("pacs-name").value.trim();
+    if(!name){ pacsStatus("Name is required.","error"); return; }
+    const {vendor,cfg} = readConfigForm();
+    const conns = loadConnections();
+    if(editingId){
+      const i = conns.findIndex(c=>c.id===editingId);
+      if(i>=0){ conns[i] = {...conns[i], name, vendor, config:cfg}; }
+    } else {
+      conns.push({id:newId(),name,vendor,config:cfg,status:"configured",lastSync:null});
+    }
+    saveConnections(conns);
+    renderConnections();
+    pacsStatus(editingId ? "Connection updated." : "Connection saved.","ok");
+    editingId = null;
+  };
+
+  window.pacsEditConnection = function(id){
+    const c = loadConnections().find(c=>c.id===id);
+    if(!c) return;
+    editingId = id;
+    document.getElementById("pacs-name").value = c.name || "";
+    document.getElementById("pacs-vendor").value = c.vendor;
+    pacsRenderConfig();
+    setTimeout(()=>{
+      Object.entries(c.config||{}).forEach(([k,v])=>{
+        const el = document.getElementById("pacs-cfg-" + k);
+        if(!el) return;
+        if(el.type === "checkbox") el.checked = !!v; else el.value = v ?? "";
+      });
+    },0);
+    pacsStatus("Editing — click Save to commit.","info");
+  };
+
+  window.pacsDeleteConnection = function(id){
+    if(!confirm("Delete this connection?")) return;
+    saveConnections(loadConnections().filter(c=>c.id!==id));
+    renderConnections();
+  };
+
+  window.pacsResetForm = function(){
+    editingId = null;
+    document.getElementById("pacs-name").value = "";
+    document.getElementById("pacs-vendor").value = "fluency";
+    pacsRenderConfig();
+    pacsStatus("","");
+  };
+
+  window.pacsTestConnection = function(){
+    const {vendor,cfg} = readConfigForm();
+    const issues = [];
+    // Minimal validation per vendor
+    if(vendor === "epic_fhir" && (!cfg.base_url || !cfg.client_id)) issues.push("FHIR base URL and client ID required");
+    if(vendor === "hl7_listener" && (!cfg.bind_port)) issues.push("Bind port required");
+    if(vendor === "fluency" && !cfg.endpoint) issues.push("Outbound endpoint required");
+    if(vendor === "s3" && (!cfg.bucket || !cfg.access_key_id)) issues.push("Bucket and access key required");
+    if(issues.length){ pacsStatus("✗ "+issues.join(", "),"error"); return; }
+    pacsStatus("✓ Config OK — production listener would run a live handshake here.","ok");
+  };
+
+  function pacsStatus(msg,kind){
+    const el = document.getElementById("pacs-conn-status");
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828": kind==="info"?"#1d3a8a":"var(--txt3)";
+  }
+
+  /* ─── HL7 v2 ORU^R01 parser ─────────────────────────────────────────── */
+  // Goal: extract report text from OBX|TX segments + MSH-10 (msg id), MSH-9 (msg type),
+  // PID-3 (MRN), OBR-3 (placer / accession), OBR-4 (universal service id).
+  function parseHL7(raw){
+    if(!raw) return null;
+    // HL7 separates segments with \r; handle both \r\n and \n inputs.
+    const text = raw.replace(/\r\n/g,"\n").replace(/\r/g,"\n").trim();
+    if(!text.startsWith("MSH|")) return {error:"Not an HL7 message — must start with MSH|"};
+    const segments = text.split("\n").filter(Boolean);
+    const meta = {sending_app:"",sending_facility:"",msg_type:"",control_id:"",mrn:"",patient_name:"",accession:"",observation:""};
+    const obxLines = [];
+    segments.forEach(seg=>{
+      const parts = seg.split("|");
+      const type = parts[0];
+      if(type==="MSH"){
+        meta.sending_app = parts[2]||""; meta.sending_facility = parts[3]||"";
+        meta.msg_type = parts[8]||""; meta.control_id = parts[9]||"";
+      } else if(type==="PID"){
+        meta.mrn = (parts[3]||"").split("^")[0];
+        meta.patient_name = (parts[5]||"").replace(/\^/g," ");
+      } else if(type==="OBR"){
+        meta.accession = meta.accession || (parts[2]||"").split("^")[0] || (parts[3]||"").split("^")[0];
+        meta.observation = meta.observation || (parts[4]||"").split("^")[1] || (parts[4]||"").split("^")[0];
+      } else if(type==="OBX"){
+        // OBX|1|TX|REPORT^Report Text^L||The findings are ...||||||F
+        const value_type = parts[2]||"";
+        if(value_type==="TX" || value_type==="FT" || value_type==="ST"){
+          // OBX field 5 is the value. HL7 escapes \.br\ as line breaks within a single OBX.
+          const v = (parts[5]||"").replace(/\\\.br\\/g,"\n").replace(/\\F\\/g,"|").replace(/\\R\\/g,"~").replace(/\\S\\/g,"^");
+          obxLines.push(v);
+        }
+      }
+    });
+    const body = obxLines.join("\n");
+    return {meta, body};
+  }
+
+  /* ─── FHIR DiagnosticReport parser ──────────────────────────────────── */
+  // Extracts report text from presentedForm[].data (base64), conclusion, or by walking result Observation refs.
+  function decodeBase64UTF8(b64){
+    try {
+      const bin = atob(b64.replace(/\s+/g,""));
+      const bytes = Uint8Array.from(bin,c=>c.charCodeAt(0));
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch(_){ return ""; }
+  }
+  function stripHTML(s){ return (s||"").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n"); }
+  function stripRTF(s){
+    // Very simple RTF stripper — enough for display, not perfect.
+    return (s||"")
+      .replace(/\\par[d]?/g,"\n")
+      .replace(/\\'[0-9a-fA-F]{2}/g," ")
+      .replace(/\\[a-zA-Z]+-?\d*\s?/g," ")
+      .replace(/[{}]/g,"")
+      .replace(/\\\*[^;]*;/g,"")
+      .replace(/[ \t]+\n/g,"\n")
+      .replace(/\n{3,}/g,"\n\n")
+      .trim();
+  }
+  function parseFHIR(raw){
+    if(!raw) return null;
+    let doc;
+    try { doc = typeof raw === "string" ? JSON.parse(raw) : raw; }
+    catch(e){ return {error:"Invalid JSON: "+e.message}; }
+    if(!doc || doc.resourceType !== "DiagnosticReport") return {error:"Not a DiagnosticReport resource (got resourceType="+doc?.resourceType+")"};
+
+    const meta = {
+      msg_type: "DiagnosticReport",
+      control_id: doc.id || "",
+      sending_app: (doc.performer||[]).map(p=>p.display||p.reference).filter(Boolean).join(", "),
+      mrn: "", patient_name: "", accession: "", observation: "",
+    };
+    // Subject reference → patient
+    if(doc.subject && doc.subject.reference) meta.mrn = doc.subject.reference.replace(/^Patient\//,"");
+    if(doc.subject && doc.subject.display) meta.patient_name = doc.subject.display;
+    // Accession identifier
+    if(Array.isArray(doc.identifier)){
+      const acc = doc.identifier.find(i=>(i.type?.coding||[]).some(c=>c.code==="ACSN")) || doc.identifier[0];
+      if(acc) meta.accession = acc.value || "";
+    }
+    // Code → observation/study
+    if(doc.code){
+      const c = (doc.code.coding||[])[0];
+      meta.observation = doc.code.text || (c ? `${c.code} ${c.display||""}`.trim() : "");
+    }
+
+    // Extract body in order of preference
+    let body = "";
+    // 1) presentedForm with text/plain or html or RTF base64
+    if(Array.isArray(doc.presentedForm)){
+      for(const pf of doc.presentedForm){
+        if(!pf.data) continue;
+        const decoded = decodeBase64UTF8(pf.data);
+        const ct = (pf.contentType||"").toLowerCase();
+        let text;
+        if(ct.includes("rtf")) text = stripRTF(decoded);
+        else if(ct.includes("html")) text = stripHTML(decoded);
+        else text = decoded;
+        if(text.trim()){ body = text.trim(); break; }
+      }
+    }
+    // 2) conclusion as fallback
+    if(!body && doc.conclusion) body = doc.conclusion;
+    // 3) Walk result observations (text content)
+    if(!body && Array.isArray(doc.result)){
+      const obsLines = [];
+      doc.result.forEach(o=>{
+        if(o.display) obsLines.push(`- ${o.display}`);
+      });
+      if(obsLines.length) body = "FINDINGS:\n" + obsLines.join("\n");
+    }
+    return {meta, body};
+  }
+
+  /* ─── ingest pipeline ───────────────────────────────────────────────── */
+  const RECENT = [];
+  window.pacsIngest = function(){
+    const fmt = document.getElementById("pacs-ingest-format").value;
+    const body = document.getElementById("pacs-ingest-body").value;
+    if(!body.trim()){ pacsIngestStatus("Paste a message first.","error"); return; }
+    let result;
+    if(fmt==="hl7") result = parseHL7(body);
+    else if(fmt==="fhir") result = parseFHIR(body);
+    else result = {meta:{}, body: body};
+    if(!result){ pacsIngestStatus("Parser returned no result.","error"); return; }
+    if(result.error){ pacsIngestStatus("✗ "+result.error,"error"); return; }
+
+    document.getElementById("pacs-meta").innerHTML = renderMeta(result.meta||{});
+    document.getElementById("pacs-extracted-wrap").style.display = "";
+    document.getElementById("pacs-extracted").textContent = result.body || "(empty)";
+
+    // Push to recent activity
+    RECENT.unshift({
+      ts: new Date().toISOString(), fmt,
+      accession: result.meta?.accession || "",
+      mrn: result.meta?.mrn || "",
+      sending: result.meta?.sending_app || result.meta?.sending_facility || "",
+      preview: (result.body||"").slice(0,160),
+    });
+    if(RECENT.length>20) RECENT.length = 20;
+    renderActivity();
+
+    // Route to CPT Coding tab
+    const codingInput = document.getElementById("coding-input");
+    if(codingInput && result.body){
+      codingInput.value = result.body;
+      pacsIngestStatus("✓ Parsed. Routing to CPT Coding…","ok");
+      // Auto-run the analyzer
+      if(typeof window.codingAnalyze === "function") {
+        try { window.codingAnalyze(); } catch(e){ console.error("codingAnalyze failed",e); }
+      }
+      // Jump to the coding tab
+      setTimeout(()=>{
+        if(typeof window.nav === "function"){
+          const navItem = document.querySelector('.snav-item[data-pg="coding"]');
+          window.nav("coding", navItem || null);
+        }
+      }, 150);
+    } else {
+      pacsIngestStatus("✓ Parsed. (Open CPT Coding to analyze.)","ok");
+    }
+  };
+
+  function renderMeta(meta){
+    if(!meta || !Object.keys(meta).length) return `<span style="color:var(--txt3);font-size:12px">(no metadata extracted)</span>`;
+    const rows = Object.entries(meta).filter(([_,v])=>v).map(([k,v])=>
+      `<tr><td style="padding:3px 8px 3px 0;font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;font-weight:700">${escapeHTML(k.replace(/_/g," "))}</td><td style="padding:3px 0;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHTML(v)}</td></tr>`
+    ).join("");
+    return `<table style="border-collapse:collapse">${rows}</table>`;
+  }
+
+  function pacsIngestStatus(msg,kind){
+    const el = document.getElementById("pacs-ingest-status");
+    el.textContent = msg;
+    el.style.color = kind==="ok"?"#22a06b": kind==="error"?"#a02828":"var(--txt3)";
+  }
+
+  function renderActivity(){
+    const host = document.getElementById("pacs-activity-list");
+    if(!host) return;
+    if(!RECENT.length){
+      host.innerHTML = `<p style="color:var(--txt3);font-size:12px">No activity yet — parse a message in the Inbound test tab.</p>`;
+      return;
+    }
+    host.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--txt3)">
+        <tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">Time</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">Format</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">Source</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">Accession</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">MRN</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--bdr)">Preview</th>
+        </tr></thead>
+      <tbody>${RECENT.map(r=>`
+        <tr style="border-bottom:1px solid var(--bdr)">
+          <td style="padding:4px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px">${escapeHTML(new Date(r.ts).toLocaleTimeString())}</td>
+          <td style="padding:4px 6px;font-size:11px">${escapeHTML(r.fmt.toUpperCase())}</td>
+          <td style="padding:4px 6px;font-size:11px;color:var(--txt2)">${escapeHTML(r.sending||"—")}</td>
+          <td style="padding:4px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px">${escapeHTML(r.accession||"—")}</td>
+          <td style="padding:4px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px">${escapeHTML(r.mrn||"—")}</td>
+          <td style="padding:4px 6px;font-size:11px;color:var(--txt3)">${escapeHTML((r.preview||"").slice(0,80))}…</td>
+        </tr>`).join("")}
+      </tbody></table>`;
+  }
+
+  /* ─── sample payloads ───────────────────────────────────────────────── */
+  const SAMPLE_HL7 = `MSH|^~\\&|FLUENCY|RIVERVIEW|RADAPP|RIVERVIEW|20260513150000||ORU^R01|MSG00001|P|2.5\nPID|1||MRN-0009^^^MRN^MR||SAMPLE^PATIENT^TEST||19620301|M\nPV1|1|O|RADIOLOGY^^^RIVERVIEW||||||||||||||||||||||||||||||||||||||||||\nOBR|1|ACC-001234|ACC-001234|CT0010^CT ABDOMEN AND PELVIS WITH CONTRAST^L|||20260513145000|||||||||DR.SMITH\nOBX|1|TX|REPORT^Report^L||EXAM: CT of the abdomen and pelvis with IV contrast||||||F\nOBX|2|TX|REPORT^Report^L||CLINICAL HISTORY: 58-year-old male with RLQ pain.||||||F\nOBX|3|TX|REPORT^Report^L||TECHNIQUE: Axial images from diaphragm through symphysis with IV contrast. 3D postprocessing on independent workstation.||||||F\nOBX|4|TX|REPORT^Report^L||FINDINGS: Appendix dilated to 11 mm with surrounding inflammatory stranding.||||||F\nOBX|5|TX|REPORT^Report^L||IMPRESSION: Acute uncomplicated appendicitis.||||||F`;
+
+  // Build sample FHIR DiagnosticReport with base64 plain-text body
+  function _toB64(s){
+    return btoa(unescape(encodeURIComponent(s)));
+  }
+  const SAMPLE_REPORT_TEXT = `EXAM: MRI of both knees without IV contrast\n\nCLINICAL HISTORY: 36-year-old runner with bilateral knee pain.\n\nTECHNIQUE: Multisequence MRI of the bilateral knees without contrast.\n\nFINDINGS:\nRight knee: medial meniscus posterior horn intrasubstance signal.\nLeft knee: small joint effusion with horizontal tear of the posterior horn medial meniscus.\n\nIMPRESSION:\n1. Left medial meniscus posterior horn tear.\n2. Right knee degenerative meniscal signal without tear.`;
+  function buildSampleFHIR(){
+    return JSON.stringify({
+      resourceType: "DiagnosticReport",
+      id: "DR-EX-001234",
+      identifier: [{ type:{coding:[{system:"http://terminology.hl7.org/CodeSystem/v2-0203",code:"ACSN"}]}, value:"ACC-2026-0567" }],
+      status: "final",
+      category: [{ coding:[{system:"http://terminology.hl7.org/CodeSystem/v2-0074",code:"RAD",display:"Radiology"}] }],
+      code: { coding:[{system:"http://loinc.org",code:"24588-9",display:"Knee MRI bilateral"}], text:"MRI both knees without contrast" },
+      subject: { reference:"Patient/MRN-0042", display:"Sample Patient" },
+      effectiveDateTime: "2026-05-13T15:00:00Z",
+      issued: "2026-05-13T15:05:00Z",
+      performer: [{ reference:"Practitioner/dr-jones", display:"Dr. K. Jones" }],
+      presentedForm: [{
+        contentType: "text/plain",
+        data: _toB64(SAMPLE_REPORT_TEXT),
+        title: "Final signed report"
+      }],
+      conclusion: "Left medial meniscus posterior horn tear. Right knee degenerative meniscal signal without tear.",
+    }, null, 2);
+  }
+
+  window.pacsLoadSample = function(kind){
+    const fmt = document.getElementById("pacs-ingest-format");
+    const body = document.getElementById("pacs-ingest-body");
+    if(kind==="hl7"){
+      fmt.value = "hl7";
+      body.value = SAMPLE_HL7;
+    } else if(kind==="fhir"){
+      fmt.value = "fhir";
+      body.value = buildSampleFHIR();
+    }
+    pacsIngestStatus("Sample loaded — click Parse to ingest.","info");
+  };
+
+  /* ─── tab switching ─────────────────────────────────────────────────── */
+  window.pacsTab = function(name, el){
+    document.querySelectorAll('#page-pacs .tab').forEach(t=>t.classList.remove("on"));
+    if(el) el.classList.add("on");
+    document.querySelectorAll('#page-pacs .pacs-tab').forEach(p=>{
+      p.style.display = p.dataset.pacstabPane === name ? "" : "none";
+    });
+    if(name==="activity") renderActivity();
+  };
+
+  /* ─── boot ──────────────────────────────────────────────────────────── */
+  function boot(){
+    if(!document.getElementById("page-pacs")) return;
+    pacsRenderConfig();
+    renderConnections();
+    renderActivity();
+    console.log("[radapp pacs] loaded");
+  }
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
+</script>
