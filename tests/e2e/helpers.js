@@ -70,6 +70,9 @@ async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mf
           });
           return api;
         },
+        then(resolve, reject) {
+          return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+        },
         limit: async n => ({ data: rows.slice(0, n), error: null }),
         single: async () => ({ data: rows[0] || null, error: rows[0] ? null : { message: 'mocked no row' } }),
         maybeSingle: async () => ({ data: rows[0] || null, error: null }),
