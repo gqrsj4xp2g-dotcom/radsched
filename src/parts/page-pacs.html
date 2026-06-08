@@ -266,14 +266,17 @@ create table pacs_inbound (
 
     <div class="card" style="margin-top:14px">
       <div class="card-title">Vendor-specific wiring notes</div>
-      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">M*Modal / Solventum Fluency for Imaging</summary>
+      <details style="margin-top:6px" open><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">M*Modal / Solventum Fluency (dictation + signed report)</summary>
       <div style="padding:8px 10px;font-size:12px;line-height:1.6;color:var(--txt2)">
-        <ul style="margin:0;padding-left:20px">
-          <li>Fluency emits an HL7 v2 ORU^R01 message on signing — point its outbound MLLP feed at <code>/api/pacs/ingest</code> wrapped in an HL7-over-HTTPS adapter, OR run our MLLP receiver on the Fluency network.</li>
-          <li>For Fluency Catalyst (cloud): poll the FHIR <code>DiagnosticReport</code> endpoint instead. Request <em>read</em> scope.</li>
-          <li>OBX|TX segments carry the report body (one line per OBX). Our parser concatenates these in order.</li>
-          <li>MSH-10 → <code>accession</code>; PID-3 → <code>patient_mrn</code> (de-identify before storage in V1).</li>
-        </ul>
+        Three integration surfaces, each addressing a different moment in the workflow:
+        <ol style="margin:6px 0 0 18px;padding:0;line-height:1.7">
+          <li><strong>Signed report (after-the-fact)</strong> — Fluency emits an HL7 v2 ORU^R01 on signing. Point its outbound MLLP feed at <code>/api/pacs/ingest</code> wrapped in an HL7-over-HTTPS adapter, OR run our MLLP receiver on the Fluency network. OBX|TX segments carry the body. MSH-10 → accession; PID-3 → MRN (de-identify in V1).</li>
+          <li><strong>CAPD live stream (during dictation)</strong> — Fluency Direct and Catalyst expose a WebSocket of interim transcripts (the same hook CDI nudges use). Configure the URL in the connection card and in the Live Dictation pane; we subscribe and re-analyze every 1.5 s after the dictator pauses. This is how the radiologist sees CPT + modifier suggestions <em>before</em> signing, so missing documentation can be added in the same dictation.</li>
+          <li><strong>Catalyst FHIR (cloud)</strong> — newer Fluency Catalyst deployments expose a FHIR R4 <code>DiagnosticReport</code> endpoint. Poll it with the tenant ID configured on the connection. Body lives in <code>presentedForm[].data</code> (base64; usually RTF or HTML — strip before passing to the coder).</li>
+        </ol>
+        <div style="margin-top:8px;padding:8px 10px;background:#eef5ff;border-left:3px solid var(--blue);border-radius:3px">
+          <strong>Browser-mic prototype</strong> — for evaluation today (no Fluency yet), the Live Dictation pane uses the Web Speech API to capture from your laptop mic. Fine for synthetic / de-identified rehearsals; not a production PHI path.
+        </div>
       </div>
       </details>
       <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:12px;padding:6px 8px;background:var(--bg3);border-radius:4px">Nuance Powerscribe 360</summary>
