@@ -9234,6 +9234,28 @@ async function renderBackupPicker(targetElId){
   }
 }
 
+function renderRestoreFromBackups(){
+  if(!_adminOnly('open backup restore')) return;
+  try{
+    const settingsNav = document.querySelector('[data-pg="settings"]');
+    if(typeof nav === 'function') nav('settings', settingsNav || null);
+    else if(typeof renderSettings === 'function') renderSettings();
+  }catch(e){
+    console.warn('[RS] renderRestoreFromBackups: settings nav failed:', e);
+  }
+  requestAnimationFrame(() => {
+    try{
+      if(typeof renderBackupPicker === 'function') renderBackupPicker('backup-picker');
+      const picker = document.getElementById('backup-picker');
+      if(picker && typeof picker.scrollIntoView === 'function'){
+        picker.scrollIntoView({ block:'center', behavior:'smooth' });
+      }
+    }catch(e){
+      console.warn('[RS] renderRestoreFromBackups: backup picker failed:', e);
+    }
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    ADMIN AUDIT LOG
    Records who did what (manual + AI-driven mutations) for accountability.
