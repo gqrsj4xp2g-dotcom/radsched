@@ -174,6 +174,7 @@ check('System health card exists in ops tools', /id="sys-health-result"/.test(in
 check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index) && /Rollback timeline/.test(index));
 check('SSO login entry point exists', /function\s+doSSOLogin\(/.test(index) && /signInWithSSO/.test(index) && /auth-sso-domain/.test(index));
 check('Backup restore preview wizard exists', /function\s+previewBackupRestore\(/.test(index) && /Restore preview/.test(index) && /I understand this overwrites current data/.test(index));
+check('Stress-test revert opens backup restore UI', /function\s+renderRestoreFromBackups\(/.test(index) && /renderRestoreFromBackups\(\)/.test(index) && /renderBackupPicker\('backup-picker'\)/.test(index));
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
 check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
