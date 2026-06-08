@@ -71,6 +71,89 @@
     </div>
   </div>
 
+  <!-- ─── TAB: live dictation ────────────────────────────────────────── -->
+  <div class="pacs-tab" data-pacstab-pane="dictate" style="display:none">
+    <div class="g2" style="gap:14px;align-items:start">
+      <div class="card">
+        <div class="card-title">🎙️ Live dictation → live coding</div>
+        <div style="font-size:12px;color:var(--txt2);line-height:1.55;margin-bottom:10px">
+          Two ways to drive this pane:
+          <ol style="margin:6px 0 0 18px;padding:0">
+            <li><strong>Browser mic</strong> — Web Speech API (Chrome / Edge / Safari). Useful prototype today, not for live PHI dictation.</li>
+            <li><strong>Fluency CAPD stream</strong> — paste the WebSocket URL from your Solventum config and we'll subscribe to interim transcripts. Same hook CDI nudges use.</li>
+          </ol>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <button class="bp" id="dict-start" onclick="dictStart()">🎙️ Start dictating</button>
+          <button class="bt bsm" id="dict-stop" onclick="dictStop()" disabled>⏹ Stop</button>
+          <button class="bt bxs" onclick="dictClear()">Clear</button>
+          <label style="font-size:11px;color:var(--txt3);margin-left:8px;display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="dict-live-coding" checked> live coding
+          </label>
+          <span id="dict-status" style="font-size:11px;color:var(--txt3);margin-left:auto"></span>
+        </div>
+
+        <div class="fg" style="margin-top:0">
+          <label>Transcript</label>
+          <textarea id="dict-transcript" rows="14" placeholder="Click ▶ Start dictating, then speak. Or paste an existing draft here." style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;resize:vertical;min-height:280px"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <button class="bt bsm" onclick="dictAnalyzeNow()">Code now</button>
+            <button class="bt bsm" onclick="dictSendToCoding()">Send to CPT Coding tab</button>
+            <span style="font-size:10.5px;color:var(--txt3)">Live coding analyzes every 1.5s after you pause.</span>
+          </div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-size:11.5px;font-weight:700;padding:6px 8px;background:var(--bg3);border-radius:4px">Connect to a Fluency CAPD stream</summary>
+          <div style="padding:10px;font-size:12px;line-height:1.55">
+            <div class="fg" style="margin-bottom:6px">
+              <label>WebSocket URL</label>
+              <input id="dict-capd-url" type="text" placeholder="wss://fluency-capd.riverview.local/stream/&lt;session_id&gt;" style="width:100%">
+            </div>
+            <div class="fg">
+              <label>Bearer token (optional)</label>
+              <input id="dict-capd-token" type="password" placeholder="will be sent as Sec-WebSocket-Protocol" style="width:100%">
+            </div>
+            <button class="bt bsm" onclick="dictCAPDConnect()">Connect</button>
+            <button class="bt bxs" onclick="dictCAPDDisconnect()">Disconnect</button>
+            <span id="dict-capd-status" style="font-size:11px;color:var(--txt3);margin-left:8px"></span>
+            <div style="font-size:11px;color:var(--txt3);margin-top:8px;line-height:1.5">
+              Expected message shape (from Solventum docs):
+              <pre style="background:var(--bg2);padding:8px;border-radius:4px;font-size:11px;margin-top:4px">{"type":"interim"|"final","text":"...","speakerId":"radiologist","timestamp":"…"}</pre>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="card-title">Live suggestions</div>
+          <div id="dict-suggestions" style="font-size:12px;color:var(--txt3)">Speak or paste to see suggested codes appear here in real time.</div>
+        </div>
+        <div class="card" id="dict-summary-card" style="display:none">
+          <div class="card-title">Estimated reimbursement (live)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3);font-weight:700">Medicare allowable</div>
+              <div style="font-size:22px;font-weight:800;color:var(--blue);tabular-nums" id="dict-total">$0.00</div>
+            </div>
+            <div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt3);font-weight:700">Δ vs naive</div>
+              <div style="font-size:22px;font-weight:800;tabular-nums" id="dict-delta">$0.00</div>
+            </div>
+          </div>
+          <div id="dict-ncci-flag" style="margin-top:8px;font-size:11px;color:#7a5a00;display:none">
+            ⚠ <span id="dict-ncci-count">0</span> NCCI warning(s) — check the CPT Coding tab.
+          </div>
+        </div>
+        <div class="note ni" style="margin-top:10px;font-size:11px;color:var(--txt3);line-height:1.55;padding:10px">
+          <strong>Why this matters for Fluency users:</strong> the radiologist sees CPT + modifier suggestions while still dictating, before the report is signed. If a modifier is missing or a -50 isn't supported, the suggestion box stays empty — that's the prompt to add the documentation now, not after the coder rejects it.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ─── TAB: ingest ─────────────────────────────────────────────────── -->
   <div class="pacs-tab" data-pacstab-pane="ingest" style="display:none">
     <div class="g2" style="gap:14px;align-items:start">
