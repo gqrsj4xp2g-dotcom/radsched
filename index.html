@@ -42139,10 +42139,95 @@ function _renderCoverageGapBanner(isAdmin){
 //   amber   = 70–85% or 115–130%
 //   red     = <70% or >130%
 // Click a row → opens FTE Monitor page for that physician.
+function _fairnessActivePhysicians(){
+  return (S.physicians || []).filter(p => _fairnessDrFte(p) > 0 || _fairnessIrFte(p) > 0);
+}
+function _fairnessDrFte(p){
+  if(!p || p.role === 'IR') return 0;
+  return Math.max(0, Number(p.drFte) || 0);
+}
+function _fairnessIrGroupFromKey(group){
+  const g = String(group || '').trim();
+  if(!g || g === 'IR' || g === 'ALL') return '';
+  const m = /^IR-(.+)$/.exec(g);
+  return m ? m[1] : g;
+}
+function _fairnessIrFte(p, group){
+  if(!p) return 0;
+  const fte = Math.max(0, Number(p.irFte) || 0);
+  if(fte <= 0) return 0;
+  const groupName = _fairnessIrGroupFromKey(group);
+  if(!groupName) return fte;
+  return p.irGroup === groupName ? fte : 0;
+}
+function _fairnessHolidayFte(p, group){
+  const g = group || 'ALL';
+  if(g === 'ALL') return _fairnessDrFte(p) + _fairnessIrFte(p);
+  if(g === 'DR') return _fairnessDrFte(p);
+  if(g === 'IR') return _fairnessIrFte(p);
+  if(/^IR-(.+)$/.test(g)) return _fairnessIrFte(p, g);
+  return 0;
+}
+function _fairnessExpectedForPool(physList, totalCount, fteFn){
+  const out = {};
+  const count = Number(totalCount) || 0;
+  const totalFte = physList.reduce((sum, p) => sum + (Number(fteFn(p)) || 0), 0);
+  physList.forEach(p => {
+    const fte = Number(fteFn(p)) || 0;
+    out[p.id] = count > 0 && totalFte > 0 && fte > 0 ? count * (fte / totalFte) : 0;
+  });
+  return out;
+}
+function _fairnessExpectedForGroupedCounts(physList, groupCounts, fteForGroup){
+  const out = {};
+  physList.forEach(p => { out[p.id] = 0; });
+  Object.entries(groupCounts || {}).forEach(([group, totalCount]) => {
+    const count = Number(totalCount) || 0;
+    if(count <= 0) return;
+    const totalFte = physList.reduce((sum, p) => sum + (Number(fteForGroup(p, group)) || 0), 0);
+    if(totalFte <= 0) return;
+    physList.forEach(p => {
+      const fte = Number(fteForGroup(p, group)) || 0;
+      if(fte > 0) out[p.id] += count * (fte / totalFte);
+    });
+  });
+  return out;
+}
+function _fairnessRatioColor(r){
+  const T = (typeof _TUNE === 'object' && _TUNE) ? _TUNE : {};
+  const greenLo = Number.isFinite(T.FAIRNESS_GREEN_LO) ? T.FAIRNESS_GREEN_LO : 0.85;
+  const greenHi = Number.isFinite(T.FAIRNESS_GREEN_HI) ? T.FAIRNESS_GREEN_HI : 1.15;
+  const amberLo = Number.isFinite(T.FAIRNESS_AMBER_LO) ? T.FAIRNESS_AMBER_LO : 0.70;
+  const amberHi = Number.isFinite(T.FAIRNESS_AMBER_HI) ? T.FAIRNESS_AMBER_HI : 1.30;
+  if(r == null || Number.isNaN(r)) return { bg: '#f8fafc', fg: '#64748b' };
+  if(r >= greenLo && r <= greenHi) return { bg: '#dcfce7', fg: '#166534' };
+  if(r >= amberLo && r <= amberHi) return { bg: '#fef3c7', fg: '#854d0e' };
+  return { bg: '#fee2e2', fg: '#991b1b' };
+}
+function _fairnessCell(actualRaw, expectedRaw, label, context){
+  const actual = Number(actualRaw) || 0;
+  const expected = Number(expectedRaw) || 0;
+  const detail = context ? `, ${context}` : '';
+  if(expected <= 0){
+    if(actual <= 0){
+      const tip = `No expected ${label} workload for this physician in the relevant FTE pool${detail}.`;
+      const { bg, fg } = _fairnessRatioColor(null);
+      return `<td style="text-align:center;padding:5px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${escHtml(tip)}">&mdash;</span></td>`;
+    }
+    const tip = `${actual} actual ${label} with no configured FTE in the relevant pool${detail}.`;
+    const { bg, fg } = _fairnessRatioColor(Infinity);
+    return `<td style="text-align:center;padding:5px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${escHtml(tip)}">${actual} &middot; no FTE</span></td>`;
+  }
+  const ratio = actual / expected;
+  const { bg, fg } = _fairnessRatioColor(ratio);
+  const pct = Math.round(ratio * 100);
+  const tip = `${actual} actual vs ${expected.toFixed(1)} expected (${label}${detail})`;
+  return `<td style="text-align:center;padding:5px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${escHtml(tip)}">${actual} &middot; ${pct}%</span></td>`;
+}
 function _renderFairnessScoreboard(isAdmin){
   const host = document.getElementById('dash-fairness');
   if(!host) return;
-  const physList = (S.physicians || []).filter(p => (p.drFte || 0) + (p.irFte || 0) > 0);
+  const physList = _fairnessActivePhysicians();
   if(physList.length < 2){
     host.innerHTML = ''; // need ≥2 physicians for a meaningful comparison
     return;
@@ -42152,30 +42237,42 @@ function _renderFairnessScoreboard(isAdmin){
   const yearEnd   = `${yr}-12-31`;
   // Counters per physician.
   const wkndPer = {}, holPer = {}, s2Per = {}, s3Per = {}, callPer = {};
+  const holGroupCounts = {};
+  const callGroupCounts = {};
   physList.forEach(p => { wkndPer[p.id] = 0; holPer[p.id] = 0; s2Per[p.id] = 0; s3Per[p.id] = 0; callPer[p.id] = 0; });
   (S.weekendCalls || []).forEach(w => { const d = w.satDate || w.date; if(d >= yearStart && d <= yearEnd && wkndPer[w.physId] != null) wkndPer[w.physId]++; });
-  (S.holidays || []).forEach(h => { if(h.date >= yearStart && h.date <= yearEnd && holPer[h.physId] != null) holPer[h.physId]++; });
+  const seenHolidays = new Set();
+  (S.holidays || []).forEach(h => {
+    if(!h.date || h.date < yearStart || h.date > yearEnd || holPer[h.physId] == null) return;
+    const group = h.group || 'ALL';
+    const key = `${h.physId}|${h.name || h.date}|${h.year || h.date.slice(0,4)}|${group}`;
+    if(seenHolidays.has(key)) return;
+    seenHolidays.add(key);
+    holPer[h.physId]++;
+    holGroupCounts[group] = (holGroupCounts[group] || 0) + 1;
+  });
   (S.drShifts || []).forEach(s => {
     if(s.date < yearStart || s.date > yearEnd) return;
     if(s.shift === '2nd' && s2Per[s.physId] != null) s2Per[s.physId]++;
     if(s.shift === '3rd' && s3Per[s.physId] != null) s3Per[s.physId]++;
   });
-  (S.irCalls || []).forEach(c => { if(c.date >= yearStart && c.date <= yearEnd && callPer[c.physId] != null) callPer[c.physId]++; });
-  // Compute expected per category as (totalForCategory * fteShare).
+  (S.irCalls || []).forEach(c => {
+    if(c.date < yearStart || c.date > yearEnd || callPer[c.physId] == null) return;
+    if(c.callType !== 'daily') return;
+    if(typeof _isHolidaySyncedCall === 'function' && _isHolidaySyncedCall(c)) return;
+    const group = c.irGroup || 'IR';
+    callPer[c.physId]++;
+    callGroupCounts[group] = (callGroupCounts[group] || 0) + 1;
+  });
+  // Compute expected workload against the relevant pool for each category.
   const total = arr => arr.reduce((a,b) => a + b, 0);
-  const totalFte = physList.reduce((a, p) => a + (p.drFte || 0) + (p.irFte || 0), 0) || 1;
   const cats = [
-    { key: 'wknd', label: 'Weekend Call',  perPhys: wkndPer, total: total(Object.values(wkndPer)) },
-    { key: 'hol',  label: 'Holiday',       perPhys: holPer,  total: total(Object.values(holPer))  },
-    { key: 's2',   label: '2nd Shift',     perPhys: s2Per,   total: total(Object.values(s2Per))   },
-    { key: 's3',   label: '3rd Shift',     perPhys: s3Per,   total: total(Object.values(s3Per))   },
-    { key: 'call', label: 'IR Daily Call', perPhys: callPer, total: total(Object.values(callPer)) },
+    { key: 'wknd', label: 'Weekend Call',  perPhys: wkndPer, expected: _fairnessExpectedForPool(physList, total(Object.values(wkndPer)), _fairnessDrFte), context: 'DR FTE pool' },
+    { key: 'hol',  label: 'Holiday',       perPhys: holPer,  expected: _fairnessExpectedForGroupedCounts(physList, holGroupCounts, _fairnessHolidayFte), context: 'holiday pool' },
+    { key: 's2',   label: '2nd Shift',     perPhys: s2Per,   expected: _fairnessExpectedForPool(physList, total(Object.values(s2Per)), _fairnessDrFte), context: 'DR FTE pool' },
+    { key: 's3',   label: '3rd Shift',     perPhys: s3Per,   expected: _fairnessExpectedForPool(physList, total(Object.values(s3Per)), _fairnessDrFte), context: 'DR FTE pool' },
+    { key: 'call', label: 'IR Daily Call', perPhys: callPer, expected: _fairnessExpectedForGroupedCounts(physList, callGroupCounts, _fairnessIrFte), context: 'IR group FTE pool' },
   ];
-  const ratioColor = r => {
-    if(r >= 0.85 && r <= 1.15) return { bg: '#dcfce7', fg: '#166534' };  // green
-    if(r >= 0.70 && r <= 1.30) return { bg: '#fef3c7', fg: '#854d0e' };  // amber
-    return { bg: '#fee2e2', fg: '#991b1b' };                              // red
-  };
   // For non-admin users we only show their OWN row, no other physicians.
   const visiblePhys = (isAdmin) ? physList : physList.filter(p => p.id === (CU?.physId || CU?.id));
   if(!visiblePhys.length){ host.innerHTML = ''; return; }
@@ -42185,14 +42282,10 @@ function _renderFairnessScoreboard(isAdmin){
     ${cats.map(c => `<th style="text-align:center;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">${escHtml(c.label)}</th>`).join('')}
   </tr>`;
   const rows = visiblePhys.map(p => {
-    const fteShare = ((p.drFte || 0) + (p.irFte || 0)) / totalFte;
     const cells = cats.map(c => {
-      const expected = c.total * fteShare;
-      const actual = c.perPhys[p.id];
-      const ratio = expected > 0 ? actual / expected : 1;
-      const { bg, fg } = ratioColor(ratio);
-      const pct = Math.round(ratio * 100);
-      return `<td style="text-align:center;padding:5px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${actual} actual vs ${expected.toFixed(1)} expected (FTE-adjusted)">${actual} · ${pct}%</span></td>`;
+      const expected = c.expected[p.id] || 0;
+      const actual = c.perPhys[p.id] || 0;
+      return _fairnessCell(actual, expected, c.label, c.context);
     }).join('');
     return `<tr>
       <td style="padding:5px 8px;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)}</td>
@@ -42204,7 +42297,7 @@ function _renderFairnessScoreboard(isAdmin){
       <span>⚖ Workload Fairness — ${yr}</span>
       <button class="bsm" onclick="nav('fte',document.querySelector('[onclick*=fte]'))" title="Open FTE Monitor for full per-month detail">FTE Monitor →</button>
     </div>
-    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Each cell shows actual count and percent of FTE-adjusted expected. Green = within 15%, amber = within 30%, red = beyond.</div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Each cell shows actual count and percent of expected workload using the relevant pool for that category. Green = within 15%, amber = within 30%, red = beyond.</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead>${headers}</thead>
       <tbody>${rows}</tbody>
@@ -42235,43 +42328,33 @@ function _renderEquityHeatmap(){
     ? addDays(today, horizonDays)
     : new Date(Date.now() + horizonDays * 86400000).toISOString().slice(0,10);
   const inWindow = (d) => d >= today && d <= horizonEnd;
-  const physList = (S.physicians || []).filter(p => (p.drFte || 0) + (p.irFte || 0) > 0);
+  const physList = _fairnessActivePhysicians();
   if(physList.length < 2){ host.innerHTML = ''; return; }
-  const totalFte = physList.reduce((a, p) => a + (p.drFte || 0) + (p.irFte || 0), 0) || 1;
   // Per-physician forward counts.
   const drFwd = {}, irFwd = {}, wkFwd = {};
+  const irGroupCounts = {};
   physList.forEach(p => { drFwd[p.id] = 0; irFwd[p.id] = 0; wkFwd[p.id] = 0; });
   (S.drShifts    || []).forEach(s => { if(inWindow(s.date) && drFwd[s.physId] != null && (s.shift==='1st'||s.shift==='2nd'||s.shift==='3rd')) drFwd[s.physId]++; });
-  (S.irCalls     || []).forEach(c => { if(inWindow(c.date) && irFwd[c.physId] != null) irFwd[c.physId]++; });
+  (S.irCalls     || []).forEach(c => {
+    if(!inWindow(c.date) || irFwd[c.physId] == null) return;
+    if(typeof _isHolidaySyncedCall === 'function' && _isHolidaySyncedCall(c)) return;
+    const group = c.irGroup || 'IR';
+    irFwd[c.physId]++;
+    irGroupCounts[group] = (irGroupCounts[group] || 0) + 1;
+  });
   (S.weekendCalls|| []).forEach(w => { const d = w.satDate || w.date; if(inWindow(d) && wkFwd[w.physId] != null) wkFwd[w.physId]++; });
-  // Use _TUNE thresholds for color decision.
-  const ratioColor = (r) => {
-    const T = _TUNE;
-    if(r >= T.FAIRNESS_GREEN_LO && r <= T.FAIRNESS_GREEN_HI) return { bg:'#dcfce7', fg:'#166534' };
-    if(r >= T.FAIRNESS_AMBER_LO && r <= T.FAIRNESS_AMBER_HI) return { bg:'#fef3c7', fg:'#854d0e' };
-    return { bg:'#fee2e2', fg:'#991b1b' };
-  };
   const total = (m) => Object.values(m).reduce((a,b)=>a+b, 0);
-  const totals = { dr: total(drFwd), ir: total(irFwd), wk: total(wkFwd) };
+  const expected = {
+    dr: _fairnessExpectedForPool(physList, total(drFwd), _fairnessDrFte),
+    ir: _fairnessExpectedForGroupedCounts(physList, irGroupCounts, _fairnessIrFte),
+    wk: _fairnessExpectedForPool(physList, total(wkFwd), _fairnessDrFte),
+  };
   const rows = physList.map(p => {
-    const fteShare = ((p.drFte || 0) + (p.irFte || 0)) / totalFte;
-    const cell = (label, m, total) => {
-      const expected = total * fteShare;
-      // m[p.id] may be undefined for physicians with zero assignments
-      // in the horizon. `undefined / expected` would yield NaN, which
-      // renders as "NaN · NaN%" in the cell. Coerce to 0 first.
-      const actual = m[p.id] || 0;
-      const ratio = expected > 0 ? actual / expected : 1;
-      const { bg, fg } = ratioColor(ratio);
-      const pct = Math.round(ratio * 100);
-      const tip = `${actual} actual vs ${expected.toFixed(1)} expected (${label}, next ${horizonDays}d)`;
-      return `<td style="text-align:center;padding:4px"><span style="background:${bg};color:${fg};padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;font-family:ui-monospace,monospace" title="${escHtml(tip)}">${actual} · ${pct}%</span></td>`;
-    };
     return `<tr>
       <td style="padding:5px 8px;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)}</td>
-      ${cell('DR shifts', drFwd, totals.dr)}
-      ${cell('IR call',   irFwd, totals.ir)}
-      ${cell('Weekend',   wkFwd, totals.wk)}
+      ${_fairnessCell(drFwd[p.id], expected.dr[p.id], 'DR shifts', `next ${horizonDays}d, DR FTE pool`)}
+      ${_fairnessCell(irFwd[p.id], expected.ir[p.id], 'IR call', `next ${horizonDays}d, IR group FTE pool`)}
+      ${_fairnessCell(wkFwd[p.id], expected.wk[p.id], 'Weekend', `next ${horizonDays}d, DR FTE pool`)}
     </tr>`;
   }).join('');
   host.innerHTML = `<div class="card">
@@ -42279,7 +42362,7 @@ function _renderEquityHeatmap(){
       <span>📈 Equity Heatmap — Next ${horizonDays} days</span>
       <span style="font-size:11px;font-weight:400;color:var(--txt3)">${today} → ${horizonEnd}</span>
     </div>
-    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Forward-looking balance: actual vs FTE-adjusted-expected for upcoming work. Rebalance now to head off disputes.</div>
+    <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Forward-looking balance: actual vs expected upcoming work, with DR and IR work measured against their own FTE pools.</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
       <thead><tr>
         <th style="text-align:left;padding:6px 8px;font-size:11px;font-weight:700;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.5px">Physician</th>
