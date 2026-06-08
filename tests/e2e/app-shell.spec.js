@@ -106,6 +106,87 @@ test('dashboard shows role-aware home panel', async ({ page }) => {
   await expect(page.locator('#dash-role-home')).toContainText('Pending swaps');
 });
 
+test('dashboard fairness and equity use category-specific FTE pools', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=fairness-equity');
+  await launchSyntheticUser(page, 'admin');
+
+  const result = await page.evaluate(() => {
+    const today = fmtDate(new Date());
+    const future = n => addDays(today, n);
+    const yr = new Date().getFullYear();
+    S.physicians = [
+      { id: 1, first: 'Dana', last: 'DR Full', role: 'DR', drFte: 1, irFte: 0, irGroup: null, active: true },
+      { id: 2, first: 'Henry', last: 'DR Half', role: 'DR', drFte: 0.5, irFte: 0, irGroup: null, active: true },
+      { id: 3, first: 'Iris', last: 'IR Full', role: 'IR', drFte: 0, irFte: 1, irGroup: 'North', active: true },
+      { id: 4, first: 'Nia', last: 'IR Half', role: 'IR', drFte: 0, irFte: 0.5, irGroup: 'North', active: true },
+    ];
+    S.weekendCalls = [
+      { id: 101, physId: 1, satDate: future(12), sunDate: future(13) },
+      { id: 102, physId: 1, satDate: future(19), sunDate: future(20) },
+      { id: 103, physId: 1, satDate: future(26), sunDate: future(27) },
+    ];
+    S.holidays = [
+      { id: 201, physId: 1, name: 'Thanksgiving', year: yr, date: `${yr}-11-26`, group: 'DR' },
+      { id: 202, physId: 1, name: 'Thanksgiving', year: yr, date: `${yr}-11-27`, group: 'DR' },
+    ];
+    S.drShifts = [
+      { id: 301, physId: 1, date: `${yr}-03-02`, shift: '2nd' },
+      { id: 302, physId: 1, date: `${yr}-03-03`, shift: '2nd' },
+      { id: 303, physId: 1, date: `${yr}-03-04`, shift: '2nd' },
+      { id: 304, physId: 1, date: future(5), shift: '1st' },
+      { id: 305, physId: 1, date: future(6), shift: '1st' },
+      { id: 306, physId: 1, date: future(7), shift: '1st' },
+    ];
+    S.irCalls = [
+      { id: 401, physId: 3, date: `${yr}-04-01`, callType: 'daily', irGroup: 'North' },
+      { id: 402, physId: 3, date: `${yr}-04-02`, callType: 'daily', irGroup: 'North' },
+      { id: 403, physId: 3, date: `${yr}-04-03`, callType: 'daily', irGroup: 'North' },
+      { id: 404, physId: 3, date: future(8), callType: 'weekend', irGroup: 'North' },
+      { id: 405, physId: 3, date: future(15), callType: 'weekend', irGroup: 'North' },
+      { id: 406, physId: 3, date: future(16), callType: 'daily', irGroup: 'North', notes: 'Auto (Holiday)' },
+    ];
+
+    _renderFairnessScoreboard(true);
+    _renderEquityHeatmap();
+    const collect = selector => [...document.querySelectorAll(`${selector} tbody tr`)].map(tr => ({
+      name: tr.cells[0].textContent.trim(),
+      cells: [...tr.cells].slice(1).map(td => {
+        const chip = td.querySelector('span');
+        return {
+          text: td.textContent.trim(),
+          title: chip ? chip.getAttribute('title') : '',
+        };
+      }),
+    }));
+    return {
+      fairness: collect('#dash-fairness'),
+      heatmap: collect('#dash-equity-heatmap'),
+    };
+  });
+
+  const fairnessDr = result.fairness.find(row => row.name.includes('DR Full'));
+  const fairnessIr = result.fairness.find(row => row.name.includes('IR Full'));
+  const heatmapDr = result.heatmap.find(row => row.name.includes('DR Full'));
+  const heatmapIr = result.heatmap.find(row => row.name.includes('IR Full'));
+  expect(fairnessDr).toBeTruthy();
+  expect(fairnessIr).toBeTruthy();
+  expect(heatmapDr).toBeTruthy();
+  expect(heatmapIr).toBeTruthy();
+
+  expect(fairnessDr.cells[0].title).toContain('3 actual vs 2.0 expected (Weekend Call, DR FTE pool)');
+  expect(fairnessDr.cells[1].title).toContain('1 actual vs 0.7 expected (Holiday, holiday pool)');
+  expect(fairnessDr.cells[2].title).toContain('3 actual vs 2.0 expected (2nd Shift, DR FTE pool)');
+  expect(fairnessDr.cells[4].title).toContain('No expected IR Daily Call workload');
+  expect(fairnessIr.cells[0].title).toContain('No expected Weekend Call workload');
+  expect(fairnessIr.cells[4].title).toContain('3 actual vs 2.0 expected (IR Daily Call, IR group FTE pool)');
+
+  expect(heatmapDr.cells[0].title).toContain('3 actual vs 2.0 expected (DR shifts, next 90d, DR FTE pool)');
+  expect(heatmapDr.cells[1].title).toContain('No expected IR call workload');
+  expect(heatmapDr.cells[2].title).toContain('3 actual vs 2.0 expected (Weekend, next 90d, DR FTE pool)');
+  expect(heatmapIr.cells[0].title).toContain('No expected DR shifts workload');
+  expect(heatmapIr.cells[1].title).toContain('2 actual vs 1.3 expected (IR call, next 90d, IR group FTE pool)');
+});
+
 test('admin MFA gate blocks privileged navigation until aal2 verification', async ({ page }) => {
   await openApp(page, '/index.html?e2e=admin-mfa');
   await launchSyntheticUser(page, 'admin', { aal: 'aal1' });
