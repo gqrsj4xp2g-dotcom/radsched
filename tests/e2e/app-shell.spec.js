@@ -111,9 +111,20 @@ test('dashboard fairness and equity use category-specific FTE pools', async ({ p
   await launchSyntheticUser(page, 'admin');
 
   const result = await page.evaluate(() => {
+    const NativeDate = Date;
+    const fixedNow = new NativeDate('2026-06-08T12:00:00');
+    class FixedDate extends NativeDate {
+      constructor(...args) {
+        super(...(args.length ? args : [fixedNow]));
+      }
+      static now() { return fixedNow.getTime(); }
+      static parse(value) { return NativeDate.parse(value); }
+      static UTC(...args) { return NativeDate.UTC(...args); }
+    }
+    window.Date = FixedDate;
     const today = fmtDate(new Date());
     const future = n => addDays(today, n);
-    const yr = new Date().getFullYear();
+    const yr = 2026;
     S.physicians = [
       { id: 1, first: 'Dana', last: 'DR Full', role: 'DR', drFte: 1, irFte: 0, irGroup: null, active: true },
       { id: 2, first: 'Henry', last: 'DR Half', role: 'DR', drFte: 0.5, irFte: 0, irGroup: null, active: true },
