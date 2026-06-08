@@ -311,6 +311,25 @@ test('backup restore drill validates and applies a Supabase backup row', async (
   expect(result.edgeAction).toBe('restore-backup');
 });
 
+test('stress-test revert helper opens backup restore picker', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=stress-revert-helper');
+  await launchSyntheticUser(page, 'admin');
+
+  await page.evaluate(() => {
+    window.__rsMockSupabase.__backupRows.push({
+      id: 'main_backup_stress_revert_e2e',
+      practice_id: 'main',
+      created_at: '2026-06-08T12:00:00.000Z',
+      data: JSON.stringify({ physicians: [], sites: [], drShifts: [] }),
+    });
+    const openBackups = globalThis.renderRestoreFromBackups || Function('return typeof renderRestoreFromBackups === "function" ? renderRestoreFromBackups : null')();
+    openBackups();
+  });
+
+  await expect(page.locator('#page-settings')).toBeVisible();
+  await expect(page.locator('#backup-picker')).toContainText('main_backup_stress_revert_e2e');
+});
+
 test('audit log dual-writes to the side table and exports canonical rows', async ({ page }) => {
   await openApp(page, '/index.html?e2e=audit');
   await launchSyntheticUser(page, 'admin');
