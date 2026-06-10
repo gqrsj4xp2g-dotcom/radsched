@@ -24157,7 +24157,13 @@ function _renderMessages(){
       dateDivider=`<div style="text-align:center;font-size:10px;color:var(--txt3);margin:8px 0;display:flex;align-items:center;gap:8px"><div style="flex:1;height:1px;background:var(--bdr)"></div>${label}<div style="flex:1;height:1px;background:var(--bdr)"></div></div>`;
     }
     const _isPinned = _pinnedIds.includes(m.id);
-    const _pinBtn = `<span onclick="_toggleChatPin('${_convId.replace(/['"\\]/g,'')}',${+m.id||0})" title="${_isPinned?'Unpin':'Pin'} message" style="cursor:pointer;opacity:${_isPinned?'1':'.3'};margin-left:4px">📌</span>`;
+    // m.id is always numeric (sendChatMessage uses S.nextId++); the
+    // earlier `+m.id||0` coercion collapsed any non-numeric legacy id
+    // to 0, making all such messages share one pin slot. Emit the raw
+    // numeric id; skip the button entirely for non-numeric legacy ids.
+    const _pinBtn = (typeof m.id === 'number')
+      ? `<span onclick="_toggleChatPin('${_convId.replace(/['"\\]/g,'')}',${m.id})" title="${_isPinned?'Unpin':'Pin'} message" style="cursor:pointer;opacity:${_isPinned?'1':'.3'};margin-left:4px">📌</span>`
+      : '';
     return dateDivider+`<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:2px">
       <div style="font-size:10px;color:var(--txt3);margin-bottom:3px;padding:0 4px">${u?escHtml(u.first+' '+u.last):'?'} · ${escHtml((m.ts||'').slice(0,16).replace('T',' '))}${_pinBtn}</div>
       <div style="max-width:72%;padding:8px 13px;border-radius:${isMe?'14px 14px 3px 14px':'14px 14px 14px 3px'};font-size:13px;line-height:1.45;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}${_isPinned?';box-shadow:0 0 0 2px var(--accent-300,#c1dbed)':''}">
