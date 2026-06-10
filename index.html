@@ -48352,6 +48352,23 @@ function _validateLocalBeforeSave(){
   });
   return issues;
 }
+// rs-v101: on-demand UI for the validator above (Settings → 🩺
+// Validate data). Read-only — reports, never mutates.
+function runLocalDataValidation(){
+  let issues = [];
+  try{ issues = _validateLocalBeforeSave() || []; }
+  catch(e){ issues = ['validator crashed: ' + (e?.message || String(e))]; }
+  const body = issues.length
+    ? `<div style="font-size:12.5px;color:var(--amber-t,#92400e);margin-bottom:8px"><strong>${issues.length}</strong> issue${issues.length===1?'':'s'} found. These records may be silently dropped or corrected when another device syncs.</div>
+       <div style="max-height:260px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:11px;line-height:1.6">${issues.slice(0,80).map(i=>`<div>• ${escHtml(i)}</div>`).join('')}${issues.length>80?`<div>… and ${issues.length-80} more</div>`:''}</div>`
+    : `<div style="font-size:13px;color:var(--green-t)">✓ All local records pass the remote-apply validators. Nothing would be dropped on sync.</div>`;
+  if(typeof _rsConfirm === 'function'){
+    _rsConfirm({ title: '🩺 Local data validation', bodyHtml: body, confirmLabel: 'Close', cancelLabel: '' });
+  } else {
+    alert(issues.length ? issues.join('\n') : 'All records valid.');
+  }
+  if(typeof _audit === 'function') _audit('data.validate.manual', { issues: issues.length });
+}
 
 // ── Excel export of full schedule (round-trip with import) ─────────────
 // Writes an XLSX with one sheet per category (DR Shifts, IR Shifts, IR
