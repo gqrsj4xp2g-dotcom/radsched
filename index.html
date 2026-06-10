@@ -20228,13 +20228,23 @@ function _vacWeeks(year){
   const dow=jan1.getDay();
   const weekStart=new Date(jan1);
   weekStart.setDate(jan1.getDate()-dow);
-  return Array.from({length:52},(_,i)=>{
+  // rs-v102: was hard-coded to 52 weeks, so in 53-week years (Sunday-
+  // anchored: any year whose Dec 27-31 starts a new week) the final
+  // week was simply missing \u2014 physicians couldn't pick the year-end
+  // week, and a manual admin assign of week 53 created an assignment
+  // tag with no matching week (orphaned vacation records). Emit weeks
+  // while the week START is still inside `year`; yields 52 or 53.
+  const dec31=new Date(year,11,31);
+  const weeks=[];
+  for(let i=0;i<54;i++){
     const s=new Date(weekStart); s.setDate(weekStart.getDate()+i*7);
+    if(i>0 && s>dec31) break;   // week starts after year end \u2014 done (i=0 always kept)
     const e=new Date(s); e.setDate(s.getDate()+6);
     const lbl=n=>n.toLocaleDateString('default',{month:'short',day:'numeric'});
-    return{week:i+1,start:fmtDate(s),end:fmtDate(e),
-      label:`Wk ${i+1}: ${lbl(s)}\u2013${lbl(e)}`};
-  });
+    weeks.push({week:i+1,start:fmtDate(s),end:fmtDate(e),
+      label:`Wk ${i+1}: ${lbl(s)}\u2013${lbl(e)}`});
+  }
+  return weeks;
 }
 
 // Check if a week is available for a physician (returns {ok,reason})
