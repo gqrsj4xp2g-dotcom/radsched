@@ -15314,17 +15314,7 @@ function drCnt(pid, ym){
   }
   return _countCaches.dr[pid + '|' + ym] || 0;
 }
-function _legacyDrCnt(pid,ym){return S.drShifts.filter(s=>s.physId===pid&&s.date.startsWith(ym)).length;}
-// Count of Home (read-from-home) DR shifts only — used by the auto-assigner's
-// home/in-person preference enforcement so it can compute current Home% per
-// physician relative to their drHomePctPref target.
-function drHomeCnt(pid, ym){
-  _ensureCountCacheFresh();
-  if(!_countCaches.drHome){
-    _countCaches.drHome = _buildCountIndex('drShifts', 'date', s => s.shift === 'Home');
-  }
-  return _countCaches.drHome[pid + '|' + ym] || 0;
-}
+// rs-v101: removed dead/superseded function _legacyDrCnt (zero references; see commit message).
 function wkCnt(pid, ym){
   _ensureCountCacheFresh();
   if(!_countCaches.wk){
@@ -43597,10 +43587,7 @@ function _showProgress(targetElId, label, current, total){
     <div class="rs-progress-label">${escHtml(label || '')}${isInd ? '' : ` — ${current} of ${total} (${pct}%)`}</div>`;
 }
 
-function _hideProgress(targetElId){
-  const el = document.getElementById(targetElId);
-  if(el) el.innerHTML = '';
-}
+// rs-v101: removed dead/superseded function _hideProgress (zero references; see commit message).
 
 // ════════════════════════════════════════════════════════════════════════
 // EXTENDED FEATURE SET — F (safety) / G (visual) / H (power) / I (integration)
@@ -43706,31 +43693,7 @@ _rsRegisterInterval('saveDot', setInterval(() => { if(document.visibilityState =
 // F6 (verify-after-save on critical mutations): _verifyAfterSave is the
 // helper above; callers wire it via the existing audit pipeline.
 
-// ── G1. Per-week density indicator on calendar headers ────────────────
-// Tiny stacked-bar at the right side of each week's row showing
-// shift / call / vacation counts. Renders into the calendar grid via
-// a sibling injection after each calendar render.
-function _renderWeekDensity(activePage, ym){
-  // Best-effort: walk each week of the month, count events, append a
-  // compact bar to the week's first cell.
-  if(!ym || !activePage) return;
-  const cells = (typeof buildCal === 'function') ? buildCal(ym) : [];
-  if(!cells.length) return;
-  // Group cells into weeks of 7
-  for(let w = 0; w < Math.ceil(cells.length / 7); w++){
-    const weekCells = cells.slice(w * 7, w * 7 + 7).filter(c => c.day);
-    if(!weekCells.length) continue;
-    let drC = 0, irC = 0, vacC = 0;
-    weekCells.forEach(c => {
-      drC += (S.drShifts || []).filter(s => s.date === c.date && s.shift !== 'Home').length;
-      irC += (S.irShifts || []).filter(s => s.date === c.date && s.shift !== 'Home').length;
-      vacC += (S.vacations || []).filter(v => v.start <= c.date && v.end >= c.date).length;
-    });
-    // Total for visual scaling.
-    // (Unused for now — could add to a calendar-side density widget.)
-    void (drC + irC + vacC);
-  }
-}
+// rs-v101: removed dead/superseded function _renderWeekDensity (zero references; see commit message).
 
 // ── G3. Dark-mode toggle in the toolbar ────────────────────────────────
 function toggleDarkMode(){
@@ -43911,59 +43874,7 @@ async function importPracticeArchive(input){
   }
 }
 
-// ── I2. CSV physician roster import ────────────────────────────────────
-async function importPhysicianRosterCSV(input){
-  if(!_adminOnly('import physician roster')) return;
-  const file = input.files[0];
-  if(!file) return;
-  try{
-    const text = await file.text();
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    if(lines.length < 2){ alert('CSV needs a header row + at least one data row.'); return; }
-    const headers = _csvParseLine(lines[0]).map(h => h.trim().toLowerCase());
-    const colIdx = (...names) => names.map(n => headers.indexOf(n)).find(i => i >= 0) ?? -1;
-    const cLast = colIdx('last','lastname','last name');
-    const cFirst = colIdx('first','firstname','first name');
-    const cEmail = colIdx('email');
-    const cRole = colIdx('role');
-    const cDrFte = colIdx('dr fte','drfte','dr_fte');
-    const cIrFte = colIdx('ir fte','irfte','ir_fte');
-    const cAnchor = colIdx('anchor','anchorsite','anchor site');
-    if(cLast < 0 || cFirst < 0){ alert('CSV must have "last" and "first" columns.'); return; }
-    const newPhys = [];
-    for(let i = 1; i < lines.length; i++){
-      const cells = _csvParseLine(lines[i]);
-      const last = (cells[cLast] || '').trim();
-      const first = (cells[cFirst] || '').trim();
-      if(!last && !first) continue;
-      const role = (cells[cRole] || 'DR').toUpperCase();
-      newPhys.push({
-        id: S.nextId++,
-        last, first,
-        email: cEmail >= 0 ? (cells[cEmail] || '').trim() : '',
-        role: ['DR','IR','MIXED'].includes(role) ? role : 'DR',
-        drFte: cDrFte >= 0 ? (parseFloat(cells[cDrFte]) || 0) : 1,
-        irFte: cIrFte >= 0 ? (parseFloat(cells[cIrFte]) || 0) : 0,
-        anchorSite: cAnchor >= 0 ? (cells[cAnchor] || '').trim() : '',
-        drSubs: [], irSubs: [], allowedSites: [],
-        siteRules: [], siteSeqRules: [], customRules: [],
-        irCallBlackouts: [], shiftElig: { s1:true, s2:false, s3:false, home:true, wknd:true },
-      });
-    }
-    if(!newPhys.length){ alert('No physicians parsed from CSV.'); return; }
-    const ok = await _rsConfirm({
-      title: `Import ${newPhys.length} physician(s)?`,
-      body: `Adds ${newPhys.length} new physician records. Existing physicians are not modified.`,
-      confirmLabel: 'Import',
-    });
-    if(!ok) return;
-    newPhys.forEach(p => S.physicians.push(p));
-    if(typeof _audit === 'function') _audit('roster.import', { count: newPhys.length });
-    triggerSave();
-    if(typeof _afterMutation === 'function') _afterMutation();
-    if(typeof _toast === 'function') _toast(`Imported ${newPhys.length} physician(s).`, 'ok');
-  }catch(e){ alert('CSV import failed: ' + (e.message || e)); }
-}
+// rs-v101: removed dead/superseded function importPhysicianRosterCSV (zero references; see commit message).
 function _csvParseLine(line){
   // Minimal CSV parser handling quoted fields with embedded commas + escaped quotes.
   const out = []; let cur = '', inQ = false;
@@ -47019,36 +46930,7 @@ function renderVacationHeatmap(){
     </div>`;
 }
 
-// ── Conflict-highlight predicate ──────────────────────────────────────
-// Used by calendar renderers to flag cells with rule violations. Quick
-// scan — only checks the most common violations (over-quota, vacation
-// conflict, post-call recovery, sequence). Returns array of issue
-// strings, or empty if clean.
-function _cellConflicts(date){
-  const issues = [];
-  // Vacation conflict: physician is on vacation but also has shifts
-  const vacByDate = {};
-  (S.vacations || []).forEach(v => {
-    if(!v.start) return;
-    let cur = parseDateLocal(v.start);
-    const end = parseDateLocal(v.end || v.start);
-    while(cur <= end){
-      const ds = fmtDate(cur);
-      if(ds === date){
-        if(!vacByDate[v.physId]) vacByDate[v.physId] = [];
-        vacByDate[v.physId].push(v);
-      }
-      cur.setDate(cur.getDate() + 1);
-    }
-  });
-  Object.keys(vacByDate).forEach(pid => {
-    const onShift = (S.drShifts || []).some(s => s.physId === +pid && s.date === date && s.shift !== 'Home') ||
-                    (S.irShifts || []).some(s => s.physId === +pid && s.date === date && s.shift !== 'Home') ||
-                    (S.irCalls || []).some(c => c.physId === +pid && c.date === date);
-    if(onShift) issues.push(`vacation+shift: ${pname(+pid)}`);
-  });
-  return issues;
-}
+// rs-v101: removed dead/superseded function _cellConflicts (zero references; see commit message).
 
 // ── Persistent last-saved indicator ──────────────────────────────────
 // Replaces the 3-second flash with always-visible "Last synced 12s ago"
