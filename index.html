@@ -5306,6 +5306,17 @@ WHERE email = 'your-admin@example.com';</pre>
         onclick="if(typeof exportPracticeArchive==='function')exportPracticeArchive()">
         💾 Export practice archive
       </button>
+      <!-- rs-v100: importPracticeArchive was fully implemented (confirm
+           dialog + pre-import snapshot + payload validation) but had NO
+           file input anywhere — the export's restore counterpart was
+           unreachable. The input resets value='' so picking the same
+           file twice re-fires onchange. -->
+      <button class="bsm" title="Restore a previously exported practice archive. Replaces ALL current data for this practice — a pre-import backup is taken first."
+        onclick="document.getElementById('archive-import-file')?.click()">
+        📂 Import practice archive
+      </button>
+      <input type="file" id="archive-import-file" accept=".json,application/json" style="display:none"
+        onchange="if(typeof importPracticeArchive==='function')importPracticeArchive(this);this.value='';">
       <button class="bsm" title="AI explainer for the most recent rule violation (H6)"
         onclick="(async()=>{const v=(window._lastRuleViolation)||{rule:'unknown',data:{}};if(typeof explainRuleViolation==='function'){const out=await explainRuleViolation(v);_modalAlert?.('Why this rule fired',out);}})()">
         🧠 Explain last violation
