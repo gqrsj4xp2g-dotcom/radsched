@@ -28142,7 +28142,7 @@ function _aiExecuteTool(name, input) {
     // (DR shifts / IR calls / weekend calls), so the AI could write
     // assignments the UI would have refused.
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return { ok:false, error:'date must be in YYYY-MM-DD format (got: ' + JSON.stringify(date) + ').' };
-    if(typeof _canEditDate === 'function' && !_canEditDate(date, {silent:true})) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
+    if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
     if((shift||'1st') !== 'Home' && typeof isHolidayBlackout === 'function' && isHolidayBlackout(date)){
