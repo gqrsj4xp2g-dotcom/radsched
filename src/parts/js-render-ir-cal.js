@@ -553,3 +553,4 @@ function ircStepFocus(step){
   else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
   ircSetFocus(next);
 }
+

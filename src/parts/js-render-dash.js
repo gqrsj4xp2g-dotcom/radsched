@@ -77,7 +77,7 @@ function renderDash(){
   // devices (UX audit finding #12).
   ['dash-more-details'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isAdm?'':'none';});
   if(!isAdm){
-    ['dash-admin-section','dash-fairness','dash-equity-heatmap','dash-dr-recent','dash-ir-recent'].forEach(id => {
+    ['dash-admin-section','dash-fairness','dash-equity-heatmap','dash-dr-recent','dash-ir-recent','dash-activity'].forEach(id => {
       const el = document.getElementById(id); if(el && el.innerHTML) el.innerHTML = '';
     });
   }
@@ -238,5 +238,9 @@ function renderDash(){
       const cls=irGroupColorClass(c.irGroup);
       return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${escHtml(c.irGroup||'')}</span><span style="color:var(--txt3);font-size:11px">${escHtml(c.date.slice(5))} ${escHtml(c.callType||'')}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No IR calls.</p>';
+    // rs-v100: 24h activity feed — renderer existed but was never
+    // called and its container never added. Admin-only (audit data).
+    try{ if(typeof _renderRecentActivity === 'function') _renderRecentActivity(); }catch(e){ if(typeof _logError === 'function') _logError('_renderRecentActivity', e?.message||String(e), e); }
   }
 }
+
