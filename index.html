@@ -16685,7 +16685,16 @@ function renderMySched(){
     html+='</tbody></table></div></div>';
   } else html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)}</div><div class="note ni">No shifts assigned this week. Step ‹ › to browse other weeks.</div></div>`;
   html += `</div>`;  // close mysched-list-section
+  // rs-v100: "next 4 weeks workload" mini-widget. _renderMyWorkload was
+  // fully implemented (its comment even says "called from renderMySched")
+  // but neither the container nor the call ever existed — found by the
+  // zero-reference sweep. Container only renders for linked physicians;
+  // the renderer no-ops without CU.physId.
+  if(CU?.physId) html += `<div class="card" id="my-workload" style="margin-top:12px"></div>`;
   document.getElementById('my-content').innerHTML=html;
+  if(CU?.physId && typeof _renderMyWorkload === 'function'){
+    try{ _renderMyWorkload(); }catch(e){ if(typeof _logError === 'function') _logError('_renderMyWorkload', e?.message||String(e), e); }
+  }
 }
 
 // ── My-Schedule per-view renders ─────────────────────────────────
