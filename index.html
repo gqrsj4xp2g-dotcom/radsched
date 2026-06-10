@@ -23055,7 +23055,16 @@ function renderIRShiftTable(){
       <td style="font-size:11px">${s.notes||'—'}</td>
       <td style="white-space:nowrap">
         <button class="bt bxs" onclick="startEditIRShift(${s.id})" title="Edit">✏</button>
+        <!-- rs-v101: quick-reassign. toggleIRShiftReassign +
+             reassignIRShift existed but no row rendered the panel
+             or the toggle they were written for. -->
+        <button class="bt bxs" onclick="toggleIRShiftReassign(${s.id})" title="Reassign this shift to a different IR physician">↔</button>
         <button class="br bxs" onclick="deleteIRShift(${s.id})">✕</button>
+        <div id="irs-reassign-${s.id}" style="display:none;margin-top:4px">
+          <select style="font-size:11px;max-width:150px" onchange="reassignIRShift(${s.id}, +this.value)">
+            <option value="">— reassign to —</option>${physOpts}
+          </select>
+        </div>
       </td>
     </tr>`;
   }).join('');
