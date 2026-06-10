@@ -48681,6 +48681,41 @@ function applySavedView(viewName){
   });
   if(typeof _toast === 'function') _toast(`View "${viewName}" applied.`, 'ok');
 }
+// rs-v101: picker dialog for saved views — lists views for the ACTIVE
+// page with one-click Apply / Delete. saveCurrentView + applySavedView
+// existed but nothing surfaced the saved list, so views could be saved
+// and never restored. Reached via ⋯ menu → "Saved views…".
+function deleteSavedView(viewName){
+  const activePage = document.querySelector('.page.on');
+  const pageId = activePage ? activePage.id.replace('page-', '') : '';
+  const views = _loadSavedViews().filter(v => !(v.page === pageId && v.name === viewName));
+  _persistSavedViews(views);
+  if(typeof _toast === 'function') _toast(`View "${viewName}" deleted.`, 'info');
+}
+function openSavedViewsPicker(){
+  const activePage = document.querySelector('.page.on');
+  if(!activePage) return;
+  const pageId = activePage.id.replace('page-', '');
+  const views = _loadSavedViews().filter(v => v.page === pageId);
+  const rows = views.length
+    ? views.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0)).map(v => {
+        const nm = String(v.name||'').replace(/['"\\<>]/g,''); // ids are user text — strip metachars for the inline handlers
+        return `<div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--rs-line)">
+          <span style="flex:1;font-size:13px">${escHtml(v.name||'')}</span>
+          <button class="bp bxs" onclick="applySavedView('${nm}');this.closest('div[role=&quot;dialog&quot;]')?.remove?.()">Apply</button>
+          <button class="br bxs" onclick="deleteSavedView('${nm}');this.closest('div[role=&quot;dialog&quot;]')?.remove?.();openSavedViewsPicker()">✕</button>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:12.5px;color:var(--rs-ink-3);padding:10px 0">No saved views for this page yet. Use ⋯ → "Save current view…" first.</div>`;
+  if(typeof _rsConfirm === 'function'){
+    _rsConfirm({
+      title: `Saved views — ${pageId}`,
+      bodyHtml: `<div>${rows}</div>`,
+      confirmLabel: 'Close',
+      cancelLabel: '',
+    });
+  }
+}
 
 // ── Inline shift annotations ───────────────────────────────────────────
 // Free-text notes attached to specific dates. Visible to all viewers of
