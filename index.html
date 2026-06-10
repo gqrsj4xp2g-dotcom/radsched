@@ -12843,6 +12843,18 @@ let _hardSaveInFlight = false;
 async function hardSave(){
   if(_hardSaveInFlight) return;
   _hardSaveInFlight = true;
+  // rs-v101: non-blocking data-health check on explicit saves. Warns
+  // (never blocks — legacy data must still save) when records would
+  // be dropped/coerced by the remote-apply validators on another
+  // device. Full report: Settings → 🩺 Validate data.
+  try{
+    if(typeof _validateLocalBeforeSave === 'function'){
+      const _vIssues = _validateLocalBeforeSave() || [];
+      if(_vIssues.length && typeof _toast === 'function'){
+        _toast(`Saved, but ${_vIssues.length} data issue${_vIssues.length===1?'':'s'} detected — see Settings → 🩺 Validate data.`, 'warn');
+      }
+    }
+  }catch(_){}
   // Visually disable the button(s) so the user sees their click landed
   // and can't double-fire. Restore in `finally` below.
   const _saveBtns = Array.from(document.querySelectorAll('[onclick="hardSave()"]'));
