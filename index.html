@@ -20311,7 +20311,22 @@ function _doAssignVacWeek(physId, round, weekNum){
 
 function assignVacWeek(physId, round, weekNum){
   if(!_adminOnly('assign vacation week')) return;
+  // rs-v102: capacity check. The auto path (autoAssignVacPhys) runs
+  // _vacWeekAvail before assigning; this manual override didn't, so an
+  // admin could silently overload a week past totalWeekLimit / section
+  // caps. Keep the override possible — but informed.
+  const _yr = S.vacPicking?.year || new Date().getFullYear();
+  const _wkCount = (typeof _vacWeeks === 'function') ? _vacWeeks(_yr).length : 52;
+  if(weekNum < 1 || weekNum > _wkCount){
+    alert(`Week ${weekNum} doesn't exist in ${_yr} (${_wkCount} weeks).`);
+    return;
+  }
+  if(typeof _vacWeekAvail === 'function'){
+    const av = _vacWeekAvail(weekNum, physId, _yr);
+    if(!av.ok && !confirm(`Week ${weekNum} check: ${av.reason}.\n\nAssign anyway (admin override)?`)) return;
+  }
   _doAssignVacWeek(physId,round,weekNum);
+  if(typeof _audit === 'function') _audit('vacWeek.manualAssign', { physId, round, weekNum, year:_yr });
   triggerSave();
   renderVacRounds();
 }
