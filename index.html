@@ -23864,6 +23864,11 @@ function doReassignHoliday(id){
   if(isIR) _removeHolidayIRCall(h.physId, h.date);
   h.physId = newPhysId;
   if(isIR) _syncHolidayToIRCall(h.physId, h.date, h.name);
+  // rs-v102: DR-group holidays never re-synced on reassignment — the
+  // IR branch re-ran its sync but the DR branch did nothing, so the
+  // new holiday physician's day-ownership cleanup (removing now-
+  // conflicting regular DR shifts on that date) never happened.
+  else if(typeof _syncHolDRDates === 'function') _syncHolDRDates(h.physId, [h.date], h.name);
   triggerSave();
   closeModal('link-modal');
   renderHolTable();
