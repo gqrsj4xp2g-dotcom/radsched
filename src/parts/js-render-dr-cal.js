@@ -542,4 +542,3 @@ function _ircClearFilters(){
   if(typeof renderIRCal === 'function') renderIRCal();
   if(typeof _toast === 'function') _toast('Filters cleared.', 'ok');
 }
-

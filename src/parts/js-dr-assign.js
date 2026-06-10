@@ -385,4 +385,3 @@ function previewAA(){
   document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }
-

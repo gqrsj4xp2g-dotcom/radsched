@@ -103,4 +103,3 @@ function renderFTE(){
   const el=document.getElementById('fte-content');
   if(el) el.innerHTML=html||'<div class="note ni">No physicians configured.</div>';
 }
-

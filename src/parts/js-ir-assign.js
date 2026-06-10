@@ -666,4 +666,3 @@ function applyIRAA(){
   document.getElementById('ira-box').innerHTML=html;
   document.getElementById('ira-apply').style.display='none';
 }
-

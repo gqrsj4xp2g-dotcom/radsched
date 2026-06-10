@@ -334,4 +334,3 @@ function renderHolSchedule(){
   }
   wrap.innerHTML = html;
 }
-

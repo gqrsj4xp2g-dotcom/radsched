@@ -464,4 +464,3 @@ function mySchedStepFocus(step){
   }
   mySchedSetFocus(next);
 }
-
