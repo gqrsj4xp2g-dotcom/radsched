@@ -382,6 +382,6 @@ function previewAA(){
   // apply runs. Without this, the second-and-later applies looked
   // like they did nothing on the calendar.
   if(typeof _afterMutation === 'function') _afterMutation();
-  document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
+  document.getElementById('aa-box').innerHTML=`<div class="note ns">${toApply.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }
