@@ -179,7 +179,7 @@ function renderHolCounter(){
       : '';
 
     html += `<tr>
-      <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
+      <td style="font-weight:600">${p ? pnameHtml(+id) : '?'}</td>
       ${allCells}
       ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
