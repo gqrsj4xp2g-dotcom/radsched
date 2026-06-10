@@ -24107,7 +24107,16 @@ function _renderMessages(){
     return;
   }
   let lastDate='';
-  el.innerHTML=msgs.map(m=>{
+  // rs-v101: pinned-messages banner + per-message 📌 toggle. Both
+  // _toggleChatPin and _renderPinnedBanner were fully implemented
+  // (S.chatPins has even been in the persistence manifest since
+  // rs-v64) but no UI ever created or displayed a pin.
+  const _convId = String(_chatContext.id);
+  const _pinnedIds = (S.chatPins && S.chatPins[_convId]) || [];
+  const _pinBanner = (typeof _renderPinnedBanner === 'function')
+    ? _renderPinnedBanner(_convId, msgs.map(m => ({ id: m.id, text: m.text, author: (USERS.find(x=>x.id===m.userId)?.first) || '?' })))
+    : '';
+  el.innerHTML=_pinBanner+msgs.map(m=>{
     const isMe=m.userId===CU?.id;
     const u=USERS.find(x=>x.id===m.userId);
     const dayStr=(m.ts||'').slice(0,10);
@@ -24117,9 +24126,11 @@ function _renderMessages(){
       const label=dayStr===fmtDate(new Date())?'Today':dayStr;
       dateDivider=`<div style="text-align:center;font-size:10px;color:var(--txt3);margin:8px 0;display:flex;align-items:center;gap:8px"><div style="flex:1;height:1px;background:var(--bdr)"></div>${label}<div style="flex:1;height:1px;background:var(--bdr)"></div></div>`;
     }
+    const _isPinned = _pinnedIds.includes(m.id);
+    const _pinBtn = `<span onclick="_toggleChatPin('${_convId.replace(/['"\\]/g,'')}',${+m.id||0})" title="${_isPinned?'Unpin':'Pin'} message" style="cursor:pointer;opacity:${_isPinned?'1':'.3'};margin-left:4px">📌</span>`;
     return dateDivider+`<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:2px">
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:3px;padding:0 4px">${u?escHtml(u.first+' '+u.last):'?'} · ${escHtml((m.ts||'').slice(0,16).replace('T',' '))}</div>
-      <div style="max-width:72%;padding:8px 13px;border-radius:${isMe?'14px 14px 3px 14px':'14px 14px 14px 3px'};font-size:13px;line-height:1.45;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:3px;padding:0 4px">${u?escHtml(u.first+' '+u.last):'?'} · ${escHtml((m.ts||'').slice(0,16).replace('T',' '))}${_pinBtn}</div>
+      <div style="max-width:72%;padding:8px 13px;border-radius:${isMe?'14px 14px 3px 14px':'14px 14px 14px 3px'};font-size:13px;line-height:1.45;background:${isMe?'var(--navy)':'var(--bg3)'};color:${isMe?'#fff':'var(--txt1)'}${_isPinned?';box-shadow:0 0 0 2px var(--accent-300,#c1dbed)':''}">
         ${m.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}
       </div>
     </div>`;
