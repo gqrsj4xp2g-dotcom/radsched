@@ -28032,12 +28032,22 @@ function _aiExecuteTool(name, input) {
     // can quote back and recover from.
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return { ok:false, error:'date must be in YYYY-MM-DD format (got: ' + JSON.stringify(date) + ').' };
     if(!['1st','2nd','3rd','Home'].includes(shift)) return { ok:false, error:'shift must be one of: 1st, 2nd, 3rd, Home (got: ' + JSON.stringify(shift) + ').' };
+    // rs-v102: schedule-lock parity with the manual path (the AI could
+    // previously write into locked months).
+    if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = _physById(physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
     const vd = vacDays(physId);
     if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
     const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
     if(existing) return { ok:false, error:`${p.last} already has a DR shift on ${date} (shift: ${existing.shift}).` };
+    // rs-v102: cross-type collision parity (one-shift-per-day) — the
+    // old check only caught same-day DR shifts, missing IR shifts,
+    // IR calls, and weekend calls.
+    if(!force && typeof _physBookingsOnDate === 'function'){
+      const _b = _physBookingsOnDate(physId, date);
+      if(_b.length) return { ok:false, error:`${p.last} already has on ${date}: ${_b.map(x=>x.kind).join(', ')}. One shift per day — remove it first, or retry with force:true.` };
+    }
     // Home / 2nd / 3rd are read-from-home shifts — always At Home / Remote.
     // Force the site even if the caller passed something else, so the AI
     // can't accidentally create "2nd @ CHN" type records.
