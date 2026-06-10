@@ -42892,7 +42892,7 @@ function _populateHolPhysSel(){
 function _populateHolFilterName(){
   const el=document.getElementById('holf-name'); if(!el) return;
   const names=[...new Set(S.holidays.map(h=>h.name))].sort();
-  el.innerHTML='<option value="">All</option>'+names.map(n=>`<option>${n}</option>`).join('');
+  el.innerHTML='<option value="">All</option>'+names.map(n=>`<option>${escHtml(n)}</option>`).join('');
 }
 
 function renderHolTable(){
@@ -42910,14 +42910,14 @@ function renderHolTable(){
       const groupOpts = ['DR','IR-North','IR-South','IR'].map(g=>
         `<option value="${g}"${h.group===g?' selected':''}>${labelOf(g)}</option>`).join('');
       return`<tr style="background:var(--blue-bg)">
-        <td><input id="hol-edit-name-${h.id}" value="${h.name}" style="width:100%;font-size:11px"></td>
+        <td><input id="hol-edit-name-${h.id}" value="${escHtml(h.name)}" style="width:100%;font-size:11px"></td>
         <td><input id="hol-edit-date-${h.id}" type="date" value="${h.date}" style="width:110px"></td>
         <td><input id="hol-edit-yr-${h.id}" type="number" value="${h.year}" style="width:65px"></td>
         <td><select id="hol-edit-phys-${h.id}" style="width:100%;font-size:11px">
           ${physOpts.replace(`value="${h.physId}"`,`value="${h.physId}" selected`)}
         </select></td>
         <td><select id="hol-edit-grp-${h.id}" style="font-size:11px">${groupOpts}</select></td>
-        <td><input id="hol-edit-notes-${h.id}" value="${h.notes||''}" style="width:100%;font-size:11px"></td>
+        <td><input id="hol-edit-notes-${h.id}" value="${escHtml(h.notes||'')}" style="width:100%;font-size:11px"></td>
         <td><button class="bg bsm" onclick="saveEditHoliday(${h.id})">✓</button></td>
         <td><button class="bsm" onclick="cancelEditHoliday()">✕</button></td>
       </tr>`;
