@@ -28796,10 +28796,19 @@ Admin access is required for data-changing operations. The current user role is:
             result = { ok:false, crashed:true, error:`Tool ${block.name} crashed: ${e?.message || String(e)}` };
             if(typeof _logError === 'function') _logError('ai-tool', `${block.name} crashed`, e);
           }
+          // rs-v102: cap tool-result payloads. An all-physician
+          // list_* call can serialize 50KB+; with no cap, a few such
+          // results push the conversation toward the context limit
+          // and slow every subsequent turn. 12K chars keeps full
+          // fidelity for normal results and truncates only dumps.
+          let _trContent = JSON.stringify(result);
+          if(_trContent.length > 12000){
+            _trContent = _trContent.slice(0, 12000) + '… [truncated — ' + _trContent.length + ' chars total. Re-query with narrower filters (physId, month) for the rest.]';
+          }
           toolResults.push({
             type: 'tool_result',
             tool_use_id: block.id,
-            content: JSON.stringify(result)
+            content: _trContent
           });
           // Render the tool call inline (collapsible) so the admin can audit
           // exactly what the AI did. Track in transcript too.
