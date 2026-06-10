@@ -23880,7 +23880,12 @@ function renderManageShifts(){
     <td>${o.sub||'—'}</td><td>${o.site||'—'}</td>
     <td>${o.claimedBy?`<span class="tag tg">${pnameHtml(o.claimedBy)}</span>`:'<span class="tag tgr">Unclaimed</span>'}</td>
     <td>${o.notes?String(o.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'—'}</td>
-    <td><button class="br bxs" onclick="deleteOpenShift(${o.id})" title="Delete this open shift entry">X</button></td>
+    <td style="white-space:nowrap">
+      <!-- rs-v101: editOpenShift existed (pull-into-form pattern) but no
+           row ever offered it — admins had to delete + re-create. -->
+      <button class="bt bxs" onclick="editOpenShift(${o.id})" title="Pull this entry back into the form above for editing">✏</button>
+      <button class="br bxs" onclick="deleteOpenShift(${o.id})" title="Delete this open shift entry">X</button>
+    </td>
   </tr>`).join('')||'<tr><td colspan="8" style="color:var(--txt3);text-align:center">No open shifts</td></tr>';
 }
 function claimShift(oid,pid){
