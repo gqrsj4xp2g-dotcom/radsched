@@ -62,38 +62,92 @@
 /* @TOKENS_BEGIN — managed by tools/build-index.sh from src/parts/css-tokens.css.
    Edit the source file, not this block. The build replaces everything between
    the BEGIN/END markers verbatim. See src/README.md for the full plan. */
-/* RadScheduler — design tokens.
- * Source of truth for colors, radii, shadows. Injected into index.html
- * between the TOKENS_BEGIN and TOKENS_END markers by
- * tools/build-index.sh.
+/* RadScheduler — design tokens (semantic core + back-compat aliases).
+ * Source of truth for color, spacing, type, radius, shadow, z-index.
+ * Injected into index.html between TOKENS_BEGIN/END by tools/build-index.sh.
  *
  * To change a token: edit this file → run ./tools/build-index.sh →
  * commit both files. The build is idempotent + diff-checkable.
  *
- * Naming convention:
- *   --bg, --bg2, --bg3, --bg4   = background ramp light → dark
- *   --txt, --txt2, --txt3       = text ramp dark → light
- *   --bdr, --bdr2               = border ramp
- *   --<color>, --<color>-bg,
- *   --<color>-t                 = swatch + soft background + bold text
- *   --r, --rl, --rxl            = border-radius scale
- *   --sh, --sh2                 = shadow elevation scale
+ * ARCHITECTURE (rs-v103): a semantic layer (--color-*, --sp-*, --fs-*, …)
+ * is the source; the original short names (--bg, --txt, --blue, --r, …) are
+ * kept as ALIASES so the ~2,200 existing var() references keep working
+ * unchanged. Light-mode computed values are byte-identical to before — the
+ * only behavioural change is that legacy tokens now flip in dark mode
+ * (body[data-theme="dark"]) because their semantic source flips.
  */
 :root{
+  /* ── Brand ── */
   --navy:#1a2e4a;--navy2:#243b5e;--navy3:#0f1e32;
-  --blue:#2563eb;--blue2:#1d4ed8;--blue-bg:#eff6ff;--blue-t:#1e40af;
+
+  /* ── Semantic core (the source the rest alias onto) ── */
+  --color-bg:#f5f4f0;--color-surface:#fff;--color-surface-2:#eeece8;--color-surface-3:#e8e5df;
+  --color-text-primary:#18181b;--color-text-secondary:#52525b;--color-text-tertiary:#a1a1aa;
+  --color-border:#e4e4e7;--color-border-strong:#d4d4d8;
+  --color-accent:#2563eb;--color-accent-hover:#1d4ed8;
+  --color-accent-soft:rgba(37,99,235,.10);--color-accent-ring:rgba(37,99,235,.32);
+
+  /* ── Colored swatches (swatch / soft bg / bold-or-status text) ── */
   --green:#16a34a;--green-bg:#f0fdf4;--green-t:#14532d;
   --amber:#d97706;--amber-bg:#fffbeb;--amber-t:#92400e;
   --red:#dc2626;--red-bg:#fef2f2;--red-t:#991b1b;
   --purple:#7c3aed;--purple-bg:#f5f3ff;--purple-t:#4c1d95;
   --teal:#0d9488;--teal-bg:#f0fdfa;--teal-t:#134e4a;
   --pink:#db2777;--pink-bg:#fdf2f8;
-  --bg:#f5f4f0;--bg2:#fff;--bg3:#eeece8;--bg4:#e8e5df;
-  --txt:#18181b;--txt2:#52525b;--txt3:#a1a1aa;
-  --bdr:#e4e4e7;--bdr2:#d4d4d8;
-  --r:6px;--rl:10px;--rxl:14px;
-  --sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
-  --sh2:0 4px 16px rgba(0,0,0,.09),0 2px 6px rgba(0,0,0,.05);
+
+  /* ── Spacing scale (4px base) — for the component restyle ── */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-12:48px;
+
+  /* ── Type scale (no half-pixel drift) ── */
+  --fs-2xs:10px;--fs-xs:11px;--fs-sm:12px;--fs-base:13px;--fs-md:14px;--fs-lg:16px;--fs-xl:18px;--fs-2xl:22px;--fs-3xl:28px;
+  --lh-tight:1.2;--lh-base:1.45;--lh-loose:1.6;
+  --fw-normal:400;--fw-medium:500;--fw-semibold:600;--fw-bold:700;
+  --tr-tight:-0.022em;--tr-snug:-0.011em;--tr-normal:-0.005em;--tr-wide:0.05em;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter","Helvetica Neue",Helvetica,Arial,sans-serif;
+
+  /* ── Radius scale ── */
+  --rad-sm:6px;--rad-md:10px;--rad-lg:14px;--rad-xl:18px;--rad-pill:999px;
+
+  /* ── Elevation ── */
+  --elev-1:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+  --elev-2:0 4px 16px rgba(0,0,0,.09),0 2px 6px rgba(0,0,0,.05);
+  --elev-3:0 12px 40px rgba(10,10,12,.10),0 2px 6px rgba(10,10,12,.04);
+
+  /* ── Z-index scale (replaces ad-hoc 1→99999) ── */
+  --z-base:1;--z-sticky:30;--z-drawer:300;--z-overlay:400;--z-modal:500;--z-toast:9000;--z-popover:10050;--z-cmdk:10100;--z-skiplink:10300;
+
+  /* ── BACK-COMPAT ALIASES — keep existing var() refs working ── */
+  --bg:var(--color-bg);--bg2:var(--color-surface);--bg3:var(--color-surface-2);--bg4:var(--color-surface-3);
+  --txt:var(--color-text-primary);--txt1:var(--color-text-primary);--txt2:var(--color-text-secondary);--txt3:var(--color-text-tertiary);
+  --bdr:var(--color-border);--bdr2:var(--color-border-strong);
+  --blue:var(--color-accent);--blue2:var(--color-accent-hover);--blue-bg:#eff6ff;--blue-t:#1e40af;
+  --r:var(--rad-sm);--rl:var(--rad-md);--rxl:var(--rad-lg);
+  --sh:var(--elev-1);--sh2:var(--elev-2);
+  /* Previously-undefined tokens (silent bugs: --txt1 used 10×, --accent-300/400) now defined */
+  --accent-300:#93c5fd;--accent-400:#60a5fa;
+}
+
+/* ── Dark mode (body[data-theme="dark"]) ──
+   Overriding the semantic source flips every aliased legacy token too, so
+   token-based components go dark automatically. Inline-styled colors are
+   purged to tokens in the component-restyle milestone; until then some
+   light islands remain. */
+body[data-theme="dark"]{
+  --color-bg:#0a0a0c;--color-surface:#1c1c1e;--color-surface-2:#2c2c2e;--color-surface-3:#3a3a3c;
+  --color-text-primary:#fafafa;--color-text-secondary:#c6c6ca;--color-text-tertiary:#98989a;
+  --color-border:rgba(255,255,255,.10);--color-border-strong:rgba(255,255,255,.16);
+  --color-accent:#4d8cff;--color-accent-hover:#6ba0ff;
+  --color-accent-soft:rgba(77,140,255,.14);--color-accent-ring:rgba(77,140,255,.40);
+  --blue-bg:#10243a;--blue-t:#9cc6f5;
+  --green-bg:#10260f;--green-t:#86d39a;
+  --amber-bg:#2e2410;--amber-t:#f0c578;
+  --red-bg:#2e1212;--red-t:#f0a0a0;
+  --purple-bg:#1f1b3a;--purple-t:#c2b6f0;
+  --teal-bg:#0e2a26;--teal-t:#7ed3c0;
+  --pink-bg:#2e1320;
+  --elev-1:0 1px 2px rgba(0,0,0,.4);
+  --elev-2:0 4px 14px rgba(0,0,0,.5);
+  --elev-3:0 12px 40px rgba(0,0,0,.6),0 2px 6px rgba(0,0,0,.4);
 }
 
 /* @TOKENS_END */
@@ -23447,7 +23501,7 @@ function renderHolCounter(){
       : '';
 
     html += `<tr>
-      <td style="font-weight:600">${p ? pname(+id) : '?'}</td>
+      <td style="font-weight:600">${p ? pnameHtml(+id) : '?'}</td>
       ${allCells}
       ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
@@ -38344,7 +38398,7 @@ function previewAA(){
   // apply runs. Without this, the second-and-later applies looked
   // like they did nothing on the calendar.
   if(typeof _afterMutation === 'function') _afterMutation();
-  document.getElementById('aa-box').innerHTML=`<div class="note ns">${S.aaPreview.length} shifts applied.</div>`;
+  document.getElementById('aa-box').innerHTML=`<div class="note ns">${toApply.length} shifts applied.</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }
 
