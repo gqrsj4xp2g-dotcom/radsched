@@ -23104,8 +23104,27 @@ function reassignIRShift(id, newPhysId){
   if(!s) return;
   const p = S.physicians.find(x => x.id === newPhysId);
   if(!p) return;
+  // rs-v102: validate the NEW physician like the manual addIRShift
+  // path does — previously reassign blindly swapped physId, letting a
+  // double-booked or rule-violating assignment through (one-shift-per-
+  // day, allowedSites, vacation). Warn-and-confirm, admin can override.
+  if(vacDays(newPhysId).has(s.date)){
+    alert(`${p.last} is on vacation on ${s.date}. Remove the vacation first if this is wrong.`);
+    return;
+  }
+  const _existing = (typeof _physBookingsOnDate === 'function')
+    ? _physBookingsOnDate(newPhysId, s.date).filter(b => b.id !== id) : [];
+  if(_existing.length){
+    const list = _existing.map(b => '• ' + b.kind + (b.site ? ' @ ' + b.site : '')).join('\n');
+    if(!confirm(`${p.last} already has on ${s.date}:\n\n${list}\n\nReassign anyway? (double-books them)`)) return;
+  }
+  const _v = (typeof _gatherManualRuleViolations === 'function')
+    ? _gatherManualRuleViolations(p, { physId:newPhysId, date:s.date, site:s.site, shift:s.shift||'1st', sub:s.sub||'', kind:'ir-shift', ym:(s.date||'').slice(0,7), irGroup:p.irGroup||'' })
+    : [];
+  if(_v.length && !confirm(`Reassigning to ${p.last} violates ${_v.length} rule(s):\n\n  • ${_v.join('\n  • ')}\n\nReassign anyway?`)) return;
   s.physId  = newPhysId;
   s.irGroup = p.irGroup || s.irGroup;
+  if(typeof _audit === 'function') _audit('irShift.reassign', { id, date:s.date, site:s.site, toPhysId:newPhysId });
   triggerSave();
   renderIRShiftTable();
 }
