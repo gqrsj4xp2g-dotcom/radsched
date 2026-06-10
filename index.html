@@ -48650,7 +48650,11 @@ function openSavedViewsPicker(){
   const views = _loadSavedViews().filter(v => v.page === pageId);
   const rows = views.length
     ? views.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0)).map(v => {
-        const nm = String(v.name||'').replace(/['"\\<>]/g,''); // ids are user text — strip metachars for the inline handlers
+        // Escape (don't strip) the name for the inline handlers: stripping
+        // meant "Report-2025" and "Report'2025" collapsed to the same key,
+        // so Apply/Delete could hit the wrong view. Backslash-escape ' and
+        // \ for the JS string literal, then escHtml for attribute safety.
+        const nm = escHtml(String(v.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
         return `<div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--rs-line)">
           <span style="flex:1;font-size:13px">${escHtml(v.name||'')}</span>
           <button class="bp bxs" onclick="applySavedView('${nm}');this.closest('div[role=&quot;dialog&quot;]')?.remove?.()">Apply</button>
