@@ -217,7 +217,18 @@ function renderDRCal(){
     });
     S.openShifts.filter(o=>o.date===c.date&&!o.claimedBy&&o.group==='DR').forEach(()=>{evs+=`<div class="ev eopen">Open</div>`;});
     const _isSB=c.day&&!c.isWknd&&S.vacations.some(v=>v.type==='Vacation Sold Back'&&c.date>=v.start&&c.date<=v.end);
-    return`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${_isSB?' sold-back':''}"><div class="cal-num">${c.day}${_isSB?'<span class="sold-back-banner"> SOLD BACK</span>':''}</div>${evs}</div>`;
+    // rs-v101: per-date annotation affordance. editCellAnnotation +
+    // S.cellNotes existed (and persisted since rs-v64) but no calendar
+    // ever surfaced the icon its comment promised. Note icon shows for
+    // everyone when a note exists (hover = text); admins also get a
+    // faint icon on empty days to add one. Editor enforces admin.
+    const _note = (S.cellNotes||{})[c.date] || '';
+    const _noteIcon = _note
+      ? `<span onclick="editCellAnnotation('${c.date}')" title="${escHtml(_note)}" style="cursor:pointer;font-size:9px;margin-left:3px">📝</span>`
+      : ((typeof _isAdminOrSU==='function'&&_isAdminOrSU())
+          ? `<span onclick="editCellAnnotation('${c.date}')" title="Add note for ${c.date}" style="cursor:pointer;font-size:9px;margin-left:3px;opacity:.18">📝</span>`
+          : '');
+    return`<div class="cal-day${c.date===today?' today':''}${c.isWknd?' wknd':''}${_isSB?' sold-back':''}"><div class="cal-num">${c.day}${_noteIcon}${_isSB?'<span class="sold-back-banner"> SOLD BACK</span>':''}</div>${evs}</div>`;
   }).join('');
 }
 
