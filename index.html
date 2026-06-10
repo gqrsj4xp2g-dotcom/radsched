@@ -12851,7 +12851,9 @@ async function hardSave(){
     if(typeof _validateLocalBeforeSave === 'function'){
       const _vIssues = _validateLocalBeforeSave() || [];
       if(_vIssues.length && typeof _toast === 'function'){
-        _toast(`Saved, but ${_vIssues.length} data issue${_vIssues.length===1?'':'s'} detected — see Settings → 🩺 Validate data.`, 'warn');
+        // Wording: the save hasn't completed yet at this point — don't
+        // claim "Saved". The save proceeds regardless (non-blocking).
+        _toast(`⚠ ${_vIssues.length} data issue${_vIssues.length===1?'':'s'} detected (saving anyway) — see Settings → 🩺 Validate data.`, 'warn');
       }
     }
   }catch(_){}
