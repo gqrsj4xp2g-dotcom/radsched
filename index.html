@@ -5320,6 +5320,14 @@ WHERE email = 'your-admin@example.com';</pre>
         onclick="document.getElementById('archive-import-file')?.click()">
         📂 Import practice archive
       </button>
+      <!-- rs-v101: _validateLocalBeforeSave existed (runs the same
+           per-record validators the remote-apply path uses) but no
+           caller — data issues were only discoverable after a failed
+           sync. Surfaced as an on-demand health check. -->
+      <button class="bsm" title="Run the remote-apply validators against local data and list any records that would be dropped or flagged on sync"
+        onclick="if(typeof runLocalDataValidation==='function')runLocalDataValidation()">
+        🩺 Validate data
+      </button>
       <input type="file" id="archive-import-file" accept=".json,application/json" style="display:none"
         onchange="if(typeof importPracticeArchive==='function')importPracticeArchive(this);this.value='';">
       <button class="bsm" title="AI explainer for the most recent rule violation (H6)"
