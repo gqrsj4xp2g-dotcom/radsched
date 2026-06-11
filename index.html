@@ -29942,6 +29942,29 @@ function _themeApply(t){
   root.style.setProperty('--bdr',  _hslShift(bg, isDark ? +12 : -8));
   root.style.setProperty('--bdr2', _hslShift(bg, isDark ? +18 : -14));
 
+  // rs-v113: also drive the SEMANTIC (--color-*) + refined (--rs-*) tokens so
+  // theme presets recolor the WHOLE app (cards, command palette, empty states,
+  // toasts, metrics…), not just the legacy-token surfaces. Mirrors the values
+  // derived above — fixes the "presets only half-apply" split-brain.
+  const _bg2v  = _hslShift(bg, isDark ? +5 : +3);
+  const _bg3v  = _hslShift(bg, isDark ? +9 : -4);
+  const _bg4v  = _hslShift(bg, isDark ? +13: -8);
+  const _txt2v = _hslShift(txt, isDark ? -25 : +30);
+  const _txt3v = _hslShift(txt, isDark ? -42 : +50);
+  const _bdrv  = _hslShift(bg, isDark ? +12 : -8);
+  const _bdr2v = _hslShift(bg, isDark ? +18 : -14);
+  const _soft  = _hslSet(accent, isDark ? 22 : 92);
+  const _SP = (k, v) => root.style.setProperty(k, v);
+  _SP('--color-accent', accent); _SP('--color-accent-hover', _hslShift(accent, -8));
+  _SP('--color-accent-soft', _soft); _SP('--color-accent-ring', accent);
+  _SP('--color-bg', bg); _SP('--color-surface', _bg2v);
+  _SP('--color-surface-2', _bg3v); _SP('--color-surface-3', _bg4v);
+  _SP('--color-text-primary', txt); _SP('--color-text-secondary', _txt2v); _SP('--color-text-tertiary', _txt3v);
+  _SP('--color-border', _bdrv); _SP('--color-border-strong', _bdr2v);
+  _SP('--rs-accent', accent); _SP('--rs-accent-soft', _soft); _SP('--rs-accent-ring', accent);
+  _SP('--rs-ink-1', txt); _SP('--rs-ink-2', _txt2v); _SP('--rs-ink-3', _txt3v);
+  _SP('--rs-line', _bdrv); _SP('--rs-line-strong', _bdr2v);
+
   // Radius + font scale + density
   const r = Math.max(0, Math.min(20, +t.radius || 6));
   root.style.setProperty('--r',   r + 'px');
