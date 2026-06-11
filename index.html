@@ -26436,7 +26436,7 @@ function requestClaim(listingId){
   if(!CU?.physId){_toast('You must be linked to a physician profile to claim shifts.','warn');return;}
   const l = (S.shiftListings||[]).find(x=>x.id===listingId);
   if(!l){alert('Listing not found.');return;}
-  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  if(l.status!=='open'){_toast('This listing is no longer open.','warn');return;}
   if(l.sellerPhysId===CU.physId){_toast('You cannot claim your own listing.','warn');return;}
   if((l.claims||[]).some(c=>c.claimantPhysId===CU.physId)){_toast('You have already claimed this shift.','warn');return;}
   const message = (prompt(`Add a note to ${pname(l.sellerPhysId)} (optional):`, '')||'').trim();
@@ -26469,7 +26469,7 @@ function acceptClaim(listingId, claimId){
   const l = (S.shiftListings||[]).find(x=>x.id===listingId);
   if(!l){alert('Listing not found.');return;}
   if(l.sellerPhysId !== CU?.physId){alert('Only the seller can accept claims on this listing.');return;}
-  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  if(l.status!=='open'){_toast('This listing is no longer open.','warn');return;}
   const claim = (l.claims||[]).find(c=>c.id===claimId);
   if(!claim){alert('Claim not found.');return;}
   if(!confirm(`Accept ${pname(claim.claimantPhysId)}'s claim?\n\nThis will reassign your shift on ${l.shift.date} to them, decline all other claims, and notify everyone involved.`)) return;
@@ -26539,7 +26539,7 @@ function cancelMyListing(listingId){
   const l = (S.shiftListings||[]).find(x=>x.id===listingId);
   if(!l){alert('Listing not found.');return;}
   if(l.sellerPhysId !== CU?.physId){alert('Only the seller can cancel their listing.');return;}
-  if(l.status!=='open'){alert('This listing is no longer open.');return;}
+  if(l.status!=='open'){_toast('This listing is no longer open.','warn');return;}
   const claimCount = (l.claims||[]).length;
   const msg = claimCount
     ? `Cancel this listing? ${claimCount} colleague${claimCount>1?'s have':' has'} requested to claim it — they will be notified.`
@@ -27608,7 +27608,7 @@ function addHoliday(){
   if(typeof _canEditDate==='function' && !_canEditDate(date)) return;
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
-  if(grp==='DR' && p.role==='IR') { alert('IR-only physicians cannot take DR holiday call.'); return; }
+  if(grp==='DR' && p.role==='IR') { _toast('IR-only physicians cannot take DR holiday call.','warn'); return; }
   // Generic IR-<groupName> check — works for any admin-added group.
   const _irMatch = /^IR-(.+)$/.exec(grp);
   if(_irMatch){
@@ -39505,7 +39505,7 @@ function addIRCallFromGrid(sel,date,callType,group){
   if(typeof _canEditDate==='function' && !_canEditDate(date)){sel.value='';return;}
   const p=S.physicians.find(x=>x.id===physId);
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===group&&ic.callType==='daily')){
-    alert('Only 1 daily IR call per group per day. Remove existing first.');sel.value='';return;}
+    _toast('Only 1 daily IR call per group per day. Remove existing first.','warn');sel.value='';return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
     alert('Back-to-back call not allowed: '+pname(physId)+' already has IR call on an adjacent day.');sel.value='';return;}
   if(callType==='daily'&&isIRCallBlackout(physId,date)){
