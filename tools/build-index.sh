@@ -72,6 +72,7 @@ declare -a REGIONS=(
   "JS_LOOKUP_CACHES:js-lookup-caches.js"
   "JS_AI_TOOLS:js-ai-tools.js"
   "JS_SCHED_RULES:js-sched-rules.js"
+  "JS_MCF_SOLVER:js-mcf-solver.js"
 )
 
 # Use Python for the replacement — sed/awk are too fragile for
