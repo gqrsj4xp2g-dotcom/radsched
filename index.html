@@ -15340,14 +15340,7 @@ function isSoldBackDate(physId, date){
   return S.vacations.some(v=>v.physId===physId&&v.type==='Vacation Sold Back'&&date>=v.start&&date<=v.end);
 }
 
-function soldBackDays(physId){
-  const d=new Set();
-  S.vacations.filter(v=>v.physId===physId&&v.type==='Vacation Sold Back').forEach(v=>{
-    let c=parseDateLocal(v.start),e=parseDateLocal(v.end);
-    while(c<=e){const ds=fmtDate(c);if(parseDateLocal(ds).getDay()>=1&&parseDateLocal(ds).getDay()<=5)d.add(ds);c.setDate(c.getDate()+1);}
-  });
-  return d;
-}
+/* rs-v111: removed dead fn soldBackDays — verified zero references (live sibling isSoldBackDate retained). */
 
 function vacDays(pid){
   const d=new Set();
