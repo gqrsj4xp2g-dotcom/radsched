@@ -31788,15 +31788,7 @@ function _rotationPhysIdsFor(item, isoDate){
 // Resolve THE phys for a date — single-slot back-compat used by call sites
 // that haven't been updated to multi-assignment. Returns the first assigned
 // phys or null. Single-slot rotations behave identically to before.
-function _rotationPhysFor(item, isoDate){
-  const ids = _rotationPhysIdsFor(item, isoDate);
-  if(ids.length) return ids[0];
-  // Fall through to legacy computed assignment
-  try{
-    const computed = _evtAssignedPhysIds(item, isoDate);
-    return (computed && computed[0]) != null ? computed[0] : null;
-  }catch(_){ return null; }
-}
+/* rs-v111: removed dead fn _rotationPhysFor — verified zero references. */
 
 // Build the eligible-pool predicate for a rotation slot. Returns true if
 // physId p is eligible for that slot. Pure function, no side effects.
@@ -34739,14 +34731,7 @@ function _renderPresence(state){
   el.textContent = `👁 ${others} other${others===1?'':'s'} here`;
   el.title = names.length ? `Also viewing: ${names.join(', ')}` : '';
 }
-function _teardownPresence(){
-  if(!_presenceChannel) return;
-  try{ _presenceChannel.untrack(); }catch(_){}
-  try{ _presenceChannel.unsubscribe(); }catch(_){}
-  _presenceChannel = null;
-  const el = document.getElementById('rs-presence');
-  if(el) el.style.display = 'none';
-}
+/* rs-v111: removed dead fn _teardownPresence — verified zero references. */
 
 // ── Calendar mode toggle (grid ↔ list) ──────────────────────────────
 // Global toggle that flips body[data-cal-mode] between grid (default)
@@ -42538,17 +42523,7 @@ function _removeHolidayIRCall(physId, date){
 }
 
 // Return the IR call physician(s) covering a given date (daily exact or within weekend span)
-function _irCallPhysOnDate(date,irGroup){
-  return S.irCalls.filter(c=>{
-    if(irGroup&&c.irGroup!==irGroup) return false;
-    if(c.callType==='daily') return c.date===date;
-    if(c.callType==='weekend'){
-      const wEnd=addDays(c.date,3); // Fri+3 = Mon
-      return date>=c.date&&date<=wEnd;
-    }
-    return false;
-  });
-}
+/* rs-v111: removed dead fn _irCallPhysOnDate — verified zero references. */
 
 
 
