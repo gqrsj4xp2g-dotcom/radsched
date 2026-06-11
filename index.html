@@ -21456,7 +21456,7 @@ function saveMyVacPick(ci){
   // Deduplicate — can't pick same week twice
   const current=(vp.picks?.[physId]?.[openRound]||[]).slice();
   if(wn&&current.some((v,i)=>v===wn&&i!==ci)){
-    alert('You already have that week as another choice. Pick a different week.');
+    _toast('You already have that week as another choice. Pick a different week.','warn');
     const el=document.getElementById(`myp-c${ci}`);
     if(el) el.value=current[ci]||'';
     return;
@@ -21473,7 +21473,7 @@ function saveAllMyVacPicks(){
   // Check duplicates
   const nonNull=vals.filter(v=>v!=null);
   if(new Set(nonNull).size!==nonNull.length){
-    alert('You have duplicate week selections. Each choice must be a different week.');
+    _toast('You have duplicate week selections. Each choice must be a different week.','warn');
     return;
   }
   vals.forEach((wn,ci)=>setVacPick(physId,openRound,ci,wn));
@@ -26438,7 +26438,7 @@ function requestClaim(listingId){
   if(!l){alert('Listing not found.');return;}
   if(l.status!=='open'){alert('This listing is no longer open.');return;}
   if(l.sellerPhysId===CU.physId){_toast('You cannot claim your own listing.','warn');return;}
-  if((l.claims||[]).some(c=>c.claimantPhysId===CU.physId)){alert('You have already claimed this shift.');return;}
+  if((l.claims||[]).some(c=>c.claimantPhysId===CU.physId)){_toast('You have already claimed this shift.','warn');return;}
   const message = (prompt(`Add a note to ${pname(l.sellerPhysId)} (optional):`, '')||'').trim();
   if(message===null) return;
   if(!Array.isArray(l.claims)) l.claims=[];
@@ -26649,7 +26649,7 @@ function openSwapSuggestModal(){
   myShifts.sort((a, b) => a.date.localeCompare(b.date));
   const upcoming = myShifts.filter(s => s.date <= addDays(today, 30));
   if(!upcoming.length){
-    alert('No upcoming shifts in the next 30 days to swap.');
+    _toast('No upcoming shifts in the next 30 days to swap.','info');
     return;
   }
   // Build the modal HTML.
