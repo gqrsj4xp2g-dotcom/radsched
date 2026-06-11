@@ -44783,6 +44783,17 @@ function acknowledgeOnCall(physId, ds){
   });
   if(typeof _audit === 'function') _audit('oncall.confirmed', { physId, date: ds, ackBy: CU?.id });
   if(typeof triggerSave === 'function') triggerSave();
+  // rs-v112 (migration Phase 2): mirror this ack into the owner-RLS
+  // rs_on_call_acks table (fire-and-forget; the JSON blob stays canonical).
+  try{
+    const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+    if(_sb && CU?.id) _sb.from('rs_on_call_acks').upsert({
+      practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
+      owner_uid: CU.id,
+      phys_id: (typeof physId==='number')?physId:null,
+      ack_date: ds
+    }, { onConflict:'practice_id,owner_uid,ack_date' }).then(()=>{},()=>{});
+  }catch(_){}
   if(typeof _afterMutation === 'function') _afterMutation();
   if(typeof _toast === 'function') _toast('On-call confirmed for tonight.', 'ok');
   try{ _renderOnCallConfirmation((typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : CU?.role === 'admin'); }catch(_){}
