@@ -14653,6 +14653,48 @@ function _showSwUpdateBanner(version){
   `;
   document.body.appendChild(banner);
 }
+
+// ── Keyboard accessibility for click-only nav (rs-v108) ───────────────
+// Page tabs (.tab), sidebar items (.snav-item) and week-tab pills
+// (.wktab) are <div onclick=…> with no tabindex/role, so keyboard and
+// screen-reader users can't reach or activate them. Make them focusable
+// + Enter/Space-activatable WITHOUT touching every render site: a single
+// delegated keydown handler activates the focused control, and a
+// MutationObserver tags controls (incl. dynamically-rendered ones).
+(function _initNavKeyboardA11y(){
+  var SEL = '.tab,.snav-item,.wktab';
+  function tag(el){
+    if(el.getAttribute('tabindex') == null) el.setAttribute('tabindex','0');
+    if(!el.getAttribute('role')) el.setAttribute('role','button');
+  }
+  function tagAll(root){
+    try{ root.querySelectorAll(SEL).forEach(tag); }catch(_){}
+  }
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    var t = e.target;
+    if(t && t.matches && t.matches(SEL)){ e.preventDefault(); t.click(); }
+  });
+  function start(){
+    tagAll(document);
+    try{
+      new MutationObserver(function(muts){
+        for(var i=0;i<muts.length;i++){
+          var an = muts[i].addedNodes;
+          for(var j=0;j<an.length;j++){
+            var n = an[j];
+            if(n.nodeType !== 1) continue;
+            if(n.matches && n.matches(SEL)) tag(n);
+            if(n.querySelectorAll) tagAll(n);
+          }
+        }
+      }).observe(document.body, { childList:true, subtree:true });
+    }catch(_){}
+  }
+  if(document.body) start();
+  else document.addEventListener('DOMContentLoaded', start);
+})();
+
 // Fire-and-forget on script load. Doesn't block anything; if registration
 // fails or sw.js doesn't exist, the app behaves exactly as before.
 try{
