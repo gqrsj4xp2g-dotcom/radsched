@@ -366,7 +366,7 @@ function previewAA(){
   document.getElementById('aa-apply').style.display=preview.length?'inline-block':'none';
 }function applyAA(){
   if(!_adminOnly('apply auto-assign'))return;
-  if(!S.aaPreview.length)return;
+  if(!S.aaPreview.length){ if(typeof _toast==='function') _toast('Run Preview first to see what will be assigned.','info'); return; }
   const toApply=[...S.aaPreview];
   S.aaPreview=[];
   toApply.forEach(a=>{
