@@ -44023,24 +44023,7 @@ async function importPracticeArchive(input){
 }
 
 // rs-v101: removed dead/superseded function importPhysicianRosterCSV (zero references; see commit message).
-function _csvParseLine(line){
-  // Minimal CSV parser handling quoted fields with embedded commas + escaped quotes.
-  const out = []; let cur = '', inQ = false;
-  for(let i = 0; i < line.length; i++){
-    const c = line[i];
-    if(inQ){
-      if(c === '"' && line[i+1] === '"'){ cur += '"'; i++; }
-      else if(c === '"') inQ = false;
-      else cur += c;
-    } else {
-      if(c === '"') inQ = true;
-      else if(c === ','){ out.push(cur); cur = ''; }
-      else cur += c;
-    }
-  }
-  out.push(cur);
-  return out;
-}
+/* rs-v111: removed dead fn _csvParseLine — verified zero references. */
 
 // ── I4. Webhook event coalescing (rate-limit) ─────────────────────────
 // Don't fire 100 webhooks during a bulk import. Coalesce events with
