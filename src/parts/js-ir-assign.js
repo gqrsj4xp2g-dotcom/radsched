@@ -548,7 +548,7 @@ function previewIRAA(){
 
 function applyIRAA(){
   if(!_adminOnly('apply IR auto-assign'))return;
-  if(!S.iraPreview.length)return;
+  if(!S.iraPreview.length){ if(typeof _toast==='function') _toast('Run Preview first to see what will be assigned.','info'); return; }
   const toApply=[...S.iraPreview];
   S.iraPreview=[];
   let procShiftsAdded=0;
