@@ -27336,10 +27336,15 @@ function removeDayCondition(idx){
   triggerSave();renderSiteRulesList();
 }
 
-function clearSeqRules(){
+async function clearSeqRules(){
   const p=S.physicians.find(x=>x.id===_srPhysId);if(!p)return;
+  if(typeof _rsConfirm==='function'){
+    const ok=await _rsConfirm({title:'Clear sequence rules',body:`Remove all sequence rules for ${p.last||'this physician'}?`,confirmLabel:'Clear rules',destructive:true});
+    if(!ok) return;
+  }
   p.seqRules=null;
   triggerSave();renderSiteRulesList();
+  if(typeof _toast==='function') _toast('Sequence rules cleared.','ok');
 }
 
 /* ─── EDIT HANDLERS for structured rule categories ───
