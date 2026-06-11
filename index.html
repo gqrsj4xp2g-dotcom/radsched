@@ -128,6 +128,56 @@
   --sh:var(--elev-1);--sh2:var(--elev-2);
   /* Previously-undefined tokens (silent bugs: --txt1 used 10×, --accent-300/400) now defined */
   --accent-300:#93c5fd;--accent-400:#60a5fa;
+
+  /* ── Calendar event palette (tokenized rs-v110 so it flips in dark) ── */
+  --ev-e1-bg:#dbeafe;--ev-e1-fg:#1e3a8a;
+  --ev-e2-bg:#d1fae5;--ev-e2-fg:#065f46;
+  --ev-e3-bg:#fef3c7;--ev-e3-fg:#78350f;
+  --ev-home-bg:#fce7f3;--ev-home-fg:#9d174d;
+  --ev-wk-bg:#dcfce7;--ev-wk-fg:#14532d;
+  --ev-vac-bg:#fee2e2;--ev-vac-fg:#7f1d1d;
+  --ev-hol-bg:#ede9fe;--ev-hol-fg:#4c1d95;
+  --ev-ir-bg:#cffafe;--ev-ir-fg:#164e63;
+  --ev-irs-bg:#d1fae5;--ev-irs-fg:#064e3b;
+  --ev-open-bg:#f4f4f5;--ev-open-fg:#52525b;--ev-open-bd:#a1a1aa;
+  --ev-wknd-bg:#fefdf8;
+}
+
+/* ── Dark mode (body[data-theme="dark"]) — rs-v110 ──
+   Overriding the semantic source flips every aliased legacy token, so all
+   token-based surfaces (cards, tables, nav, inputs, buttons, tags, notes,
+   metrics, calendar) go dark automatically. A few self-contained inline-
+   colored callout blocks stay light (readable colored islands) and get
+   refined later. The auth page is pre-login with no dark toggle, so its
+   literal palette is intentionally untouched. css-refined.css carries the
+   matching dark values for the --rs-* layer. */
+body[data-theme="dark"]{
+  --color-bg:#0a0a0c;--color-surface:#1c1c1e;--color-surface-2:#2c2c2e;--color-surface-3:#3a3a3c;
+  --color-text-primary:#fafafa;--color-text-secondary:#c6c6ca;--color-text-tertiary:#98989a;
+  --color-border:rgba(255,255,255,.10);--color-border-strong:rgba(255,255,255,.16);
+  --color-accent:#4d8cff;--color-accent-hover:#6ba0ff;
+  --color-accent-soft:rgba(77,140,255,.14);--color-accent-ring:rgba(77,140,255,.40);
+  --blue-bg:#10243a;--blue-t:#9cc6f5;
+  --green-bg:#10260f;--green-t:#86d39a;
+  --amber-bg:#2e2410;--amber-t:#f0c578;
+  --red-bg:#2e1212;--red-t:#f0a0a0;
+  --purple-bg:#1f1b3a;--purple-t:#c2b6f0;
+  --teal-bg:#0e2a26;--teal-t:#7ed3c0;
+  --pink-bg:#2e1320;
+  --elev-1:0 1px 2px rgba(0,0,0,.4);
+  --elev-2:0 4px 14px rgba(0,0,0,.5);
+  --elev-3:0 12px 40px rgba(0,0,0,.6),0 2px 6px rgba(0,0,0,.4);
+  --ev-e1-bg:#10243a;--ev-e1-fg:#9cc6f5;
+  --ev-e2-bg:#0e2a22;--ev-e2-fg:#86d8b0;
+  --ev-e3-bg:#2e2410;--ev-e3-fg:#f0c578;
+  --ev-home-bg:#2e1622;--ev-home-fg:#f0a8c8;
+  --ev-wk-bg:#102617;--ev-wk-fg:#86d39a;
+  --ev-vac-bg:#2e1212;--ev-vac-fg:#f0a0a0;
+  --ev-hol-bg:#1f1b3a;--ev-hol-fg:#c2b6f0;
+  --ev-ir-bg:#0c2a30;--ev-ir-fg:#7fd0e0;
+  --ev-irs-bg:#0e2a20;--ev-irs-fg:#7fd0b0;
+  --ev-open-bg:#2c2c2e;--ev-open-fg:#a0a0a8;--ev-open-bd:#48484a;
+  --ev-wknd-bg:#161510;
 }
 
 /* @TOKENS_END */
@@ -909,23 +959,23 @@ tbody tr:hover{background:var(--bg3)}
 .cal-day{min-height:80px;border:1px solid var(--bdr);border-radius:4px;padding:3px;background:var(--bg2)}
 .cal-day.other{opacity:.28;background:var(--bg3)}
 .cal-day.today{border-color:var(--blue);border-width:2px}
-.cal-day.wknd{background:#fefdf8}
+.cal-day.wknd{background:var(--ev-wknd-bg)}
 /* Date numbers in calendar cells — bumped from --txt3 (light gray)
    to --txt2 (mid gray) for WCAG AA contrast on the white --bg2
    cell background. The 10px size means low-vision users especially
    need the contrast boost. */
 .cal-num{font-size:10px;font-weight:600;color:var(--txt2);margin-bottom:2px}
 .ev{border-radius:3px;padding:2px 5px;margin-bottom:2px;overflow:hidden;cursor:default;word-break:break-word;line-height:1.3}
-.e1{background:#dbeafe;color:#1e3a8a}
-.e2{background:#d1fae5;color:#065f46}
-.e3{background:#fef3c7;color:#78350f}
-.ehome{background:#fce7f3;color:#9d174d}
-.ewk{background:#dcfce7;color:#14532d}
-.evac{background:#fee2e2;color:#7f1d1d}
-.ehol{background:#ede9fe;color:#4c1d95}
-.eir{background:#cffafe;color:#164e63}
-.eirs{background:#d1fae5;color:#064e3b}
-.eopen{background:#f4f4f5;color:#52525b;border:1px dashed #a1a1aa}
+.e1{background:var(--ev-e1-bg);color:var(--ev-e1-fg)}
+.e2{background:var(--ev-e2-bg);color:var(--ev-e2-fg)}
+.e3{background:var(--ev-e3-bg);color:var(--ev-e3-fg)}
+.ehome{background:var(--ev-home-bg);color:var(--ev-home-fg)}
+.ewk{background:var(--ev-wk-bg);color:var(--ev-wk-fg)}
+.evac{background:var(--ev-vac-bg);color:var(--ev-vac-fg)}
+.ehol{background:var(--ev-hol-bg);color:var(--ev-hol-fg)}
+.eir{background:var(--ev-ir-bg);color:var(--ev-ir-fg)}
+.eirs{background:var(--ev-irs-bg);color:var(--ev-irs-fg)}
+.eopen{background:var(--ev-open-bg);color:var(--ev-open-fg);border:1px dashed var(--ev-open-bd)}
 .eanc{outline:2px solid var(--amber);outline-offset:-1px}
 
 /* ── ANCHOR UI ── */
