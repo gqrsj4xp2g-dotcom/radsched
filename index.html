@@ -24020,8 +24020,8 @@ function claimShift(oid,pid){
   if(typeof _canEditDate==='function' && !_canEditDate(o.date)) return;
   const p=_physById(pid);
   if(!p){alert('Physician not found.');return;}
-  if(o.group==='DR'&&p.role==='IR'){alert('IR-only physicians cannot claim DR shifts.');return;}
-  if(o.group==='IR'&&!(p.irFte>0)){alert('This is an IR shift — only IR physicians can claim it.');return;}
+  if(o.group==='DR'&&p.role==='IR'){_toast('IR-only physicians cannot claim DR shifts.','warn');return;}
+  if(o.group==='IR'&&!(p.irFte>0)){_toast('This is an IR shift — only IR physicians can claim it.','warn');return;}
   // Vacation conflict warning (not a hard block — admin may override after confirming)
   if(vacDays(p.id).has(o.date)){
     if(!confirm(`${pname(p.id)} has a vacation on ${o.date}. Claim anyway?`))return;
@@ -26433,11 +26433,11 @@ function renderListingsMine(){
 
 // A colleague requests to claim a listed shift.
 function requestClaim(listingId){
-  if(!CU?.physId){alert('You must be linked to a physician profile to claim shifts.');return;}
+  if(!CU?.physId){_toast('You must be linked to a physician profile to claim shifts.','warn');return;}
   const l = (S.shiftListings||[]).find(x=>x.id===listingId);
   if(!l){alert('Listing not found.');return;}
   if(l.status!=='open'){alert('This listing is no longer open.');return;}
-  if(l.sellerPhysId===CU.physId){alert('You cannot claim your own listing.');return;}
+  if(l.sellerPhysId===CU.physId){_toast('You cannot claim your own listing.','warn');return;}
   if((l.claims||[]).some(c=>c.claimantPhysId===CU.physId)){alert('You have already claimed this shift.');return;}
   const message = (prompt(`Add a note to ${pname(l.sellerPhysId)} (optional):`, '')||'').trim();
   if(message===null) return;
