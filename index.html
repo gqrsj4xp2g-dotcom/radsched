@@ -48873,31 +48873,7 @@ function _summarizeRec(r){
 }
 
 // Show a pre-apply diff modal. Resolves true (apply) / false (cancel).
-async function _confirmBulkApply(opts){
-  const diffs = opts.diffs || []; // [{label, before, after}]
-  const sections = diffs.map(d => {
-    const diff = _scheduleDiff(d.before, d.after);
-    return _renderDiffHtml(diff, d.label);
-  }).join('');
-  const total = diffs.reduce((s, d) => {
-    const diff = _scheduleDiff(d.before, d.after);
-    return s + diff.total;
-  }, 0);
-  if(total === 0){
-    return _rsConfirm({
-      title: opts.title || 'Apply',
-      body: opts.body || 'No changes to apply.',
-      confirmLabel: 'OK',
-      cancelLabel: '',
-    });
-  }
-  return _rsConfirm({
-    title: opts.title || `Apply ${total} change${total===1?'':'s'}?`,
-    bodyHtml: `<div style="font-size:12.5px;color:var(--rs-ink-2);margin-bottom:12px">${escHtml(opts.body || 'Review the diff below. This action will modify the schedule.')}</div>${sections}`,
-    confirmLabel: opts.confirmLabel || 'Apply',
-    destructive: opts.destructive || false,
-  });
-}
+/* rs-v111: removed dead fn _confirmBulkApply — verified zero references. */
 
 // ── Multi-step undo timeline ───────────────────────────────────────────
 // The existing undo ring snapshots state on every mutation. Surface the
