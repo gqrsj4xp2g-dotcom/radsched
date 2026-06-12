@@ -30189,7 +30189,9 @@ async function _migLoadCommPrefs(){
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;
     const { data, error } = await sb.from('rs_comm_prefs')
-      .select('prefs').eq('owner_uid', CU.id).maybeSingle();
+      .select('prefs').eq('owner_uid', CU.id)
+      .eq('practice_id', CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'))
+      .maybeSingle();
     if(error || !data || !data.prefs || typeof data.prefs !== 'object') return false;
     const before = JSON.stringify(CU.notifPrefs || {});
     CU.notifPrefs = { ...(CU.notifPrefs || {}), ...data.prefs };   // table wins, blob fills gaps
