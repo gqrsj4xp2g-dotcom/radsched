@@ -30175,6 +30175,29 @@ async function changeMyPassword(){
   }
 }
 
+// rs-v114 (migration Phase 3): comm-prefs read-cutover. Loads the owner's prefs
+// from rs_comm_prefs (the secured per-user table, RLS owner-scoped) as
+// authoritative, with the JSON blob as fallback. Flip _MIG_READ_CUTOVER to
+// false to disable instantly. Fully guarded — any error keeps the blob value.
+const _MIG_READ_CUTOVER = true;
+let _migCommPrefsLoadedFor = null;
+async function _migLoadCommPrefs(){
+  if(_MIG_READ_CUTOVER === false || !CU || !CU.id) return false;
+  if(_migCommPrefsLoadedFor === CU.id) return false;   // load once per user
+  _migCommPrefsLoadedFor = CU.id;
+  try{
+    const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+    if(!sb) return false;
+    const { data, error } = await sb.from('rs_comm_prefs')
+      .select('prefs').eq('owner_uid', CU.id).maybeSingle();
+    if(error || !data || !data.prefs || typeof data.prefs !== 'object') return false;
+    const before = JSON.stringify(CU.notifPrefs || {});
+    CU.notifPrefs = { ...(CU.notifPrefs || {}), ...data.prefs };   // table wins, blob fills gaps
+    const u = USERS.find(x => x.id === CU.id);
+    if(u) u.notifPrefs = { ...CU.notifPrefs };
+    return JSON.stringify(CU.notifPrefs) !== before;
+  }catch(_){ return false; }
+}
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
