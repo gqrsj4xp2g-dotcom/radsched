@@ -29822,6 +29822,13 @@ function _detectMentions(text){
 /* ─── COMMUNICATION PREFERENCES PAGE ─── */
 function renderCommPrefs(){
   if(!CU) return;
+  // rs-v114 (migration Phase 3): read-cutover — load this user's notification
+  // prefs from the secured rs_comm_prefs table (authoritative; the JSON blob is
+  // the fallback). Owner-scoped, guarded, flag-gated, once per user; re-renders
+  // only if the table value actually differs from what the blob carried.
+  _migLoadCommPrefs().then(changed => {
+    if(changed && document.getElementById('cp-master')) renderCommPrefs();
+  });
   const emailEl = document.getElementById('cp-email');
   if(emailEl) emailEl.value = CU.email || '(no email on file)';
   const notifEl = document.getElementById('cp-notify-email');
