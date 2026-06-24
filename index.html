@@ -44815,6 +44815,9 @@ function _hasOnCallAck(physId, ds){
 function _renderOnCallConfirmation(isAdmin){
   const host = document.getElementById('dash-oncall-confirm');
   if(!host) return;
+  // rs-v115 (migration Phase 3): merge secured rs_on_call_acks into S.onCallAcks
+  // (union, never drops blob acks), then re-render if anything new arrived.
+  _migLoadOnCallAcks().then(changed => { if(changed){ try{ _renderOnCallConfirmation(isAdmin); }catch(_){} } });
   const today = (typeof fmtDate === 'function')
     ? fmtDate(new Date())
     : _todayLocalISO();
