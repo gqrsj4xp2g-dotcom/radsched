@@ -30200,6 +30200,35 @@ async function _migLoadCommPrefs(){
     return JSON.stringify(CU.notifPrefs) !== before;
   }catch(_){ return false; }
 }
+// rs-v115 (migration Phase 3): on-call-acks read-cutover. Merges the secured
+// rs_on_call_acks table (same-practice SELECT) into S.onCallAcks by UNION
+// (physId+date) so it never drops blob acks. Guarded/flag-gated; loads once
+// per practice; any error keeps the blob acks.
+let _migAcksLoadedFor = null;
+async function _migLoadOnCallAcks(){
+  if(_MIG_READ_CUTOVER === false || !CU) return false;
+  const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
+  if(_migAcksLoadedFor === pid) return false;
+  _migAcksLoadedFor = pid;
+  try{
+    const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+    if(!sb) return false;
+    const { data, error } = await sb.from('rs_on_call_acks')
+      .select('phys_id, ack_date, owner_uid, ts').eq('practice_id', pid);
+    if(error || !Array.isArray(data)) return false;
+    if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
+    let added = 0;
+    for(const row of data){
+      const physId = row.phys_id, date = row.ack_date;
+      if(physId == null || !date) continue;
+      if(!S.onCallAcks.some(a => a.physId === physId && a.date === date)){
+        S.onCallAcks.push({ physId, date, ackBy: row.owner_uid || null, ackAt: row.ts || null });
+        added++;
+      }
+    }
+    return added > 0;
+  }catch(_){ return false; }
+}
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
