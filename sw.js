@@ -33,14 +33,23 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      ))
+      .then((keys) => Promise.all(keys.map((k) =>
+        // Old-version caches: delete entirely. CURRENT cache: drop the cached
+        // HTML shell so a STALE shell can never be served — not even as the
+        // offline fallback. This is the recovery path for devices stuck in a
+        // refresh loop on an old cached index.html: once this SW activates,
+        // network-first always fetches the fresh shell (which carries the
+        // reload circuit-breaker). Icons/manifest stay cached.
+        k !== CACHE_NAME
+          ? caches.delete(k)
+          : caches.open(k).then((c) => Promise.all([
+              c.delete('/'), c.delete('/index.html'),
+              c.delete(new Request('/')), c.delete(new Request('/index.html')),
+            ])).catch(() => {})
+      )))
       .then(() => self.clients.claim())
       // Tell every open client a new SW version is active so the page
       // can offer to reload (or auto-reload) and pick up the new HTML.
-      // Without this, users see a one-cycle delay where the OLD shell
-      // is served from cache even though the new SW is installed.
       .then(() => self.clients.matchAll({ type: 'window' }))
       .then((clients) => clients.forEach((c) =>
         c.postMessage({ type: 'rs:sw-updated', version: CACHE_VERSION })
