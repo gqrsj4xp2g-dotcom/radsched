@@ -14511,7 +14511,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v115';
+const _SW_VERSION = 'rs-v114';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -15904,7 +15904,43 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v115';
+const _RS_HTML_BUILD = 'rs-v114';
+// rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
+// sw.js (or any errant reload path) can trap a device refreshing forever.
+// Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
+// reloads); past that, HALT and show a manual "clear cache & reload" so the
+// tab can NEVER loop. Both auto-reload paths (auto-heal + controllerchange)
+// are gated through _rsReloadAllowed().
+function _rsReloadAllowed(){
+  try{
+    var now = Date.now(), KEY = 'rs.reloadTimes';
+    var arr = (JSON.parse(localStorage.getItem(KEY) || '[]') || []).filter(function(t){ return now - t < 30000; });
+    arr.push(now);
+    localStorage.setItem(KEY, JSON.stringify(arr));
+    if(arr.length > 3){ _rsShowReloadHalt(); return false; }
+    return true;
+  }catch(_){ return true; }
+}
+function _rsShowReloadHalt(){
+  try{
+    if(document.getElementById('rs-reload-halt')) return;
+    var d = document.createElement('div');
+    d.id = 'rs-reload-halt';
+    d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0a1f3a;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,system-ui,sans-serif;padding:24px;text-align:center';
+    d.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:10px">Update loop detected — paused</div>'
+      + '<div style="font-size:13px;opacity:.85;max-width:420px;line-height:1.5;margin-bottom:20px">This device had a stale cached version that kept reloading. Auto-reload is paused. Tap below to clear the cache and load the latest version.</div>'
+      + '<button id="rs-reload-halt-btn" style="background:#fff;color:#0a1f3a;border:0;border-radius:10px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer">Clear cache &amp; reload</button>';
+    (document.body || document.documentElement).appendChild(d);
+    var btn = document.getElementById('rs-reload-halt-btn');
+    if(btn) btn.addEventListener('click', async function(){
+      try{ if('caches' in self){ var ks = await caches.keys(); await Promise.all(ks.map(function(k){ return caches.delete(k); })); } }catch(_){}
+      try{ if('serviceWorker' in navigator){ var rg = await navigator.serviceWorker.getRegistrations(); await Promise.all(rg.map(function(r){ return r.unregister(); })); } }catch(_){}
+      try{ localStorage.removeItem('rs.reloadTimes'); }catch(_){}
+      try{ for(var i=sessionStorage.length-1;i>=0;i--){ var k=sessionStorage.key(i); if(k && k.indexOf('rs.autoHeal')===0) sessionStorage.removeItem(k); } }catch(_){}
+      try{ var u = new URL(location.href); u.searchParams.set('_rsfix', Date.now().toString(36)); location.replace(u.toString()); }catch(_){ location.reload(); }
+    });
+  }catch(_){}
+}
 let _RS_BUILD_TAG = '…';
 (async () => {
   try{
