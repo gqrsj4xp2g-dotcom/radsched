@@ -14686,7 +14686,7 @@ function _registerServiceWorker(){
     _reloaded = true;
     // Tiny delay so any in-flight save the user just triggered
     // (Cmd+S, debounced edit) has a chance to flush via beforeunload.
-    setTimeout(() => { try{ location.reload(); }catch(_){} }, 150);
+    setTimeout(() => { try{ if(_rsReloadAllowed()) location.reload(); }catch(_){} }, 150);
   });
 }
 let _swUpdateBannerShown = false;
@@ -15989,7 +15989,7 @@ let _RS_BUILD_TAG = '…';
             }catch(_){}
             const url = new URL(location.href);
             url.searchParams.set('_rsheal', Date.now().toString(36));
-            location.replace(url.toString());
+            if(_rsReloadAllowed()) location.replace(url.toString());
           }
         }
       }catch(_){}
