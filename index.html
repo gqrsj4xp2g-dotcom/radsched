@@ -7259,9 +7259,11 @@ Once set, ask me anything about your schedule!</div>
     const out = [];
     const cfg = CODING_DATA.config;
     const m = code => MOD_BY_CODE.get(code);
-    const synthetic = label => [{text:`[practice config: billing_posture=professional]`,start:-1,end:-1,_synthetic:true}];
+    const synthetic = label => [{text:`[practice config: billing_posture=${cfg.posture}]`,start:-1,end:-1,_synthetic:true}];
 
-    if(cpt.pctc===1){
+    // Auto-append -26 only in professional posture; in global posture the practice
+    // bills the whole study (no professional/technical split modifier).
+    if(cpt.pctc===1 && cfg.posture==='professional'){
       const mm = m("26"); if(mm) out.push({code:"26",desc:mm.desc,plain:mm.plain,rule:mm.rule,
         supporting_spans:synthetic(), rationale:"Professional component (practice posture)."});
     }
