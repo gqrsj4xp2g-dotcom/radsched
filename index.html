@@ -7595,6 +7595,16 @@ Once set, ask me anything about your schedule!</div>
   };
   window.codingRender = codingRender;
 
+  // Billing-posture / place-of-service toggle → update config + re-run if a report is loaded.
+  window.codingSetConfig = function(){
+    const p = document.getElementById("coding-posture");
+    const s = document.getElementById("coding-pos");
+    if(p) CODING_DATA.config.posture = p.value;
+    if(s) CODING_DATA.config.pos = s.value;
+    const t = document.getElementById("coding-input");
+    if(t && t.value.trim()) window.codingAnalyze();
+  };
+
   const SAMPLES = {
     ctap: `EXAM: CT of the abdomen and pelvis with IV contrast
 
