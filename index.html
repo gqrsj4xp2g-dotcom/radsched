@@ -6947,7 +6947,12 @@ window.RVU_REFERENCE = [
     var qEl = document.getElementById("rvuref-q"); if(!qEl) return;
     var q = qEl.value.trim().toLowerCase();
     var rows = REF;
-    if(q){ var toks=q.split(/\s+/); rows = REF.filter(function(r){ var h=(r[0]+" "+r[1]+" "+r[2]).toLowerCase(); return toks.every(function(t){ return h.indexOf(t)>=0; }); }); }
+    if(q){
+      var EX={mra:["mr","angiography"],cta:["ct","angiography"],angio:["angiography"],angiogram:["angiography"],
+              injection:["inj"],xray:["x-ray"],dexa:["dxa"],pe:["pulmon"],picc:["picc"]};
+      var toks=[]; q.split(/\s+/).forEach(function(t){ (EX[t]||[t]).forEach(function(x){ toks.push(x); }); });
+      rows = REF.filter(function(r){ var h=(r[0]+" "+r[1]+" "+r[2]).toLowerCase(); return toks.every(function(t){ return h.indexOf(t)>=0; }); });
+    }
     var cap = 300, shown = rows.slice(0,cap);
     var cEl = document.getElementById("rvuref-count");
     if(cEl) cEl.textContent = rows.length + " match" + (rows.length===1?"":"es") + (rows.length>cap?" (showing "+cap+")":"");
