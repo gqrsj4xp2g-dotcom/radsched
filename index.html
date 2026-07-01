@@ -7651,11 +7651,19 @@ window.RVU_REFERENCE = [
       "kyphoplasty":"22514","breast_biopsy":"19083",
     };
     const procLabels = labels(feats.procedures);
+    const procLat = labels(feats.laterality);
     Object.entries(procMap).forEach(([label,code])=>{
-      if(!procLabels.has(label) || seen.has(code)) return;
-      seen.add(code);
-      const cpt = CPT_BY_CODE.get(code); if(!cpt) return;
-      out.push({code, short:cpt.short, score:0.93, source:"rule",
+      if(!procLabels.has(label)) return;
+      let finalCode = code;
+      // Diagnostic mammo is bilateral (77066) by default, but unilateral (77065)
+      // when one side is documented and it is not called bilateral.
+      if(label==="diagnostic_mammo" && (procLat.has("left")||procLat.has("right")) && !procLat.has("bilateral")){
+        finalCode = "77065";
+      }
+      if(seen.has(finalCode)) return;
+      seen.add(finalCode);
+      const cpt = CPT_BY_CODE.get(finalCode); if(!cpt) return;
+      out.push({code:finalCode, short:cpt.short, score:0.93, source:"rule",
         rationale:`procedure phrase (${label})`,
         supporting_spans:feats.procedures.filter(s=>s.label===label).slice(0,1)});
     });
