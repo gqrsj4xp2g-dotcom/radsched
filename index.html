@@ -6602,12 +6602,16 @@ Once set, ask me anything about your schedule!</div>
   /* ─── reference data (subset of the seed YAMLs) ─────────────────────── */
   const CODING_DATA = {
     config: {
-      conversion_factor: 32.3465,   // CY2025 Medicare CF
-      pro_pct: 0.30,                // -26 professional component (uniform fallback)
-      tech_pct: 0.70,               // -TC technical component
-      dimpr_factor: 0.95,           // diagnostic-imaging multiple-procedure reduction (approx)
-      bilateral_pct: 1.50,          // -50 pays 150% of unilateral allowable
-      reduced_pct: 0.50,            // -52 default
+      conversion_factor: 32.3465,   // CY2025 Medicare CF (PPRRVU2025 Oct release)
+      // Billing posture + place of service select which CMS total-RVU column is paid:
+      //   posture 'professional' → hospital-based read; -26 (professional component) auto-applied
+      //   posture 'global'       → the practice owns the equipment and bills the whole study
+      //   pos     'facility' (hospital)  |  'office' (non-facility / IDTF)
+      // For diagnostic imaging (PC/TC split) posture drives the number; for procedures
+      // (no split) pos does. See lineComponents()/computeReimbursement().
+      posture: 'professional',
+      pos: 'facility',
+      reduced_pct: 0.50,            // -52 reduced services (payer-dependent default)
     },
 
     // (code, short_desc, modality, body_region, bilateral_ind, mult_proc_ind, pctc_ind, is_addon, keywords)
