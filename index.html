@@ -7351,53 +7351,78 @@ Once set, ask me anything about your schedule!</div>
     return {lines,warnings};
   }
 
-  /* ─── reimbursement ─────────────────────────────────────────────────── */
-  function baseAllowable(code){
-    const r = RVU_BY_CODE.get(code); if(!r) return 0;
-    const cfg = CODING_DATA.config;
-    // facility PE column by default (place-of-service = hospital outpatient).
-    const total = r.work + r.pe_f + r.mp;
-    return Math.round(total * cfg.conversion_factor * 100)/100;
-  }
-  function modifierFactor(modifierCodes,pctc){
-    let f = 1.0;
-    const cfg = CODING_DATA.config;
-    if(pctc===1){
-      if(modifierCodes.includes("26")) f *= cfg.pro_pct;
-      if(modifierCodes.includes("TC")) f *= cfg.tech_pct;
+  /* ─── reimbursement (CMS CY2025 MPFS, national, no GPCI) ─────────────────
+     RVU_BY_CODE = {nf,f,pc,tc,pctc,mult,bilat}. × CF = allowable dollars.
+     lineComponents() resolves which component RVUs a line is paid on given its
+     billed modifiers + place of service; computeReimbursement() then applies the
+     real MPPR (imaging = 50% off the TECHNICAL component of later studies, ranked
+     by TC within each family, professional component never reduced; surgical =
+     100/50/50 on the whole line) and the bilateral / -52 adjustments. */
+  function round2(x){ return Math.round(x*100)/100; }
+  const BILAT_FACTOR = {0:1.0, 1:1.5, 2:1.0, 3:2.0, 9:1.0};  // CMS BILAT SURG indicator → -50 factor
+
+  function lineComponents(code, mods){
+    const r = RVU_BY_CODE.get(code);
+    if(!r) return {rvu:0, pc:0, tc:0};
+    const pos = CODING_DATA.config.pos || "facility";
+    if(r.pctc===1){                                    // diagnostic imaging with a PC/TC split
+      if(mods.includes("26")) return {rvu:r.pc, pc:r.pc, tc:0};      // professional read only
+      if(mods.includes("TC")) return {rvu:r.tc, pc:0,    tc:r.tc};   // technical only
+      const g = (pos==="office" ? r.nf : r.f);         // global (nf==f for imaging)
+      return {rvu:g, pc:r.pc, tc:r.tc};
     }
-    if(modifierCodes.includes("50")) f *= cfg.bilateral_pct;
-    if(modifierCodes.includes("52")) f *= cfg.reduced_pct;
-    return f;
+    const g = (pos==="office" ? r.nf : r.f);           // procedures / TC-only tests / add-ons
+    return {rvu:g, pc:0, tc:g};                         // whole line behaves as "technical" for MPPR
   }
-  function multiProcFactor(rank, multProc, isAddon){
-    if(isAddon) return 1.0;
-    if(rank===0) return 1.0;
-    if(multProc===4 || multProc===6 || multProc===7) return CODING_DATA.config.dimpr_factor;
-    return 1.0;
+  // Global allowable at the current posture/pos (used by any external caller).
+  function baseAllowable(code){
+    return round2(lineComponents(code, []).rvu * CODING_DATA.config.conversion_factor);
   }
+
   function computeReimbursement(lines){
     const cfg = CODING_DATA.config;
-    const active = lines.map((ln,i)=>({ i, ln, base:baseAllowable(ln.code) }))
-      .filter(({ln})=>!ln.blocked_by_ncci && !ln.is_addon);
-    active.sort((a,b)=>b.base-a.base);
-    const rankFor = new Map(); active.forEach((e,r)=>rankFor.set(e.i,r));
-
-    const per = lines.map((ln,i)=>{
-      const base = baseAllowable(ln.code);
-      if(ln.blocked_by_ncci) return {code:ln.code, base, allowance:0, naive:0, units:ln.units||1, blocked:true};
+    const cf = cfg.conversion_factor;
+    const info = lines.map((ln,i)=>{
+      const r = RVU_BY_CODE.get(ln.code) || {};
       const mods = (ln.modifiers||[]).map(m=>m.code);
-      const f = modifierFactor(mods,ln.pctc);
-      const mpr = multiProcFactor(rankFor.get(i)||0, ln.mult, ln.is_addon);
-      const units = ln.units || 1;
-      const naivePctc = (ln.pctc===1) ? cfg.pro_pct : 1.0;  // naive billing assumes -26 if pctc=1
-      const naive = Math.round(base * naivePctc * units * 100)/100;
-      const allow = Math.round(base * f * mpr * units * 100)/100;
-      return {code:ln.code, base, allowance:allow, naive, units, blocked:false};
+      return { i, ln, mods, comp: lineComponents(ln.code, mods),
+               mult: (r.mult!=null?r.mult:0), bilat: (r.bilat!=null?r.bilat:0),
+               isAddon: ln.is_addon, blocked: ln.blocked_by_ncci };
     });
-    const total = Math.round(per.reduce((s,p)=>s+p.allowance,0)*100)/100;
-    const naive = Math.round(per.reduce((s,p)=>s+p.naive,0)*100)/100;
-    return {per, total, naive, delta: Math.round((total-naive)*100)/100};
+
+    // Imaging MPPR (indicators 4/6/7): reduce TC of the 2nd..n study by 50%, ranked by
+    // TC within each family; professional component untouched (PC MPPR ended CY2017).
+    const tcReduced = new Set(), fam = {};
+    info.filter(x=>!x.blocked && !x.isAddon && x.comp.tc>0 && (x.mult===4||x.mult===6||x.mult===7))
+        .forEach(x=>{ (fam[x.mult]=fam[x.mult]||[]).push(x); });
+    Object.keys(fam).forEach(k=>{
+      fam[k].sort((a,b)=>b.comp.tc - a.comp.tc);
+      fam[k].slice(1).forEach(x=>tcReduced.add(x.i));
+    });
+    // Surgical MPPR (indicator 2): rank by allowable, pay 100/50/50 on the whole line.
+    const surgReduced = new Set();
+    info.filter(x=>!x.blocked && !x.isAddon && x.mult===2)
+        .sort((a,b)=>b.comp.rvu - a.comp.rvu)
+        .slice(1).forEach(x=>surgReduced.add(x.i));
+
+    const per = info.map(x=>{
+      const units = x.ln.units || 1;
+      const face = round2(x.comp.rvu * cf * units);    // pre-adjustment face value
+      if(x.blocked) return {code:x.ln.code, base:face, allowance:0, naive:face, units, blocked:true};
+      let pc = x.comp.pc, tc = x.comp.tc;
+      if(tcReduced.has(x.i)) tc = tc * 0.50;           // imaging MPPR (technical only)
+      let rvu = pc + tc;
+      if(surgReduced.has(x.i)) rvu = rvu * 0.50;       // surgical MPPR
+      let mult = 1.0;
+      if(x.mods.includes("50")) mult *= (BILAT_FACTOR[x.bilat] != null ? BILAT_FACTOR[x.bilat] : 1.0);
+      if(x.mods.includes("52")) mult *= cfg.reduced_pct;
+      const payerPriced = x.mods.includes("53") || x.mods.includes("22");
+      const allowance = round2(rvu * cf * mult * units);
+      return {code:x.ln.code, base:face, allowance, naive:face, units, blocked:false, payerPriced};
+    });
+    const total = round2(per.filter(p=>!p.blocked).reduce((s,p)=>s+p.allowance,0));
+    const naive = round2(per.reduce((s,p)=>s+p.naive,0));   // face value incl. would-be-blocked lines
+    return {per, total, naive, delta: round2(total-naive)};
   }
 
   /* ─── pipeline ──────────────────────────────────────────────────────── */
