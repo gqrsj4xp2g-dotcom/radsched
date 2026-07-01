@@ -6948,10 +6948,19 @@ window.RVU_REFERENCE = [
     var q = qEl.value.trim().toLowerCase();
     var rows = REF;
     if(q){
-      var EX={mra:["mr","angiography"],cta:["ct","angiography"],angio:["angiography"],angiogram:["angiography"],
-              injection:["inj"],xray:["x-ray"],dexa:["dxa"],pe:["pulmon"],picc:["picc"]};
-      var toks=[]; q.split(/\s+/).forEach(function(t){ (EX[t]||[t]).forEach(function(x){ toks.push(x); }); });
-      rows = REF.filter(function(r){ var h=(r[0]+" "+r[1]+" "+r[2]).toLowerCase(); return toks.every(function(t){ return h.indexOf(t)>=0; }); });
+      // any-of aliases: a query token matches if the row contains the token OR any alias
+      // (CMS mixes spelled-out and abbreviated forms, e.g. "thrombectomy" vs "thrmbc").
+      var ALIAS={mra:["mr angiography"],cta:["ct angiography"],angiogram:["angiography"],
+                 injection:["inj"],thrombectomy:["thrmbc"],xray:["x-ray"],embolization:["emboliz"],
+                 kyphoplasty:["kypho"],nephrostomy:["nephsto","nephrostomy"]};
+      var toks=q.split(/\s+/);
+      rows = REF.filter(function(r){
+        var h=(r[0]+" "+r[1]+" "+r[2]).toLowerCase();
+        return toks.every(function(t){
+          var alts=[t]; if(ALIAS[t]) alts=alts.concat(ALIAS[t]);
+          return alts.some(function(a){ return h.indexOf(a)>=0; });
+        });
+      });
     }
     var cap = 300, shown = rows.slice(0,cap);
     var cEl = document.getElementById("rvuref-count");
