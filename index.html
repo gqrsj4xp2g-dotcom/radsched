@@ -7816,11 +7816,15 @@ window.RVU_REFERENCE = [
         supporting_spans:synthetic(), rationale:"Professional component (practice posture)."});
     }
     const lat = labels(feats.laterality);
-    if(lat.has("bilateral") && cpt.bilat===1){
+    // Use the authoritative CMS bilateral-surgery indicator (RVU table), not the stale
+    // cpt.bilat field: indicator 1 (pay 150%) or 3 (pay 100%/side) => -50 is meaningful.
+    const rvuBilat = (RVU_BY_CODE.get(cpt.code) || {}).bilat;
+    const bilatEligible = (rvuBilat===1 || rvuBilat===3);
+    if(lat.has("bilateral") && bilatEligible){
       const mm = m("50"); if(mm) out.push({code:"50",desc:mm.desc,plain:mm.plain,rule:mm.rule,
         supporting_spans:feats.laterality.filter(s=>s.label==="bilateral").slice(0,1),
-        rationale:`${cpt.code} is unilateral (bilateral_ind=1); report documents bilateral exam.`});
-    } else if((lat.has("left")||lat.has("right")) && cpt.bilat===1){
+        rationale:`${cpt.code} is unilateral (CMS bilat indicator ${rvuBilat}); report documents bilateral exam.`});
+    } else if((lat.has("left")||lat.has("right")) && bilatEligible){
       const side = lat.has("left") ? "LT" : "RT";
       const mm = m(side); if(mm) out.push({code:side,desc:mm.desc,plain:mm.plain,rule:mm.rule,
         supporting_spans:feats.laterality.filter(s=>s.label===(side==="LT"?"left":"right")).slice(0,1),
