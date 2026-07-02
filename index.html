@@ -7613,7 +7613,7 @@ window.RVU_REFERENCE = [
   function candidatesFromRules(feats){
     let mods = labels(feats.modality);
     let regions = labels(feats.body_region);
-    const ctr = pickContrast(labels(feats.contrast));
+    const ctr = pickContrast(labels(feats.contrast));   // global fallback
     const lat = labels(feats.laterality);
 
     // If a compound region is documented, drop the constituents.
@@ -7621,12 +7621,27 @@ window.RVU_REFERENCE = [
       if(regions.has(comp)){ REGION_CONSTITUENTS[comp].forEach(c=>regions.delete(c)); }
     });
 
+    // Per-region contrast: choose the contrast phrase NEAREST the region mention, so a
+    // mixed-contrast multi-region report ("CT chest w/o AND CT abdomen/pelvis with contrast")
+    // labels each study correctly instead of applying one global contrast to every code.
+    function localContrast(regSet){
+      const rspans = feats.body_region.filter(s=>regSet.includes(s.label));
+      if(!rspans.length || !feats.contrast.length) return ctr;
+      let best=null, bestD=Infinity;
+      rspans.forEach(rs=>feats.contrast.forEach(cs=>{
+        const d = Math.min(Math.abs(cs.start-rs.end), Math.abs(rs.start-cs.end));
+        if(d<bestD){ bestD=d; best=cs.label; }
+      }));
+      return best!=null ? best : ctr;
+    }
+
     const out = [], seen = new Set();
     PRIMARY_MAP.forEach(([modSet,regSet,wantCtr,code])=>{
       const modOk = modSet.some(m=>mods.has(m));
       const regOk = regSet.some(r=>regions.has(r));
-      const ctrOk = wantCtr==null || wantCtr===ctr;
-      if(!(modOk && regOk && ctrOk)) return;
+      if(!(modOk && regOk)) return;
+      const lc = (wantCtr==null) ? null : localContrast(regSet);
+      if(!(wantCtr==null || wantCtr===lc)) return;
       let final = code;
       if(BILATERAL_UPGRADE[code] && lat.has("bilateral")) final = BILATERAL_UPGRADE[code];
       if(seen.has(final)) return;
@@ -7638,7 +7653,7 @@ window.RVU_REFERENCE = [
         .concat(feats.body_region.filter(s=>regSet.includes(s.label)))
         .concat(wantCtr ? feats.contrast.filter(s=>s.label===wantCtr) : []);
       out.push({code:final, short:cpt.short, score:0.95, source:"rule",
-        rationale:`modality=${[...mods].join("/")} region=${[...regions].join("/")} contrast=${ctr||"n/a"}`,
+        rationale:`modality=${[...mods].join("/")} region=${regSet.filter(r=>regions.has(r)).join("/")} contrast=${lc||wantCtr||"n/a"}`,
         supporting_spans:spans});
     });
 
