@@ -7919,6 +7919,9 @@ window.RVU_REFERENCE = [
       if(mods.includes("26")) return {rvu:r.pc, pc:r.pc, tc:0};      // professional read only
       if(mods.includes("TC")) return {rvu:r.tc, pc:0,    tc:r.tc};   // technical only
       const g = (pos==="office" ? r.nf : r.f);         // global (nf==f for imaging)
+      // Carrier-priced codes (CMS status C, e.g. PET/CT 78815) have no national GLOBAL
+      // price (nf==f==0) even though a PC exists — don't invent one from pc+tc.
+      if(g<=0) return {rvu:0, pc:0, tc:0};
       return {rvu:g, pc:r.pc, tc:r.tc};
     }
     const g = (pos==="office" ? r.nf : r.f);           // procedures / TC-only tests / add-ons
