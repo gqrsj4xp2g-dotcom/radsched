@@ -7692,6 +7692,14 @@ window.RVU_REFERENCE = [
     return out;
   }
 
+  // A phrase that is only RECOMMENDED / considered / conditional was not performed —
+  // don't emit a code for it (prevents billing procedures off "consider X"/"X recommended").
+  const REC_GUARD = /\b(?:recommend|consider|suggest|advis|correlate\s+with|further\s+eval|if\s+(?:clinically|indicated|needed|warranted|desired)|may\s+(?:be|benefit|provide|help)|should\s+be\s+(?:considered|obtained|performed)|could\s+be|would\s+(?:be|benefit)|warrant|as\s+needed|prn\b)/i;
+  function sentenceAround(text, idx, len){
+    let s = idx; while(s>0 && !/[.\n;:]/.test(text[s-1])) s--;
+    let e = idx+len; while(e<text.length && !/[.\n;]/.test(text[e])) e++;
+    return text.slice(s,e);
+  }
   function candidatesFromKeywords(text){
     const out = [];
     const lower = text.toLowerCase();
@@ -7702,6 +7710,8 @@ window.RVU_REFERENCE = [
         if(!phrase || phrase.length < 10) continue;
         const idx = lower.indexOf(phrase.toLowerCase());
         if(idx<0) continue;
+        // Skip matches that sit inside a recommendation/conditional clause.
+        if(REC_GUARD.test(sentenceAround(text, idx, phrase.length))) continue;
         out.push({code:cpt.code, short:cpt.short, score:0.75, source:"keyword",
           rationale:`verbatim keyword "${phrase}"`,
           supporting_spans:[{text:text.substr(idx,phrase.length),start:idx,end:idx+phrase.length}]});
