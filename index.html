@@ -7129,6 +7129,7 @@ window.RVU_REFERENCE = [
       ["20610", "Arthrocentesis large joint", "IR","any",0,2,0,false, "joint injection, arthrocentesis, aspiration of a large joint, injection of the knee, injection of the shoulder"],
       ["20611", "Arthrocentesis large joint w/ US", "IR","any",0,2,0,false, "ultrasound guided joint injection, joint injection with ultrasound guidance, ultrasound-guided arthrocentesis"],
       ["20605", "Arthrocentesis intermediate joint", "IR","any",0,2,0,false, "intermediate joint injection, injection of the wrist, injection of the ankle joint"],
+      ["20606", "Arthrocentesis intermediate joint w/ US", "IR","any",0,2,0,false, "ultrasound guided wrist injection, ultrasound guided ankle injection, ultrasound guided elbow injection"],
       ["37184", "Mech thrombectomy, arterial, 1st", "IR","any",0,2,0,false, "arterial mechanical thrombectomy, pulmonary artery thrombectomy, pulmonary embolism thrombectomy, flowtriever thrombectomy"],
       ["37187", "Mech thrombectomy, venous", "IR","any",0,2,0,false, "venous mechanical thrombectomy, percutaneous venous thrombectomy"],
       ["37211", "Cath-directed thrombolysis, arterial", "IR","any",0,2,0,false, "catheter directed thrombolysis, catheter-directed thrombolytic infusion"],
@@ -7195,7 +7196,7 @@ window.RVU_REFERENCE = [
       ["74455",3.04,3.04,0.46,2.58,1,0,0],
       ["20610",1.96,1.36,0,0,0,2,1],
       ["20611",2.98,1.77,0,0,0,2,1],
-      ["20605",1.65,1.1,0,0,0,2,1],
+      ["20605",1.65,1.1,0,0,0,2,1],["20606",2.7,1.56,0,0,0,2,1],
       ["37184",48.75,12.62,0,0,0,2,1],
       ["37187",47.89,11.53,0,0,0,2,1],
       ["37211",11.32,11.32,0,0,0,2,1],
@@ -7275,6 +7276,8 @@ window.RVU_REFERENCE = [
       ["70496","70470",0,"CTA head bundles diagnostic CT head w/o & w/"],
       ["20611","20610",0,"US-guided joint injection supersedes non-guided (same procedure)"],
       ["20611","76942",0,"US guidance included in 20611 (do not report 76942 separately)"],
+      ["20606","20605",0,"US-guided intermediate joint injection supersedes non-guided (same procedure)"],
+      ["20606","76942",0,"US guidance included in 20606 (do not report 76942 separately)"],
       ["77085","77080",0,"DEXA with VFA (77085) includes the axial DEXA (77080)"],
       ["70546","70544",0,"Combined MRA head (w/o & w/) supersedes w/o-only component"],
       ["70546","70545",0,"Combined MRA head (w/o & w/) supersedes w/-only component"],
@@ -7455,6 +7458,12 @@ window.RVU_REFERENCE = [
     [/\bTFESI\b|\btransforaminal\s+(?:epidural\s+)?injection\b/gi,"tfesi"],
     [/\bkyphoplasty\b|\bvertebroplasty\b|\bvertebral\s+augmentation\b/gi,"kyphoplasty"],
     [/\bbreast\s+biopsy\b|\bbiopsy\s+of\s+(?:the\s+)?breast\b/gi,"breast_biopsy"],
+    // Joint injections/aspirations — tolerant of laterality + "joint" qualifiers in either word order.
+    [/\b(?:injection|aspiration|arthrocentesis)\s+of\s+(?:the\s+)?(?:left\s+|right\s+|bilateral\s+)?(?:knee|hip|shoulder)s?(?:\s+joint)?\b|\b(?:knee|hip|shoulder)\s+(?:joint\s+)?(?:injection|aspiration|arthrocentesis)\b/gi,"joint_inj_large"],
+    [/\b(?:injection|aspiration|arthrocentesis)\s+of\s+(?:the\s+)?(?:left\s+|right\s+|bilateral\s+)?(?:wrist|elbow|ankle)s?(?:\s+joint)?\b|\b(?:wrist|elbow|ankle)\s+(?:joint\s+)?(?:injection|aspiration|arthrocentesis)\b/gi,"joint_inj_mid"],
+    // Image-guided collection drainage — matches with any qualifiers between the anchor words.
+    [/\b(?:abscess|fluid\s+collection|seroma|hematoma)\s+drainage\b|\bdrainage\s+of\s+(?:a\s+|the\s+)?(?:abscess|fluid\s+collection|collection|seroma|hematoma)\b|\bdrainage\s+catheter\s+(?:placement|insertion)\b|\bpigtail\s+catheter\s+(?:placement|insertion)\b/gi,"abscess_drain"],
+    [/\bsoft\s+tissue\s+(?:collection|abscess|fluid\s+collection)\b|\bsubcutaneous\s+(?:abscess|collection|fluid\s+collection)\b/gi,"soft_tissue_ctx"],
   ];
   const TEACHING = [
     /\bresident\b|\bsupervised\s+by\b|\bteaching\s+physician\b|\battending\s+(?:was\s+)?present\b/gi,
@@ -7545,6 +7554,10 @@ window.RVU_REFERENCE = [
       additional_levels: 0,  additional_levels_spans: [],
       sedation_minutes: 0,   sedation_spans: [],
     };
+    // Procedure phrases inside recommendation/conditional clauses were not performed —
+    // drop them so procMap codes (port, IVC filter, drains, joint injections...) can't
+    // bill off "recommend/consider X" narrative.
+    feats.procedures = feats.procedures.filter(s=>!isRecommendationOnly(text, s.start, s.end-s.start));
     // Scalar counters with citations
     function scalarCount(re,key,key_spans){
       let m; re.lastIndex = 0;
@@ -7672,6 +7685,7 @@ window.RVU_REFERENCE = [
       "paracentesis":"49083","thoracentesis":"32555","nephrostomy":"50432",
       "ivc_filter":"37191","tace":"37243","lp":"62328","tfesi":"64483",
       "kyphoplasty":"22514","breast_biopsy":"19083",
+      "joint_inj_large":"20610","joint_inj_mid":"20605","abscess_drain":"49405",
     };
     const procLabels = labels(feats.procedures);
     const procLat = labels(feats.laterality);
@@ -7683,6 +7697,12 @@ window.RVU_REFERENCE = [
       if(label==="diagnostic_mammo" && (procLat.has("left")||procLat.has("right")) && !procLat.has("bilateral")){
         finalCode = "77065";
       }
+      // US-guided joint injections use the with-guidance codes (guidance bundled, no 76942).
+      const gLab = labels(feats.guidance);
+      if(label==="joint_inj_large" && gLab.has("us")) finalCode = "20611";
+      if(label==="joint_inj_mid"   && gLab.has("us")) finalCode = "20606";
+      // Soft-tissue/subcutaneous collections drain under 10030; visceral/deep under 49405.
+      if(label==="abscess_drain" && procLabels.has("soft_tissue_ctx")) finalCode = "10030";
       if(seen.has(finalCode)) return;
       seen.add(finalCode);
       const cpt = CPT_BY_CODE.get(finalCode); if(!cpt) return;
@@ -7708,6 +7728,13 @@ window.RVU_REFERENCE = [
     let e = idx+len; while(e<text.length && !/[.\n;]/.test(text[e])) e++;
     return text.slice(s,e);
   }
+  // Past-tense completion evidence overrides the recommendation guard, so a mixed
+  // sentence ("aspiration was performed; repeat injection may help") keeps its code.
+  const PERFORMED_OVERRIDE = /\b(?:was|were|has\s+been|have\s+been)\s+(?:performed|completed|placed|obtained|drained|injected|aspirated|carried\s+out)\b|\bsuccessfully\b/i;
+  function isRecommendationOnly(text, idx, len){
+    const sent = sentenceAround(text, idx, len);
+    return REC_GUARD.test(sent) && !PERFORMED_OVERRIDE.test(sent);
+  }
   function candidatesFromKeywords(text){
     const out = [];
     const lower = text.toLowerCase();
@@ -7719,7 +7746,7 @@ window.RVU_REFERENCE = [
         const idx = lower.indexOf(phrase.toLowerCase());
         if(idx<0) continue;
         // Skip matches that sit inside a recommendation/conditional clause.
-        if(REC_GUARD.test(sentenceAround(text, idx, phrase.length))) continue;
+        if(isRecommendationOnly(text, idx, phrase.length)) continue;
         out.push({code:cpt.code, short:cpt.short, score:0.75, source:"keyword",
           rationale:`verbatim keyword "${phrase}"`,
           supporting_spans:[{text:text.substr(idx,phrase.length),start:idx,end:idx+phrase.length}]});
