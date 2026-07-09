@@ -50554,7 +50554,14 @@ async function _pushToSupabase(){
     // network latency to debounced typing. The probe still fires when the
     // user has been idle and is starting a fresh save burst — exactly when
     // a stale baseline matters.
-    const _CONFLICT_PROBE_SKIP_MS = 30000;
+    // AUDIT FIX (2026-07 deep dive): shrunk from 30s to 3s. The old 30s skip
+    // meant that during an active editing burst (debounced pushes ~every 1.5s)
+    // the conflict probe NEVER fired, so two admins editing at once silently
+    // last-write-wins. Now that realtime echo suppression is origin-based (a
+    // real concurrent save is applied, not swallowed as our echo), a short 3s
+    // skip is enough to avoid probing on back-to-back keystrokes while still
+    // catching a colleague's concurrent save within one debounce cycle.
+    const _CONFLICT_PROBE_SKIP_MS = 3000;
     const _lastPushAge = S._lastSaved ? (Date.now() - S._lastSaved.getTime()) : Infinity;
     const _shouldProbe = _baseRemoteSavedAt && _lastPushAge >= _CONFLICT_PROBE_SKIP_MS;
     if(_shouldProbe){
