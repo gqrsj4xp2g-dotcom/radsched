@@ -13977,6 +13977,9 @@ function _hydrateUserFromSession(sbUser){
   // for backwards compatibility with older accounts that haven't been backfilled.
   _ROW_ID = appMeta.practiceId || userMeta.practiceId || 'main';
   _PRACTICE_ID = _ROW_ID;
+  // Remember for pre-login preloads (see _preloadUsers) so the login screen
+  // reads THIS practice's row next time, not the hardcoded 'main' row.
+  try{ localStorage.setItem('rs.lastPracticeId', _ROW_ID); }catch(_){}
   // Role — STRICTLY app_metadata. If app_metadata.role is missing, default to
   // 'user'. Never read role from user_metadata.
   const role = appMeta.role || 'user';
