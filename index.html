@@ -17733,10 +17733,11 @@ function mySchedStepFocus(step){
     // too long), so step by week too.
     next = addDays(cur, 7 * step);
   } else {
-    // month: advance by a month
+    // month: advance by a month, day-clamped (Jan 31 +1 = Feb 28, not Mar 3)
     const d = parseDateLocal(cur);
-    d.setMonth(d.getMonth() + step);
-    next = fmtDate(d);
+    const t = new Date(d.getFullYear(), d.getMonth() + step, 1);
+    t.setDate(Math.min(d.getDate(), new Date(t.getFullYear(), t.getMonth()+1, 0).getDate()));
+    next = fmtDate(t);
   }
   mySchedSetFocus(next);
 }
@@ -21600,7 +21601,7 @@ function renderCalendarSync(){
     startEl.value = fmtDate(new Date());
   }
   if(endEl && !endEl.value){
-    const d=new Date(); d.setMonth(d.getMonth()+2); d.setDate(0);
+    const _n=new Date(); const d=new Date(_n.getFullYear(), _n.getMonth()+2, 0); // last day of next month, overflow-safe
     endEl.value = fmtDate(d);
   }
   // Surface the live URL on tab open if the user previously generated
