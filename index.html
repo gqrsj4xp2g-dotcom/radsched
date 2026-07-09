@@ -45715,7 +45715,7 @@ function acknowledgeOnCall(physId, ds){
     if(_sb && CU?.id) _sb.from('rs_on_call_acks').upsert({
       practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
       owner_uid: CU.id,
-      phys_id: (typeof physId==='number')?physId:null,
+      phys_id: Number.isFinite(+physId) ? +physId : null,  // coerce numeric strings (SW bridge sends strings)
       ack_date: ds
     }, { onConflict:'practice_id,owner_uid,ack_date' }).then(()=>{},()=>{});
   }catch(_){}
