@@ -34553,7 +34553,12 @@ function drcStepFocus(step){
   if(view === 'day')        next = addDays(cur, step);
   else if(view === 'week')  next = addDays(cur, 7 * step);
   else if(view === 'list')  next = addDays(cur, 7 * step);   // list is week-scoped → step by week
-  else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
+  else { // month step, day-clamped: Jan 31 +1 month = Feb 28, not Mar 3 (setMonth overflow)
+    const d = parseDateLocal(cur);
+    const t = new Date(d.getFullYear(), d.getMonth() + step, 1);
+    t.setDate(Math.min(d.getDate(), new Date(t.getFullYear(), t.getMonth()+1, 0).getDate()));
+    next = fmtDate(t);
+  }
   drcSetFocus(next);
 }
 // Reset all four DR-calendar filters. Triggered by the
@@ -39844,7 +39849,12 @@ function ircStepFocus(step){
   if(view === 'day')        next = addDays(cur, step);
   else if(view === 'week')  next = addDays(cur, 7 * step);
   else if(view === 'list')  next = addDays(cur, 7 * step);   // list is week-scoped → step by week
-  else { const d = parseDateLocal(cur); d.setMonth(d.getMonth() + step); next = fmtDate(d); }
+  else { // month step, day-clamped: Jan 31 +1 month = Feb 28, not Mar 3 (setMonth overflow)
+    const d = parseDateLocal(cur);
+    const t = new Date(d.getFullYear(), d.getMonth() + step, 1);
+    t.setDate(Math.min(d.getDate(), new Date(t.getFullYear(), t.getMonth()+1, 0).getDate()));
+    next = fmtDate(t);
+  }
   ircSetFocus(next);
 }
 
