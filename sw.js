@@ -79,9 +79,30 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
+  if (e.request.method !== 'GET') return;
+
+  // ── Boot-critical CDN deps (xlsx, supabase-js): CACHE-FIRST ──
+  // Serve the precached copy so the app can start during a CDN outage or an
+  // offline launch (audit fix 2026-07). Revalidate in the background so a
+  // version-pinned bump still lands eventually. Never blocks boot on the network.
+  if (CDN_HOSTS.has(url.hostname)) {
+    e.respondWith(
+      caches.match(e.request).then((cached) => {
+        const net = fetch(e.request).then((resp) => {
+          if (resp && resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(e.request, copy)).catch(() => {});
+          }
+          return resp;
+        }).catch(() => cached || Promise.reject(new Error('offline')));
+        return cached || net;
+      })
+    );
+    return;
+  }
+
   // Only handle same-origin GETs. Anything else (Supabase API, Maps,
   // POST mutations, websockets, GitHub deploy) bypasses the cache.
-  if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
 
   // ── NEVER serve OR cache sw.js itself ──
