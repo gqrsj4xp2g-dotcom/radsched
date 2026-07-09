@@ -19913,7 +19913,13 @@ async function _mapsProxyCall(origins, destinations, departureTime, trafficModel
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
     return data;
 
-  }catch(e){console.warn("[RS] _mapsProxyCall:", e.message||e);}
+  }catch(e){
+    // AUDIT FIX: rethrow — swallowing here returned undefined, so callers'
+    // allSettled/rejection branches never fired, updateTrafficTimes reported
+    // "✓ updated" on total failure, and calcAllDriveTimes deref'd undefined.rows.
+    console.warn("[RS] _mapsProxyCall:", e.message||e);
+    throw e;
+  }
 }
 
 async function calcAllDriveTimes(){
@@ -20121,7 +20127,10 @@ async function _mapsProxyCallRT(origins, destinations, departureTime){
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
     return data;
 
-  }catch(e){console.warn("[RS] _mapsProxyCallRT:", e.message||e);}
+  }catch(e){
+    console.warn("[RS] _mapsProxyCallRT:", e.message||e);
+    throw e;  // AUDIT FIX: rethrow — see _mapsProxyCall
+  }
 }
 
 /* ─── DAILY DRIVE TIMES WITH TRAFFIC ──────────────────────────────────────
