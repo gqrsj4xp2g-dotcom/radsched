@@ -45664,6 +45664,15 @@ function acknowledgeOnCall(physId, ds){
     if(typeof _toast === 'function') _toast('Sign in to confirm on-call.', 'err');
     return;
   }
+  // AUDIT FIX (2026-07 deep dive): ownership check. This is reachable from a
+  // URL param (?onCallAck=physId,date) and the SW bridge, so without this a
+  // user could forge an acknowledgment on a colleague's behalf. A physician
+  // may only confirm their OWN on-call; admins/superusers may confirm anyone.
+  const _adminAck = (typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : (CU.role==='admin'||CU.role==='superuser');
+  if(!_adminAck && Number(CU.physId) !== Number(physId)){
+    if(typeof _toast === 'function') _toast('You can only confirm your own on-call.', 'err');
+    return;
+  }
   if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
   if(_hasOnCallAck(physId, ds)) return; // idempotent
   S.onCallAcks.push({
