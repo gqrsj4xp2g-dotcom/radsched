@@ -50589,6 +50589,12 @@ function _initSupabase(){
 // loop kept calling but the user had no way to know real-time sync
 // was broken.
 let _pullFailCount = 0;
+// AUDIT FIX (2026-07 deep dive): distinguishes "row genuinely missing" from
+// "pull failed (network/backend)". Both used to return null, and the boot
+// first-run seeder treated a network failure as a fresh practice — pushing
+// near-empty defaults over a real row. true after a failed pull; false after
+// any successful round-trip (row present or confirmed absent).
+let _lastPullFailed = false;
 // AUDIT FIX (2026-07 deep dive): cheap timestamp read. The poll and the
 // conflict probe used to download + JSON.parse the ENTIRE multi-MB blob every
 // cycle just to read savedAt. The saved_at column (migration
