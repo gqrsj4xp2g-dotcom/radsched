@@ -27335,6 +27335,17 @@ function acceptClaim(listingId, claimId){
       if(claimant?.irGroup) s.irGroup = claimant.irGroup;
       s.notes=(s.notes?s.notes+' ':'')+'[marketplace]';
       reassigned=true;
+      // AUDIT FIX (2026-07 deep dive): move the auto-paired IR day shift WITH
+      // the call. Daily-call policy pairs the call with a procedure shift; the
+      // old code transferred only the call, leaving the SELLER still scheduled
+      // for the day shift and the claimant on call with no paired shift.
+      if(s.callType==='daily'){
+        const pairedIdx=(S.irShifts||[]).findIndex(x=>x.physId===l.sellerPhysId&&x.date===s.date
+          &&typeof x.notes==='string'&&x.notes.startsWith('Auto-paired with IR call'));
+        if(pairedIdx>=0) S.irShifts.splice(pairedIdx,1);   // seller's auto-pair goes
+        if(typeof _ensureIRShiftForCall==='function')
+          _ensureIRShiftForCall(claim.claimantPhysId, s.date, claimant?.irGroup||'', s.site||'', 'marketplace');
+      }
     }
   } else if(kind==='wk'){
     const s = S.weekendCalls.find(x=>x.id===id);
