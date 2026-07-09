@@ -34889,10 +34889,17 @@ function renderDRBuilder(){
     if(ak !== bk) return ak - bk;
     return (a.last||'').localeCompare(b.last||'');
   });
-  document.getElementById('sb-phys').innerHTML = drs.map(p => {
+  // AUDIT FIX (2026-07 deep dive): preserve the selected physician across the
+  // rebuild. Every add re-rendered the builder, silently resetting this select
+  // to the first physician — an admin entering a run of shifts for one doctor
+  // could put later entries on the wrong person without noticing.
+  const _sbSel = document.getElementById('sb-phys');
+  const _sbPrev = _sbSel.value;
+  _sbSel.innerHTML = drs.map(p => {
     const tag = p.role === 'IR' ? ' [IR-only]' : p.role === 'MIXED' ? ' [MIXED]' : '';
     return `<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}${tag}</option>`;
   }).join('');
+  if(_sbPrev && drs.some(p => String(p.id) === _sbPrev)) _sbSel.value = _sbPrev;
   // Sub dropdown filters by selected site — `siteDRSubsByName` returns the
   // per-site list if configured, else the global list. Called again from
   // updateSbInfo whenever the site selector changes.
