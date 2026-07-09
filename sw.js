@@ -208,11 +208,16 @@ self.addEventListener('notificationclick', (e) => {
         }
         // No open tab — open one and let the boot wire-up notice the
         // pending ack via the URL hint.
+        // AUDIT FIX (2026-07 deep dive): build the URL via the URL API so the
+        // query lands BEFORE the hash. data.url is '/#dashboard'; naive string
+        // concat produced '/#dashboard?onCallAck=...', where the param is part
+        // of the FRAGMENT — page-side searchParams.get('onCallAck') returned
+        // null and the acknowledgment was silently dropped. URL.searchParams
+        // places the query correctly (/?onCallAck=...#dashboard).
         if (self.clients.openWindow) {
-          const url = (data.url || '/') +
-            (data.url && data.url.includes('?') ? '&' : '?') +
-            'onCallAck=' + encodeURIComponent(data.rsPhysId + ',' + data.rsDate);
-          return self.clients.openWindow(url);
+          const u = new URL(data.url || '/', self.location.origin);
+          u.searchParams.set('onCallAck', data.rsPhysId + ',' + data.rsDate);
+          return self.clients.openWindow(u.toString());
         }
       })
     );
