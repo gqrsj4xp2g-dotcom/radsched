@@ -39197,6 +39197,22 @@ function previewAA(){
           if(!p.shiftElig.home)return false;
           const vd=vacDays(p.id);if(vd.has(c.date))return false;
           if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
+          // AUDIT FIX (2026-07 deep dive): the configured-Home pool ignored ALL
+          // existing assignments — a physician already working a manual DR shift,
+          // weekend call, IR shift, or IR call that day could be double-booked
+          // into a Home slot. Mirror the main pool's guards (39147-39163).
+          if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date))return false;
+          if((S.weekendCalls||[]).some(w=>w.physId===p.id&&((w.satDate||w.date)===c.date||w.sunDate===c.date)))return false;
+          if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date))return false;
+          if((S.irCalls||[]).some(ic=>{
+            if(ic.physId!==p.id)return false;
+            if(ic.callType==='daily')return ic.date===c.date;
+            if(ic.callType==='weekend'){
+              return c.date===ic.date||c.date===addDays(ic.date,1)
+                   ||c.date===addDays(ic.date,2)||c.date===addDays(ic.date,3);
+            }
+            return false;
+          }))return false;
           const _hctx={physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'};
           if(!natLangRulesOk(_hctx))return false;
           if(!tbRulesOk(p,_hctx))return false;
