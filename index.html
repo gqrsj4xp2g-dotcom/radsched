@@ -45753,7 +45753,10 @@ function _bootOnCallReminders(){
     const hint = u.searchParams.get('onCallAck');
     if(hint){
       const [pid, ds] = hint.split(',');
-      if(pid && ds && /^\d+$/.test(pid)){
+      // Validate both parts (audit fix): pid all-digits, ds a real ISO date.
+      // acknowledgeOnCall now also enforces that pid is the current user's own
+      // physId (unless admin), so a forged hint for someone else is rejected.
+      if(pid && ds && /^\d+$/.test(pid) && /^\d{4}-\d{2}-\d{2}$/.test(ds)){
         // Fire after a short delay so S has finished loading.
         setTimeout(() => { try{ acknowledgeOnCall(+pid, ds); }catch(_){} }, 2000);
       }
