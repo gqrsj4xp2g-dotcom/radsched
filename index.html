@@ -50567,20 +50567,40 @@ async function _pushToSupabase(){
           try{ probeJson = JSON.parse(probe.data); }catch(_){}
           const remoteNow = probeJson?.savedAt || null;
           if(remoteNow && remoteNow !== _baseRemoteSavedAt){
-            // Another device beat us. Re-apply remote, then re-arm a save
-            // so the user's local edits get layered on top of the
-            // freshly-pulled remote. The user sees a non-blocking toast.
-            console.warn('[RS] Push conflict: remote moved from',_baseRemoteSavedAt,'→',remoteNow);
-            if(typeof _toast === 'function'){
-              _toast('Another device saved while you were editing — refreshing then retrying.', 'warn');
+            // Another device beat us. Two cases:
+            const remoteMs   = new Date(remoteNow).getTime();
+            const localChange= S._lastLocalChange || 0;
+            const localSavedMs = S._lastSaved ? S._lastSaved.getTime() : 0;
+            const localIsNewer = localChange > remoteMs && localChange > localSavedMs;
+            if(localIsNewer){
+              // AUDIT FIX (2026-07 deep dive): our edits are strictly newer than
+              // the remote. _applyRemoteData's stale-remote guard would SKIP
+              // (refusing to clobber our fresh work) — but that left
+              // S._remoteSavedAt unadvanced, so the next probe re-detected the
+              // SAME conflict and re-armed in 1s: a ~1Hz livelock that never
+              // converged. Advance the baseline and proceed to push (local
+              // wins — whole-blob LWW), surfacing that remote work was
+              // superseded so a human can reconcile.
+              console.warn('[RS] Push conflict: local newer than remote — proceeding (local wins), advancing baseline', _baseRemoteSavedAt, '→', remoteNow);
+              S._remoteSavedAt = remoteNow;
+              if(typeof _toast === 'function'){
+                _toast('Your edits were newer than another device’s save — yours were kept. Review recent changes if two people were editing.', 'warn');
+              }
+              // fall through to the normal push below
+            } else {
+              // Remote is newer (we have no pending edits past it). Re-apply
+              // remote, then re-arm a save so local edits layer on top.
+              console.warn('[RS] Push conflict: remote moved from',_baseRemoteSavedAt,'→',remoteNow);
+              if(typeof _toast === 'function'){
+                _toast('Another device saved while you were editing — refreshing then retrying.', 'warn');
+              }
+              try{ _applyRemoteData(probeJson); }catch(_){}
+              _updateSaveUI('↻ Refreshed (conflict)','var(--blue-t)');
+              _hasUnsavedChanges = true;
+              clearTimeout(_saveTimeout);
+              _saveTimeout = setTimeout(() => _pushToSupabase(), 1000);
+              return false;
             }
-            try{ _applyRemoteData(probeJson); }catch(_){}
-            _updateSaveUI('↻ Refreshed (conflict)','var(--blue-t)');
-            // Mark unsaved so the merged-on-top edits get pushed in 1s.
-            _hasUnsavedChanges = true;
-            clearTimeout(_saveTimeout);
-            _saveTimeout = setTimeout(() => _pushToSupabase(), 1000);
-            return false;
           }
         }
       }catch(probeErr){
