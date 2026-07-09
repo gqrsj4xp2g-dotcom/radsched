@@ -25253,30 +25253,53 @@ function resolveSwap(id,status){
   const s=(S.swapRequests||[]).find(x=>x.id===id);if(!s)return;
   if(s.status===status){triggerSave();renderSwaps();return;} // idempotent
   if(status==='approved'){
-    // Actually reassign the shift from fromPhysId to toPhysId for the given date.
-    // Swaps are currently only modeled for single-date DR/IR 1st-shifts. Find matching entries.
-    const d=s.date;
-    let moved=0;
-    // Try DR shifts first
-    (S.drShifts||[]).filter(x=>x.physId===s.fromPhysId&&x.date===d).forEach(x=>{
-      x.physId=s.toPhysId;
-      x.notes=(x.notes?x.notes+' ':'')+'[swap-approved]';
-      moved++;
-    });
-    // Then IR shifts
-    (S.irShifts||[]).filter(x=>x.physId===s.fromPhysId&&x.date===d).forEach(x=>{
-      x.physId=s.toPhysId;
-      x.notes=(x.notes?x.notes+' ':'')+'[swap-approved]';
-      moved++;
-    });
-    // Then weekend calls (match by satDate or sunDate)
-    (S.weekendCalls||[]).filter(x=>x.physId===s.fromPhysId&&(x.satDate===d||x.sunDate===d||x.date===d)).forEach(x=>{
-      x.physId=s.toPhysId;
-      x.notes=(x.notes?x.notes+' ':'')+'[swap-approved]';
-      moved++;
-    });
+    // AUDIT FIX (2026-07 deep dive): this used to execute only HALF of a two-sided
+    // swap (the fromPhys→toPhys leg on s.date; s.theirDate was never touched, so the
+    // counterparty ended up carrying both shifts), skipped IR calls entirely (an IR
+    // call swap moved the paired day shift but left the call behind), and performed
+    // no rule checks. Now: both legs move, all four assignment collections are
+    // covered, and vacation/site-restriction conflicts are surfaced for an explicit
+    // admin override before anything is reassigned.
+    const moveAssignments=(physFrom, physTo, d)=>{
+      let n=0;
+      const tag=x=>{x.physId=physTo;x.notes=(x.notes?x.notes+' ':'')+'[swap-approved]';n++;};
+      (S.drShifts||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
+      (S.irShifts||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
+      (S.irCalls||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
+      (S.weekendCalls||[]).filter(x=>x.physId===physFrom&&(x.satDate===d||x.sunDate===d||x.date===d)).forEach(tag);
+      return n;
+    };
+    // Rule checks: warn (don't hard-block) so the admin can consciously override.
+    const onVac=(pid,d)=>(S.vacations||[]).some(v=>v.physId===pid&&v.start<=d&&v.end>=d);
+    const siteOf=(pid,d)=>{
+      const hit=(S.drShifts||[]).find(x=>x.physId===pid&&x.date===d)||(S.irShifts||[]).find(x=>x.physId===pid&&x.date===d);
+      return hit?hit.site||'':'';
+    };
+    const siteAllowed=(pid,site)=>{
+      if(!site) return true;
+      const p=(S.physicians||[]).find(x=>x.id===pid);
+      const as=p&&Array.isArray(p.allowedSites)?p.allowedSites:[];
+      return !as.length||as.includes(site);   // empty allowlist = all sites
+    };
+    const conflicts=[];
+    if(onVac(s.toPhysId,s.date)) conflicts.push(`${pname(s.toPhysId)} is on vacation on ${s.date}`);
+    const fwdSite=siteOf(s.fromPhysId,s.date)||s.site||'';
+    if(!siteAllowed(s.toPhysId,fwdSite)) conflicts.push(`${pname(s.toPhysId)} is not allowed at ${fwdSite}`);
+    if(s.theirDate){
+      if(onVac(s.fromPhysId,s.theirDate)) conflicts.push(`${pname(s.fromPhysId)} is on vacation on ${s.theirDate}`);
+      const backSite=siteOf(s.toPhysId,s.theirDate);
+      if(!siteAllowed(s.fromPhysId,backSite)) conflicts.push(`${pname(s.fromPhysId)} is not allowed at ${backSite}`);
+    }
+    if(conflicts.length){
+      const ok=confirm(`Approving this swap conflicts with scheduling rules:\n\n• ${conflicts.join('\n• ')}\n\nApprove anyway?`);
+      if(!ok) return;
+    }
+    const moved=moveAssignments(s.fromPhysId,s.toPhysId,s.date);
+    const movedBack=s.theirDate?moveAssignments(s.toPhysId,s.fromPhysId,s.theirDate):0;
     if(!moved){
-      alert(`No shift found for ${pname(s.fromPhysId)} on ${d}. The swap request was approved but no shift was reassigned. It may have already been modified.`);
+      alert(`No shift found for ${pname(s.fromPhysId)} on ${s.date}. The swap request was approved but no shift was reassigned. It may have already been modified.`);
+    } else if(s.theirDate&&!movedBack){
+      alert(`Return leg incomplete: no shift found for ${pname(s.toPhysId)} on ${s.theirDate}. Only the ${s.date} leg was reassigned — review the calendar.`);
     }
   }
   s.status=status;
