@@ -15676,11 +15676,19 @@ function _startPollFallback(){
     _pollInFlight = true;
     _pollStartedAt = Date.now();
     try{
-      const d=await _pullFromSupabase();
-      const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
       const knownSaved=S._remoteSavedAt?new Date(S._remoteSavedAt).getTime():0;
       const localSaved=S._lastSaved?S._lastSaved.getTime():0;
       const baseline=Math.max(knownSaved,localSaved);
+      // Cheap gate (audit fix): read only saved_at; skip the multi-MB blob
+      // download when nothing moved. Falls back to a full pull if the column
+      // isn't available yet (older DB). The finally still clears the in-flight flag.
+      const cheap = await _pullSavedAt();
+      if(cheap !== null){
+        const remoteMs = new Date(cheap).getTime();
+        if(!(remoteMs > baseline + 500)) return;   // unchanged — no full download
+      }
+      const d=await _pullFromSupabase();
+      const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
       if(d&&remoteSaved>baseline+500){
         _applyRemoteData(d);
         _refreshCurrentPage();
