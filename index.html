@@ -30978,10 +30978,20 @@ async function _migLoadCommPrefs(){
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;
     const { data, error } = await sb.from('rs_comm_prefs')
-      .select('prefs').eq('owner_uid', CU.id)
+      .select('prefs, updated_at').eq('owner_uid', CU.id)
       .eq('practice_id', CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'))
       .maybeSingle();
     if(error || !data || !data.prefs || typeof data.prefs !== 'object') return false;
+    // AUDIT FIX (2026-07 deep dive): recency arbitration. The dual-write mirror
+    // into rs_comm_prefs is fire-and-forget and can fail silently, so the table
+    // row may be STALE relative to the (canonical) blob. Only let the table
+    // override when it is at least as fresh as the blob we loaded — otherwise a
+    // failed mirror would resurrect old prefs over the user's newer ones. The
+    // blob's whole-row savedAt is a conservative upper bound on when these prefs
+    // were last written from this practice.
+    const _tableMs = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+    const _blobMs  = S._remoteSavedAt ? new Date(S._remoteSavedAt).getTime() : 0;
+    if(_tableMs && _blobMs && _tableMs < _blobMs) return false;   // blob fresher — keep it
     const before = JSON.stringify(CU.notifPrefs || {});
     CU.notifPrefs = { ...(CU.notifPrefs || {}), ...data.prefs };   // table wins, blob fills gaps
     const u = USERS.find(x => x.id === CU.id);
