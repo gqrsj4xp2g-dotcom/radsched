@@ -50503,6 +50503,20 @@ function _initSupabase(){
 // loop kept calling but the user had no way to know real-time sync
 // was broken.
 let _pullFailCount = 0;
+// AUDIT FIX (2026-07 deep dive): cheap timestamp read. The poll and the
+// conflict probe used to download + JSON.parse the ENTIRE multi-MB blob every
+// cycle just to read savedAt. The saved_at column (migration
+// radscheduler_add_saved_at_column; a trigger mirrors the JSON savedAt) lets us
+// gate the full pull on a few-byte read. Returns null if unavailable (older DB
+// without the column) so callers fall back to a full pull.
+async function _pullSavedAt(rowId){
+  if(!_initSupabase())return null;
+  try{
+    const {data,error}=await _supabase.from(_TABLE).select('saved_at').eq('id',rowId||_ROW_ID).single();
+    if(error)return null;
+    return data && data.saved_at ? data.saved_at : null;
+  }catch(_){ return null; }
+}
 async function _pullFromSupabase(){
   if(!_initSupabase())return null;
   try{
