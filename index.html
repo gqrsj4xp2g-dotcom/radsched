@@ -30493,6 +30493,7 @@ async function _notify(kind, opts){
       try{errBody=await res.json();}catch(e){errBody={raw:await res.text().catch(()=>'')};}
       console.error(`[RS notify] send-notification failed HTTP ${res.status}:`, errBody,
         `\n→ Kind: ${kind} · Recipients: ${recipList.map(r=>r.email).join(', ')}`);
+      _notifyFailureSurface(kind, `HTTP ${res.status}`);
       return {ok:false, status:res.status, error:errBody};
     }
     const body=await res.json().catch(()=>({}));
@@ -30501,8 +30502,23 @@ async function _notify(kind, opts){
     return {ok:true, result:body};
   }catch(e){
     console.error('[RS notify] network error calling send-notification:', e.message||e);
+    _notifyFailureSurface(kind, e.message||String(e));
     return {ok:false, error:e.message||String(e)};
   }
+}
+
+// AUDIT FIX (2026-07 deep dive): notification sends failed with only a console
+// line — an admin assigning shifts believed everyone was told when nobody was.
+// Surface a toast + error-log entry, throttled so a burst doesn't spam.
+let _notifyFailLastToast = 0;
+function _notifyFailureSurface(kind, detail){
+  try{
+    if(typeof _logError === 'function') _logError('notify', `Notification (${kind}) failed to send`, detail);
+    const now = Date.now();
+    if(now - _notifyFailLastToast < 60000) return;   // at most one toast/min
+    _notifyFailLastToast = now;
+    if(typeof _toast === 'function') _toast('⚠ A notification email failed to send — recipients may not have been alerted. See error log.', 'warn');
+  }catch(_){}
 }
 
 // Send a test email to the current user. Surfaces any config/setup error clearly.
