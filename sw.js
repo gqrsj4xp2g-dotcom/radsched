@@ -21,11 +21,27 @@ const SHELL = [
   '/icons/favicon.svg',
 ];
 
+// Third-party runtime dependencies the app needs to BOOT. They load
+// parser-blocking from CDNs; without caching, a CDN outage or an offline
+// launch left the app unable to start at all (audit fix 2026-07). Both CDNs
+// send CORS headers, so we can precache real (non-opaque) responses and serve
+// them cache-first. Keep these version-pinned so a silent upstream bump can't
+// poison the cache. Update in lockstep with the <script src> tags in index.html.
+const CDN_DEPS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+];
+const CDN_HOSTS = new Set(['cdnjs.cloudflare.com', 'cdn.jsdelivr.net']);
+
 self.addEventListener('install', (e) => {
-  // Best-effort cache: a missing icon shouldn't kill the install.
+  // Best-effort cache: a missing icon or a CDN hiccup shouldn't kill install.
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => {}))))
+      .then((c) => Promise.all([
+        ...SHELL.map((u) => c.add(u).catch(() => {})),
+        ...CDN_DEPS.map((u) => fetch(u, { mode: 'cors' })
+          .then((r) => (r && r.ok) ? c.put(u, r) : null).catch(() => null)),
+      ]))
       .then(() => self.skipWaiting())
   );
 });
