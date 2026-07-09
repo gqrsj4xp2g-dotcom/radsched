@@ -50660,13 +50660,14 @@ async function _pushToSupabase(){
               }
               // fall through to the normal push below
             } else {
-              // Remote is newer (we have no pending edits past it). Re-apply
-              // remote, then re-arm a save so local edits layer on top.
+              // Remote is newer (we have no pending edits past it). Pull the
+              // full blob (only now that we know we need it), re-apply, then
+              // re-arm a save so local edits layer on top.
               console.warn('[RS] Push conflict: remote moved from',_baseRemoteSavedAt,'→',remoteNow);
               if(typeof _toast === 'function'){
                 _toast('Another device saved while you were editing — refreshing then retrying.', 'warn');
               }
-              try{ _applyRemoteData(probeJson); }catch(_){}
+              try{ const fresh = await _pullFromSupabase(); if(fresh) _applyRemoteData(fresh); }catch(_){}
               _updateSaveUI('↻ Refreshed (conflict)','var(--blue-t)');
               _hasUnsavedChanges = true;
               clearTimeout(_saveTimeout);
