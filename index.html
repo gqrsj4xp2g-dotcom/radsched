@@ -23660,17 +23660,17 @@ function updateIRSbInfo(){
   // Subspecialty from per-site list if configured, else global irSubs
   const subs = siteIRSubsByName(siteSel.value);
   const curSub = subSel.value;
-  subSel.innerHTML = '<option value="">—</option>' + subs.map(s => `<option>${s}</option>`).join('');
+  subSel.innerHTML = '<option value="">—</option>' + subs.map(s => `<option>${escHtml(s)}</option>`).join('');
   if(curSub && subs.includes(curSub)) subSel.value = curSub;
 
-  // Info box: capacity check
+  // Info box: capacity check (stored physician fields escaped — audit fix)
   const infoEl = document.getElementById('irs-info');
   if(infoEl && p && date){
     const existing = (S.irShifts||[]).filter(s => s.date === date && s.irGroup === p.irGroup && s.shift !== 'Home');
     const vd = vacDays(p.id);
     let msg = '';
-    if(vd.has(date)) msg = `<span style="color:var(--amber,#d97706)">⚠ ${p.last} is on vacation ${date}</span>`;
-    else if(existing.length) msg = `<span style="color:var(--txt3);font-size:11px">${existing.length} shift(s) already assigned on ${date} for ${p.irGroup}</span>`;
+    if(vd.has(date)) msg = `<span style="color:var(--amber,#d97706)">⚠ ${escHtml(p.last)} is on vacation ${date}</span>`;
+    else if(existing.length) msg = `<span style="color:var(--txt3);font-size:11px">${existing.length} shift(s) already assigned on ${date} for ${escHtml(p.irGroup||'')}</span>`;
     infoEl.innerHTML = msg;
   }
 }
