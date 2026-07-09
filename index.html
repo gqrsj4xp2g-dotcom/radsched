@@ -15769,6 +15769,11 @@ function _refreshCurrentPage(){
         const el = document.getElementById(_activeId);
         if(el && typeof el.focus === 'function'){
           try{
+            // Re-apply uncommitted typing before focus/selection (audit fix) —
+            // the rebuilt element holds the persisted value, not the draft.
+            if(_activeVal != null && 'value' in el && el.value !== _activeVal){
+              el.value = _activeVal;
+            }
             el.focus({ preventScroll: true });
             if(_selStart != null && typeof el.setSelectionRange === 'function'){
               try{ el.setSelectionRange(_selStart, _selEnd ?? _selStart); }catch(_){}
