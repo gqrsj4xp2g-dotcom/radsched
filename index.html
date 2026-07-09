@@ -50633,11 +50633,11 @@ async function _pushToSupabase(){
           console.warn('[RS] Push aborted before probe: _ROW_ID changed mid-flight');
           return false;
         }
-        const {data: probe} = await _supabase.from(_TABLE).select('data').eq('id', _pushRowId).single();
-        if(probe?.data){
-          let probeJson = null;
-          try{ probeJson = JSON.parse(probe.data); }catch(_){}
-          const remoteNow = probeJson?.savedAt || null;
+        // Cheap probe (audit fix 2026-07): read only saved_at, not the whole
+        // multi-MB blob. The full blob is pulled below ONLY if the remote is
+        // actually newer and we need to merge it.
+        const remoteNow = await _pullSavedAt(_pushRowId);
+        {
           if(remoteNow && remoteNow !== _baseRemoteSavedAt){
             // Another device beat us. Two cases:
             const remoteMs   = new Date(remoteNow).getTime();
