@@ -31013,13 +31013,16 @@ async function _migLoadOnCallAcks(){
   if(_MIG_READ_CUTOVER === false || !CU) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
   if(_migAcksLoadedFor === pid) return false;
-  _migAcksLoadedFor = pid;
+  // AUDIT FIX (2026-07 deep dive): set the once-guard only after a definitive
+  // SELECT (see _migLoadCommPrefs) — not before the client check, which used to
+  // burn the guard on a transient not-ready and never retry.
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
-    if(!sb) return false;
+    if(!sb) return false;   // transient — retry
     const { data, error } = await sb.from('rs_on_call_acks')
       .select('phys_id, ack_date, owner_uid, ts').eq('practice_id', pid);
-    if(error || !Array.isArray(data)) return false;
+    if(error || !Array.isArray(data)) return false;   // transient — retry
+    _migAcksLoadedFor = pid;   // definitive answer received
     if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
     let added = 0;
     for(const row of data){
