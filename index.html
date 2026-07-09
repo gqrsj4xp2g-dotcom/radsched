@@ -50622,6 +50622,13 @@ async function _pushToSupabase(){
           // _PERSISTED_KEYS manifest, not here.
           users: USERS,
           savedAt: _stamp,
+          // AUDIT FIX (2026-07 deep dive): stamp the originating tab so the
+          // realtime subscriber can suppress its OWN echo by identity rather
+          // than by a 2.5s wall-clock window. The time window also suppressed
+          // GENUINE concurrent edits from another admin during an active
+          // editing burst (pushes every ~1.5s), silently losing them to
+          // whole-blob last-writer-wins.
+          _originTab: _TAB_ID,
           // Stamp schema version on every push. _runMigrations on the
           // receiving side compares payload._schemaVersion against the
           // client constant and applies forward-migrations as needed.
