@@ -34,18 +34,21 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.map((k) =>
-        // Old-version caches: delete entirely. CURRENT cache: drop the cached
-        // HTML shell so a STALE shell can never be served — not even as the
-        // offline fallback. This is the recovery path for devices stuck in a
-        // refresh loop on an old cached index.html: once this SW activates,
-        // network-first always fetches the fresh shell (which carries the
-        // reload circuit-breaker). Icons/manifest stay cached.
+        // Old-version caches: delete entirely. CURRENT cache: REFRESH the HTML
+        // shell from the network (audit fix 2026-07) instead of DELETING it.
+        // Deleting the shell prevented a stale shell being served, but it also
+        // left NO offline fallback — an offline launch right after a deploy had
+        // no shell at all and showed the browser error page. Refreshing keeps a
+        // shell available offline while guaranteeing it is the fresh one;
+        // network-first still fetches live when online. If the refresh fails
+        // (offline during activate), the existing shell stays as the fallback.
         k !== CACHE_NAME
           ? caches.delete(k)
-          : caches.open(k).then((c) => Promise.all([
-              c.delete('/'), c.delete('/index.html'),
-              c.delete(new Request('/')), c.delete(new Request('/index.html')),
-            ])).catch(() => {})
+          : caches.open(k).then((c) => Promise.all(['/', '/index.html'].map((u) =>
+              fetch(u, { cache: 'no-store' })
+                .then((r) => (r && r.status === 200 && r.type === 'basic') ? c.put(u, r.clone()) : null)
+                .catch(() => null)
+            ))).catch(() => {})
       )))
       .then(() => self.clients.claim())
       // Tell every open client a new SW version is active so the page
