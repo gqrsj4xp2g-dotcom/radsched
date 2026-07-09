@@ -20788,11 +20788,19 @@ async function triggerAutoRefreshTraffic(){
   setStatus('Triggering server-side refresh\u2026');
   try{
     const res=await fetch(`${_getUrl()}/functions/v1/auto-refresh-traffic`,{
-      method:'POST',headers:{'Content-Type':'application/json'},body:'{}'
+      method:'POST',headers:await _edgeAuthHeaders(),body:'{}'
     });
-    const data=await res.json();
+    // Check HTTP status BEFORE parsing \u2014 a 500 with an HTML error body used to
+    // throw inside res.json() and surface as a confusing parse error. Also send
+    // the standard edge-auth headers this endpoint expects.
+    if(!res.ok){
+      const txt=await res.text().catch(()=>'');
+      setStatus(`Server error (HTTP ${res.status}): ${txt.slice(0,120)||'no detail'}`);
+      return;
+    }
+    const data=await res.json().catch(()=>({}));
     if(data.ok) setStatus(`\u2713 ${data.message}. Reload to see updated times.`);
-    else setStatus(`Server error: ${data.error}`);
+    else setStatus(`Server error: ${data.error||'unknown'}`);
   }catch(e){
     setStatus(`Error: ${e.message}`);
   }
@@ -37705,7 +37713,7 @@ function renderAuditLog(){
   const highlight = (s) => {
     const escs = escHtml(s);
     if(!_hlRe) return escs;
-    return escs.replace(_hlRe, '<mark style="background:#fef08a;color:inherit;padding:0 1px;border-radius:2px">$1</mark>');
+    return escs.replace(_hlRe, '<mark style="background:#fef08a;color:#111827;padding:0 1px;border-radius:2px">$1</mark>');   // explicit dark text — color:inherit was unreadable in dark mode
   };
   el.innerHTML = `<div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:6px">Showing ${rows.length} entry / entries from ${escHtml(source)} (most recent first)${filter ? ` matching <strong>"${escHtml(filter)}"</strong>` : ''}</div>
     <table class="tbl" style="font-size:11.5px"><thead><tr>
