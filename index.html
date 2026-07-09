@@ -12252,9 +12252,19 @@ let _undoStack = [];
 let _redoStack = [];
 let _undoSuppressNext = false;  // set when we apply an undo, so the resulting save doesn't snapshot itself
 
+let _undoLastSnapAt = 0;
 function _undoSnapshot(label){
   if(_isRestoring) return;
   if(_undoSuppressNext){ _undoSuppressNext = false; return; }
+  // AUDIT FIX (2026-07 deep dive): this deep clone ran on EVERY triggerSave —
+  // and _wrapArray fires triggerSave per push/splice, so bulk operations
+  // (auto-assign apply, Excel import) cloned the entire practice state once
+  // PER ROW (O(N²) freeze). Coalesce to one snapshot per user gesture: skip
+  // if the last snapshot is <500ms old. Undo still lands on gesture
+  // boundaries, which is what a user expects to step back through anyway.
+  const _nowSnap = Date.now();
+  if(_nowSnap - _undoLastSnapAt < 500) return;
+  _undoLastSnapAt = _nowSnap;
   try{
     // Capture only the schedule-shaped fields. Skip caches/derived.
     const SNAP_KEYS = ['physicians','sites','drSubs','irSubs','irGroups','vacations',
