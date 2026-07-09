@@ -21304,7 +21304,18 @@ function vacpTab(t,el){
 }
 
 function renderVacPick(){
-  vacpTab('setup',document.querySelector('#vacp-tabs .tab'));
+  // AUDIT FIX (2026-07 deep dive): re-render whichever tab is currently active
+  // rather than always snapping back to Setup. A remote blob update (e.g. two
+  // admins running a draft) fires _refreshCurrentPage → renderVacPick, which
+  // used to yank the user off the Rounds/Calendar tab they were working in.
+  const tabs = Array.from(document.querySelectorAll('#vacp-tabs .tab'));
+  const active = tabs.find(x => x.classList.contains('on')) || tabs[0];
+  const label = (active?.textContent || '').toLowerCase();
+  const t = label.includes('seniority') ? 'seniority'
+          : label.includes('round')     ? 'rounds'
+          : label.includes('calendar')  ? 'calendar'
+          : 'setup';
+  vacpTab(t, active || document.querySelector('#vacp-tabs .tab'));
 }
 
 // ── SETUP TAB ──────────────────────────────────────────────────────────────
