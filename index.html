@@ -39235,7 +39235,19 @@ function previewAA(){
         const alreadyDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date);
         const alreadyWk=S.weekendCalls.find(w=>w.physId===p.id&&((w.satDate||w.date)===c.date||(w.sunDate)===c.date));
         const alreadyPrev=preview.find(a=>a.physId===p.id&&a.date===c.date);
-        if(!alreadyDR&&!alreadyWk&&!alreadyPrev&&cnt[p.id].wd<effTarget[p.id]){
+        // AUDIT FIX (2026-07 deep dive): also block on IR work — the auto-home
+        // fill checked DR/weekend but could stack Home on an IR shift or call.
+        const alreadyIR=(S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date)
+          ||(S.irCalls||[]).some(ic=>{
+              if(ic.physId!==p.id)return false;
+              if(ic.callType==='daily')return ic.date===c.date;
+              if(ic.callType==='weekend'){
+                return c.date===ic.date||c.date===addDays(ic.date,1)
+                     ||c.date===addDays(ic.date,2)||c.date===addDays(ic.date,3);
+              }
+              return false;
+            });
+        if(!alreadyDR&&!alreadyWk&&!alreadyIR&&!alreadyPrev&&cnt[p.id].wd<effTarget[p.id]){
           preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true});
           cnt[p.id].wd++;
           cnt[p.id].home = (cnt[p.id].home||0) + 1;
