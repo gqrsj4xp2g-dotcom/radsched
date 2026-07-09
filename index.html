@@ -16011,7 +16011,12 @@ _isRestoring=false;
     const c=JSON.parse(raw);
     if(!c.url||!c.key) return;
     const _sb=supabase.createClient(c.url,c.key);
-    const {data}=await _sb.from('radscheduler').select('data').eq('id','main').single();
+    // AUDIT FIX (2026-07 deep dive): preload the row for the practice this
+    // browser LAST logged into (persisted at auth-hydration/switchPractice),
+    // not the hardcoded 'main' row — which merged another practice's user
+    // records into USERS on every login screen of every other practice.
+    const _preloadRow = (()=>{ try{ return localStorage.getItem('rs.lastPracticeId') || 'main'; }catch(_){ return 'main'; } })();
+    const {data}=await _sb.from('radscheduler').select('data').eq('id',_preloadRow).single();
     if(data?.data){
       const d=JSON.parse(data.data);
       if(d.users&&Array.isArray(d.users)){
