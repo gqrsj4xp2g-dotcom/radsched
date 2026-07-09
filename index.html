@@ -6038,15 +6038,15 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
       <div class="card">
         <div class="card-title">FTE Caps & Anchor Rules</div>
         <div class="g2">
-          <div class="fg"><label>Max weekday shifts (1.0 FTE)</label><input id="cfg-wd" type="number" value="20" style="width:70px" oninput="saveCfg()"></div>
-          <div class="fg"><label>Max weekend calls (1.0 FTE)</label><input id="cfg-wk" type="number" value="4" style="width:70px" oninput="saveCfg()"></div>
-          <div class="fg"><label>Max IR daily calls (1.0 FTE)</label><input id="cfg-ir-daily" type="number" value="20" style="width:70px" oninput="saveCfg()"></div>
-          <div class="fg"><label>Max IR weekend calls (1.0 FTE)</label><input id="cfg-ir-wknd" type="number" value="4" style="width:70px" oninput="saveCfg()"></div>
-          <div class="fg"><label>Min rest days between shifts</label><input id="cfg-rest" type="number" value="1" style="width:70px" oninput="saveCfg()"></div>
+          <div class="fg"><label>Max weekday shifts (1.0 FTE)</label><input id="cfg-wd" type="number" value="20" style="width:70px" onchange="saveCfg()"></div>
+          <div class="fg"><label>Max weekend calls (1.0 FTE)</label><input id="cfg-wk" type="number" value="4" style="width:70px" onchange="saveCfg()"></div>
+          <div class="fg"><label>Max IR daily calls (1.0 FTE)</label><input id="cfg-ir-daily" type="number" value="20" style="width:70px" onchange="saveCfg()"></div>
+          <div class="fg"><label>Max IR weekend calls (1.0 FTE)</label><input id="cfg-ir-wknd" type="number" value="4" style="width:70px" onchange="saveCfg()"></div>
+          <div class="fg"><label>Min rest days between shifts</label><input id="cfg-rest" type="number" value="1" style="width:70px" onchange="saveCfg()"></div>
         </div>
         <div class="fg" style="background:var(--amber-bg);border:1px solid #fde68a;border-radius:var(--r);padding:10px 12px;margin-top:6px">
           <label style="color:var(--amber-t)">⚓ Anchor Site Minimum %</label>
-          <div class="flex" style="margin-top:4px;gap:8px"><input id="cfg-anc" type="number" value="70" min="10" max="100" style="width:70px" oninput="saveCfg()"><span style="font-size:11px;color:var(--amber-t)">% of all assigned shifts must be at anchor site</span></div>
+          <div class="flex" style="margin-top:4px;gap:8px"><input id="cfg-anc" type="number" value="70" min="10" max="100" style="width:70px" onchange="saveCfg()"><span style="font-size:11px;color:var(--amber-t)">% of all assigned shifts must be at anchor site</span></div>
         </div>
         <!-- IR shift solver selector. Default 'greedy' = legacy multi-pass.
              'mcf' = min-cost-flow optimal solver (computes globally-optimal
@@ -6076,7 +6076,7 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
           <label style="font-size:12px;display:flex;align-items:center;gap:6px">
             🚗 Drive-time wRVU credit:
-            <input id="cfg-dt-wrvu" type="number" min="0" max="20" step="0.5" value="0" oninput="saveCfg()" style="width:70px;font-size:12px">
+            <input id="cfg-dt-wrvu" type="number" min="0" max="20" step="0.5" value="0" onchange="saveCfg()" style="width:70px;font-size:12px">
             wRVU per drive-hour
           </label>
         </div>
@@ -6091,15 +6091,15 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
         <div class="g3" style="gap:8px;margin-bottom:6px;align-items:end">
           <div class="fg" style="margin:0">
             <label>Weekly target (hrs)</label>
-            <input id="cfg-credit-weekly" type="number" min="0" max="80" step="0.5" value="0" oninput="saveCreditTargets()" style="width:90px">
+            <input id="cfg-credit-weekly" type="number" min="0" max="80" step="0.5" value="0" onchange="saveCreditTargets()" style="width:90px">
           </div>
           <div class="fg" style="margin:0">
             <label>Monthly target (hrs)</label>
-            <input id="cfg-credit-monthly" type="number" min="0" max="320" step="0.5" value="0" oninput="saveCreditTargets()" style="width:90px">
+            <input id="cfg-credit-monthly" type="number" min="0" max="320" step="0.5" value="0" onchange="saveCreditTargets()" style="width:90px">
           </div>
           <div class="fg" style="margin:0">
             <label>wRVU per credit-hour <small style="color:var(--txt3);font-weight:400">(adds to daily wRVU)</small></label>
-            <input id="cfg-credit-wrvu-rate" type="number" min="0" max="100" step="0.5" value="28" oninput="saveCreditTargets()" style="width:90px">
+            <input id="cfg-credit-wrvu-rate" type="number" min="0" max="100" step="0.5" value="28" onchange="saveCreditTargets()" style="width:90px">
           </div>
         </div>
         <div class="note ni" style="font-size:11px;margin-top:8px;line-height:1.5">
@@ -25550,7 +25550,7 @@ function populateWRVUDefaults(){
   const order = ['1st', '2nd', '3rd', 'Home', 'IR 1st', 'IR 2nd', 'IR 3rd', 'IR Home', 'IR daily', 'IR weekend', 'Weekend Call', 'Holiday'];
   host.innerHTML = order.map(k => `<div class="fg" style="margin:0">
     <label style="font-size:11.5px">${escHtml(k)} shift</label>
-    <input type="number" data-wrvu-key="${escHtml(k)}" value="${+(S.cfg.wRVUDefaults[k] || 0)}" min="0" max="200" step="0.5" oninput="saveCfg()" style="width:90px;font-size:12px">
+    <input type="number" data-wrvu-key="${escHtml(k)}" value="${+(S.cfg.wRVUDefaults[k] || 0)}" min="0" max="200" step="0.5" onchange="saveCfg()" style="width:90px;font-size:12px">
   </div>`).join('');
 }
 
