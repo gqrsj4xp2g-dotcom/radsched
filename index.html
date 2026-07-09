@@ -18586,7 +18586,7 @@ function renderVacations(){
   const vacTypes = typeEl
     ? Array.from(typeEl.options).map(o => o.value).filter(v => v)
     : ['Vacation','CME','Sick','Bereavement','Admin','Vacation Sold Back','Other'];
-  document.getElementById('vac-tbody').innerHTML=S.vacations.sort((a,b)=>a.start>b.start?1:-1).map(v=>{
+  document.getElementById('vac-tbody').innerHTML=[...S.vacations].sort((a,b)=>a.start>b.start?1:-1).map(v=>{
     const d=Math.round((parseDateLocal(v.end)-parseDateLocal(v.start))/86400000)+1;
     if(_editingVacId === v.id){
       const typeOpts = vacTypes.map(t=>`<option value="${t}"${t===v.type?' selected':''}>${t}</option>`).join('');
@@ -38726,7 +38726,7 @@ function renderWkBuilder(){
 
   const physOpts = drs.map(p=>`<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
 
-  document.getElementById('wk-tbody').innerHTML=S.weekendCalls.sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
+  document.getElementById('wk-tbody').innerHTML=[...S.weekendCalls].sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
     if(_editingWkId === w.id){
       const subs = siteDRSubsByName(w.site);
