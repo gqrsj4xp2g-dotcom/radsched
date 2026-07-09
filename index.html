@@ -14808,12 +14808,31 @@ function _applyRemoteData(d){
   // Side-table snapshot is invalid as soon as we replace S.* with the
   // remote payload — drop it so the next sync does a full re-diff.
   if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
-  const KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-    'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','physicians',
-    'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'];
-  KEYS.forEach(k=>{
-    if(d[k]!==undefined){S[k]=d[k];if(Array.isArray(S[k]))_wrapArray(S[k]);}
-  });
+  // Manifest-driven load: every _PERSISTED_KEYS entry is applied here EXCEPT the
+  // ones with bespoke handling below (legacy migrations, merge semantics, pruning).
+  // AUDIT FIX (2026-07 deep dive): the previous hand-maintained KEYS list had
+  // drifted 13 keys behind the manifest (onCallAcks, lockedMonths, announcements,
+  // leaveAllocations, widgetPairings, physicianCredits, shiftOffers, auditLog,
+  // siteCaps, shiftSubNeeds, cellNotes, chatPins, physicianPairRules) — those
+  // loaded empty on every fresh boot and the next save persisted the empties,
+  // wiping the data for the whole practice. Save and load MUST share the manifest.
+  const _APPLY_SPECIAL = new Set(['siteSlots','siteSlotsSubs','irGroups','irSlots',
+    'irShiftSlots','irShiftSlotLabels','siteSlotLabels','shiftPickGroups','wkndNeeds',
+    'cfg','vacPicking','driveTimes','tumorBoards','clinics','publishLog','nextId']);
+  for(const entry of _PERSISTED_KEYS){
+    const k = entry.key;
+    if(_APPLY_SPECIAL.has(k)) continue;
+    if(d[k]===undefined) continue;
+    if(entry.type==='array'){
+      if(Array.isArray(d[k])){ S[k]=d[k]; _wrapArray(S[k]); }
+    } else if(entry.type==='object'){
+      // Replace, not merge: the payload is always schema-complete, and merging
+      // resurrects entries the user deleted on another device.
+      if(d[k] && typeof d[k]==='object') S[k]={...d[k]};
+    } else {
+      S[k]=d[k];
+    }
+  }
   if(d.siteSlots)Object.assign(S.siteSlots,d.siteSlots);
   // Prune legacy hospital-site Home keys. Older practice snapshots populated
   // "CHN|1|Home" etc., which are no longer configurable from the UI and
