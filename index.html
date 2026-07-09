@@ -15734,6 +15734,16 @@ function _refreshCurrentPage(){
   const _activeId = document.activeElement?.id || null;
   const _selStart = document.activeElement?.selectionStart;
   const _selEnd   = document.activeElement?.selectionEnd;
+  // AUDIT FIX (2026-07 deep dive): also preserve the focused field's VALUE.
+  // Focus/selection were restored but the re-render rebuilt the input from
+  // state — silently discarding whatever the user had typed but not committed
+  // (chat drafts, swap reasons, settings edits) whenever a remote update
+  // landed mid-typing. The active typist's uncommitted text wins.
+  const _ae = document.activeElement;
+  const _aeTag = _ae?.tagName;
+  const _activeVal = (_aeTag==='TEXTAREA' ||
+    (_aeTag==='INPUT' && !/^(checkbox|radio|button|submit|file)$/i.test(_ae.type||'')))
+    ? _ae.value : null;
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
