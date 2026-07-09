@@ -45189,6 +45189,15 @@ function offerShiftForTrade(kind, shiftId, reason){
 
 function claimOfferedShift(offerId, claimerPhysId){
   if(!Array.isArray(S.shiftOffers)) return;
+  // AUDIT FIX (2026-07 deep dive): ownership gate. This is reachable from the
+  // non-admin marketplace UI with an arbitrary claimerPhysId — without this, a
+  // non-admin could reassign a listed shift to ANY colleague. You claim for
+  // yourself; only admins may claim on someone else's behalf.
+  const _adminClaim = (typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : (CU?.role==='admin'||CU?.role==='superuser');
+  if(!_adminClaim && Number(claimerPhysId) !== Number(CU?.physId)){
+    if(typeof _toast === 'function') _toast('You can only claim a shift for yourself.', 'err');
+    return;
+  }
   const offer = S.shiftOffers.find(o => o.id === offerId);
   if(!offer || offer.claimedBy || offer.cancelled){
     if(typeof _toast === 'function') _toast('That offer is no longer available.', 'warn');
