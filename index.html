@@ -16634,7 +16634,8 @@ function _rsShowReloadHalt(){
     if(btn) btn.addEventListener('click', async function(){
       try{ if('caches' in self){ var ks = await caches.keys(); await Promise.all(ks.map(function(k){ return caches.delete(k); })); } }catch(_){}
       try{ if('serviceWorker' in navigator){ var rg = await navigator.serviceWorker.getRegistrations(); await Promise.all(rg.map(function(r){ return r.unregister(); })); } }catch(_){}
-      try{ localStorage.removeItem('rs.reloadTimes'); }catch(_){}
+      try{ sessionStorage.removeItem('rs.reloadTimes'); }catch(_){}
+      try{ localStorage.removeItem('rs.reloadTimes'); }catch(_){} // legacy key
       try{ for(var i=sessionStorage.length-1;i>=0;i--){ var k=sessionStorage.key(i); if(k && k.indexOf('rs.autoHeal')===0) sessionStorage.removeItem(k); } }catch(_){}
       try{ var u = new URL(location.href); u.searchParams.set('_rsfix', Date.now().toString(36)); location.replace(u.toString()); }catch(_){ location.reload(); }
     });
