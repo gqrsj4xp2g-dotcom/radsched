@@ -16699,21 +16699,27 @@ let _RS_BUILD_TAG = '…';
           } else {
             sessionStorage.setItem(HEAL_KEY, '1');
             console.warn('[RS] Stale HTML detected ('+_RS_HTML_BUILD+' on a server serving '+_RS_BUILD_TAG+'). Auto-healing…');
-            try{
-              if('caches' in self){
-                const keys = await caches.keys();
-                await Promise.all(keys.map(k => caches.delete(k)));
-              }
-            }catch(_){}
-            try{
-              if('serviceWorker' in navigator){
-                const regs = await navigator.serviceWorker.getRegistrations();
-                await Promise.all(regs.map(reg => reg.unregister()));
-              }
-            }catch(_){}
-            const url = new URL(location.href);
-            url.searchParams.set('_rsheal', Date.now().toString(36));
-            if(_rsReloadAllowed()) location.replace(url.toString());
+            // AUDIT FIX (2026-07 deep dive): consult the reload circuit-breaker
+            // BEFORE the destructive work. The old order nuked every cache and
+            // unregistered the SW, then asked permission to reload — a breaker
+            // halt left the tab sitting on a destroyed cache/SW state.
+            if(_rsReloadAllowed()){
+              try{
+                if('caches' in self){
+                  const keys = await caches.keys();
+                  await Promise.all(keys.map(k => caches.delete(k)));
+                }
+              }catch(_){}
+              try{
+                if('serviceWorker' in navigator){
+                  const regs = await navigator.serviceWorker.getRegistrations();
+                  await Promise.all(regs.map(reg => reg.unregister()));
+                }
+              }catch(_){}
+              const url = new URL(location.href);
+              url.searchParams.set('_rsheal', Date.now().toString(36));
+              location.replace(url.toString());
+            }
           }
         }
       }catch(_){}
