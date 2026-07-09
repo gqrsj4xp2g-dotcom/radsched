@@ -39291,7 +39291,14 @@ function previewAA(){
           return cnt[b.id].wk-cnt[a.id].wk;
         });
         if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
-        else{gaps.push(`Weekend ${c.date} ${sub}`);S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:''});}
+        else{
+          gaps.push(`Weekend ${c.date} ${sub}`);
+          // AUDIT FIX (2026-07 deep dive): dedup like the weekday path (39177) —
+          // openShifts is a PERSISTED reactive array, so the unconditional push
+          // created a duplicate open shift on every preview re-run.
+          if(!S.openShifts.find(o=>o.date===c.date&&o.shiftType==='Weekend Call'&&o.sub===sub))
+            S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:''});
+        }
       });
     });
     // Stash excluded weekends in a module-level var so the UI render can show them
