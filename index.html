@@ -16606,9 +16606,16 @@ const _RS_HTML_BUILD = 'rs-v114';
 function _rsReloadAllowed(){
   try{
     var now = Date.now(), KEY = 'rs.reloadTimes';
-    var arr = (JSON.parse(localStorage.getItem(KEY) || '[]') || []).filter(function(t){ return now - t < 30000; });
+    // AUDIT FIX (2026-07 deep dive): count reloads PER-TAB via sessionStorage,
+    // not localStorage. A localStorage counter is shared across every open tab,
+    // so a routine deploy that legitimately reloads two tabs could sum past the
+    // threshold and falsely trip the "update loop" halt on an innocent tab.
+    // sessionStorage survives a reload of the SAME tab (exactly what we count)
+    // and is isolated per-tab.
+    var store = (typeof sessionStorage !== 'undefined') ? sessionStorage : localStorage;
+    var arr = (JSON.parse(store.getItem(KEY) || '[]') || []).filter(function(t){ return now - t < 30000; });
     arr.push(now);
-    localStorage.setItem(KEY, JSON.stringify(arr));
+    store.setItem(KEY, JSON.stringify(arr));
     if(arr.length > 3){ _rsShowReloadHalt(); return false; }
     return true;
   }catch(_){ return true; }
