@@ -21700,7 +21700,9 @@ function _myEventsInRange(startISO, endISO){
     });
   });
   // Vacations
-  (S.vacations||[]).filter(v => v.physId===myId && (inRange(v.start) || inRange(v.end))).forEach(v => {
+  // Interval OVERLAP (not endpoint containment) — a vacation fully spanning the
+  // export range has neither endpoint in range but must still be included.
+  (S.vacations||[]).filter(v => v.physId===myId && v.start <= endDate && (v.end || v.start) >= startDate).forEach(v => {
     events.push({
       uid: `vac-${v.id}@radscheduler`,
       date: v.start,
