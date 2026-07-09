@@ -50615,8 +50615,10 @@ async function _pullFromSupabase(){
     const {data,error}=await _supabase.from(_TABLE).select('data').eq('id',_ROW_ID).single();
     if(error&&error.code!=='PGRST116')throw error;
     _pullFailCount = 0; // success — reset counter
+    _lastPullFailed = false;  // definitive answer (row present OR confirmed absent)
     return data?JSON.parse(data.data):null;
   }catch(e){
+    _lastPullFailed = true;
     _pullFailCount++;
     console.error('[RS] Pull failed:',e);
     // After 3 consecutive misses, the network or backend is likely
