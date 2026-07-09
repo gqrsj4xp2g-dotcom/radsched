@@ -15581,12 +15581,17 @@ function _doSubscribeRealtimeSocket(){
         if(payloadRowId && payloadRowId!==_subscribedRowId) return;
         // Guard 2: current active practice must still match what we subscribed to
         if(_subscribedRowId!==_ROW_ID) return;
-        // Guard 3: ignore our own recent echo
-        if(S._lastSaved&&(new Date()-S._lastSaved)<2500) return;
         const newData=payload.new?.data||payload.record?.data;
         if(!newData)return;
         try{
           const d=JSON.parse(newData);
+          // Guard 3 (audit fix 2026-07): suppress our OWN echo by tab identity,
+          // not by a 2.5s wall-clock window. The old time window also dropped a
+          // second admin's genuine concurrent save that happened to land within
+          // 2.5s of ours. Fall back to the time heuristic only for legacy
+          // payloads that predate _originTab.
+          if(d._originTab){ if(d._originTab === _TAB_ID) return; }
+          else if(S._lastSaved && (new Date()-S._lastSaved)<2500) return;
           _applyRemoteData(d);
           _refreshCurrentPage();
           // Forward to follower tabs in this browser so they see the update
