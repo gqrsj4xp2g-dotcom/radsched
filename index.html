@@ -50440,6 +50440,20 @@ function _rsHydrateFilter(el, lsKey){
 if(typeof document !== 'undefined' && !window._rsVisibilityWired){
   window._rsVisibilityWired = true;
   document.addEventListener('visibilitychange', () => {
+    // AUDIT FIX (2026-07 deep dive): flush pending edits the moment the tab is
+    // HIDDEN, not just at beforeunload/pagehide. The unload flush awaits
+    // multiple round-trips (conflict probe + upsert) that a closing tab rarely
+    // survives, and fetch keepalive can't help (64KB cap vs a ~200KB blob).
+    // Nearly every tab close/switch fires 'hidden' first, when the tab still
+    // has seconds of runtime — so the save usually completes here and the
+    // unload handlers become a no-op backstop.
+    if(document.visibilityState === 'hidden'){
+      if(_hasUnsavedChanges && _getUrl&&_getUrl()&&_getKey&&_getKey()){
+        clearTimeout(_saveTimeout);
+        try{ const p=_pushToSupabase(); if(p&&typeof p.catch==='function') p.catch(()=>{}); }catch(_){}
+      }
+      return;
+    }
     if(document.visibilityState !== 'visible') return;
     // Tab regained focus — refresh the most user-visible status pills.
     try{ if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge(); }catch(_){}
