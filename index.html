@@ -30973,15 +30973,20 @@ let _migCommPrefsLoadedFor = null;
 async function _migLoadCommPrefs(){
   if(_MIG_READ_CUTOVER === false || !CU || !CU.id) return false;
   if(_migCommPrefsLoadedFor === CU.id) return false;   // load once per user
-  _migCommPrefsLoadedFor = CU.id;
+  // AUDIT FIX (2026-07 deep dive): the once-guard used to be set HERE, before
+  // the client-availability check — so if the auth client wasn't ready yet the
+  // load silently never retried. Set it only after a DEFINITIVE SELECT result
+  // (row or confirmed-no-row); transient failures fall through and retry.
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
-    if(!sb) return false;
+    if(!sb) return false;   // transient — retry when the client is ready
     const { data, error } = await sb.from('rs_comm_prefs')
       .select('prefs, updated_at').eq('owner_uid', CU.id)
       .eq('practice_id', CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'))
       .maybeSingle();
-    if(error || !data || !data.prefs || typeof data.prefs !== 'object') return false;
+    if(error) return false;   // transient — retry
+    _migCommPrefsLoadedFor = CU.id;   // definitive answer received
+    if(!data || !data.prefs || typeof data.prefs !== 'object') return false;
     // AUDIT FIX (2026-07 deep dive): recency arbitration. The dual-write mirror
     // into rs_comm_prefs is fire-and-forget and can fail silently, so the table
     // row may be STALE relative to the (canonical) blob. Only let the table
