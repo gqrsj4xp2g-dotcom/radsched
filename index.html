@@ -25090,6 +25090,11 @@ function _showChatPlaceholder(){
 // ── Render messages ──────────────────────────────────────────────────────
 function _renderMessages(){
   const el=document.getElementById('chat-messages');if(!el||!_chatContext)return;
+  // AUDIT FIX (2026-07 deep dive): only autoscroll if the reader was already at
+  // (or near) the bottom BEFORE the rebuild. Every remote blob change re-renders
+  // chat; the unconditional scroll yanked anyone reading history back to the
+  // latest message. An empty/fresh pane counts as "at bottom".
+  const _nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
   const msgs=_getContextMessages().sort((a,b)=>a.ts>b.ts?1:-1);
   if(!msgs.length){
     el.innerHTML='<div style="text-align:center;color:var(--txt3);padding:40px;font-size:13px">No messages yet. Say something!</div>';
