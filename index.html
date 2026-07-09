@@ -14453,7 +14453,14 @@ async function launchApp(){
         // id is registered in the practices table, OR the default 'main' id (legacy).
         // This prevents a user with a typo'd practiceId from silently creating orphan rows.
         const practiceRegistered = _PRACTICE_ID==='main' || (_PRACTICES||[]).some(p=>p.id===_PRACTICE_ID);
-        if(S.nextId < 300 && practiceRegistered){
+        // AUDIT FIX (2026-07 deep dive): only seed when the pull CONFIRMED the row
+        // is absent. A network failure also returns null — seeding then would
+        // push near-empty defaults over the practice's real data.
+        if(_lastPullFailed){
+          if(si){si.textContent='⚠ DB unreachable — will retry, not initializing';si.style.color='var(--red-t)';
+            setTimeout(()=>{if(si)si.textContent='';},6000);}
+          console.warn('[RS] Boot pull failed (network) — skipping first-run seed to protect existing data');
+        } else if(S.nextId < 300 && practiceRegistered){
           await _pushToSupabase();
           if(si){si.textContent='✓ Initialized';si.style.color='var(--green-t)';
             setTimeout(()=>{if(si)si.textContent='';},2500);}
