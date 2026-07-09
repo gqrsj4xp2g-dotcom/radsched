@@ -21786,7 +21786,9 @@ function _eventsToICS(events, calName){
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeText(calName||'My RadScheduler Schedule')}`,
-    'X-WR-TIMEZONE:UTC',
+    // AUDIT FIX: no X-WR-TIMEZONE header — event times are emitted as floating
+    // local wall-clock values; declaring UTC shifted every timed shift by the
+    // viewer's UTC offset in strict calendar apps.
   ];
   for(const ev of events){
     lines.push('BEGIN:VEVENT');
