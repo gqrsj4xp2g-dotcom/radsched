@@ -15060,6 +15060,12 @@ function _applyRemoteData(d){
   }
   // Track when this data was saved so poll can detect remote changes
   if(d.savedAt) S._remoteSavedAt = d.savedAt;
+  // AUDIT FIX (2026-07 deep dive): invalidate the version-gated lookup caches
+  // (_dateIdx via _shiftsOnDate, _physByIdMap via _physById). triggerSave normally
+  // bumps them, but it is suppressed by _isRestoring during a remote apply — so
+  // realtime/poll updates rendered from the STALE index until the viewer's next
+  // local edit. The remote payload just replaced the arrays; the caches must go.
+  if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
   // ── Final invariant: core arrays must be arrays ───────────────────────
   // Even with _validateRemotePayload, a malformed remote (or a future
   // schema field that lands in the manifest before defaults are seeded)
