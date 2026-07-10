@@ -31483,6 +31483,220 @@ function _renderRecurringPage(kind){
 function renderTumorBoards(){ _renderRecurringPage('tumorBoard'); }
 function renderClinics(){     _renderRecurringPage('clinic'); }
 
+/* ═══════════════════════ TIME LOG ═══════════════════════════════════════
+   Users log hours against admin-defined activity "options"; admins define
+   the options (optionally scoped to specific users) and view aggregate
+   analytics. Data: S.timeLogOptions [{id,label,users[],active}] +
+   S.timeLogEntries [{id,physId,optionId,hours,date,note,by,ts}], persisted
+   via the _PERSISTED_KEYS manifest. */
+function _tlTodayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function _tlOptById(id){ return (S.timeLogOptions||[]).find(o=>String(o.id)===String(id)); }
+function _tlOptionsForUser(physId){
+  return (S.timeLogOptions||[]).filter(o=> o.active!==false &&
+    (!o.users || !o.users.length || (physId!=null && o.users.map(String).includes(String(physId)))) );
+}
+function _tlHrs(n){ n=+n||0; return (Math.round(n*100)/100).toLocaleString(undefined,{maximumFractionDigits:2}); }
+
+function renderTimeLog(){
+  const host=document.getElementById('timelog-body'); if(!host) return;
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
+  const myPid=CU?.physId;
+  const today=_tlTodayISO();
+  const myOpts=_tlOptionsForUser(myPid);
+  let html='';
+
+  // ── Log-time card ──
+  if(myPid==null){
+    html+=`<div class="note ni" style="margin-bottom:14px">Your login isn't linked to a physician record, so you can't log time. ${isAdm?'You can still manage activities and view analytics below.':'Ask an admin to link your account.'}</div>`;
+  } else if(!myOpts.length){
+    html+=`<div class="note ni" style="margin-bottom:14px">No time-log activities are available to you yet.${isAdm?' Add some under “Manage activities” below.':' An admin needs to create them.'}</div>`;
+  } else {
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Log time</div>
+      <div class="flex" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+        <div class="fg" style="min-width:190px;flex:1"><label>Activity</label>
+          <select id="tl-opt">${myOpts.map(o=>`<option value="${o.id}">${escHtml(o.label)}</option>`).join('')}</select></div>
+        <div class="fg" style="width:110px"><label>Hours</label>
+          <input id="tl-hours" type="number" min="0" step="0.25" placeholder="1.5"></div>
+        <div class="fg" style="width:150px"><label>Date</label>
+          <input id="tl-date" type="date" value="${today}"></div>
+        <div class="fg" style="min-width:190px;flex:2"><label>Note (optional)</label>
+          <input id="tl-note" type="text" maxlength="200" placeholder="What did you work on?"></div>
+        <button class="bp" onclick="tlLogTime()">＋ Log</button>
+      </div>
+    </div>`;
+  }
+
+  // ── My entries ──
+  if(myPid!=null){
+    const mine=(S.timeLogEntries||[]).filter(e=>String(e.physId)===String(myPid))
+      .sort((a,b)=> (a.date<b.date?1:a.date>b.date?-1:((a.ts||'')<(b.ts||'')?1:-1)));
+    const total=mine.reduce((s,e)=>s+(+e.hours||0),0);
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">My entries <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${mine.length} entr${mine.length===1?'y':'ies'}, ${_tlHrs(total)} h total</span></div>
+      ${mine.length? `<div style="overflow:auto;max-height:340px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+          <th style="padding:5px 8px">Date</th><th style="padding:5px 8px">Activity</th><th style="padding:5px 8px;text-align:right">Hours</th><th style="padding:5px 8px">Note</th><th></th></tr></thead>
+        <tbody>${mine.map(e=>{const o=_tlOptById(e.optionId);return `<tr style="border-bottom:1px solid var(--bdr)">
+          <td style="padding:4px 8px;white-space:nowrap">${escHtml(e.date||'')}</td>
+          <td style="padding:4px 8px">${escHtml(o?o.label:'(deleted activity)')}</td>
+          <td style="padding:4px 8px;text-align:right;tabular-nums">${_tlHrs(e.hours)}</td>
+          <td style="padding:4px 8px;color:var(--txt2)">${escHtml(e.note||'')}</td>
+          <td style="padding:4px 8px;text-align:right"><span onclick="tlDeleteEntry(${e.id})" title="Delete" style="cursor:pointer;color:var(--red-t);opacity:.6">✕</span></td></tr>`;}).join('')}</tbody></table></div>`
+      : `<div class="note ni" style="font-size:12px">No entries yet.</div>`}
+    </div>`;
+  }
+
+  // ── Admin: manage activities + analytics ──
+  if(isAdm){
+    const physOpts=(S.physicians||[]).slice().sort((a,b)=>(a.last||'').localeCompare(b.last||''));
+    const opts=(S.timeLogOptions||[]);
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Manage activities <span style="font-weight:400;color:var(--txt3);font-size:11px">(admin)</span></div>
+      <div class="flex" style="flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px">
+        <div class="fg" style="min-width:200px;flex:1"><label>New activity name</label>
+          <input id="tl-newopt" type="text" maxlength="80" placeholder="e.g. Reading, Procedures, Admin, Teaching"></div>
+        <div class="fg" style="min-width:200px;flex:1"><label>Available to (none selected = everyone)</label>
+          <select id="tl-newopt-users" multiple size="3">${physOpts.map(p=>`<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('')}</select></div>
+        <button class="bp" onclick="tlAddOption()">＋ Add activity</button>
+      </div>
+      ${opts.length? `<div style="display:flex;flex-direction:column;gap:6px">${opts.map(o=>{
+        const cnt=(S.timeLogEntries||[]).filter(e=>String(e.optionId)===String(o.id)).length;
+        const scope=(!o.users||!o.users.length)?'All users':o.users.map(id=>{const p=_physById(id);return p?escHtml(p.last):('#'+id);}).join(', ');
+        return `<div class="flex" style="justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:8px;${o.active===false?'opacity:.55':''}">
+          <div><strong>${escHtml(o.label)}</strong> <span style="font-size:11px;color:var(--txt3)">· ${scope} · ${cnt} entr${cnt===1?'y':'ies'}</span></div>
+          <div class="flex" style="gap:6px">
+            <button class="bt bxs" onclick="tlToggleOptionActive(${o.id})">${o.active===false?'Enable':'Disable'}</button>
+            <button class="bt bxs" onclick="tlDeleteOption(${o.id})" style="color:var(--red-t)">Delete</button>
+          </div></div>`;}).join('')}</div>`
+      : `<div class="note ni" style="font-size:12px">No activities defined yet.</div>`}
+    </div>`;
+
+    html+=`<div class="card">
+      <div class="card-title">Analytics <span style="font-weight:400;color:var(--txt3);font-size:11px">(admin — aggregate across everyone)</span></div>
+      <div class="flex" style="flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px">
+        <div class="fg" style="width:150px"><label>From</label><input id="tl-from" type="date" onchange="tlRunAnalytics()"></div>
+        <div class="fg" style="width:150px"><label>To</label><input id="tl-to" type="date" onchange="tlRunAnalytics()"></div>
+        <div class="fg" style="min-width:160px"><label>User</label><select id="tl-fuser" onchange="tlRunAnalytics()"><option value="">All users</option>${physOpts.map(p=>`<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('')}</select></div>
+        <div class="fg" style="min-width:160px"><label>Activity</label><select id="tl-fopt" onchange="tlRunAnalytics()"><option value="">All activities</option>${opts.map(o=>`<option value="${o.id}">${escHtml(o.label)}</option>`).join('')}</select></div>
+        <button class="bt bsm" onclick="tlExportCSV()">⬇ Export CSV</button>
+      </div>
+      <div id="tl-analytics"></div>
+    </div>`;
+  }
+
+  host.innerHTML=html;
+  if(isAdm) tlRunAnalytics();
+}
+
+function tlLogTime(){
+  if(CU?.physId==null){ if(typeof _toast==='function') _toast('Your account isn\'t linked to a physician.','err'); return; }
+  const optId=+document.getElementById('tl-opt')?.value;
+  const hours=parseFloat(document.getElementById('tl-hours')?.value);
+  const date=document.getElementById('tl-date')?.value||_tlTodayISO();
+  const note=(document.getElementById('tl-note')?.value||'').trim().slice(0,200);
+  if(!optId||!_tlOptById(optId)){ if(typeof _toast==='function') _toast('Pick an activity.','err'); return; }
+  if(!(hours>0)){ if(typeof _toast==='function') _toast('Enter hours greater than 0.','err'); return; }
+  if(!Array.isArray(S.timeLogEntries)) S.timeLogEntries=[];
+  S.timeLogEntries.push({id:S.nextId++, physId:CU.physId, optionId:optId, hours:Math.round(hours*100)/100, date, note, by:CU.id, ts:new Date().toISOString()});
+  if(typeof _audit==='function') _audit('timelog.logged',{physId:CU.physId, optionId:optId, hours, date});
+  triggerSave();
+  if(typeof _afterMutation==='function') _afterMutation();
+  if(typeof _toast==='function') _toast('Time logged.','ok');
+}
+function tlDeleteEntry(id){
+  const e=(S.timeLogEntries||[]).find(x=>x.id===id); if(!e) return;
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
+  if(!isAdm && String(e.physId)!==String(CU?.physId)){ if(typeof _toast==='function') _toast('You can only delete your own entries.','err'); return; }
+  if(!confirm('Delete this time entry?')) return;
+  S.timeLogEntries=(S.timeLogEntries||[]).filter(x=>x.id!==id);
+  triggerSave(); if(typeof _afterMutation==='function') _afterMutation();
+}
+function tlAddOption(){
+  if(!_adminOnly('add time-log activity')) return;
+  const label=(document.getElementById('tl-newopt')?.value||'').trim().slice(0,80);
+  if(!label){ if(typeof _toast==='function') _toast('Enter an activity name.','err'); return; }
+  const sel=document.getElementById('tl-newopt-users');
+  const users=sel?Array.from(sel.selectedOptions).map(o=>+o.value):[];
+  if(!Array.isArray(S.timeLogOptions)) S.timeLogOptions=[];
+  if(S.timeLogOptions.some(o=>(o.label||'').toLowerCase()===label.toLowerCase() && o.active!==false)){ if(typeof _toast==='function') _toast('An activity with that name already exists.','warn'); return; }
+  S.timeLogOptions.push({id:S.nextId++, label, users, active:true});
+  triggerSave(); if(typeof _afterMutation==='function') _afterMutation(); if(typeof _toast==='function') _toast('Activity added.','ok');
+}
+function tlDeleteOption(id){
+  if(!_adminOnly('delete time-log activity')) return;
+  const o=_tlOptById(id); if(!o) return;
+  const cnt=(S.timeLogEntries||[]).filter(e=>String(e.optionId)===String(id)).length;
+  if(!confirm(`Delete activity “${o.label}”?`+(cnt?`\n\n${cnt} logged entr${cnt===1?'y':'ies'} will be kept but shown as “(deleted activity)”.`:''))) return;
+  S.timeLogOptions=(S.timeLogOptions||[]).filter(x=>x.id!==id);
+  triggerSave(); if(typeof _afterMutation==='function') _afterMutation();
+}
+function tlToggleOptionActive(id){
+  if(!_adminOnly('change time-log activity')) return;
+  const o=_tlOptById(id); if(!o) return;
+  o.active=(o.active===false);
+  triggerSave(); if(typeof _afterMutation==='function') _afterMutation();
+}
+function _tlFilteredEntries(){
+  const from=document.getElementById('tl-from')?.value||'';
+  const to=document.getElementById('tl-to')?.value||'';
+  const u=document.getElementById('tl-fuser')?.value||'';
+  const opt=document.getElementById('tl-fopt')?.value||'';
+  return (S.timeLogEntries||[]).filter(e=>{
+    if(from && (e.date||'')<from) return false;
+    if(to && (e.date||'')>to) return false;
+    if(u && String(e.physId)!==String(u)) return false;
+    if(opt && String(e.optionId)!==String(opt)) return false;
+    return true;
+  });
+}
+function tlRunAnalytics(){
+  const host=document.getElementById('tl-analytics'); if(!host) return;
+  const rows=_tlFilteredEntries();
+  if(!rows.length){ host.innerHTML='<div class="note ni" style="font-size:12px">No entries match these filters.</div>'; return; }
+  const total=rows.reduce((s,e)=>s+(+e.hours||0),0);
+  const days=new Set(rows.map(e=>e.date)).size;
+  const contributors=new Set(rows.map(e=>String(e.physId))).size;
+  const byOpt={}; rows.forEach(e=>{const k=String(e.optionId);(byOpt[k]=byOpt[k]||{h:0,n:0});byOpt[k].h+=(+e.hours||0);byOpt[k].n++;});
+  const byUser={}; rows.forEach(e=>{const k=String(e.physId);(byUser[k]=byUser[k]||{h:0,n:0});byUser[k].h+=(+e.hours||0);byUser[k].n++;});
+  const tile=(l,v,s)=>`<div class="met" style="min-width:120px"><div class="met-lbl">${l}</div><div class="met-val">${v}</div>${s?`<div class="met-sub">${s}</div>`:''}</div>`;
+  const mkRows=(obj,nameFn)=>Object.entries(obj).sort((a,b)=>b[1].h-a[1].h).map(([k,v])=>
+    `<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:4px 8px">${nameFn(k)}</td>
+     <td style="padding:4px 8px;text-align:right;tabular-nums">${_tlHrs(v.h)}</td>
+     <td style="padding:4px 8px;text-align:right;tabular-nums">${v.n}</td>
+     <td style="padding:4px 8px;text-align:right;tabular-nums">${_tlHrs(v.h/v.n)}</td></tr>`).join('');
+  const tbl=(title,body)=>`<div style="flex:1;min-width:270px"><div style="font-size:11px;font-weight:700;color:var(--txt2);margin:6px 0 3px">${title}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+    <th style="padding:4px 8px">${title.includes('activity')?'Activity':'User'}</th><th style="padding:4px 8px;text-align:right">Hours</th><th style="padding:4px 8px;text-align:right">Entries</th><th style="padding:4px 8px;text-align:right">Avg</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+  host.innerHTML=`
+    <div class="flex" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      ${tile('Total hours', _tlHrs(total))}
+      ${tile('Entries', rows.length)}
+      ${tile('Avg / entry', _tlHrs(total/rows.length)+' h')}
+      ${tile('Active days', days)}
+      ${tile('Avg / day', _tlHrs(days?total/days:0)+' h')}
+      ${tile('Contributors', contributors)}
+    </div>
+    <div class="flex" style="flex-wrap:wrap;gap:18px">
+      ${tbl('By activity', mkRows(byOpt, k=>{const o=_tlOptById(k);return escHtml(o?o.label:'(deleted)');}))}
+      ${tbl('By user', mkRows(byUser, k=>{const p=_physById(k);return p?escHtml(p.last+', '+p.first):('#'+k);}))}
+    </div>`;
+}
+function tlExportCSV(){
+  const rows=_tlFilteredEntries();
+  if(!rows.length){ if(typeof _toast==='function') _toast('Nothing to export for these filters.','warn'); return; }
+  const esc=s=>{s=String(s==null?'':s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const lines=[['Date','User','Activity','Hours','Note'].join(',')];
+  rows.slice().sort((a,b)=>((a.date||'')<(b.date||'')?-1:1)).forEach(e=>{
+    const p=_physById(e.physId); const o=_tlOptById(e.optionId);
+    lines.push([e.date, p?p.last+' '+p.first:('#'+e.physId), o?o.label:'(deleted)', e.hours, e.note||''].map(esc).join(','));
+  });
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='time-log-'+_tlTodayISO()+'.csv'; a.click();
+  setTimeout(()=>{try{URL.revokeObjectURL(a.href);}catch(_){}} ,2000);
+}
+
 // Read-only card. Identical schema for both kinds; only the action buttons
 // and emoji differ.
 function _renderRecurringViewCard(item, kind){
