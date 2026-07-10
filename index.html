@@ -51557,7 +51557,27 @@ async function testSupabaseConnection(){
   }
   try{
     const {data,error}=await _supabase.from(_TABLE).select('id').limit(1);
-    if(error&&error.code!=='PGRST116')throw error;
+    if(error&&error.code!=='PGRST116'){
+      // AUDIT FIX (2026-07): a 42501 "permission denied for table radscheduler"
+      // while NOT signed in is the EXPECTED, healthy result — the table grants
+      // access to the `authenticated` role only, so an anon probe reaching
+      // PostgREST and being denied proves the URL/key/network are all fine and
+      // security is doing its job. The old code rendered the raw error, which
+      // read as a broken configuration.
+      if(error.code==='42501'){
+        let signedIn=false;
+        try{ const s=await _supabase.auth.getSession(); signedIn=!!s?.data?.session; }catch(_){}
+        if(!signedIn){
+          if(msgEl)msgEl.innerHTML='<span style="color:var(--green-t)">✓ Connection reachable. Data access is granted to signed-in users only — sign in to sync.</span>';
+          renderSettingsSupabaseStatus();
+          return;
+        }
+        // Signed in AND denied → a real grants/RLS problem worth surfacing.
+        if(msgEl)msgEl.innerHTML='<span style="color:var(--red-t)">Connected, but your signed-in account was denied access to the data table — contact your admin (grants/RLS).</span>';
+        return;
+      }
+      throw error;
+    }
     if(msgEl)msgEl.innerHTML='<span style="color:var(--green-t)">✓ Connection successful! Reload to sync data.</span>';
     renderSettingsSupabaseStatus();
   }catch(e){
