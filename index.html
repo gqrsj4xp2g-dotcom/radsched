@@ -12938,6 +12938,14 @@ function triggerSave(){
     // attach .catch() so a network failure doesn't surface as
     // "Unhandled Promise Rejection" in the console.
     if(_isRestoring) return;
+    // AUDIT FIX (2026-07): only auto-push once a user is authenticated. The
+    // table grants SELECT/INSERT/UPDATE to the `authenticated` role only — an
+    // anon client (the login screen, before sign-in) gets "permission denied
+    // for table" (42501) on every write, which flooded the console with
+    // "Push failed" and flashed a "⚠ Save failed" indicator on the login page.
+    // Nothing meaningful changes pre-login anyway; the post-login boot does an
+    // explicit push. Guard on CU (the current signed-in user).
+    if((typeof CU==='undefined'||!CU)) return;
     if(_getUrl&&_getUrl()&&_getKey&&_getKey()){
       const r = _pushToSupabase();
       if(r && typeof r.catch === 'function'){
