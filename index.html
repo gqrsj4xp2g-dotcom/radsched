@@ -2111,8 +2111,16 @@ tbody tr:hover{background:var(--bg3)}
 
 /* @REFINED_END */
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Runtime deps: SELF-HOSTED same-origin so a CDN-blocking network (common on
+     hospital networks) can't stop the app from booting — a blocked jsdelivr
+     left `supabase` undefined, so login failed with "Supabase is not configured.
+     Offline login is disabled." (audit fix 2026-07). Each falls back to its CDN
+     only if the same-origin file is missing (e.g. a downloaded portable copy),
+     via a synchronous global-presence check. Update /vendor/* when bumping. -->
+<script src="/vendor/xlsx.full.min.js"></script>
+<script>window.XLSX||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');</script>
+<script src="/vendor/supabase.js"></script>
+<script>window.supabase||document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');</script>
 </head>
 <body>
 <a href="#main-content" class="rs-skiplink">Skip to main content</a>
