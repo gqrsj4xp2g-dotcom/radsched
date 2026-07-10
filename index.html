@@ -16091,6 +16091,11 @@ _isRestoring=false;
     // not the hardcoded 'main' row — which merged another practice's user
     // records into USERS on every login screen of every other practice.
     const _preloadRow = (()=>{ try{ return localStorage.getItem('rs.lastPracticeId') || 'main'; }catch(_){ return 'main'; } })();
+    // AUDIT FIX (2026-07): only preload when a persisted session exists. The
+    // table grants access to `authenticated` only, so an anon read is a
+    // guaranteed 42501 — a pointless denied request on every login screen.
+    const _sess = await _sb.auth.getSession().catch(()=>null);
+    if(!_sess?.data?.session) return;
     const {data}=await _sb.from('radscheduler').select('data').eq('id',_preloadRow).single();
     if(data?.data){
       const d=JSON.parse(data.data);
