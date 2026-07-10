@@ -50960,6 +50960,13 @@ let _saveWatchdog=null;     // Timer that force-clears _isSaving if a push hangs
 let _consecutiveSaveFails=0; // Backoff state for the retry loop below.
 const _SAVE_TIMEOUT_MS = 30000; // Supabase-default-ish; if a push exceeds this we give up.
 async function _pushToSupabase(){
+  // AUDIT FIX (2026-07): never push without an authenticated user. The table
+  // grants writes to the `authenticated` role only, so an anon client (before
+  // sign-in) always gets 42501 "permission denied" — and the failure→retry
+  // path re-armed a 1 Hz push loop that flooded the console with "Push failed"
+  // and flashed "⚠ Save failed" on the login screen. Clearing the dirty flag
+  // stops the retry loop; the post-login boot pushes explicitly once CU is set.
+  if(typeof CU==='undefined' || !CU){ _hasUnsavedChanges=false; return false; }
   if(_isSaving){
     // Re-entrant call while previous save is in-flight. Mark that we need another push
     // when the current one finishes, so nothing is lost. _hasUnsavedChanges=true signals this.
