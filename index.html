@@ -15703,6 +15703,11 @@ function _startPollFallback(){
   clearInterval(_pollInterval);
   _pollInterval=setInterval(async()=>{
     if(!_supabase||_isRestoring) return;
+    // AUDIT FIX (2026-07): don't poll before sign-in. Reads are granted to the
+    // `authenticated` role only; polling as anon 42501'd every tick and flooded
+    // the console with "Pull failed". The post-login boot does the initial pull
+    // explicitly once CU is set.
+    if(typeof CU==='undefined' || !CU) return;
     // Skip if a previous poll is still in flight. Without this, a slow
     // Supabase round-trip could fire 2-3 overlapping pulls within the
     // 10s interval, each of which would call _applyRemoteData and
