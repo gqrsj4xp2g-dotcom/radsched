@@ -19,6 +19,11 @@ const SHELL = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/favicon.svg',
+  // Self-hosted runtime deps (audit fix 2026-07): supabase-js is required to
+  // boot/login; xlsx for import. Precached so the app works offline and can't
+  // be broken by a CDN-blocking network. Served same-origin via the handler below.
+  '/vendor/supabase.js',
+  '/vendor/xlsx.full.min.js',
 ];
 
 // Third-party runtime dependencies the app needs to BOOT. They load
