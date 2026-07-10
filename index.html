@@ -9777,6 +9777,30 @@ let _saveTimeout=null;
 // Security policies on each table. If RLS isn't configured, fix that first.
 const _SUPABASE_URL=/*CREDS_URL_START*/'https://tpbgwvisikbuqhmlqtky.supabase.co'/*CREDS_URL_END*/;
 const _SUPABASE_KEY=/*CREDS_KEY_START*/'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwYmd3dmlzaWtidXFobWxxdGt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODg0MzUsImV4cCI6MjA5MTY2NDQzNX0.biu0OD-zk1cUl2CImDkkuOmIaat3vQKsgZ9riFn65Yk'/*CREDS_KEY_END*/;
+// AUTO-SEED Supabase config (2026-07): the URL + anon key baked in above are
+// seeded into localStorage on first load so EVERY config path — the pre-login
+// user preload, the Settings connection status, and any localStorage reader —
+// is configured out of the box with no manual entry on a fresh browser. Runs at
+// eval time, before the _preloadUsers IIFE and any DOMContentLoaded handlers.
+// Self-healing for credential rotation: an AUTO-seeded entry is refreshed from
+// the (possibly redeployed) constants; a user's manual Settings override is
+// left untouched (it clears the 'auto' marker on save). The anon key is
+// public-by-design — data access is gated by Supabase RLS.
+try{
+  if(_SUPABASE_URL && _SUPABASE_KEY){
+    const _rawCfg = localStorage.getItem('radscheduler_sb_config');
+    const _wasAuto = localStorage.getItem('radscheduler_sb_config_auto') === '1';
+    let _cfgObj = null; try{ _cfgObj = _rawCfg ? JSON.parse(_rawCfg) : null; }catch(_){}
+    const _isUserOverride = _rawCfg && !_wasAuto;
+    if(!_isUserOverride && (!_cfgObj || _cfgObj.url !== _SUPABASE_URL || _cfgObj.key !== _SUPABASE_KEY)){
+      _SB_CFG.url = _SUPABASE_URL; _SB_CFG.key = _SUPABASE_KEY;
+      localStorage.setItem('radscheduler_sb_config', JSON.stringify({url:_SUPABASE_URL, key:_SUPABASE_KEY}));
+      localStorage.setItem('radscheduler_sb_config_auto', '1');
+    } else if(_cfgObj && _cfgObj.url && _cfgObj.key){
+      _SB_CFG.url = _cfgObj.url; _SB_CFG.key = _cfgObj.key;
+    }
+  }
+}catch(_){}
 const _ALLOW_LEGACY_AUTH=false; // disable legacy plaintext local auth by default
 const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
