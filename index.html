@@ -31646,6 +31646,40 @@ async function _prPull(force){
     return _PR_REVIEWS;
   }catch(_){ return _PR_REVIEWS; }
 }
+// Pending reviews assigned to me → count + ⚖️ Peer Review nav badge. Auto
+// reviews (once per shift, server-created) need a nudge since the rad didn't
+// initiate them.
+function _prMyPendingCount(){
+  if(!CU) return 0;
+  return _PR_REVIEWS.filter(v=>v.status==='pending' && v.reviewer_uid===CU.id).length;
+}
+function _prUpdateNavBadge(){
+  try{
+    const item=document.querySelector('.snav-item[data-pg="peer-review"]'); if(!item) return;
+    let b=item.querySelector('.pr-nav-badge');
+    const n=_prMyPendingCount();
+    if(n>0){
+      if(!b){ b=document.createElement('span'); b.className='pr-nav-badge';
+        b.style.cssText='margin-left:6px;display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red-t,#dc2626);color:#fff;font-size:10px;font-weight:800;vertical-align:middle';
+        item.appendChild(b); }
+      b.textContent=String(n);
+    } else if(b){ b.remove(); }
+  }catch(_){}
+}
+// Boot watcher: once per launch, load peer reviews (so the badge shows without
+// visiting the tab) and start realtime so a server-side auto-trigger surfaces
+// live. One gentle login nudge if reviews are waiting.
+let _prWatcherStarted=false;
+function _prBootWatcher(){
+  if(_prWatcherStarted || !CU) return;
+  _prWatcherStarted=true;
+  try{ _rsReportsStartLive(); }catch(_){}
+  _prPull(true).then(()=>{
+    _prUpdateNavBadge();
+    const n=_prMyPendingCount();
+    if(n>0 && typeof _toast==='function') _toast(`You have ${n} peer review${n===1?'':'s'} to complete — see ⚖️ Peer Review.`,'info');
+  });
+}
 // Grading overlay ---------------------------------------------------------
 function _prShowGrader(ctx){
   _prGradeCtx=ctx; _prPicked=null;
