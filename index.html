@@ -31804,16 +31804,18 @@ function _prFind(){
         ${mine?`<span style="font-size:11px;color:var(--green-t)">✓ reviewed (${mine.score})</span>`
              :`<button class="bp bxs" data-uid="${escHtml(r.report_uid)}" onclick="_prReviewReport(this)">Review</button>`}</div>`;}).join('');
 }
-function _prReviewReport(btn){
+async function _prReviewReport(btn){
   const uid=btn&&btn.dataset?btn.dataset.uid:null; const r=_RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
+  const reportText=await _rsFetchReportText(uid);   // fetched on demand (not in bulk pull)
   _prShowGrader({report_uid:r.report_uid, accession:r.accession, reviewed_phys_id:r.phys_id,
-    examLabel:(r.exam||r.modality||'')+' · '+(r.signed_at||'').slice(0,10), reportText:r.report_text});
+    examLabel:(r.exam||r.modality||'')+' · '+(r.signed_at||'').slice(0,10), reportText});
 }
-function _prGradePending(id){
+async function _prGradePending(id){
   const v=_PR_REVIEWS.find(x=>x.id===id); if(!v) return;
   const r=_RS_REPORTS.find(x=>x.report_uid===v.report_uid);
+  const reportText=await _rsFetchReportText(v.report_uid);
   _prShowGrader({report_uid:v.report_uid, accession:v.accession, reviewed_phys_id:v.reviewed_phys_id,
-    examLabel:(r?(r.exam||r.modality||''):'')+(r?' · '+(r.signed_at||'').slice(0,10):''), reportText:r?r.report_text:'', existingId:v.id});
+    examLabel:(r?(r.exam||r.modality||''):'')+(r?' · '+(r.signed_at||'').slice(0,10):''), reportText, existingId:v.id});
 }
 // Aggregation -------------------------------------------------------------
 function _prAggregate(reviews){
