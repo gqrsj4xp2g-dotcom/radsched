@@ -179,6 +179,7 @@ serve(async (req: Request) => {
         accession: payload.accession || "", mrn: payload.mrn || "", patient_name: payload.patient_name || "",
         exam: payload.exam || "", interpreter: payload.interpreter || payload.reading_physician || "",
         signed_at: payload.signed_at || "", modality: payload.modality || "",
+        body_part: payload.body_part || "",
       },
       body: payload.report_text || payload.text || "",
     };
