@@ -12,6 +12,10 @@ const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
 // entry costs install-time bandwidth on every device.
+// Self-hosted runtime deps (audit fix 2026-07): supabase-js is required to
+// boot/login; xlsx for import. Precached so the app works offline and cannot
+// be broken by a CDN-blocking network. Served same-origin via the handler below.
+// NOTE: keep this array string-literals only (the smoke-check scans it by regex).
 const SHELL = [
   '/',
   '/index.html',
@@ -19,9 +23,6 @@ const SHELL = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/favicon.svg',
-  // Self-hosted runtime deps (audit fix 2026-07): supabase-js is required to
-  // boot/login; xlsx for import. Precached so the app works offline and can't
-  // be broken by a CDN-blocking network. Served same-origin via the handler below.
   '/vendor/supabase.js',
   '/vendor/xlsx.full.min.js',
 ];
