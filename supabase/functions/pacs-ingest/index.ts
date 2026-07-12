@@ -77,7 +77,11 @@ function parseHL7(raw: string): ParseResult {
       // OBR-2 placer, then OBR-18/19 vendor fields.
       cur.meta.accession = (p[3] || "").split("^")[0] || (p[2] || "").split("^")[0]
         || (p[18] || "").split("^")[0] || (p[19] || "").split("^")[0];
-      cur.meta.exam = (p[4] || "").split("^")[1] || (p[4] || "").split("^")[0];
+      // OBR-4 Universal Service ID: keep BOTH the code + text components so the
+      // exam carries the modality token ("XR CHEST 2 VIEWS", not just "CHEST…").
+      cur.meta.exam = (p[4] || "").split("^").slice(0, 2).filter(Boolean).join(" ");
+      // OBR-24 Diagnostic Service Section ID is the authoritative modality.
+      cur.meta.modality = hl7Modality((p[24] || "").split("^")[0]);
       const obr32 = p[32] || "";
       if (obr32) cur.meta.interpreter = hl7Name(obr32);
       cur.meta.signed_at = hl7Date(p[22]) || hl7Date(p[7]);
