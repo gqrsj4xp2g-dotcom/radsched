@@ -31532,6 +31532,21 @@ function _rsReportsStartLive(){
     }, 45000);
   }
 }
+// Tear down the per-practice reports/peer-review module (realtime channel,
+// poll timer, debounce, caches, and boot latches) on logout / practice switch.
+// Without this, a second session in the same tab renders the prior practice's
+// cached reports, never re-binds realtime for the new practice, and the peer
+// nudge/badge never re-arms.
+function _rsTeardown(){
+  try{ if(_rsReportsChannel){ _rsReportsChannel.unsubscribe(); } }catch(_){}
+  _rsReportsChannel = null;
+  if(_rsPollTimer){ clearInterval(_rsPollTimer); _rsPollTimer = null; }
+  if(_rsRtDebounce){ clearTimeout(_rsRtDebounce); _rsRtDebounce = null; }
+  _RS_REPORTS = []; _RS_REPORTS_AT = 0; _RS_REPORTS_STATE = 'idle'; _rsScoring = false;
+  _PR_REVIEWS = []; _PR_AT = 0;
+  _wrvuKicked = false; _prKicked = false; _prWatcherStarted = false;
+  try{ if(typeof _prUpdateNavBadge === 'function') _prUpdateNavBadge(); }catch(_){}
+}
 // Admin-only ingest-token accessors (SECURITY DEFINER RPCs; the token row is
 // otherwise service-role-locked). Used by the PACS Connections tab.
 async function _rsGetIngestToken(){
