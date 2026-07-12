@@ -32008,7 +32008,10 @@ function renderPeerReview(){
 function _prSetQuarter(q){ _prQuarter=q; renderPeerReview(); }
 function _prExportCSV(q){
   const rows=_PR_REVIEWS.filter(v=>v.quarter===q && v.status==='completed');
-  const esc=s=>`"${String(s==null?'':s).replace(/"/g,'""')}"`;
+  // Quote-escape AND neutralize spreadsheet formula/DDE injection: a free-text
+  // comment starting with = + - @ (or a control char) is prefixed with ' so
+  // Excel/Sheets treats it as text, not a formula.
+  const esc=s=>{ let t=String(s==null?'':s); if(/^[=+\-@\t\r]/.test(t)) t="'"+t; return `"${t.replace(/"/g,'""')}"`; };
   const lines=[['quarter','reviewed_rad','reviewer_rad','score','label','comments','signed_report','ts'].join(',')];
   rows.forEach(v=>{const rp=(v.reviewed_phys_id!=null)?_physById(v.reviewed_phys_id):null,by=(v.reviewer_phys_id!=null)?_physById(v.reviewer_phys_id):null;
     lines.push([esc(v.quarter),esc(rp?rp.last+', '+rp.first:v.reviewed_phys_id),esc(by?by.last+', '+by.first:v.reviewer_phys_id),esc(v.score),esc(_PR_LABELS[v.score]||''),esc(v.comments||''),esc(v.accession||v.report_uid||''),esc(v.ts||'')].join(','));});
