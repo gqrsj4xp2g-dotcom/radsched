@@ -31469,7 +31469,7 @@ function _rsReportsStartLive(){
         .on('postgres_changes', {event:'*', schema:'public', table:'rs_reports', filter:`practice_id=eq.${pid}`},
           ()=>{ _rsReportsPull(true).then(_rsRerenderActive); })
         .on('postgres_changes', {event:'*', schema:'public', table:'rs_peer_reviews', filter:`practice_id=eq.${pid}`},
-          ()=>{ if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview(); })
+          ()=>{ _prPull(true).then(()=>{ if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview(); }); })
         .subscribe(()=>{});
     }catch(_){ _rsReportsChannel = null; }
   }
