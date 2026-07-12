@@ -31545,7 +31545,14 @@ function renderWrvu(){
   // First-ever load; later refreshes arrive via realtime/poll.
   if(_RS_REPORTS_AT===0 && !_wrvuKicked){
     _wrvuKicked=true;
-    _rsReportsPull(true).then(()=>{ _wrvuKicked=false; if(document.getElementById('page-wrvu')?.classList.contains('on')) renderWrvu(); });
+    // Only clear the latch + re-render when the pull actually SUCCEEDED. On
+    // failure (offline / expired JWT / 5xx) the timestamp stays 0 — clearing
+    // the latch immediately would re-enter and produce a tight refetch loop, so
+    // we back off 5s before allowing a retry.
+    _rsReportsPull(true).then(()=>{
+      if(_RS_REPORTS_AT!==0){ _wrvuKicked=false; if(document.getElementById('page-wrvu')?.classList.contains('on')) renderWrvu(); }
+      else { setTimeout(()=>{ _wrvuKicked=false; if(document.getElementById('page-wrvu')?.classList.contains('on')) renderWrvu(); }, 5000); }
+    });
   }
   const range=_wrvuRange(_wrvuPeriod);
   const periodBtns=[['month','This month'],['quarter','This quarter'],['lastq','Last quarter'],['ytd','Year to date']]
