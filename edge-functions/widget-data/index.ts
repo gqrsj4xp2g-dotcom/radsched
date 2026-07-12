@@ -567,5 +567,51 @@ Deno.serve(async (req: Request) => {
     return jsonResp({ ok: true });
   }
 
+  // ── PEER-OPEN ───────────────────────────────────────────────────
+  // Trigger a peer review of a PRIOR report on the patient the physician is
+  // currently reading. Finds the most recent prior report by a DIFFERENT
+  // radiologist and creates a pending rs_peer_reviews row assigned to the
+  // reader, which then surfaces in the app's "Pending reviews" list to grade.
+  if (action === 'peer-open') {
+    const readerPhysId = payload.physId;
+    if (readerPhysId == null) return jsonResp({ error: 'physId required' }, 400);
+    // reviewer_uid is NOT NULL and this function runs as service role (no
+    // auth.uid), so resolve the reader's account uid from the practice roster.
+    const reviewerUser = Array.isArray(practice.users)
+      ? practice.users.find((u: any) => u && u.physId === readerPhysId) : null;
+    const reviewerUid = reviewerUser && reviewerUser.id;
+    if (!reviewerUid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(reviewerUid)))
+      return jsonResp({ error: 'reader has no linked account; cannot open a review' }, 409);
+    const accIn = (body.accession || '').toString().trim();
+    let mrn = (body.mrn || '').toString().trim();
+    if (!mrn && accIn) {
+      const { data: cur } = await sb.from('rs_reports').select('mrn')
+        .eq('practice_id', payload.practiceId).eq('accession', accIn).limit(1).maybeSingle();
+      mrn = (cur as any)?.mrn || '';
+    }
+    if (!mrn) return jsonResp({ error: 'mrn or accession required' }, 400);
+    const { data: priors } = await sb.from('rs_reports')
+      .select('report_uid, accession, phys_id, signed_at, exam')
+      .eq('practice_id', payload.practiceId).eq('mrn', mrn)
+      .order('signed_at', { ascending: false }).limit(25);
+    const prior = (priors || []).find((r: any) =>
+      r.phys_id != null && r.phys_id !== readerPhysId && r.accession !== accIn);
+    if (!prior) return jsonResp({ error: 'no prior report by another radiologist for this patient' }, 404);
+    const { data: existing } = await sb.from('rs_peer_reviews')
+      .select('id, status').eq('practice_id', payload.practiceId)
+      .eq('report_uid', prior.report_uid).eq('reviewer_uid', reviewerUid).limit(1).maybeSingle();
+    if (existing) return jsonResp({ ok: true, existing: true,
+      review: { id: (existing as any).id, report_uid: prior.report_uid, status: (existing as any).status, reviewed_phys_id: prior.phys_id, exam: prior.exam } });
+    const now = new Date();
+    const quarter = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+    const { data: ins, error: insErr } = await sb.from('rs_peer_reviews').insert({
+      practice_id: payload.practiceId, report_uid: prior.report_uid, accession: prior.accession,
+      reviewed_phys_id: prior.phys_id, reviewer_phys_id: readerPhysId, reviewer_uid: reviewerUid,
+      quarter, status: 'pending',
+    }).select('id').maybeSingle();
+    if (insErr) return jsonResp({ error: 'could not open review: ' + insErr.message }, 500);
+    return jsonResp({ ok: true, review: { id: (ins as any)?.id, report_uid: prior.report_uid, reviewed_phys_id: prior.phys_id, exam: prior.exam, status: 'pending' } });
+  }
+
   return jsonResp({ error: 'unknown action: ' + action }, 400);
 });
