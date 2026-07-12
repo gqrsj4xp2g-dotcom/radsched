@@ -18619,8 +18619,11 @@ function addPhys(){
     // Multiplier applied over cfg.wRVUDefaults[shiftType] for per-physician
     // wRVU expectation (1.0 = standard FTE expectation; 0.7 = 70% FTE).
     wRVUMultiplier: parseFloat(document.getElementById('p-wrvu-mult')?.value) || 1.0,
+    // PACS interpreter aliases → attribute ingested reports to this physician.
+    pacsNames: _parsePacsNames(document.getElementById('p-pacsnames')?.value),
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
+  { const _pn=document.getElementById('p-pacsnames'); if(_pn) _pn.value=''; }
   renderPhysicians();
   // Refresh user mgmt so physician link dropdowns reflect the new physician
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
