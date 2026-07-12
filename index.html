@@ -31814,7 +31814,14 @@ function renderPeerReview(){
   const myPid=CU.physId;
   if((_RS_REPORTS_AT===0 || _PR_AT===0) && !_prKicked){
     _prKicked=true;
-    Promise.all([_rsReportsPull(true),_prPull(true)]).then(()=>{ _prKicked=false; if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+    // Re-render only on success; back off on failure so a persistently failing
+    // pull (offline / expired JWT / 5xx) can't drive a tight refetch+rerender
+    // loop (both timestamps stay 0 on error).
+    Promise.all([_rsReportsPull(true),_prPull(true)]).then(()=>{
+      const ok = (_RS_REPORTS_AT!==0 && _PR_AT!==0);
+      const rerun = ()=>{ _prKicked=false; if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); };
+      if(ok) rerun(); else setTimeout(rerun, 5000);
+    });
   }
   let html='';
 
