@@ -31561,6 +31561,265 @@ function renderWrvu(){
   host.innerHTML=html;
 }
 
+// ── Peer Review (RADPEER-style 1–4 scoring, live via rs_peer_reviews) ─────
+const _PR_LABELS = {1:'Agree', 2:'Mostly agree', 3:'Mostly disagree', 4:'Disagree'};
+const _PR_COLORS = {1:'#16a34a', 2:'#84cc16', 3:'#ea580c', 4:'#dc2626'};
+let _PR_REVIEWS = [];
+let _PR_AT = 0;
+let _prKicked = false;
+let _prFindMrn = '';
+let _prQuarter = null;      // aggregation quarter (null = latest/current)
+let _prPicked = null;       // score picked in the open grader
+let _prGradeCtx = null;
+function _prCurrentQuarter(){ const n=new Date(); return `${n.getFullYear()}-Q${Math.floor(n.getMonth()/3)+1}`; }
+async function _prPull(force){
+  if(!CU) return _PR_REVIEWS;
+  if(!force && _PR_AT && (Date.now()-_PR_AT)<15000) return _PR_REVIEWS;
+  const sb=(typeof _initAuthClient==='function')?_initAuthClient():null; if(!sb) return _PR_REVIEWS;
+  try{
+    const {data,error}=await sb.from('rs_peer_reviews')
+      .select('id, report_uid, accession, reviewed_phys_id, reviewer_phys_id, reviewer_uid, score, comments, quarter, status, ts')
+      .eq('practice_id', _rsPracticeId()).order('ts',{ascending:false}).limit(4000);
+    if(error) return _PR_REVIEWS;
+    _PR_REVIEWS=Array.isArray(data)?data:[]; _PR_AT=Date.now(); return _PR_REVIEWS;
+  }catch(_){ return _PR_REVIEWS; }
+}
+// Grading overlay ---------------------------------------------------------
+function _prShowGrader(ctx){
+  _prGradeCtx=ctx; _prPicked=null;
+  const old=document.getElementById('pr-grader'); if(old) old.remove();
+  const revP=(ctx.reviewed_phys_id!=null)?_physById(ctx.reviewed_phys_id):null;
+  const ov=document.createElement('div'); ov.id='pr-grader';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML=`<div class="card" style="max-width:540px;width:100%;max-height:90vh;overflow:auto">
+    <div class="card-title">Peer review${revP?` — ${escHtml(revP.last)}, ${escHtml(revP.first)}`:''}</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">${escHtml(ctx.examLabel||ctx.accession||ctx.report_uid||'')}</div>
+    ${ctx.reportText?`<div style="max-height:180px;overflow:auto;background:rgba(127,127,127,0.08);border:1px solid var(--bdr);border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;margin-bottom:10px">${escHtml(ctx.reportText)}</div>`:''}
+    <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">How well do you agree with this prior interpretation?</div>
+    <div class="flex" id="pr-score-btns" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${[1,2,3,4].map(s=>`<button class="bt" data-score="${s}" onclick="_prPickScore(${s})" style="flex:1;min-width:112px;border-left:4px solid ${_PR_COLORS[s]}">${s} · ${_PR_LABELS[s]}</button>`).join('')}
+    </div>
+    <textarea id="pr-comment" rows="3" placeholder="Comments (optional) — discrepancy detail, teaching point…" style="width:100%;font-size:12px;resize:vertical"></textarea>
+    <div class="flex" style="justify-content:flex-end;gap:8px;margin-top:10px">
+      <button class="bt" onclick="_prCloseGrader()">Cancel</button>
+      <button class="bp" id="pr-submit" onclick="_prSubmitGrade()" disabled>Submit review</button>
+    </div></div>`;
+  ov.addEventListener('click', e=>{ if(e.target===ov) _prCloseGrader(); });
+  document.body.appendChild(ov);
+}
+function _prPickScore(s){
+  _prPicked=s;
+  document.querySelectorAll('#pr-score-btns button').forEach(b=>{
+    const on=(+b.dataset.score===s);
+    b.style.background=on?_PR_COLORS[s]:''; b.style.color=on?'#fff':''; b.style.fontWeight=on?'700':'';
+  });
+  const sub=document.getElementById('pr-submit'); if(sub) sub.disabled=false;
+}
+function _prCloseGrader(){ _prPicked=null; _prGradeCtx=null; const ov=document.getElementById('pr-grader'); if(ov) ov.remove(); }
+async function _prSubmitGrade(){
+  if(!_prGradeCtx || !_prPicked || !CU) return;
+  const ctx=_prGradeCtx, score=_prPicked;
+  const comments=(document.getElementById('pr-comment')?.value||'').trim().slice(0,2000);
+  const sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!sb){ if(typeof _toast==='function')_toast('Not connected.','err'); return; }
+  const sub=document.getElementById('pr-submit'); if(sub){ sub.disabled=true; sub.textContent='Saving…'; }
+  const pid=_rsPracticeId(), q=_prCurrentQuarter(), now=new Date().toISOString();
+  const reviewedPid=(ctx.reviewed_phys_id!=null)?+ctx.reviewed_phys_id:null;
+  const reviewerPid=(CU.physId!=null)?+CU.physId:null;
+  let error=null;
+  try{
+    if(ctx.existingId!=null){
+      ({error}=await sb.from('rs_peer_reviews')
+        .update({score,comments,status:'completed',quarter:q,reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
+        .eq('practice_id',pid).eq('id',ctx.existingId));
+    } else {
+      const ins=await sb.from('rs_peer_reviews').insert({
+        practice_id:pid, report_uid:ctx.report_uid||null, accession:ctx.accession||null,
+        reviewed_phys_id:reviewedPid, reviewer_phys_id:reviewerPid,
+        score, comments, quarter:q, status:'completed', updated_at:now
+      });
+      if(ins.error && (String(ins.error.code)==='23505' || /duplicate|unique/i.test(ins.error.message||''))){
+        // already reviewed this report — update my own review (RLS scopes to mine)
+        ({error}=await sb.from('rs_peer_reviews')
+          .update({score,comments,status:'completed',quarter:q,reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
+          .eq('practice_id',pid).eq('report_uid',ctx.report_uid));
+      } else error=ins.error;
+    }
+  }catch(e){ error=e; }
+  if(error){ if(typeof _toast==='function')_toast('Save failed: '+(error.message||error),'err'); if(sub){sub.disabled=false;sub.textContent='Submit review';} return; }
+  if(typeof _audit==='function') _audit('peerreview.submitted',{report_uid:ctx.report_uid,score,reviewed:reviewedPid});
+  _prCloseGrader();
+  if(typeof _toast==='function')_toast('Peer review submitted.','ok');
+  await _prPull(true); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview();
+}
+// Prior-finder + review entry points -------------------------------------
+function _prFind(){
+  const q=(document.getElementById('pr-find')?.value||'').trim(); _prFindMrn=q;
+  const host=document.getElementById('pr-find-results'); if(!host) return;
+  if(!q){ host.innerHTML=`<div class="note ni" style="font-size:12px">Enter an MRN or accession.</div>`; return; }
+  const ql=q.toLowerCase();
+  const hit=_RS_REPORTS.filter(r=>((r.mrn||'').toLowerCase()===ql)||((r.accession||'').toLowerCase()===ql));
+  let mrn=null; hit.forEach(r=>{ if(r.mrn) mrn=r.mrn; });
+  let priors=mrn?_RS_REPORTS.filter(r=>(r.mrn||'')===mrn):hit;
+  priors=priors.filter(r=>r.phys_id!==CU.physId).sort((a,b)=>((a.signed_at||'')<(b.signed_at||'')?1:-1));
+  if(!priors.length){ host.innerHTML=`<div class="note ni" style="font-size:12px">No prior reports by other radiologists found for that patient in the loaded set.</div>`; return; }
+  host.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">${priors.length} prior report${priors.length===1?'':'s'} by other radiologists${mrn?` · MRN ${escHtml(mrn)}`:''}:</div>`+
+    priors.map(r=>{const p=(r.phys_id!=null)?_physById(r.phys_id):null;
+      const mine=_PR_REVIEWS.find(v=>v.report_uid===r.report_uid && v.reviewer_uid===CU.id && v.status==='completed');
+      return `<div class="flex" style="justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:8px;margin-bottom:6px">
+        <div><strong>${escHtml(r.exam||r.modality||r.report_uid)}</strong>
+          <span style="font-size:11px;color:var(--txt3)"> · ${escHtml((r.signed_at||'').slice(0,10))} · ${p?escHtml(p.last)+', '+escHtml(p.first):'unmatched reader'}</span></div>
+        ${mine?`<span style="font-size:11px;color:var(--green-t)">✓ reviewed (${mine.score})</span>`
+             :`<button class="bp bxs" data-uid="${escHtml(r.report_uid)}" onclick="_prReviewReport(this)">Review</button>`}</div>`;}).join('');
+}
+function _prReviewReport(btn){
+  const uid=btn&&btn.dataset?btn.dataset.uid:null; const r=_RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
+  _prShowGrader({report_uid:r.report_uid, accession:r.accession, reviewed_phys_id:r.phys_id,
+    examLabel:(r.exam||r.modality||'')+' · '+(r.signed_at||'').slice(0,10), reportText:r.report_text});
+}
+function _prGradePending(id){
+  const v=_PR_REVIEWS.find(x=>x.id===id); if(!v) return;
+  const r=_RS_REPORTS.find(x=>x.report_uid===v.report_uid);
+  _prShowGrader({report_uid:v.report_uid, accession:v.accession, reviewed_phys_id:v.reviewed_phys_id,
+    examLabel:(r?(r.exam||r.modality||''):'')+(r?' · '+(r.signed_at||'').slice(0,10):''), reportText:r?r.report_text:'', existingId:v.id});
+}
+// Aggregation -------------------------------------------------------------
+function _prAggregate(reviews){
+  const by=new Map();
+  reviews.forEach(v=>{
+    if(v.status!=='completed' || v.score==null || v.reviewed_phys_id==null) return;
+    const k=v.reviewed_phys_id;
+    if(!by.has(k)) by.set(k,{pid:k,n:0,sum:0,dist:{1:0,2:0,3:0,4:0},comments:[]});
+    const g=by.get(k); g.n++; g.sum+=v.score; g.dist[v.score]=(g.dist[v.score]||0)+1;
+    if(v.comments) g.comments.push({by:v.reviewer_phys_id, score:v.score, text:v.comments, ts:v.ts});
+  });
+  return by;
+}
+function _prBar(dist,n){
+  if(!n) return '';
+  return `<div class="flex" style="height:10px;border-radius:5px;overflow:hidden;min-width:120px;flex:1">${[1,2,3,4].map(s=>{
+    const w=100*(dist[s]||0)/n; return w>0?`<div title="${s} · ${_PR_LABELS[s]}: ${dist[s]}" style="width:${w}%;background:${_PR_COLORS[s]}"></div>`:'';}).join('')}</div>`;
+}
+function renderPeerReview(){
+  const host=document.getElementById('peer-review-body'); if(!host) return;
+  if(!CU){ host.innerHTML=`<div class="note ni">Sign in to use peer review.</div>`; return; }
+  _rsReportsStartLive();
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
+  const myPid=CU.physId;
+  if((_RS_REPORTS_AT===0 || _PR_AT===0) && !_prKicked){
+    _prKicked=true;
+    Promise.all([_rsReportsPull(true),_prPull(true)]).then(()=>{ _prKicked=false; if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+  }
+  let html='';
+
+  // A. Start a review by finding priors on the patient being read.
+  html+=`<div class="card" style="margin-bottom:14px">
+    <div class="card-title">Review a prior study</div>
+    <div style="font-size:12px;color:var(--txt2);margin-bottom:8px">Enter the MRN or accession of the patient you're reading. Prior reports on that patient signed by other radiologists appear below to grade.</div>
+    <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="fg" style="min-width:220px;flex:1"><label>Patient MRN or accession</label>
+        <input id="pr-find" type="text" value="${escHtml(_prFindMrn)}" placeholder="e.g. MRN00042 or ACC12345" onkeydown="if(event.key==='Enter')_prFind()"></div>
+      <button class="bp" onclick="_prFind()">Find priors</button>
+    </div>
+    <div id="pr-find-results" style="margin-top:10px"></div>
+  </div>`;
+
+  // B. Pending reviews assigned to me (e.g. opened from the desktop widget).
+  const myPending=_PR_REVIEWS.filter(v=>v.status==='pending' && v.reviewer_uid===CU.id);
+  if(myPending.length){
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Pending reviews assigned to you <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${myPending.length}</span></div>
+      ${myPending.map(v=>{const rp=(v.reviewed_phys_id!=null)?_physById(v.reviewed_phys_id):null;const r=_RS_REPORTS.find(x=>x.report_uid===v.report_uid);
+        return `<div class="flex" style="justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:8px;margin-bottom:6px">
+          <div><strong>${escHtml(v.accession||v.report_uid||'')}</strong>
+            <span style="font-size:11px;color:var(--txt3)">${r&&r.exam?'· '+escHtml(r.exam):''} · original read: ${rp?escHtml(rp.last):'—'}</span></div>
+          <button class="bp bxs" onclick="_prGradePending(${v.id})">Grade</button></div>`;}).join('')}
+    </div>`;
+  }
+
+  // Quarter picker (shared by scorecards below).
+  const quarters=[...new Set(_PR_REVIEWS.map(v=>v.quarter).filter(Boolean))].sort().reverse();
+  if(!quarters.length) quarters.push(_prCurrentQuarter());
+  const qsel=_prQuarter && quarters.includes(_prQuarter)?_prQuarter:quarters[0];
+  const qBtns=quarters.slice(0,8).map(q=>`<button class="bt bxs" style="${q===qsel?'background:var(--blue);color:#fff;border-color:var(--blue)':''}" onclick="_prSetQuarter('${q}')">${escHtml(q)}</button>`).join(' ');
+
+  // C. My scorecard (reviews I received), blinded reviewer identity.
+  if(myPid!=null){
+    const mineAgg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel && v.reviewed_phys_id===myPid)).get(myPid);
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="card-title" style="margin:0">My peer-review scorecard</div>
+        <div class="flex" style="gap:4px;flex-wrap:wrap">${qBtns}</div></div>`;
+    if(mineAgg && mineAgg.n){
+      const mean=mineAgg.sum/mineAgg.n, disc=100*((mineAgg.dist[3]||0)+(mineAgg.dist[4]||0))/mineAgg.n;
+      html+=`<div class="flex" style="gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <div style="text-align:center"><div style="font-size:24px;font-weight:800;color:var(--blue)">${mean.toFixed(2)}</div><div style="font-size:10px;color:var(--txt3)">mean score</div></div>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:800">${mineAgg.n}</div><div style="font-size:10px;color:var(--txt3)">reviews</div></div>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:800;color:${disc>10?'var(--red-t)':'var(--green-t)'}">${disc.toFixed(0)}%</div><div style="font-size:10px;color:var(--txt3)">discordant (3–4)</div></div>
+        <div style="flex:1;min-width:140px">${_prBar(mineAgg.dist,mineAgg.n)}<div style="font-size:10px;color:var(--txt3);margin-top:4px">${[1,2,3,4].map(s=>`${s}:${mineAgg.dist[s]||0}`).join('  ')}</div></div>
+      </div>`;
+      const cmts=mineAgg.comments.filter(c=>c.text);
+      if(cmts.length){
+        html+=`<div style="margin-top:10px"><div style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comments received (reviewer blinded)</div>
+          ${cmts.map(c=>`<div style="border-left:3px solid ${_PR_COLORS[c.score]};padding:4px 8px;margin-bottom:5px;font-size:12px;background:rgba(127,127,127,0.05)"><span style="font-weight:700;color:${_PR_COLORS[c.score]}">${c.score} · ${_PR_LABELS[c.score]}</span> — ${escHtml(c.text)}</div>`).join('')}</div>`;
+      }
+    } else {
+      html+=`<div class="note ni" style="font-size:12px;margin-top:10px">No peer reviews received in ${escHtml(qsel)}.</div>`;
+    }
+    html+=`</div>`;
+  }
+
+  // D. Admin: practice-wide quarterly report + CSV export.
+  if(isAdm){
+    const agg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel));
+    const list=[...agg.values()].sort((a,b)=>(b.sum/b.n)-(a.sum/a.n));
+    const totalN=list.reduce((s,g)=>s+g.n,0);
+    html+=`<div class="card">
+      <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="card-title" style="margin:0">Quarterly report <span style="font-weight:400;color:var(--txt3);font-size:11px">(admin) — ${escHtml(qsel)} · ${totalN} reviews</span></div>
+        <div class="flex" style="gap:6px;flex-wrap:wrap"><div class="flex" style="gap:4px;flex-wrap:wrap">${qBtns}</div>
+          <button class="bt bxs" onclick="_prExportCSV('${qsel}')">⬇ CSV</button></div></div>`;
+    if(list.length){
+      html+=`<div style="overflow:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+          <th style="padding:5px 8px">Radiologist</th><th style="padding:5px 8px;text-align:right">Reviews</th><th style="padding:5px 8px;text-align:right">Mean</th>
+          <th style="padding:5px 8px;text-align:right">% discordant</th><th style="padding:5px 8px;min-width:130px">Distribution</th></tr></thead>
+        <tbody>${list.map(g=>{const p=_physById(g.pid);const mean=g.sum/g.n,disc=100*((g.dist[3]||0)+(g.dist[4]||0))/g.n;
+          return `<tr style="border-bottom:1px solid var(--bdr)">
+            <td style="padding:4px 8px">${p?escHtml(p.last)+', '+escHtml(p.first):('#'+g.pid)}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums">${g.n}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums;font-weight:700">${mean.toFixed(2)}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums;color:${disc>10?'var(--red-t)':'var(--txt2)'}">${disc.toFixed(0)}%</td>
+            <td style="padding:4px 8px">${_prBar(g.dist,g.n)}</td></tr>`;}).join('')}</tbody></table></div>`;
+      // Aggregated comments across the quarter.
+      const allC=[]; list.forEach(g=>g.comments.forEach(c=>allC.push({...c,reviewed:g.pid})));
+      if(allC.length){
+        html+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em">${allC.length} comment${allC.length===1?'':'s'} this quarter</summary>
+          <div style="margin-top:6px">${allC.map(c=>{const rp=_physById(c.reviewed),by=(c.by!=null)?_physById(c.by):null;
+            return `<div style="border-left:3px solid ${_PR_COLORS[c.score]};padding:4px 8px;margin-bottom:5px;font-size:12px;background:rgba(127,127,127,0.05)">
+              <span style="font-weight:700;color:${_PR_COLORS[c.score]}">${c.score}</span>
+              <span style="color:var(--txt3)"> ${by?escHtml(by.last):'?'} → ${rp?escHtml(rp.last):'#'+c.reviewed}:</span> ${escHtml(c.text)}</div>`;}).join('')}</div></details>`;
+      }
+    } else {
+      html+=`<div class="note ni" style="font-size:12px;margin-top:8px">No completed peer reviews in ${escHtml(qsel)}.</div>`;
+    }
+    html+=`</div>`;
+  }
+
+  host.innerHTML=html;
+  const fr=document.getElementById('pr-find'); if(_prFindMrn && fr){ _prFind(); }
+}
+function _prSetQuarter(q){ _prQuarter=q; renderPeerReview(); }
+function _prExportCSV(q){
+  const rows=_PR_REVIEWS.filter(v=>v.quarter===q && v.status==='completed');
+  const esc=s=>`"${String(s==null?'':s).replace(/"/g,'""')}"`;
+  const lines=[['quarter','reviewed_rad','reviewer_rad','score','label','comments','signed_report','ts'].join(',')];
+  rows.forEach(v=>{const rp=(v.reviewed_phys_id!=null)?_physById(v.reviewed_phys_id):null,by=(v.reviewer_phys_id!=null)?_physById(v.reviewer_phys_id):null;
+    lines.push([esc(v.quarter),esc(rp?rp.last+', '+rp.first:v.reviewed_phys_id),esc(by?by.last+', '+by.first:v.reviewer_phys_id),esc(v.score),esc(_PR_LABELS[v.score]||''),esc(v.comments||''),esc(v.accession||v.report_uid||''),esc(v.ts||'')].join(','));});
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`peer-review-${q}.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
