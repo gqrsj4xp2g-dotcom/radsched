@@ -31631,7 +31631,15 @@ function renderWrvu(){
     <div style="font-size:12px;color:var(--txt3)">${escHtml(range.label)} · <span style="color:var(--green-t)">● live</span></div></div>`;
   if(_RS_REPORTS_AT===0){ host.innerHTML=html+`<div class="note ni">Loading signed reports…</div>`; return; }
 
-  const inRange=_RS_REPORTS.filter(r=>{ const d=(r.signed_at||'').slice(0,10); return d && d>=range.from && d<range.to; });
+  // Bucket on the viewer's LOCAL calendar date (not the UTC date-slice) so an
+  // evening/overnight read isn't misattributed across month/quarter boundaries —
+  // _wrvuRange's bounds are local, so the row basis must be local too.
+  const inRange=_RS_REPORTS.filter(r=>{
+    if(!r.signed_at) return false;
+    const dt=new Date(r.signed_at); if(isNaN(dt.getTime())) return false;
+    const d=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    return d>=range.from && d<range.to;
+  });
   const byPhys=new Map(); let unmatched=0, unscored=0;
   inRange.forEach(r=>{
     if(r.phys_id==null) unmatched++;
