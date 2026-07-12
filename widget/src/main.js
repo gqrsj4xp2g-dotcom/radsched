@@ -165,6 +165,36 @@ async function checkForUpdates(opts){
             }
             resolve(null); return;
           }
+          // ── Loop-breaker #1 (primary): the ASSET's own version must be newer
+          // than what's installed. electron-builder always embeds the version
+          // in the filename, so a mis-published release whose binary isn't
+          // actually newer is caught here — we refuse to "update" into a loop.
+          const assetVer = _parseVerFromName(asset.name);
+          if(assetVer && _versionCmp(assetVer, currentVer) <= 0){
+            console.warn('[update] suppressed: tag ' + latestVer + ' but asset "' + asset.name + '" (' + assetVer + ') is not newer than installed ' + currentVer);
+            if(interactive && mainWindow){
+              mainWindow.webContents.send('rs:update-info', { kind:'stale-asset', latestVersion: latestVer, assetVersion: assetVer, currentVersion: currentVer, releaseUrl: release.html_url });
+            }
+            resolve(null); return;
+          }
+          // ── Loop-breaker #2 (backstop, for assets with no parseable version):
+          // if we keep being offered the same target while still stuck at the
+          // same running version, a prior auto-update didn't advance us. Count
+          // at most once per launch; stop after the second stuck cycle.
+          const _st = _readUpdateState();
+          if(_st.target === latestVer && _st.fromVer === currentVer){
+            if(!_loopGuardCountedThisRun){ _st.attempts = (_st.attempts || 1) + 1; _loopGuardCountedThisRun = true; _writeUpdateState(_st); }
+            if((_st.attempts || 1) >= 2){
+              console.warn('[update] suppressed: update to ' + latestVer + ' from ' + currentVer + ' has not advanced after ' + _st.attempts + ' attempts');
+              if(interactive && mainWindow){
+                mainWindow.webContents.send('rs:update-info', { kind:'update-stuck', latestVersion: latestVer, currentVersion: currentVer, releaseUrl: release.html_url });
+              }
+              resolve(null); return;
+            }
+          } else if(!_loopGuardCountedThisRun){
+            _writeUpdateState({ target: latestVer, fromVer: currentVer, attempts: 1 });
+            _loopGuardCountedThisRun = true;
+          }
           // Notify the renderer to show the update banner.
           if(mainWindow){
             mainWindow.webContents.send('rs:update-available', {
