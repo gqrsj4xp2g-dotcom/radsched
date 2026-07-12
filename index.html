@@ -31490,9 +31490,22 @@ function _rsRerenderActive(){
     if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function'){ renderPeerReview(); return; }
   }catch(_){}
 }
+// Debounced reports refresh — a score-back pass writes many rows in a burst,
+// each echoing a realtime event; collapse them into one re-pull.
+let _rsRtDebounce = null;
+function _rsRtRefresh(){
+  if(_rsRtDebounce) clearTimeout(_rsRtDebounce);
+  _rsRtDebounce = setTimeout(()=>{ _rsRtDebounce = null; _rsReportsPull(true).then(_rsRerenderActive); }, 800);
+}
+function _prLiveRefresh(){
+  _prPull(true).then(()=>{
+    if(typeof _prUpdateNavBadge==='function') _prUpdateNavBadge();
+    if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview();
+  });
+}
 // Live updates: subscribe to rs_reports + rs_peer_reviews changes for this
-// practice (realtime honors SELECT RLS). A 45s poll — only while a consumer tab
-// is visible — is the reliable fallback if the realtime socket is unavailable.
+// practice (realtime honors SELECT RLS). A 45s poll is the fallback if the
+// realtime socket is unavailable.
 function _rsReportsStartLive(){
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(sb && !_rsReportsChannel){
@@ -31500,18 +31513,22 @@ function _rsReportsStartLive(){
       const pid = _rsPracticeId();
       _rsReportsChannel = sb.channel('rs-reports-'+pid)
         .on('postgres_changes', {event:'*', schema:'public', table:'rs_reports', filter:`practice_id=eq.${pid}`},
-          ()=>{ _rsReportsPull(true).then(_rsRerenderActive); })
+          ()=>{ _rsRtRefresh(); })
         .on('postgres_changes', {event:'*', schema:'public', table:'rs_peer_reviews', filter:`practice_id=eq.${pid}`},
-          ()=>{ _prPull(true).then(()=>{ if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview(); }); })
+          ()=>{ _prLiveRefresh(); })
         .subscribe(()=>{});
     }catch(_){ _rsReportsChannel = null; }
   }
   if(!_rsPollTimer){
     _rsPollTimer = setInterval(()=>{
+      if(!CU) return;
       const vis = document.getElementById('page-wrvu')?.classList.contains('on')
                || document.getElementById('page-peer-review')?.classList.contains('on')
                || document.getElementById('page-coding')?.classList.contains('on');
-      if(vis && CU) _rsReportsPull(true).then(_rsRerenderActive);
+      if(vis) _rsReportsPull(true).then(_rsRerenderActive);
+      // The ⚖️ pending-review badge lives on the persistent nav — poll it from
+      // ANY tab so the realtime socket isn't the only path to a fresh badge.
+      _prLiveRefresh();
     }, 45000);
   }
 }
