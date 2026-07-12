@@ -23,15 +23,23 @@ That script:
 
 The output file you distribute is `widget/dist/RadScheduler-Widget-1.0.0.dmg` (or the `-arm64` variant for Apple Silicon).
 
-### "I get an unidentified developer warning"
+### "The app won't open" / "unidentified developer" / "app is damaged"
 
-That's expected for unsigned builds. First-time launch instructions for physicians:
+Expected for unsigned, un-notarized builds. **Important:** on **macOS 15 (Sequoia) and macOS 26**, the old right-click → **Open** shortcut no longer works for un-notarized apps — Gatekeeper blocks them outright, and a widget downloaded from a GitHub release carries the `com.apple.quarantine` flag that triggers this. This is the single most common reason the widget "won't launch" on a modern Mac. Use one of these:
 
-1. Right-click the app → **Open**
-2. Click **Open** in the warning dialog
-3. From now on, double-click works normally
+**Option A — Settings (per physician, no Terminal):**
+1. Double-click the app once (it will be blocked).
+2. Open **System Settings → Privacy & Security**, scroll to the bottom.
+3. Next to "RadScheduler Widget was blocked…", click **Open Anyway**, then confirm.
+4. From then on it launches normally.
 
-To eliminate the warning entirely, see *Code signing* below.
+**Option B — Terminal (one command, most reliable):**
+```bash
+xattr -dr com.apple.quarantine "/Applications/RadScheduler Widget.app"
+```
+Then double-click to launch.
+
+**The real fix** is to notarize the build with an Apple Developer ID so neither step is needed — see *Code signing* below. Until the app is notarized, every downloaded copy needs Option A or B on first launch.
 
 ---
 
