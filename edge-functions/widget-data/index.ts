@@ -454,7 +454,7 @@ Deno.serve(async (req: Request) => {
 
   // ── READ ────────────────────────────────────────────────────────
   if (action === 'read') {
-    return jsonResp({ data: practice });
+    return jsonResp({ data: sanitizeForWidget(practice) });
   }
 
   async function loadFreshPracticeForWrite(): Promise<any> {
