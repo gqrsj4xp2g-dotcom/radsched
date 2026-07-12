@@ -195,5 +195,15 @@ serve(async (req: Request) => {
   if (upErr) return json({ error: "store failed: " + upErr.message }, 500);
   sb.from("rs_ingest_tokens").update({ last_used_at: new Date().toISOString() }).eq("token", token).then(() => {});
 
+  // Auto peer review — the first signed report of a rad's shift triggers one
+  // pending peer review of a prior study. Idempotent server-side (once per rad
+  // per calendar day, deduped against the daily roster sweep). Fire-and-forget:
+  // never blocks or fails the ingest.
+  if (phys_id != null) {
+    const shiftDate = (meta.signed_at || new Date().toISOString()).slice(0, 10);
+    sb.rpc("rs_peer_review_autotrigger", { p_practice: practice_id, p_phys_id: phys_id, p_shift_date: shiftDate })
+      .then(() => {}, () => {});
+  }
+
   return json({ ok: true, report_uid, phys_id, matched: phys_id != null, interpreter: meta.interpreter || null });
 });
