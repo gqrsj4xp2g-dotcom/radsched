@@ -31992,9 +31992,10 @@ function _codingPacsRender(){
         <div style="font-size:11px;color:var(--txt3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.patient_name||'—')} · ${escHtml((r.signed_at||'').slice(0,10))} · ${p?escHtml(p.last):'unmatched'}${r.wrvu!=null?' · '+(+r.wrvu).toFixed(1)+' wRVU':''}</div></div>
       <span class="bt bxs">Load →</span></div>`;}).join('');
 }
-function _codingPacsPick(el){
+async function _codingPacsPick(el){
   const uid=el&&el.dataset?el.dataset.uid:null; const r=_RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
-  const ta=document.getElementById('coding-input'); if(ta) ta.value=r.report_text||'';
+  const txt=await _rsFetchReportText(uid);   // fetched on demand (not in bulk pull)
+  const ta=document.getElementById('coding-input'); if(ta) ta.value=txt||'';
   _codingPacsClose();
   if(typeof window.codingAnalyze==='function'){ try{ window.codingAnalyze(); }catch(_){} }
 }
