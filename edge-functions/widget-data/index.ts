@@ -426,7 +426,7 @@ Deno.serve(async (req: Request) => {
 
   // Action allowlist — reject anything we don't explicitly support
   // before we waste a DB read on it.
-  const ALLOWED_ACTIONS = new Set(['read', 'add-credit', 'edit-credit', 'delete-credit']);
+  const ALLOWED_ACTIONS = new Set(['read', 'add-credit', 'edit-credit', 'delete-credit', 'peer-open']);
   if (!ALLOWED_ACTIONS.has(action)) return jsonResp({ error: `unknown action: ${action}` }, 400);
 
   // Helper: the radscheduler table's `data` column is text (NOT jsonb)
