@@ -31379,11 +31379,19 @@ function _rsPracticeId(){
 // Bilateral (-50) lines count physician work at 150%; NCCI-blocked lines
 // contribute nothing. Returns {wrvu, codes} — or null if the engine isn't
 // loaded yet (so the row stays unscored and is retried later).
+// CPT code → work-RVU, built once from the static RVU_REFERENCE (was rebuilt
+// on every _reportWrvu call → up to 100× per score pass).
+let _RVU_WRVU;
+function _rvuWrvuMap(){
+  if(!_RVU_WRVU){ _RVU_WRVU = new Map(); (window.RVU_REFERENCE||[]).forEach(row=>{ _RVU_WRVU.set(row[0], +row[3]||0); }); }
+  return _RVU_WRVU;
+}
 function _reportWrvu(text){
   if(typeof window.codingScore !== 'function') return null;
-  let r; try{ r = window.codingScore(text); }catch(_){ return {wrvu:0, codes:[]}; }
-  const ref = new Map();
-  (window.RVU_REFERENCE||[]).forEach(row=>{ ref.set(row[0], +row[3]||0); });
+  // A per-report engine throw returns null → the row is LEFT unscored (retried
+  // next pass), never persisted as a permanent wrong 0.
+  let r; try{ r = window.codingScore(text); }catch(_){ return null; }
+  const ref = _rvuWrvuMap();
   let total = 0; const codes = [];
   ((r && r.lines) || []).forEach(ln=>{
     if(ln.blocked_by_ncci) return;
