@@ -38,6 +38,15 @@ function hl7Name(s?: string): string {
   return String(s || "").replace(/[\^&]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// OBR-24 Diagnostic Service Section ID → modality bucket (DICOM-ish codes).
+function hl7Modality(code: string): string {
+  const M: Record<string, string> = {
+    CT: "CT", MR: "MR", US: "US", XR: "XR", CR: "XR", DX: "XR", RG: "XR",
+    RF: "FLUORO", XA: "FLUORO", NM: "NM", PT: "PET", MG: "MAMMO", MA: "MAMMO",
+  };
+  return M[(code || "").toUpperCase().trim()] || "";
+}
+
 // HL7 DTM → ISO. Honors an explicit ±HHMM timezone offset when present so the
 // signed time (and thus the peer-review shift day) is correct; otherwise UTC.
 function hl7Date(s?: string): string {
