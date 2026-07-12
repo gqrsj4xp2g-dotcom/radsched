@@ -9004,6 +9004,31 @@ create table pacs_inbound (
     }
   };
 
+  // Send the pasted payload through the REAL pacs-ingest edge function (same
+  // path a live PACS feed uses) so it lands in rs_reports, gets attributed to a
+  // physician, and flows to the wRVU tracker / coding "Load from PACS" / peer
+  // review. Admin-only (needs the practice ingest token).
+  window.pacsIngestToStore = async function(){
+    const fmt = document.getElementById("pacs-ingest-format").value;
+    const raw = document.getElementById("pacs-ingest-body").value;
+    if(!raw.trim()){ pacsIngestStatus("Paste a message first.","error"); return; }
+    if(typeof _rsIngestPaste !== "function"){ pacsIngestStatus("Ingest unavailable — sign in as an admin.","error"); return; }
+    let payload;
+    if(fmt==="hl7") payload = {message: raw};
+    else if(fmt==="fhir"){ try{ payload = {resource: JSON.parse(raw)}; }catch(e){ pacsIngestStatus("Invalid FHIR JSON.","error"); return; } }
+    else payload = {report_text: raw};
+    const sendFmt = (fmt==="plain") ? "json" : fmt;
+    pacsIngestStatus("Ingesting…","ok");
+    let res;
+    try { res = await _rsIngestPaste(sendFmt, payload); }
+    catch(e){ pacsIngestStatus("✗ "+(e&&e.message||e),"error"); return; }
+    if(!res || res.error){ pacsIngestStatus("✗ "+((res&&res.error)||"ingest failed"),"error"); return; }
+    const who = res.matched ? "" : " (interpreter unmatched — set PACS aliases on the physician)";
+    pacsIngestStatus(`✓ Stored ${res.report_uid}${who}.`,"ok");
+    // Refresh the shared cache so the new report shows up immediately.
+    try{ if(typeof _rsReportsPull==="function") _rsReportsPull(true).then(()=>{ if(typeof _rsRerenderActive==="function") _rsRerenderActive(); }); }catch(_){}
+  };
+
   function renderMeta(meta){
     if(!meta || !Object.keys(meta).length) return `<span style="color:var(--txt3);font-size:12px">(no metadata extracted)</span>`;
     const rows = Object.entries(meta).filter(([_,v])=>v).map(([k,v])=>
