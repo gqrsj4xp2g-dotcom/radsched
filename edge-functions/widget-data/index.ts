@@ -67,6 +67,25 @@ function codeFingerprint(code: string): string {
   return String(code || '').trim().slice(-8);
 }
 
+// Strip practice-level secrets from the blob before handing it to the widget.
+// SECURITY (2026-07): the `read` action returned the entire practice JSON,
+// which included cfg._widgetSecret (the HMAC signing key for pairing codes) and
+// the widgetPairings records — a widget that received one could forge or
+// enumerate pairings. The widget only needs schedule/wRVU/credit data, so we
+// deep-clone and remove anything secret-shaped.
+function sanitizeForWidget(p: any): any {
+  let c: any;
+  try { c = JSON.parse(JSON.stringify(p)); } catch (_) { return {}; }
+  if (c && c.cfg && typeof c.cfg === 'object') {
+    for (const k of Object.keys(c.cfg)) {
+      if (/secret|token|password|apikey|api_key|privatekey|private_key/i.test(k)) delete c.cfg[k];
+    }
+  }
+  if (c) delete c.widgetPairings;               // per-code signing material
+  if (Array.isArray(c?.users)) c.users.forEach((u: any) => { if (u) { delete u.pw; delete u.password; } });
+  return c;
+}
+
 // `purpose` differentiates two issuing flows that share the same
 // HMAC envelope: 'widget' (read+write — credits) vs 'cal-feed'
 // (read-only — ICS). The verifier enforces that the caller's
