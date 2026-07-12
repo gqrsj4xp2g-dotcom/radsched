@@ -31658,14 +31658,24 @@ function renderWrvu(){
     const d=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
     return d>=range.from && d<range.to;
   });
+  // Authoritative per-phys totals come from the server RPC over the FULL table
+  // (the cache is capped at 3000 rows). Fetch when the period changes; fall back
+  // to cache aggregation until it lands.
+  if(_wrvuSummaryKey !== _wrvuPeriod && !_wrvuSummaryLoading){
+    _wrvuSummaryLoading = true;
+    _wrvuLoadSummary(_wrvuPeriod, range).then(ok=>{ _wrvuSummaryLoading=false; if(ok && document.getElementById('page-wrvu')?.classList.contains('on')) renderWrvu(); });
+  }
+  const summaryReady = (_wrvuSummaryKey === _wrvuPeriod);
   const byPhys=new Map(); let unmatched=0, unscored=0;
-  inRange.forEach(r=>{
-    if(r.phys_id==null) unmatched++;
-    if(r.wrvu==null) unscored++;
-    if(r.phys_id==null) return;
-    if(!byPhys.has(r.phys_id)) byPhys.set(r.phys_id,{pid:r.phys_id,wrvu:0,count:0});
-    const g=byPhys.get(r.phys_id); g.count++; g.wrvu+=(+r.wrvu||0);
-  });
+  // unmatched / awaiting-scoring are informational hints from the recent cache.
+  inRange.forEach(r=>{ if(r.phys_id==null) unmatched++; if(r.wrvu==null) unscored++; });
+  if(summaryReady){
+    _wrvuSummary.forEach((v,pid)=>byPhys.set(pid,{pid,wrvu:v.wrvu,count:v.count}));
+  } else {
+    inRange.forEach(r=>{ if(r.phys_id==null) return;
+      if(!byPhys.has(r.phys_id)) byPhys.set(r.phys_id,{pid:r.phys_id,wrvu:0,count:0});
+      const g=byPhys.get(r.phys_id); g.count++; g.wrvu+=(+r.wrvu||0); });
+  }
 
   if(myPid!=null){
     const mine=byPhys.get(myPid)||{wrvu:0,count:0};
