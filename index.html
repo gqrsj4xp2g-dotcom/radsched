@@ -18469,6 +18469,11 @@ function editPhys(id){
   document.querySelector('#page-physicians .ibox')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
+// Parse the comma-separated PACS aliases input → deduped, trimmed string[].
+function _parsePacsNames(str){
+  return String(str||'').split(',').map(s=>s.trim()).filter(Boolean)
+    .filter((v,i,a)=>a.indexOf(v)===i).slice(0,12);
+}
 function _saveEditPhys(id){
   if(!_adminOnly('edit physicians'))return;
   const p=S.physicians.find(x=>x.id===id);if(!p)return;
