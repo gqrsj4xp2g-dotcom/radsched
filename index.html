@@ -31273,6 +31273,160 @@ async function _migLoadSwaps(){
     return added > 0;
   }catch(_){ return false; }
 }
+// ─────────────────────────────────────────────────────────────────────────
+// PACS reports store (rs_reports) — shared client module (2026-07)
+// ─────────────────────────────────────────────────────────────────────────
+// Signed reports arrive server-side via the `pacs-ingest` edge function and
+// land in public.rs_reports (RLS: same-practice SELECT/UPDATE, insert is
+// service-role-only). This module is the single client gateway the wRVU
+// tracker, the CPT-coding "Load from PACS" source, and the peer-review tab all
+// read through. It pulls the practice's reports, scores any that arrived
+// unscored (wRVU + CPT codes, via the inline coding engine) and writes the
+// result back, caches the set, and keeps it live via a realtime channel plus a
+// visibility-gated poll fallback.
+function _rsPracticeId(){
+  return (CU && CU.practiceId) || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
+}
+// Delivered work-RVU + CPT codes for a report string, via window.codingScore
+// (the DOM-free scorer) and the CMS wRVU reference (RVU_REFERENCE[3]=wRVU).
+// Bilateral (-50) lines count physician work at 150%; NCCI-blocked lines
+// contribute nothing. Returns {wrvu, codes} — or null if the engine isn't
+// loaded yet (so the row stays unscored and is retried later).
+function _reportWrvu(text){
+  if(typeof window.codingScore !== 'function') return null;
+  let r; try{ r = window.codingScore(text); }catch(_){ return {wrvu:0, codes:[]}; }
+  const ref = new Map();
+  (window.RVU_REFERENCE||[]).forEach(row=>{ ref.set(row[0], +row[3]||0); });
+  let total = 0; const codes = [];
+  ((r && r.lines) || []).forEach(ln=>{
+    if(ln.blocked_by_ncci) return;
+    const w = ref.get(ln.code) || 0;
+    const units = ln.units || 1;
+    const bilat = (ln.modifiers||[]).some(m=>m && m.code==='50') ? 1.5 : 1;
+    const lineW = +(w * units * bilat).toFixed(2);
+    total += lineW;
+    codes.push({code: ln.code, short: ln.short||'', wrvu: lineW, units});
+  });
+  return {wrvu: +total.toFixed(2), codes};
+}
+
+let _RS_REPORTS = [];           // cached rows (newest first)
+let _RS_REPORTS_AT = 0;         // last successful pull (ms)
+let _RS_REPORTS_STATE = 'idle'; // idle | loading | ready | error
+let _rsReportsChannel = null;
+let _rsPollTimer = null;
+let _rsScoring = false;
+
+// Pull the practice's reports (RLS-scoped), newest first, then score any that
+// arrived without a wRVU. `force` bypasses the 15s freshness cache.
+async function _rsReportsPull(force){
+  if(!CU) return _RS_REPORTS;
+  if(!force && _RS_REPORTS_STATE==='ready' && (Date.now()-_RS_REPORTS_AT) < 15000) return _RS_REPORTS;
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb) return _RS_REPORTS;   // transient — client not ready
+  _RS_REPORTS_STATE = 'loading';
+  try{
+    const { data, error } = await sb.from('rs_reports')
+      .select('report_uid, accession, mrn, patient_name, exam, modality, phys_id, interpreter_raw, wrvu, cpt_codes, signed_at, source, report_text')
+      .eq('practice_id', _rsPracticeId())
+      .order('signed_at', {ascending:false})
+      .limit(3000);
+    if(error){ _RS_REPORTS_STATE='error'; return _RS_REPORTS; }
+    _RS_REPORTS = Array.isArray(data) ? data : [];
+    _RS_REPORTS_AT = Date.now();
+    _RS_REPORTS_STATE = 'ready';
+    _rsScoreUnscored();   // fire-and-forget; re-renders the visible tab when done
+    return _RS_REPORTS;
+  }catch(_){ _RS_REPORTS_STATE='error'; return _RS_REPORTS; }
+}
+// Score reports whose wRVU is still null (freshly ingested). Writes wrvu +
+// cpt_codes back under same-practice UPDATE RLS. Idempotent across clients
+// (same engine → same numbers), guarded, capped at 100 rows per pass.
+async function _rsScoreUnscored(){
+  if(_rsScoring || typeof window.codingScore !== 'function') return;
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb) return;
+  const pending = _RS_REPORTS.filter(r => r.wrvu == null && r.report_text).slice(0, 100);
+  if(!pending.length) return;
+  _rsScoring = true;
+  const pid = _rsPracticeId();
+  try{
+    for(const r of pending){
+      const scored = _reportWrvu(r.report_text);
+      if(!scored) break;   // engine vanished — leave the rest unscored
+      r.wrvu = scored.wrvu; r.cpt_codes = scored.codes;   // reflect in cache now
+      try{
+        await sb.from('rs_reports').update({ wrvu: scored.wrvu, cpt_codes: scored.codes })
+          .eq('practice_id', pid).eq('report_uid', r.report_uid);
+      }catch(_){}
+    }
+  } finally { _rsScoring = false; }
+  _rsRerenderActive();
+}
+// Re-render whichever reports-consuming tab is currently visible (.page.on).
+function _rsRerenderActive(){
+  try{
+    if(document.getElementById('page-wrvu')?.classList.contains('on') && typeof renderWrvu==='function'){ renderWrvu(); return; }
+    if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function'){ renderPeerReview(); return; }
+  }catch(_){}
+}
+// Live updates: subscribe to rs_reports + rs_peer_reviews changes for this
+// practice (realtime honors SELECT RLS). A 45s poll — only while a consumer tab
+// is visible — is the reliable fallback if the realtime socket is unavailable.
+function _rsReportsStartLive(){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(sb && !_rsReportsChannel){
+    try{
+      const pid = _rsPracticeId();
+      _rsReportsChannel = sb.channel('rs-reports-'+pid)
+        .on('postgres_changes', {event:'*', schema:'public', table:'rs_reports', filter:`practice_id=eq.${pid}`},
+          ()=>{ _rsReportsPull(true).then(_rsRerenderActive); })
+        .on('postgres_changes', {event:'*', schema:'public', table:'rs_peer_reviews', filter:`practice_id=eq.${pid}`},
+          ()=>{ if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview(); })
+        .subscribe(()=>{});
+    }catch(_){ _rsReportsChannel = null; }
+  }
+  if(!_rsPollTimer){
+    _rsPollTimer = setInterval(()=>{
+      const vis = document.getElementById('page-wrvu')?.classList.contains('on')
+               || document.getElementById('page-peer-review')?.classList.contains('on')
+               || document.getElementById('page-coding')?.classList.contains('on');
+      if(vis && CU) _rsReportsPull(true).then(_rsRerenderActive);
+    }, 45000);
+  }
+}
+// Admin-only ingest-token accessors (SECURITY DEFINER RPCs; the token row is
+// otherwise service-role-locked). Used by the PACS Connections tab.
+async function _rsGetIngestToken(){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb) return null;
+  try{ const {data,error} = await sb.rpc('rs_ingest_token_get', {p_practice:_rsPracticeId()}); return error?null:data; }
+  catch(_){ return null; }
+}
+async function _rsRotateIngestToken(){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb) return null;
+  try{ const {data,error} = await sb.rpc('rs_ingest_token_rotate', {p_practice:_rsPracticeId()}); return error?null:data; }
+  catch(_){ return null; }
+}
+// Ingest a pasted HL7/FHIR/JSON payload through the REAL production path — the
+// same pacs-ingest edge function a live PACS feed hits — using the practice's
+// ingest token. Returns the endpoint JSON ({ok, report_uid, phys_id, matched…}).
+async function _rsIngestPaste(format, payload){
+  const token = await _rsGetIngestToken();
+  if(!token) return {error:'No ingest token available (admin only).'};
+  const base = (typeof _getUrl==='function' && _getUrl()) ? _getUrl() : _SUPABASE_URL;
+  const anon = (typeof _getKey==='function' && _getKey()) ? _getKey() : _SUPABASE_KEY;
+  try{
+    const res = await fetch(base.replace(/\/$/,'') + '/functions/v1/pacs-ingest', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':anon},
+      body:JSON.stringify(Object.assign({format}, payload))
+    });
+    return await res.json().catch(()=>({error:'Unexpected response from ingest endpoint.'}));
+  }catch(e){ return {error:String((e&&e.message)||e)}; }
+}
+
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
