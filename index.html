@@ -31451,6 +31451,116 @@ async function _rsIngestPaste(format, payload){
   }catch(e){ return {error:String((e&&e.message)||e)}; }
 }
 
+// ── wRVU tracker (per-radiologist, live from rs_reports) ──────────────────
+let _wrvuPeriod = 'month';   // month | quarter | lastq | ytd
+let _wrvuRad = null;         // drill-in phys_id (null = self)
+let _wrvuKicked = false;
+function _wrvuSetPeriod(p){ _wrvuPeriod = p; renderWrvu(); }
+function _wrvuSetRad(v){ _wrvuRad = (v===''||v==null) ? null : (+v); renderWrvu(); }
+// Period → [from, to) ISO date bounds (to is first day of the next period).
+function _wrvuRange(period){
+  const now = new Date(); const y = now.getFullYear(), m = now.getMonth();
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const q = Math.floor(m/3);
+  if(period==='quarter') return {from:iso(new Date(y,q*3,1)), to:iso(new Date(y,q*3+3,1)), label:`Q${q+1} ${y}`};
+  if(period==='lastq'){ const lq=q===0?3:q-1, ly=q===0?y-1:y; return {from:iso(new Date(ly,lq*3,1)), to:iso(new Date(ly,lq*3+3,1)), label:`Q${lq+1} ${ly}`}; }
+  if(period==='ytd') return {from:`${y}-01-01`, to:iso(new Date(y+1,0,1)), label:`${y} YTD`};
+  return {from:iso(new Date(y,m,1)), to:iso(new Date(y,m+1,1)), label:new Date(y,m,1).toLocaleString('en-US',{month:'long'})+' '+y};
+}
+function _wrvuStat(label,val,sub){
+  return `<div class="card" style="flex:1;min-width:150px;text-align:center;padding:14px">
+    <div style="font-size:26px;font-weight:800;color:var(--blue);tabular-nums">${escHtml(val)}</div>
+    <div style="font-size:12px;color:var(--txt2);margin-top:2px">${escHtml(label)}</div>
+    ${sub?`<div style="font-size:10px;color:var(--txt3)">${escHtml(sub)}</div>`:''}</div>`;
+}
+function renderWrvu(){
+  const host=document.getElementById('wrvu-body'); if(!host) return;
+  if(!CU){ host.innerHTML=`<div class="note ni">Sign in to view the wRVU tracker.</div>`; return; }
+  _rsReportsStartLive();
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
+  const myPid=CU.physId;
+  // First-ever load; later refreshes arrive via realtime/poll.
+  if(_RS_REPORTS_AT===0 && !_wrvuKicked){
+    _wrvuKicked=true;
+    _rsReportsPull(true).then(()=>{ _wrvuKicked=false; if(document.getElementById('page-wrvu')?.classList.contains('on')) renderWrvu(); });
+  }
+  const range=_wrvuRange(_wrvuPeriod);
+  const periodBtns=[['month','This month'],['quarter','This quarter'],['lastq','Last quarter'],['ytd','Year to date']]
+    .map(([k,l])=>`<button class="bt bxs" style="${_wrvuPeriod===k?'background:var(--blue);color:#fff;border-color:var(--blue)':''}" onclick="_wrvuSetPeriod('${k}')">${l}</button>`).join(' ');
+  let html=`<div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <div class="flex" style="gap:4px;flex-wrap:wrap">${periodBtns}</div>
+    <div style="font-size:12px;color:var(--txt3)">${escHtml(range.label)} · <span style="color:var(--green-t)">● live</span></div></div>`;
+  if(_RS_REPORTS_AT===0){ host.innerHTML=html+`<div class="note ni">Loading signed reports…</div>`; return; }
+
+  const inRange=_RS_REPORTS.filter(r=>{ const d=(r.signed_at||'').slice(0,10); return d && d>=range.from && d<range.to; });
+  const byPhys=new Map(); let unmatched=0, unscored=0;
+  inRange.forEach(r=>{
+    if(r.phys_id==null) unmatched++;
+    if(r.wrvu==null) unscored++;
+    if(r.phys_id==null) return;
+    if(!byPhys.has(r.phys_id)) byPhys.set(r.phys_id,{pid:r.phys_id,wrvu:0,count:0});
+    const g=byPhys.get(r.phys_id); g.count++; g.wrvu+=(+r.wrvu||0);
+  });
+
+  if(myPid!=null){
+    const mine=byPhys.get(myPid)||{wrvu:0,count:0};
+    const avg=mine.count?mine.wrvu/mine.count:0;
+    html+=`<div class="flex" style="gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      ${_wrvuStat('My wRVU', mine.wrvu.toFixed(1), range.label)}
+      ${_wrvuStat('My reports', String(mine.count), 'signed')}
+      ${_wrvuStat('Avg wRVU / report', avg.toFixed(2), '')}</div>`;
+  } else {
+    html+=`<div class="note ni" style="margin-bottom:14px">Your login isn't linked to a physician record, so your personal wRVU can't be shown.${isAdm?' Practice totals are below.':''}</div>`;
+  }
+  if(unscored>0){
+    html+=`<div class="note ni" style="margin-bottom:12px;font-size:12px">${unscored} report${unscored===1?'':'s'} in this period ${unscored===1?'is':'are'} awaiting CPT scoring — open the 💊 CPT Coding tab once to load the engine and they'll score automatically.</div>`;
+  }
+
+  if(isAdm){
+    const list=[...byPhys.values()].sort((a,b)=>b.wrvu-a.wrvu);
+    const totWrvu=list.reduce((s,g)=>s+g.wrvu,0), totCnt=list.reduce((s,g)=>s+g.count,0);
+    html+=`<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Practice leaderboard <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${escHtml(range.label)} · ${totWrvu.toFixed(1)} wRVU / ${totCnt} reports</span></div>
+      ${list.length? `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+          <th style="padding:5px 8px">#</th><th style="padding:5px 8px">Radiologist</th><th style="padding:5px 8px;text-align:right">wRVU</th>
+          <th style="padding:5px 8px;text-align:right">Reports</th><th style="padding:5px 8px;text-align:right">Avg</th><th style="padding:5px 8px;text-align:right">Share</th></tr></thead>
+        <tbody>${list.map((g,i)=>{const p=_physById(g.pid);const nm=p?`${escHtml(p.last)}, ${escHtml(p.first)}`:('#'+g.pid);
+          const avg=g.count?(g.wrvu/g.count):0, share=totWrvu?100*g.wrvu/totWrvu:0;
+          return `<tr style="border-bottom:1px solid var(--bdr);${g.pid===myPid?'background:rgba(37,99,235,0.08)':''}">
+            <td style="padding:4px 8px;color:var(--txt3)">${i+1}</td>
+            <td style="padding:4px 8px"><a href="#" onclick="_wrvuSetRad('${g.pid}');return false" style="color:var(--blue)">${nm}</a></td>
+            <td style="padding:4px 8px;text-align:right;font-weight:700;tabular-nums">${g.wrvu.toFixed(1)}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums">${g.count}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums">${avg.toFixed(2)}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums;color:var(--txt3)">${share.toFixed(0)}%</td></tr>`;}).join('')}</tbody></table></div>`
+      : `<div class="note ni" style="font-size:12px">No signed reports in this period yet.</div>`}
+      ${unmatched>0?`<div style="font-size:11px;color:var(--txt3);margin-top:8px">${unmatched} report${unmatched===1?'':'s'} couldn't be matched to a radiologist (interpreter name unrecognized). Set each physician's PACS name aliases under People &amp; Practice → Physicians.</div>`:''}
+    </div>`;
+  }
+
+  const focusPid=(_wrvuRad!=null)?_wrvuRad:(myPid!=null?myPid:null);
+  if(focusPid!=null && (isAdm || focusPid===myPid)){
+    const p=_physById(focusPid);
+    const recent=inRange.filter(r=>r.phys_id===focusPid).slice(0,50);
+    html+=`<div class="card">
+      <div class="card-title">${p?escHtml(p.last)+', '+escHtml(p.first):'My'} reports <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${recent.length} shown</span>
+        ${isAdm && _wrvuRad!=null && _wrvuRad!==myPid?` <button class="bt bxs" style="margin-left:6px" onclick="_wrvuSetRad('')">← back to me</button>`:''}</div>
+      ${recent.length? `<div style="overflow:auto;max-height:430px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+          <th style="padding:5px 8px">Signed</th><th style="padding:5px 8px">Exam</th><th style="padding:5px 8px">CPT</th><th style="padding:5px 8px;text-align:right">wRVU</th></tr></thead>
+        <tbody>${recent.map(r=>{const codes=(Array.isArray(r.cpt_codes)?r.cpt_codes:[]).map(c=>c.code).join(', ');
+          return `<tr style="border-bottom:1px solid var(--bdr)">
+            <td style="padding:4px 8px;white-space:nowrap">${escHtml((r.signed_at||'').slice(0,10))}</td>
+            <td style="padding:4px 8px">${escHtml(r.exam||r.modality||'—')}</td>
+            <td style="padding:4px 8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--txt3)">${escHtml(codes||'—')}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums">${r.wrvu==null?'<span style="color:var(--txt3)">…</span>':(+r.wrvu).toFixed(1)}</td></tr>`;}).join('')}</tbody></table></div>`
+      : `<div class="note ni" style="font-size:12px">No reports in this period.</div>`}
+    </div>`;
+  }
+  host.innerHTML=html;
+}
+
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
