@@ -605,7 +605,7 @@ Deno.serve(async (req: Request) => {
       .eq('practice_id', payload.practiceId).eq('mrn', mrn)
       .order('signed_at', { ascending: false }).limit(25);
     const prior = (priors || []).find((r: any) =>
-      r.phys_id != null && r.phys_id !== readerPhysId && r.accession !== accIn);
+      r.phys_id != null && Number(r.phys_id) !== Number(readerPhysId) && r.accession !== accIn);
     if (!prior) return jsonResp({ error: 'no prior report by another radiologist for this patient' }, 404);
     const { data: existing } = await sb.from('rs_peer_reviews')
       .select('id, status').eq('practice_id', payload.practiceId)
