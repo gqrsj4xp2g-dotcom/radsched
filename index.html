@@ -31413,8 +31413,11 @@ async function _rsReportsPull(force){
   if(!sb) return _RS_REPORTS;   // transient — client not ready
   _RS_REPORTS_STATE = 'loading';
   try{
+    // report_text is intentionally EXCLUDED — it is KBs per row and this pull
+    // runs on every tab open + 45s poll + realtime tick. It is fetched lazily
+    // (only for unscored rows being scored, or the single report a user opens).
     const { data, error } = await sb.from('rs_reports')
-      .select('report_uid, accession, mrn, patient_name, exam, modality, phys_id, interpreter_raw, wrvu, cpt_codes, signed_at, source, report_text')
+      .select('report_uid, accession, mrn, patient_name, exam, modality, body_part, phys_id, interpreter_raw, wrvu, cpt_codes, signed_at, source')
       .eq('practice_id', _rsPracticeId())
       .order('signed_at', {ascending:false})
       .limit(3000);
