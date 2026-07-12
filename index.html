@@ -31456,17 +31456,19 @@ async function _rsScoreUnscored(){
       .select('report_uid, report_text').eq('practice_id', pid).in('report_uid', uids);
     if(error || !Array.isArray(texts)) return;
     const textByUid = new Map(texts.map(t => [t.report_uid, t.report_text]));
+    const writes = [];
     for(const r of pending){
       const txt = textByUid.get(r.report_uid);
       if(!txt) continue;
       const scored = _reportWrvu(txt);
-      if(!scored) break;   // engine vanished — leave the rest unscored
+      if(!scored) continue;   // per-report engine throw → leave unscored, retried next pass
       r.wrvu = scored.wrvu; r.cpt_codes = scored.codes;   // reflect in cache now
-      try{
-        await sb.from('rs_reports').update({ wrvu: scored.wrvu, cpt_codes: scored.codes })
-          .eq('practice_id', pid).eq('report_uid', r.report_uid);
-      }catch(_){}
+      writes.push(sb.from('rs_reports').update({ wrvu: scored.wrvu, cpt_codes: scored.codes })
+        .eq('practice_id', pid).eq('report_uid', r.report_uid));
     }
+    // Issue all score-back writes CONCURRENTLY (was up to 100 sequential
+    // round-trips blocking the pass).
+    if(writes.length) await Promise.allSettled(writes);
   }catch(_){ } finally { _rsScoring = false; }
   _rsRerenderActive();
 }
