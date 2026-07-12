@@ -31982,7 +31982,7 @@ function _codingPacsClose(){ const ov=document.getElementById('coding-pacs-picke
 function _codingPacsRender(){
   const list=document.getElementById('coding-pacs-list'); if(!list) return;
   const q=(document.getElementById('coding-pacs-search')?.value||'').trim().toLowerCase();
-  let rows=_RS_REPORTS.filter(r=>r.report_text);
+  let rows=_RS_REPORTS.slice();   // report_text is fetched on pick, not pre-filtered
   if(q) rows=rows.filter(r=>((r.patient_name||'')+' '+(r.mrn||'')+' '+(r.accession||'')+' '+(r.exam||'')).toLowerCase().includes(q));
   rows=rows.slice(0,200);
   if(!rows.length){ list.innerHTML=`<div class="note ni" style="font-size:12px">${_RS_REPORTS.length?'No matching reports.':'No reports in the PACS store yet — ingest reports via 🔌 PACS Connections.'}</div>`; return; }
