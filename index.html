@@ -31605,6 +31605,24 @@ function _wrvuStat(label,val,sub){
     <div style="font-size:12px;color:var(--txt2);margin-top:2px">${escHtml(label)}</div>
     ${sub?`<div style="font-size:10px;color:var(--txt3)">${escHtml(sub)}</div>`:''}</div>`;
 }
+// Server-side per-phys wRVU totals for the period — authoritative over the
+// FULL rs_reports table (the 3000-row cache would silently undercount a busy
+// practice). Cached per period; invalidated by live updates.
+let _wrvuSummary = new Map();     // phys_id -> {wrvu, count}
+let _wrvuSummaryKey = null;       // period the summary is for
+let _wrvuSummaryLoading = false;
+async function _wrvuLoadSummary(period, range){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb) return false;
+  const [fy,fm,fd]=range.from.split('-').map(Number), [ty,tm,td]=range.to.split('-').map(Number);
+  const fromISO=new Date(fy,fm-1,fd).toISOString(), toISO=new Date(ty,tm-1,td).toISOString();  // local-midnight instants
+  try{
+    const {data,error}=await sb.rpc('rs_wrvu_summary',{p_practice:_rsPracticeId(), p_from:fromISO, p_to:toISO});
+    if(error || !Array.isArray(data)) return false;
+    const m=new Map(); data.forEach(r=>{ if(r.phys_id!=null) m.set(r.phys_id,{wrvu:+r.total_wrvu||0, count:+r.n||0}); });
+    _wrvuSummary=m; _wrvuSummaryKey=period; return true;
+  }catch(_){ return false; }
+}
 function renderWrvu(){
   const host=document.getElementById('wrvu-body'); if(!host) return;
   if(!CU){ host.innerHTML=`<div class="note ni">Sign in to view the wRVU tracker.</div>`; return; }
