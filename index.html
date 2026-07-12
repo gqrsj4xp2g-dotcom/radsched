@@ -31638,10 +31638,12 @@ async function _prPull(force){
   const sb=(typeof _initAuthClient==='function')?_initAuthClient():null; if(!sb) return _PR_REVIEWS;
   try{
     const {data,error}=await sb.from('rs_peer_reviews')
-      .select('id, report_uid, accession, reviewed_phys_id, reviewer_phys_id, reviewer_uid, score, comments, quarter, status, ts')
+      .select('id, report_uid, accession, reviewed_phys_id, reviewer_phys_id, reviewer_uid, score, comments, quarter, status, ts, origin, shift_date')
       .eq('practice_id', _rsPracticeId()).order('ts',{ascending:false}).limit(4000);
     if(error) return _PR_REVIEWS;
-    _PR_REVIEWS=Array.isArray(data)?data:[]; _PR_AT=Date.now(); return _PR_REVIEWS;
+    _PR_REVIEWS=Array.isArray(data)?data:[]; _PR_AT=Date.now();
+    _prUpdateNavBadge();
+    return _PR_REVIEWS;
   }catch(_){ return _PR_REVIEWS; }
 }
 // Grading overlay ---------------------------------------------------------
