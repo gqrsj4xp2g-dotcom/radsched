@@ -84,6 +84,30 @@ function _pickAssetForPlatform(assets){
   return assets.find(a => /\.AppImage$/i.test(a.name));
 }
 
+// Parse an x.y.z version out of an electron-builder asset filename
+// (e.g. "RadScheduler Widget-1.0.3-arm64.dmg" → "1.0.3").
+function _parseVerFromName(name){
+  const m = /(\d+\.\d+\.\d+)/.exec(String(name || ''));
+  return m ? m[1] : null;
+}
+
+// Persistent guard against an auto-update RESTART LOOP. If a release is
+// mis-published so its attached binary is NOT actually newer than what's
+// installed (e.g. the tag says widget-v1.1.13 but a stale 1.0.3 dmg is
+// attached — exactly the dist/ version skew this repo had), the tag-vs-running
+// comparison "updates" forever: download → relaunch at the SAME version →
+// re-detect the newer tag → download again. We remember the last target we
+// offered and from which running version; if we keep being offered the same
+// target while still stuck at the same version, we stop auto-updating.
+let _loopGuardCountedThisRun = false;
+function _updateStatePath(){ return path.join(app.getPath('userData'), 'rs-update-state.json'); }
+function _readUpdateState(){
+  try{ return JSON.parse(fs.readFileSync(_updateStatePath(), 'utf8')) || {}; }catch(_){ return {}; }
+}
+function _writeUpdateState(st){
+  try{ fs.writeFileSync(_updateStatePath(), JSON.stringify(st || {})); }catch(_){}
+}
+
 async function checkForUpdates(opts){
   opts = opts || {};
   const interactive = !!opts.interactive;
