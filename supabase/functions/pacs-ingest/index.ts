@@ -210,6 +210,7 @@ serve(async (req: Request) => {
     exam: meta.exam || null,
     report_text,
     modality: modality || null,
+    body_part: body_part || null,
     interpreter_raw: meta.interpreter || null,
     phys_id,
     signed_at: meta.signed_at || new Date().toISOString(),
