@@ -31436,13 +31436,22 @@ async function _rsScoreUnscored(){
   if(_rsScoring || typeof window.codingScore !== 'function') return;
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb) return;
-  const pending = _RS_REPORTS.filter(r => r.wrvu == null && r.report_text).slice(0, 100);
+  const pending = _RS_REPORTS.filter(r => r.wrvu == null).slice(0, 100);
   if(!pending.length) return;
   _rsScoring = true;
   const pid = _rsPracticeId();
   try{
+    // report_text isn't in the lightweight bulk pull — fetch it in ONE batch
+    // for just the unscored rows we're about to score.
+    const uids = pending.map(r => r.report_uid);
+    const { data: texts, error } = await sb.from('rs_reports')
+      .select('report_uid, report_text').eq('practice_id', pid).in('report_uid', uids);
+    if(error || !Array.isArray(texts)) return;
+    const textByUid = new Map(texts.map(t => [t.report_uid, t.report_text]));
     for(const r of pending){
-      const scored = _reportWrvu(r.report_text);
+      const txt = textByUid.get(r.report_uid);
+      if(!txt) continue;
+      const scored = _reportWrvu(txt);
       if(!scored) break;   // engine vanished — leave the rest unscored
       r.wrvu = scored.wrvu; r.cpt_codes = scored.codes;   // reflect in cache now
       try{
@@ -31450,8 +31459,19 @@ async function _rsScoreUnscored(){
           .eq('practice_id', pid).eq('report_uid', r.report_uid);
       }catch(_){}
     }
-  } finally { _rsScoring = false; }
+  }catch(_){ } finally { _rsScoring = false; }
   _rsRerenderActive();
+}
+// Fetch one report's full text on demand (report_text is excluded from the
+// bulk pull). Returns '' on any failure.
+async function _rsFetchReportText(report_uid){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb || !report_uid) return '';
+  try{
+    const { data } = await sb.from('rs_reports').select('report_text')
+      .eq('practice_id', _rsPracticeId()).eq('report_uid', report_uid).maybeSingle();
+    return (data && data.report_text) || '';
+  }catch(_){ return ''; }
 }
 // Re-render whichever reports-consuming tab is currently visible (.page.on).
 function _rsRerenderActive(){
