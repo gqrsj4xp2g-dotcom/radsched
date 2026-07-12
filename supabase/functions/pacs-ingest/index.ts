@@ -220,14 +220,27 @@ serve(async (req: Request) => {
   if (upErr) return json({ error: "store failed: " + upErr.message }, 500);
   sb.from("rs_ingest_tokens").update({ last_used_at: new Date().toISOString() }).eq("token", token).then(() => {});
 
-  // Auto peer review — the first signed report of a rad's shift triggers one
-  // pending peer review of a prior study. Idempotent server-side (once per rad
-  // per calendar day, deduped against the daily roster sweep). Fire-and-forget:
-  // never blocks or fails the ingest.
+  // Auto peer review — a signed report triggers one pending review per rad per
+  // shift, LIKE-FOR-LIKE: the review targets a prior of the same modality +
+  // body part as the study just read (server-side cascade; if nothing matches,
+  // nothing is created and the rad's next study that shift tries again).
+  // Idempotent server-side (partial unique per shift day, deduped against the
+  // roster sweep). Fire-and-forget: never blocks or fails the ingest.
   if (phys_id != null) {
-    const shiftDate = (meta.signed_at || new Date().toISOString()).slice(0, 10);
-    sb.rpc("rs_peer_review_autotrigger", { p_practice: practice_id, p_phys_id: phys_id, p_shift_date: shiftDate })
-      .then(() => {}, () => {});
+    let signedMs = Date.parse(meta.signed_at || "");
+    if (!Number.isFinite(signedMs)) signedMs = Date.now();
+    // Freshness guard: a historical backfill (vendor replaying months of old
+    // reports) must not create auto reviews for long-past shifts.
+    if (Math.abs(Date.now() - signedMs) <= 48 * 3600 * 1000) {
+      // Shift day boundary at 08:00 UTC (3am ET / midnight PT): one US
+      // work/evening shift = one shift day. Must match the roster sweep's
+      // [p_date+8h, p_date+32h) window.
+      const shiftDate = new Date(signedMs - 8 * 3600 * 1000).toISOString().slice(0, 10);
+      sb.rpc("rs_peer_review_autotrigger", {
+        p_practice: practice_id, p_phys_id: phys_id, p_shift_date: shiftDate,
+        p_modality: modality || null, p_body_part: body_part || null,
+      }).then(() => {}, () => {});
+    }
   }
 
   return json({ ok: true, report_uid, phys_id, matched: phys_id != null, interpreter: meta.interpreter || null });
