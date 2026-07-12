@@ -31745,10 +31745,13 @@ async function _prSubmitGrade(){
         score, comments, quarter:q, status:'completed', updated_at:now
       });
       if(ins.error && (String(ins.error.code)==='23505' || /duplicate|unique/i.test(ins.error.message||''))){
-        // already reviewed this report — update my own review (RLS scopes to mine)
+        // already reviewed this report — update MY OWN review. Scope to
+        // reviewer_uid=me: RLS protects non-admins, but an admin/superuser
+        // reviewer bypasses owns-row and would otherwise overwrite EVERY
+        // reviewer's row for this report.
         ({error}=await sb.from('rs_peer_reviews')
           .update({score,comments,status:'completed',quarter:q,reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
-          .eq('practice_id',pid).eq('report_uid',ctx.report_uid));
+          .eq('practice_id',pid).eq('report_uid',ctx.report_uid).eq('reviewer_uid',CU.id));
       } else error=ins.error;
     }
   }catch(e){ error=e; }
