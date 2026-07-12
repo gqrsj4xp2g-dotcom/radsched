@@ -15103,6 +15103,12 @@ function _applyRemoteData(d){
     // created user. Stored as a Set of {id, addedAt} tuples on a module-level array.
     const normalized = d.users.map(u => {
       if(u.physId!=null) u.physId = parseInt(u.physId,10)||null;
+      // SECURITY (2026-07): strip any legacy plaintext password. Real auth is
+      // Supabase (bcrypt in auth.users); the blob `pw` is dead data from the
+      // disabled legacy offline-auth path and must never persist in a
+      // practice-readable row. Dropping it on load means it never round-trips
+      // back into a save, so the field is purged permanently after this ships.
+      if(u && 'pw' in u) delete u.pw;
       return u;
     });
     const remoteIds = new Set(normalized.map(u => u.id));
