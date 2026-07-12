@@ -40641,7 +40641,15 @@ function _ensureIRShiftForCall(physId, date, irGroup, callSite, noteSuffix){
 }
 
 function _has2ndOr3rdShift(physId, date){
-  // Rule: physicians on a 2nd or 3rd DR shift are blocked from all IR shifts and IR call that day
+  // Rule: physicians on a 2nd or 3rd DR shift are blocked from all IR shifts and IR call that day.
+  // PERF (2026-07): read the per-date shift index (O(shifts-on-date)) instead of scanning ALL
+  // drShifts — this is called per-candidate inside the auto-assign pool filter (was O(all shifts)
+  // per candidate per cell). The index is keyed by exact date and reflects S.drShifts, so filtering
+  // its result by physId/shift is identical to the old full scan. Falls back to the scan if the
+  // index accessor is unavailable.
+  if(typeof _shiftsOnDate === 'function'){
+    return _shiftsOnDate('dr', date).some(s => s.physId===physId && (s.shift==='2nd'||s.shift==='3rd'));
+  }
   return S.drShifts.some(s => s.physId===physId && s.date===date && (s.shift==='2nd'||s.shift==='3rd'));
 }
 
