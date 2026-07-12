@@ -27692,7 +27692,7 @@ function _ssmInitiateSwap(kind, shiftId, toPhysId){
   if(!Array.isArray(S.swapRequests)) S.swapRequests = [];
   const dateOf = (s) => s.date || s.satDate || '';
   const labelOf = (s) => s.callType ? `IR Call (${s.callType})` : (s.satDate || s.sunDate ? 'Weekend Call' : (s.shift || 'Shift'));
-  S.swapRequests.push({
+  const _newSwap = {
     id: S.nextId++,
     fromPhysId: CU.physId,
     toPhysId,
@@ -27703,7 +27703,10 @@ function _ssmInitiateSwap(kind, shiftId, toPhysId){
     reason: '(One-click suggestion)',
     status: 'pending',
     ts: new Date().toISOString(),
-  });
+  };
+  S.swapRequests.push(_newSwap);
+  // Migration Phase 2: mirror into the owner-RLS rs_swap_requests table.
+  if(typeof _migMirrorSwap === 'function') _migMirrorSwap(_newSwap);
   if(typeof _audit === 'function') _audit('swap.requested', { fromPhysId: CU.physId, toPhysId, kind, shiftId });
   if(typeof triggerSave === 'function') triggerSave();
   if(typeof _afterMutation === 'function') _afterMutation();
