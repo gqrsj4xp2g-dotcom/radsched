@@ -25477,6 +25477,8 @@ function resolveSwap(id,status){
     }
   }
   s.status=status;
+  // Migration Phase 2: mirror the resolution into rs_swap_requests (admin RLS path).
+  if(typeof _migMirrorSwapStatus === 'function') _migMirrorSwapStatus(id, status);
   if(typeof _audit==='function') _audit('swap.resolve', {id, status, fromPhysId:s.fromPhysId, toPhysId:s.toPhysId, date:s.date});
   if(typeof _emitWebhookEvent==='function')
     _emitWebhookEvent(status === 'approved' ? 'swap.approved' : 'swap.denied',
