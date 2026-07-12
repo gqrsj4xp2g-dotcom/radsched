@@ -617,7 +617,7 @@ Deno.serve(async (req: Request) => {
     const { data: ins, error: insErr } = await sb.from('rs_peer_reviews').insert({
       practice_id: payload.practiceId, report_uid: prior.report_uid, accession: prior.accession,
       reviewed_phys_id: prior.phys_id, reviewer_phys_id: readerPhysId, reviewer_uid: reviewerUid,
-      quarter, status: 'pending',
+      quarter, status: 'pending', origin: 'manual',   // on-demand widget review, not the once-per-shift auto slot
     }).select('id').maybeSingle();
     if (insErr) return jsonResp({ error: 'could not open review: ' + insErr.message }, 500);
     return jsonResp({ ok: true, review: { id: (ins as any)?.id, report_uid: prior.report_uid, reviewed_phys_id: prior.phys_id, exam: prior.exam, status: 'pending' } });
