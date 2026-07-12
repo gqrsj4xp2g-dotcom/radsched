@@ -14636,6 +14636,9 @@ async function launchApp(){
     // Kick off the periodic future-shift auto-refresh after the dashboard
     // is on screen. Idempotent — safe to call on every launchApp.
     if(typeof _startAutoRefreshTrafficLoop === 'function') _startAutoRefreshTrafficLoop();
+    // Load pending peer reviews so the ⚖️ nav badge shows without opening the
+    // tab, and go live for server-side auto-triggers. Idempotent per launch.
+    if(typeof _prBootWatcher === 'function') _prBootWatcher();
     // Try to restore a previously-picked autosave file handle. If browser
     // permission is still 'granted' from this session we resume silently;
     // otherwise the toolbar shows "Resume Auto-save" so the user can re-grant
