@@ -18518,6 +18518,8 @@ function _saveEditPhys(id){
   // wRVU per-physician multiplier (1.0 standard FTE expectation).
   const _wm = parseFloat(document.getElementById('p-wrvu-mult')?.value);
   p.wRVUMultiplier = (isFinite(_wm) && _wm >= 0 && _wm <= 5) ? _wm : 1.0;
+  // PACS interpreter aliases → used to attribute ingested reports to this rad.
+  p.pacsNames = _parsePacsNames(document.getElementById('p-pacsnames')?.value);
   // Ensure these fields exist on legacy physicians loaded from older saves
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
   if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
