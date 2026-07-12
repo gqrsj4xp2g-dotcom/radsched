@@ -31821,6 +31821,43 @@ function _prExportCSV(q){
   const a=document.createElement('a'); a.href=url; a.download=`peer-review-${q}.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 
+// ── Coding tab: load a signed report from the PACS store ──────────────────
+function codingLoadFromPacs(){
+  if(!CU){ if(typeof _toast==='function')_toast('Sign in to load from PACS.','err'); return; }
+  const old=document.getElementById('coding-pacs-picker'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='coding-pacs-picker';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML=`<div class="card" style="max-width:640px;width:100%;max-height:88vh;display:flex;flex-direction:column">
+    <div class="flex" style="justify-content:space-between;align-items:center"><div class="card-title" style="margin:0">Load report from PACS</div>
+      <button class="bt bxs" onclick="_codingPacsClose()">✕</button></div>
+    <input id="coding-pacs-search" type="text" placeholder="Filter by patient, MRN, accession, or exam…" style="width:100%;font-size:12px;margin:8px 0" oninput="_codingPacsRender()">
+    <div id="coding-pacs-list" style="overflow:auto;flex:1"><div class="note ni" style="font-size:12px">Loading…</div></div>
+  </div>`;
+  ov.addEventListener('click',e=>{ if(e.target===ov) _codingPacsClose(); });
+  document.body.appendChild(ov);
+  _rsReportsPull().then(()=>_codingPacsRender());
+}
+function _codingPacsClose(){ const ov=document.getElementById('coding-pacs-picker'); if(ov) ov.remove(); }
+function _codingPacsRender(){
+  const list=document.getElementById('coding-pacs-list'); if(!list) return;
+  const q=(document.getElementById('coding-pacs-search')?.value||'').trim().toLowerCase();
+  let rows=_RS_REPORTS.filter(r=>r.report_text);
+  if(q) rows=rows.filter(r=>((r.patient_name||'')+' '+(r.mrn||'')+' '+(r.accession||'')+' '+(r.exam||'')).toLowerCase().includes(q));
+  rows=rows.slice(0,200);
+  if(!rows.length){ list.innerHTML=`<div class="note ni" style="font-size:12px">${_RS_REPORTS.length?'No matching reports.':'No reports in the PACS store yet — ingest reports via 🔌 PACS Connections.'}</div>`; return; }
+  list.innerHTML=rows.map(r=>{const p=(r.phys_id!=null)?_physById(r.phys_id):null;
+    return `<div class="flex" style="justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:8px;margin-bottom:6px;cursor:pointer" data-uid="${escHtml(r.report_uid)}" onclick="_codingPacsPick(this)">
+      <div style="min-width:0"><strong>${escHtml(r.exam||r.modality||r.report_uid)}</strong>
+        <div style="font-size:11px;color:var(--txt3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.patient_name||'—')} · ${escHtml((r.signed_at||'').slice(0,10))} · ${p?escHtml(p.last):'unmatched'}${r.wrvu!=null?' · '+(+r.wrvu).toFixed(1)+' wRVU':''}</div></div>
+      <span class="bt bxs">Load →</span></div>`;}).join('');
+}
+function _codingPacsPick(el){
+  const uid=el&&el.dataset?el.dataset.uid:null; const r=_RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
+  const ta=document.getElementById('coding-input'); if(ta) ta.value=r.report_text||'';
+  _codingPacsClose();
+  if(typeof window.codingAnalyze==='function'){ try{ window.codingAnalyze(); }catch(_){} }
+}
+
 function saveCommPrefs(){
   if(!CU) return;
   if(!CU.notifPrefs) CU.notifPrefs={..._NOTIF_DEFAULTS};
