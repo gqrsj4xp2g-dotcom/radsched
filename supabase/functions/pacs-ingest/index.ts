@@ -86,6 +86,28 @@ function firstIdentifier(ids: any): string {
   return ids?.value || "";
 }
 
+// Coarse body-part taxonomy for like-for-like peer-review matching. Derived
+// from the exam description when present (most precise), else the report head.
+// Order matters: combined abdomen+pelvis first, spine before chest (a thoracic
+// spine study must not read as CHEST), specific regions before broad ones.
+function deriveBodyPart(exam: string, text: string): string {
+  const src = (exam && exam.trim()) ? exam : String(text || "").slice(0, 300);
+  const s = src.toLowerCase();
+  if (/abdom/.test(s) && /pelvi/.test(s)) return "ABDOMEN_PELVIS";
+  if (/\b[ctl][- ]?spine\b|cervical spine|thoracic spine|lumbar spine|\bspine\b|vertebr|sacrum|coccyx/.test(s)) return "SPINE";
+  if (/\b(head|brain|skull|cranial|sella|orbits?)\b|\biac\b/.test(s)) return "HEAD";
+  if (/carotid|\bneck\b|thyroid|parotid/.test(s)) return "NECK";
+  if (/mammogra|breast/.test(s)) return "BREAST";
+  if (/cardiac|coronary|\bheart\b/.test(s)) return "CARDIAC";
+  if (/chest|thorax|lung|pulmonary|\brib\b|pneumo|pe protocol/.test(s)) return "CHEST";
+  if (/shoulder|humer|elbow|forearm|wrist|\bhand\b|finger|clavicle|scapula/.test(s)) return "UPPER_EXT";
+  if (/\bhip\b|femur|femoral|knee|tibia|fibula|ankle|\bfoot\b|\btoe\b|runoff/.test(s)) return "LOWER_EXT";
+  if (/pelvi|bladder|prostate|uter|ovar|scrot|testic|transvaginal/.test(s)) return "PELVIS";
+  if (/abdom|liver|hepat|pancrea|spleen|kidney|renal|urogram|bowel|appendi|gallbladder|biliary/.test(s)) return "ABDOMEN";
+  if (/whole body/.test(s)) return "WHOLE_BODY";
+  return "";
+}
+
 function deriveModality(exam: string, text: string): string {
   const s = (exam + " " + text).toLowerCase();
   if (/\bct angiog|\bcta\b/.test(s)) return "CTA";
