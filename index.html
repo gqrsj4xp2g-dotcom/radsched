@@ -8185,6 +8185,10 @@ window.RVU_REFERENCE = [
     codingRender(result);
   };
   window.codingRender = codingRender;
+  // Pure scorer: returns {lines, reimbursement, feats, ...} for a report string
+  // WITHOUT touching the DOM. Used by the wRVU tracker to score signed reports
+  // pulled from the PACS store. wRVU per line comes from window.RVU_REFERENCE[3].
+  window.codingScore = function(text){ return runPipeline(String(text||'')); };
 
   // Billing-posture / place-of-service toggle → update config + re-run if a report is loaded.
   window.codingSetConfig = function(){
