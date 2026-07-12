@@ -31929,7 +31929,7 @@ function renderPeerReview(){
   const quarters=[...new Set(_PR_REVIEWS.map(v=>v.quarter).filter(Boolean))].sort().reverse();
   if(!quarters.length) quarters.push(_prCurrentQuarter());
   const qsel=_prQuarter && quarters.includes(_prQuarter)?_prQuarter:quarters[0];
-  const qBtns=quarters.slice(0,8).map(q=>`<button class="bt bxs" style="${q===qsel?'background:var(--blue);color:#fff;border-color:var(--blue)':''}" onclick="_prSetQuarter('${q}')">${escHtml(q)}</button>`).join(' ');
+  const qBtns=quarters.slice(0,8).map(q=>`<button class="bt bxs" style="${q===qsel?'background:var(--blue);color:#fff;border-color:var(--blue)':''}" data-q="${escHtml(q)}" onclick="_prSetQuarter(this.dataset.q)">${escHtml(q)}</button>`).join(' ');
 
   // C. My scorecard (reviews I received), blinded reviewer identity.
   if(myPid!=null){
