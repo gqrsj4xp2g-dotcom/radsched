@@ -16558,6 +16558,7 @@ async function switchPractice(id,name){
   _isRestoring=true;
   try{
     // 4. Clear per-practice in-memory state (users from previous practice must not leak)
+    if(typeof _rsTeardown === 'function') _rsTeardown();   // reports/peer realtime+caches are per-practice
     USERS.length=0;
     if(CU) USERS.push(CU); // keep the logged-in user so auth still resolves
     // 5. Reassign reactive arrays through the Proxy so each new array is freshly wrapped.
