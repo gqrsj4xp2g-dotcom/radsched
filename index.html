@@ -27752,7 +27752,7 @@ function submitSwapRequest(){
     if(s.satDate || s.sunDate) return 'Weekend Call';
     return s.shift || 'Shift';
   };
-  S.swapRequests.push({
+  const _newSwap = {
     id:S.nextId++,
     fromPhysId:CU?.physId||null,
     toPhysId:toId,
@@ -27763,7 +27763,10 @@ function submitSwapRequest(){
     reason:message,
     status:'pending',
     ts:new Date().toISOString()
-  });
+  };
+  S.swapRequests.push(_newSwap);
+  // Migration Phase 2: mirror into the owner-RLS rs_swap_requests table.
+  if(typeof _migMirrorSwap === 'function') _migMirrorSwap(_newSwap);
   triggerSave();
   // Notify the target physician
   const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
