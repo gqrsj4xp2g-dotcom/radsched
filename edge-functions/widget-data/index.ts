@@ -588,7 +588,7 @@ Deno.serve(async (req: Request) => {
     // reviewer_uid is NOT NULL and this function runs as service role (no
     // auth.uid), so resolve the reader's account uid from the practice roster.
     const reviewerUser = Array.isArray(practice.users)
-      ? practice.users.find((u: any) => u && u.physId === readerPhysId) : null;
+      ? practice.users.find((u: any) => u && Number(u.physId) === Number(readerPhysId)) : null;
     const reviewerUid = reviewerUser && reviewerUser.id;
     if (!reviewerUid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(reviewerUid)))
       return jsonResp({ error: 'reader has no linked account; cannot open a review' }, 409);
