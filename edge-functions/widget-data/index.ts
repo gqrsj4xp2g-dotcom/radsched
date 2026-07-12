@@ -77,12 +77,22 @@ function sanitizeForWidget(p: any): any {
   let c: any;
   try { c = JSON.parse(JSON.stringify(p)); } catch (_) { return {}; }
   if (c && c.cfg && typeof c.cfg === 'object') {
+    // Broadened to catch bare *key (e.g. mapsKey — a live Google Maps API key)
+    // and *credential, not just *apikey.
     for (const k of Object.keys(c.cfg)) {
-      if (/secret|token|password|apikey|api_key|privatekey|private_key/i.test(k)) delete c.cfg[k];
+      if (/secret|token|password|api|key|credential|private/i.test(k)) delete c.cfg[k];
     }
   }
   if (c) delete c.widgetPairings;               // per-code signing material
-  if (Array.isArray(c?.users)) c.users.forEach((u: any) => { if (u) { delete u.pw; delete u.password; } });
+  // WHITELIST user fields — the widget only needs identity/display. A blacklist
+  // missed per-user bearer credentials (calFeedToken, a 30-day ICS bearer that
+  // survives pairing revocation); a whitelist drops those and any future secret.
+  if (Array.isArray(c?.users)) {
+    c.users = c.users.map((u: any) => u ? {
+      id: u.id, physId: u.physId, first: u.first, last: u.last,
+      role: u.role, degree: u.degree, active: u.active, color: u.color,
+    } : u);
+  }
   return c;
 }
 
