@@ -25384,9 +25384,16 @@ function _countUnread(type,id){
 
 /* ─── SWAPS ─── */
 function renderSwaps(){
+  // Migration Phase 3: union the owner-RLS rs_swap_requests table into
+  // S.swapRequests (once per practice; re-renders only if rows were added).
+  if(typeof _migLoadSwaps === 'function'){
+    _migLoadSwaps().then(changed => { if(changed){ try{ renderSwaps(); }catch(_){} } }).catch(()=>{});
+  }
   // Ensure the colleague dropdown is always fresh when the page opens
   populateSwapColleagues();
-  const allSwaps=(S.swapRequests||[]).sort((a,b)=>b.ts>a.ts?1:-1);
+  // Copy before sorting — in-place .sort() on the reactive array fires
+  // triggerSave from a render path (same audit-fix class as vac/wk tables).
+  const allSwaps=[...(S.swapRequests||[])].sort((a,b)=>b.ts>a.ts?1:-1);
   const pending=allSwaps.filter(s=>s.status==='pending');
   const history=allSwaps.filter(s=>s.status!=='pending');
   const renderCard=(s)=>{
