@@ -198,6 +198,7 @@ serve(async (req: Request) => {
 
   const report_uid = (meta.accession && String(meta.accession).trim()) || (await sha256Hex(practice_id + "|" + report_text)).slice(0, 32);
   const modality = meta.modality || deriveModality(meta.exam || "", report_text);
+  const body_part = meta.body_part || deriveBodyPart(meta.exam || "", report_text);
   const strip = payload.deid === true || payload.strip_mrn === true;
 
   const { error: upErr } = await sb.from("rs_reports").upsert({
