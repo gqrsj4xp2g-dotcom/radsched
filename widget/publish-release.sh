@@ -45,16 +45,31 @@ VERSION="$(node -p "require('./package.json').version" 2>/dev/null || echo 1.0.0
 TAG="${1:-widget-v$VERSION}"
 echo "▶ Publishing release tag: $TAG"
 
-# Collect every distributable artifact (dmg + exe + zip).
+# Collect ONLY artifacts whose filename version matches the version we're
+# publishing. CRITICAL: uploading a stale binary (e.g. an old 1.0.3 dmg left in
+# dist/) under a newer tag makes every installed widget auto-"update" to a build
+# that isn't actually newer → an endless download/relaunch loop that looks like
+# "the widget won't launch". We refuse to publish a version-mismatched asset.
+# VERSION is matched as a whole token so 1.1.1 does not match 1.1.13.
+VER_RE="(^|[^0-9.])$(printf '%s' "$VERSION" | sed 's/\./\\./g')([^0-9]|$)"
 ARTIFACTS=()
+SKIPPED=()
 for f in "$DIST"/*.dmg "$DIST"/*.exe "$DIST"/*.zip; do
-  [ -f "$f" ] && ARTIFACTS+=("$f")
+  [ -f "$f" ] || continue
+  if [[ "$(basename "$f")" =~ $VER_RE ]]; then ARTIFACTS+=("$f"); else SKIPPED+=("$f"); fi
 done
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+  echo "⚠ Skipping ${#SKIPPED[@]} artifact(s) whose version ≠ $VERSION (stale build leftovers):"
+  for f in "${SKIPPED[@]}"; do printf '    ✗ %s\n' "$(basename "$f")"; done
+fi
 if [ ${#ARTIFACTS[@]} -eq 0 ]; then
-  echo "✖ No installer files found in $DIST"
+  echo "✖ No installer in $DIST matches version $VERSION."
+  echo "  dist/ is stale or the build didn't run for this version. Rebuild first:"
+  echo "    ./build-mac.sh   # mac    (produces RadScheduler Widget-$VERSION-arm64.dmg)"
+  echo "    ./build-win.cmd  # windows (produces RadScheduler Widget Setup $VERSION.exe)"
   exit 1
 fi
-echo "▶ Found ${#ARTIFACTS[@]} artifact(s):"
+echo "▶ Publishing ${#ARTIFACTS[@]} version-$VERSION artifact(s):"
 for f in "${ARTIFACTS[@]}"; do
   printf '    %s (%s)\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
 done
