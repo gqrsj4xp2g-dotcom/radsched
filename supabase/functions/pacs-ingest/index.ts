@@ -110,9 +110,16 @@ function parseFHIR(res: any): ParseResult {
   // (frequently the issuing organization); skip Organization references.
   meta.interpreter = pickInterpreter(res.resultsInterpreter) || pickInterpreter(res.performer) || "";
   let body = res.conclusion || "";
-  const pf = (res.presentedForm || [])[0];
+  // Pick the first TEXTUAL attachment (skip PDF/binary, which atob→text would
+  // store as mojibake). No contentType is assumed textual.
+  const pf = (res.presentedForm || []).find((a: any) => {
+    const ct = (a?.contentType || "").toLowerCase();
+    return a?.data && (!ct || ct.startsWith("text/"));
+  });
   if (!body && pf?.data) body = decodePresentedForm(pf);
-  return { reports: [{ meta, body: String(body || "").replace(/<[^>]+>/g, " ").trim() }] };
+  // Strip only real tags (must start with a letter or '/') so free text like
+  // "nodule < 6 mm and mass > 3 cm" is preserved.
+  return { reports: [{ meta, body: String(body || "").replace(/<\/?[a-zA-Z][^>]*>/g, " ").trim() }] };
 }
 function acsnIdentifier(ids: any): string {
   const arr = Array.isArray(ids) ? ids : (ids ? [ids] : []);
@@ -225,6 +232,7 @@ serve(async (req: Request) => {
 
   let payload: any;
   try { payload = JSON.parse(rawBody); } catch (_) { return json({ error: "body must be JSON" }, 400); }
+  if (!payload || typeof payload !== "object") return json({ error: "body must be a JSON object" }, 400);
 
   const fmt = (payload.format || "").toLowerCase();
   let parsed: ParseResult;
