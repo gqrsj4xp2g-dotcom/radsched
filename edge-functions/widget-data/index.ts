@@ -175,8 +175,14 @@ async function _verifyHmac(
 }
 
 function assertActiveWidgetPairing(practice: any, payload: any, code: string): void {
-  const pairings = Array.isArray(practice?.widgetPairings) ? practice.widgetPairings : [];
-  if (!pairings.length) return; // legacy practices before active-pairing tracking.
+  // SECURITY: distinguish a MISSING widgetPairings field (a true legacy
+  // practice from before pairing-tracking → allow) from a PRESENT-but-EMPTY
+  // array (every pairing was revoked). The old `if(!pairings.length) return`
+  // conflated them, so revoking the LAST pairing failed open — a revoked code
+  // still authorized read + all credit writes. An empty array must now fall
+  // through to find() (→ undefined → throw).
+  if (!Array.isArray(practice?.widgetPairings)) return; // true legacy practice
+  const pairings = practice.widgetPairings;
   const tokenVersion = +(payload?.v || 1);
   if (tokenVersion < 2 && payload?.pairingId == null) return; // legacy anon-key tokens were not revocable.
   const fp = codeFingerprint(code);
