@@ -60,7 +60,7 @@ function hl7Date(s?: string): string {
 
 // ── HL7 v2 ORU^R01 parse — one Report per OBR group (multi-procedure safe) ──
 function parseHL7(raw: string): ParseResult {
-  const text = (raw || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  const text = (typeof raw === "string" ? raw : "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!text.startsWith("MSH|")) return { error: "Not an HL7 message — must start with MSH|" };
   const segs = text.split("\n").filter(Boolean);
   let mrn = "", patient_name = "";
