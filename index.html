@@ -31509,7 +31509,7 @@ function _rsRerenderActive(){
 let _rsRtDebounce = null;
 function _rsRtRefresh(){
   if(_rsRtDebounce) clearTimeout(_rsRtDebounce);
-  _rsRtDebounce = setTimeout(()=>{ _rsRtDebounce = null; _rsReportsPull(true).then(()=>{ _wrvuSummaryKey=null; _rsRerenderActive(); }); }, 800);
+  _rsRtDebounce = setTimeout(()=>{ _rsRtDebounce = null; _rsReportsPull(true).then(()=>{ _wrvuInvalidateSummary(); _rsRerenderActive(); }); }, 800);
 }
 function _prLiveRefresh(){
   _prPull(true).then(()=>{
@@ -31539,7 +31539,7 @@ function _rsReportsStartLive(){
       const vis = document.getElementById('page-wrvu')?.classList.contains('on')
                || document.getElementById('page-peer-review')?.classList.contains('on')
                || document.getElementById('page-coding')?.classList.contains('on');
-      if(vis) _rsReportsPull(true).then(()=>{ _wrvuSummaryKey=null; _rsRerenderActive(); });
+      if(vis) _rsReportsPull(true).then(()=>{ _wrvuInvalidateSummary(); _rsRerenderActive(); });
       // The ⚖️ pending-review badge lives on the persistent nav — poll it from
       // ANY tab so the realtime socket isn't the only path to a fresh badge.
       _prLiveRefresh();
@@ -31622,14 +31622,18 @@ function _wrvuStat(label,val,sub){
 let _wrvuSummary = new Map();     // phys_id -> {wrvu, count}
 let _wrvuSummaryKey = null;       // period the summary is for
 let _wrvuSummaryLoading = false;
+let _wrvuSummaryGen = 0;          // bumped on every invalidation; guards stale in-flight commits
+function _wrvuInvalidateSummary(){ _wrvuSummaryKey = null; _wrvuSummaryGen++; }
 async function _wrvuLoadSummary(period, range){
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb) return false;
+  const gen = _wrvuSummaryGen;   // if an invalidation lands while we're in flight, drop our result
   const [fy,fm,fd]=range.from.split('-').map(Number), [ty,tm,td]=range.to.split('-').map(Number);
   const fromISO=new Date(fy,fm-1,fd).toISOString(), toISO=new Date(ty,tm-1,td).toISOString();  // local-midnight instants
   try{
     const {data,error}=await sb.rpc('rs_wrvu_summary',{p_practice:_rsPracticeId(), p_from:fromISO, p_to:toISO});
     if(error || !Array.isArray(data)) return false;
+    if(gen !== _wrvuSummaryGen) return false;   // superseded by a newer invalidation → don't commit stale totals
     const m=new Map(); data.forEach(r=>{ if(r.phys_id!=null) m.set(r.phys_id,{wrvu:+r.total_wrvu||0, count:+r.n||0}); });
     _wrvuSummary=m; _wrvuSummaryKey=period; return true;
   }catch(_){ return false; }
