@@ -31391,7 +31391,14 @@ function _rsPracticeId(){
 // on every _reportWrvu call → up to 100× per score pass).
 let _RVU_WRVU;
 function _rvuWrvuMap(){
-  if(!_RVU_WRVU){ _RVU_WRVU = new Map(); (window.RVU_REFERENCE||[]).forEach(row=>{ _RVU_WRVU.set(row[0], +row[3]||0); }); }
+  if(!_RVU_WRVU){
+    _RVU_WRVU = new Map();
+    (window.RVU_REFERENCE||[]).forEach(row=>{ _RVU_WRVU.set(row[0], +row[3]||0); });
+    // Supplement work-RVUs for emittable add-on codes missing from
+    // RVU_REFERENCE (CMS CY2025) so the tracker doesn't credit them 0.
+    // 99153 legitimately carries 0 work RVU, so it's intentionally omitted.
+    for(const [c,w] of Object.entries({'G0279':0.6, '99152':0.25})){ if(!_RVU_WRVU.has(c)) _RVU_WRVU.set(c, w); }
+  }
   return _RVU_WRVU;
 }
 function _reportWrvu(text){
@@ -31483,7 +31490,7 @@ async function _rsScoreUnscored(){
     }
     if(writes.length){ wrote = true; await Promise.allSettled(writes); }
   }catch(_){ } finally { _rsScoring = false; }
-  if(wrote) _wrvuSummaryKey = null;   // freshly-scored totals → refetch the server summary
+  if(wrote) _wrvuInvalidateSummary();   // freshly-scored totals → refetch the server summary
   _rsRerenderActive();
 }
 // Fetch one report's full text on demand (report_text is excluded from the
@@ -31558,7 +31565,7 @@ function _rsTeardown(){
   if(_rsRtDebounce){ clearTimeout(_rsRtDebounce); _rsRtDebounce = null; }
   _RS_REPORTS = []; _RS_REPORTS_AT = 0; _RS_REPORTS_STATE = 'idle'; _rsScoring = false; _rsUnscorable = new Set();
   _PR_REVIEWS = []; _PR_AT = 0; _prFindMrn = ''; _prQuarter = null;
-  _wrvuSummary = new Map(); _wrvuSummaryKey = null; _wrvuSummaryLoading = false;
+  _wrvuSummary = new Map(); _wrvuSummaryKey = null; _wrvuSummaryLoading = false; _wrvuSummaryGen++;
   _wrvuKicked = false; _prKicked = false; _prWatcherStarted = false;
   try{ if(typeof _prUpdateNavBadge === 'function') _prUpdateNavBadge(); }catch(_){}
 }
