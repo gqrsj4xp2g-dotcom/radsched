@@ -31925,7 +31925,8 @@ async function _prFind(){
              :`<button class="bp bxs" data-uid="${escHtml(r.report_uid)}" onclick="_prReviewReport(this)">Review</button>`}</div>`;}).join('');
 }
 async function _prReviewReport(btn){
-  const uid=btn&&btn.dataset?btn.dataset.uid:null; const r=_RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
+  const uid=btn&&btn.dataset?btn.dataset.uid:null;
+  const r=_prPriors.get(uid) || _RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
   const reportText=await _rsFetchReportText(uid);   // fetched on demand (not in bulk pull)
   _prShowGrader({report_uid:r.report_uid, accession:r.accession, reviewed_phys_id:r.phys_id,
     examLabel:(r.exam||r.modality||'')+' · '+(r.signed_at||'').slice(0,10), reportText});
