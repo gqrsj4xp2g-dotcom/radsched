@@ -268,13 +268,28 @@ serve(async (req: Request) => {
     const signedAt = Number.isFinite(sm) ? new Date(sm).toISOString() : new Date().toISOString();
 
     // Idempotency key: accession (the study id) when present; else a stable
-    // study key from mrn+exam+day (so prelim→final→addendum collapse to one
-    // row); else a content hash. Distinct studies get distinct keys.
+    // study key from mrn+exam+shift-day; else a content hash. The mrn+exam key
+    // buckets on the SAME 08:00-UTC shift-day offset used for shiftDate (not the
+    // raw UTC calendar date) so an overnight prelim→final→addendum share a key.
+    const studyDay = new Date((Number.isFinite(sm) ? sm : Date.now()) - 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const kKey = (meta.mrn && meta.exam)
+      ? ("k" + (await sha256Hex([practice_id, meta.mrn, meta.exam, studyDay].join("|"))).slice(0, 31))
+      : null;
     let report_uid: string;
     if (meta.accession && String(meta.accession).trim()) {
-      report_uid = String(meta.accession).trim().slice(0, 128);
-    } else if (meta.mrn && meta.exam) {
-      report_uid = "k" + (await sha256Hex([practice_id, meta.mrn, meta.exam, signedAt.slice(0, 10)].join("|"))).slice(0, 31);
+      const acc = String(meta.accession).trim().slice(0, 128);
+      // If an accession-LESS row for this same study already exists (a prelim
+      // that arrived before the accession), UPDATE it in place (and backfill
+      // the accession) rather than inserting a second, double-counting row.
+      let reuseK = false;
+      if (kKey) {
+        const { data: prior } = await sb.from("rs_reports").select("report_uid")
+          .eq("practice_id", practice_id).eq("report_uid", kKey).maybeSingle();
+        reuseK = !!prior?.report_uid;
+      }
+      report_uid = reuseK ? kKey! : acc;
+    } else if (kKey) {
+      report_uid = kKey;
     } else {
       report_uid = "h" + (await sha256Hex(practice_id + "|" + report_text)).slice(0, 31);
     }
