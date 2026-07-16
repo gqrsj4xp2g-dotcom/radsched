@@ -16626,6 +16626,10 @@ async function switchPractice(id,name){
       if(_leaderHbTimer){ clearInterval(_leaderHbTimer); _leaderHbTimer = null; }
       if(_leaderCheckTimer){ clearInterval(_leaderCheckTimer); _leaderCheckTimer = null; }
       _initLeaderElection();
+      // Re-arm the PACS reports / peer-review live module for the NEW practice
+      // (_rsTeardown at the top cleared it; without this the ⚖️ badge, 45s poll
+      // and realtime stay dead until a manual tab visit).
+      if(typeof _prBootWatcher === 'function') _prBootWatcher();
     } else {
       if(typeof _toast==='function') _toast('No data found for practice '+id+'.', 'info'); else alert('No data found for practice '+id+'.');
     }
@@ -31552,7 +31556,7 @@ function _rsTeardown(){
   _rsReportsChannel = null;
   if(_rsPollTimer){ clearInterval(_rsPollTimer); _rsPollTimer = null; }
   if(_rsRtDebounce){ clearTimeout(_rsRtDebounce); _rsRtDebounce = null; }
-  _RS_REPORTS = []; _RS_REPORTS_AT = 0; _RS_REPORTS_STATE = 'idle'; _rsScoring = false;
+  _RS_REPORTS = []; _RS_REPORTS_AT = 0; _RS_REPORTS_STATE = 'idle'; _rsScoring = false; _rsUnscorable = new Set();
   _PR_REVIEWS = []; _PR_AT = 0; _prFindMrn = ''; _prQuarter = null;
   _wrvuSummary = new Map(); _wrvuSummaryKey = null; _wrvuSummaryLoading = false;
   _wrvuKicked = false; _prKicked = false; _prWatcherStarted = false;
