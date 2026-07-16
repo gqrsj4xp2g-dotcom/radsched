@@ -31444,17 +31444,20 @@ async function _rsReportsPull(force){
 // Score reports whose wRVU is still null (freshly ingested). Writes wrvu +
 // cpt_codes back under same-practice UPDATE RLS. Idempotent across clients
 // (same engine → same numbers), guarded, capped at 100 rows per pass.
+// report_uids that couldn't be scored (no text, or a deterministic engine
+// throw) — skip them so a poll/realtime tick doesn't re-fetch + re-score them
+// every cycle forever. Cleared on teardown (a page reload re-attempts).
+let _rsUnscorable = new Set();
 async function _rsScoreUnscored(){
   if(_rsScoring || typeof window.codingScore !== 'function') return;
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb) return;
-  const pending = _RS_REPORTS.filter(r => r.wrvu == null).slice(0, 100);
+  const pending = _RS_REPORTS.filter(r => r.wrvu == null && !_rsUnscorable.has(r.report_uid)).slice(0, 100);
   if(!pending.length) return;
   _rsScoring = true;
   const pid = _rsPracticeId();
+  let wrote = false;
   try{
-    // report_text isn't in the lightweight bulk pull — fetch it in ONE batch
-    // for just the unscored rows we're about to score.
     const uids = pending.map(r => r.report_uid);
     const { data: texts, error } = await sb.from('rs_reports')
       .select('report_uid, report_text').eq('practice_id', pid).in('report_uid', uids);
@@ -31463,17 +31466,20 @@ async function _rsScoreUnscored(){
     const writes = [];
     for(const r of pending){
       const txt = textByUid.get(r.report_uid);
-      if(!txt) continue;
+      if(!txt){ _rsUnscorable.add(r.report_uid); continue; }          // no text → don't retry forever
       const scored = _reportWrvu(txt);
-      if(!scored) continue;   // per-report engine throw → leave unscored, retried next pass
+      if(!scored){ _rsUnscorable.add(r.report_uid); continue; }        // engine can't score this row
       r.wrvu = scored.wrvu; r.cpt_codes = scored.codes;   // reflect in cache now
+      // Guard the write: `.is('wrvu',null)` makes concurrent clients 2..N match
+      // ZERO rows (no redundant write + realtime broadcast storm); `.eq(report_text)`
+      // means a correction landing mid-flight (which the reset trigger re-nulls)
+      // won't get a wRVU computed from the now-superseded text.
       writes.push(sb.from('rs_reports').update({ wrvu: scored.wrvu, cpt_codes: scored.codes })
-        .eq('practice_id', pid).eq('report_uid', r.report_uid));
+        .eq('practice_id', pid).eq('report_uid', r.report_uid).is('wrvu', null).eq('report_text', txt));
     }
-    // Issue all score-back writes CONCURRENTLY (was up to 100 sequential
-    // round-trips blocking the pass).
-    if(writes.length) await Promise.allSettled(writes);
+    if(writes.length){ wrote = true; await Promise.allSettled(writes); }
   }catch(_){ } finally { _rsScoring = false; }
+  if(wrote) _wrvuSummaryKey = null;   // freshly-scored totals → refetch the server summary
   _rsRerenderActive();
 }
 // Fetch one report's full text on demand (report_text is excluded from the
