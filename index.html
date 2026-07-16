@@ -31889,16 +31889,32 @@ async function _prSubmitGrade(){
   await _prPull(true); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview();
 }
 // Prior-finder + review entry points -------------------------------------
-function _prFind(){
+let _prPriors = new Map();   // report_uid → prior row from the last _prFind (may be older than the cache)
+async function _prFind(){
   const q=(document.getElementById('pr-find')?.value||'').trim(); _prFindMrn=q;
   const host=document.getElementById('pr-find-results'); if(!host) return;
   if(!q){ host.innerHTML=`<div class="note ni" style="font-size:12px">Enter an MRN or accession.</div>`; return; }
-  const ql=q.toLowerCase();
-  const hit=_RS_REPORTS.filter(r=>((r.mrn||'').toLowerCase()===ql)||((r.accession||'').toLowerCase()===ql));
-  let mrn=null; hit.forEach(r=>{ if(r.mrn) mrn=r.mrn; });
-  let priors=mrn?_RS_REPORTS.filter(r=>(r.mrn||'')===mrn):hit;
-  priors=priors.filter(r=>r.phys_id!==CU.physId).sort((a,b)=>((a.signed_at||'')<(b.signed_at||'')?1:-1));
-  if(!priors.length){ host.innerHTML=`<div class="note ni" style="font-size:12px">No prior reports by other radiologists found for that patient in the loaded set.</div>`; return; }
+  const sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!sb){ host.innerHTML=`<div class="note ni" style="font-size:12px">Not connected.</div>`; return; }
+  const pid=_rsPracticeId();
+  host.innerHTML=`<div class="note ni" style="font-size:12px">Searching…</div>`;
+  let mrn=q, priors=[];
+  try{
+    // Query the FULL table (not just the 3000-row cache) so genuinely old priors
+    // are found. Resolve MRN from an accession first if needed.
+    const {data:byMrn}=await sb.from('rs_reports').select('mrn').eq('practice_id',pid).eq('mrn',q).limit(1);
+    if(!(byMrn&&byMrn.length)){
+      const {data:byAcc}=await sb.from('rs_reports').select('mrn').eq('practice_id',pid).eq('accession',q).limit(1);
+      if(byAcc&&byAcc.length&&byAcc[0].mrn) mrn=byAcc[0].mrn;
+    }
+    const {data:rows,error}=await sb.from('rs_reports')
+      .select('report_uid, accession, mrn, exam, modality, phys_id, signed_at')
+      .eq('practice_id',pid).eq('mrn',mrn).order('signed_at',{ascending:false}).limit(100);
+    if(error){ host.innerHTML=`<div class="note ni" style="font-size:12px">Search failed — try again.</div>`; return; }
+    priors=(rows||[]).filter(r=>r.phys_id!==CU.physId);
+  }catch(_){ host.innerHTML=`<div class="note ni" style="font-size:12px">Search failed — try again.</div>`; return; }
+  _prPriors=new Map(priors.map(r=>[r.report_uid,r]));
+  if(!priors.length){ host.innerHTML=`<div class="note ni" style="font-size:12px">No prior reports by other radiologists found for that patient.</div>`; return; }
   host.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">${priors.length} prior report${priors.length===1?'':'s'} by other radiologists${mrn?` · MRN ${escHtml(mrn)}`:''}:</div>`+
     priors.map(r=>{const p=(r.phys_id!=null)?_physById(r.phys_id):null;
       const mine=_PR_REVIEWS.find(v=>v.report_uid===r.report_uid && v.reviewer_uid===CU.id && v.status==='completed');
