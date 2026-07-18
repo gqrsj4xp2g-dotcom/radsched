@@ -8200,6 +8200,11 @@ window.RVU_REFERENCE = [
   // WITHOUT touching the DOM. Used by the wRVU tracker to score signed reports
   // pulled from the PACS store. wRVU per line comes from window.RVU_REFERENCE[3].
   window.codingScore = function(text){ return runPipeline(String(text||'')); };
+  // Authoritative CMS bilateral-surgery indicator per code + the factor map, so
+  // the wRVU tracker credits bilateral (-50) at the correct factor (indicator
+  // 3 = 200%, e.g. bilateral extremity-joint MRI) rather than a flat 1.5×.
+  window.BILAT_FACTOR = BILAT_FACTOR;
+  window.rvuBilatIndicator = function(code){ const r = RVU_BY_CODE.get(code); return r ? r.bilat : undefined; };
 
   // Billing-posture / place-of-service toggle → update config + re-run if a report is loaded.
   window.codingSetConfig = function(){
