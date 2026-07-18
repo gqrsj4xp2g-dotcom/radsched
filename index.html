@@ -31955,6 +31955,22 @@ function _prBar(dist,n){
   return `<div class="flex" style="height:10px;border-radius:5px;overflow:hidden;min-width:120px;flex:1">${[1,2,3,4].map(s=>{
     const w=100*(dist[s]||0)/n; return w>0?`<div title="${s} · ${_PR_LABELS[s]}: ${dist[s]}" style="width:${w}%;background:${_PR_COLORS[s]}"></div>`:'';}).join('')}</div>`;
 }
+// Confidential received-scorecard: reviewer identity is stripped server-side by
+// the SECURITY DEFINER rs_peer_my_scorecard RPC. A rad can no longer SELECT the
+// raw rows for reviews OF them (tightened SELECT RLS), so the scorecard must go
+// through the RPC. Cached per quarter; cleared on live updates / logout.
+let _prScorecard = new Map();          // quarter -> {n, mean, dist, comments}
+let _prScorecardLoading = new Set();
+async function _prLoadScorecard(quarter){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb || !CU) return null;
+  try{
+    const {data,error} = await sb.rpc('rs_peer_my_scorecard', {p_practice:_rsPracticeId(), p_quarter:quarter});
+    if(error) return null;
+    _prScorecard.set(quarter, data || {n:0});
+    return data;
+  }catch(_){ return null; }
+}
 function renderPeerReview(){
   const host=document.getElementById('peer-review-body'); if(!host) return;
   if(!CU){ host.innerHTML=`<div class="note ni">Sign in to use peer review.</div>`; return; }
