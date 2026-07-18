@@ -32125,8 +32125,9 @@ function renderPeerReview(){
             <td style="padding:4px 8px;text-align:right;tabular-nums;font-weight:700">${mean.toFixed(2)}</td>
             <td style="padding:4px 8px;text-align:right;tabular-nums;color:${disc>10?'var(--red-t)':'var(--txt2)'}">${disc.toFixed(0)}%</td>
             <td style="padding:4px 8px">${_prBar(g.dist,g.n)}</td></tr>`;}).join('')}</tbody></table></div>`;
-      // Aggregated comments across the quarter.
-      const allC=[]; list.forEach(g=>g.comments.forEach(c=>allC.push({...c,reviewed:g.pid})));
+      // Aggregated comments across the quarter (from the cache; the numeric
+      // list above may come from the RPC and carries no comments).
+      const allC=[]; [...cAgg.values()].forEach(g=>(g.comments||[]).forEach(c=>allC.push({...c,reviewed:g.pid})));
       if(allC.length){
         html+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em">${allC.length} comment${allC.length===1?'':'s'} this quarter</summary>
           <div style="margin-top:6px">${allC.map(c=>{const rp=_physById(c.reviewed),by=(c.by!=null)?_physById(c.by):null;
