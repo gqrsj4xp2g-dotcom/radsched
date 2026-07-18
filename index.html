@@ -32022,25 +32022,33 @@ function renderPeerReview(){
   const qsel=_prQuarter && quarters.includes(_prQuarter)?_prQuarter:quarters[0];
   const qBtns=quarters.slice(0,8).map(q=>`<button class="bt bxs" style="${q===qsel?'background:var(--blue);color:#fff;border-color:var(--blue)':''}" data-q="${escHtml(q)}" onclick="_prSetQuarter(this.dataset.q)">${escHtml(q)}</button>`).join(' ');
 
-  // C. My scorecard (reviews I received), blinded reviewer identity.
+  // C. My scorecard (reviews I received) — via the blinded RPC, since a rad can
+  //    no longer read the raw rows for reviews of them (reviewer stays anonymous).
   if(myPid!=null){
-    const mineAgg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel && v.reviewed_phys_id===myPid)).get(myPid);
+    const sc=_prScorecard.get(qsel);
+    if(sc===undefined && !_prScorecardLoading.has(qsel)){
+      _prScorecardLoading.add(qsel);
+      _prLoadScorecard(qsel).then(()=>{ _prScorecardLoading.delete(qsel); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+    }
     html+=`<div class="card" style="margin-bottom:14px">
       <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div class="card-title" style="margin:0">My peer-review scorecard</div>
+        <div class="card-title" style="margin:0">My peer-review scorecard <span style="font-weight:400;color:var(--txt3);font-size:11px">— reviewers anonymous</span></div>
         <div class="flex" style="gap:4px;flex-wrap:wrap">${qBtns}</div></div>`;
-    if(mineAgg && mineAgg.n){
-      const mean=mineAgg.sum/mineAgg.n, disc=100*((mineAgg.dist[3]||0)+(mineAgg.dist[4]||0))/mineAgg.n;
+    if(sc===undefined){
+      html+=`<div class="note ni" style="font-size:12px;margin-top:10px">Loading…</div>`;
+    } else if(sc.n){
+      const dist=sc.dist||{}, n=+sc.n||0, d=k=>+((dist[k]||dist[String(k)]||0))||0;
+      const mean=+sc.mean||0, disc=n?100*(d(3)+d(4))/n:0;
       html+=`<div class="flex" style="gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px">
         <div style="text-align:center"><div style="font-size:24px;font-weight:800;color:var(--blue)">${mean.toFixed(2)}</div><div style="font-size:10px;color:var(--txt3)">mean score</div></div>
-        <div style="text-align:center"><div style="font-size:24px;font-weight:800">${mineAgg.n}</div><div style="font-size:10px;color:var(--txt3)">reviews</div></div>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:800">${n}</div><div style="font-size:10px;color:var(--txt3)">reviews</div></div>
         <div style="text-align:center"><div style="font-size:24px;font-weight:800;color:${disc>10?'var(--red-t)':'var(--green-t)'}">${disc.toFixed(0)}%</div><div style="font-size:10px;color:var(--txt3)">discordant (3–4)</div></div>
-        <div style="flex:1;min-width:140px">${_prBar(mineAgg.dist,mineAgg.n)}<div style="font-size:10px;color:var(--txt3);margin-top:4px">${[1,2,3,4].map(s=>`${s}:${mineAgg.dist[s]||0}`).join('  ')}</div></div>
+        <div style="flex:1;min-width:140px">${_prBar({1:d(1),2:d(2),3:d(3),4:d(4)},n)}<div style="font-size:10px;color:var(--txt3);margin-top:4px">${[1,2,3,4].map(s=>`${s}:${d(s)}`).join('  ')}</div></div>
       </div>`;
-      const cmts=mineAgg.comments.filter(c=>c.text);
+      const cmts=(Array.isArray(sc.comments)?sc.comments:[]).filter(c=>c && c.text);
       if(cmts.length){
         html+=`<div style="margin-top:10px"><div style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comments received (reviewer blinded)</div>
-          ${cmts.map(c=>`<div style="border-left:3px solid ${_PR_COLORS[c.score]};padding:4px 8px;margin-bottom:5px;font-size:12px;background:rgba(127,127,127,0.05)"><span style="font-weight:700;color:${_PR_COLORS[c.score]}">${c.score} · ${_PR_LABELS[c.score]}</span> — ${escHtml(c.text)}</div>`).join('')}</div>`;
+          ${cmts.map(c=>`<div style="border-left:3px solid ${_PR_COLORS[c.score]||'var(--bdr)'};padding:4px 8px;margin-bottom:5px;font-size:12px;background:rgba(127,127,127,0.05)"><span style="font-weight:700;color:${_PR_COLORS[c.score]||'var(--txt2)'}">${escHtml(String(c.score))} · ${escHtml(_PR_LABELS[c.score]||'')}</span> — ${escHtml(c.text)}</div>`).join('')}</div>`;
       }
     } else {
       html+=`<div class="note ni" style="font-size:12px;margin-top:10px">No peer reviews received in ${escHtml(qsel)}.</div>`;
