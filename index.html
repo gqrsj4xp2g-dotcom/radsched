@@ -31864,8 +31864,11 @@ async function _prSubmitGrade(){
   let error=null;
   try{
     if(ctx.existingId!=null){
+      // Grading a pending review (autotrigger/widget): DON'T overwrite quarter —
+      // it was set at creation from the read's shift_date (RADPEER convention);
+      // re-stamping it to grade-time would misfile a Q1 read graded in Q2.
       ({error}=await sb.from('rs_peer_reviews')
-        .update({score,comments,status:'completed',quarter:q,reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
+        .update({score,comments,status:'completed',reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
         .eq('practice_id',pid).eq('id',ctx.existingId));
     } else {
       const ins=await sb.from('rs_peer_reviews').insert({
