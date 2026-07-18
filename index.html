@@ -32091,9 +32091,23 @@ function renderPeerReview(){
 
   // D. Admin: practice-wide quarterly report + CSV export.
   if(isAdm){
-    const agg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel));
-    const list=[...agg.values()].sort((a,b)=>(b.sum/b.n)-(a.sum/a.n));
-    const totalN=list.reduce((s,g)=>s+g.n,0);
+    // Per-rad numbers from the full-table RPC; comments from the cache (admin
+    // sees all rows via RLS — supplementary).
+    const asum=_prAdminSummary.get(qsel);
+    if(asum===undefined && !_prAdminSummaryLoading.has(qsel)){
+      _prAdminSummaryLoading.add(qsel);
+      _prLoadAdminSummary(qsel).then(()=>{ _prAdminSummaryLoading.delete(qsel); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+    }
+    const cAgg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel));   // comments source
+    let list, totalN;
+    if(Array.isArray(asum)){
+      list=asum.map(r=>({pid:r.reviewed_phys_id, n:+r.n||0, sum:(+r.mean_score||0)*(+r.n||0),
+        dist:{1:+r.d1||0,2:+r.d2||0,3:+r.d3||0,4:+r.d4||0}})).filter(g=>g.n>0).sort((a,b)=>(b.sum/b.n)-(a.sum/a.n));
+      totalN=list.reduce((s,g)=>s+g.n,0);
+    } else {
+      list=[...cAgg.values()].sort((a,b)=>(b.sum/b.n)-(a.sum/a.n));
+      totalN=list.reduce((s,g)=>s+g.n,0);
+    }
     html+=`<div class="card">
       <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div class="card-title" style="margin:0">Quarterly report <span style="font-weight:400;color:var(--txt3);font-size:11px">(admin) — ${escHtml(qsel)} · ${totalN} reviews</span></div>
