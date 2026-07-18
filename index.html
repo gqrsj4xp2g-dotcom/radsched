@@ -31913,7 +31913,10 @@ async function _prFind(){
       .select('report_uid, accession, mrn, exam, modality, phys_id, signed_at')
       .eq('practice_id',pid).eq('mrn',mrn).order('signed_at',{ascending:false}).limit(100);
     if(error){ host.innerHTML=`<div class="note ni" style="font-size:12px">Search failed — try again.</div>`; return; }
-    priors=(rows||[]).filter(r=>r.phys_id!==CU.physId);
+    // Exclude the caller's own reads AND unattributable priors (phys_id null):
+    // a review of an unmatched reader inserts reviewed_phys_id=null, which every
+    // scorecard/aggregate silently discards — so don't offer them for review.
+    priors=(rows||[]).filter(r=>r.phys_id!=null && r.phys_id!==CU.physId);
   }catch(_){ host.innerHTML=`<div class="note ni" style="font-size:12px">Search failed — try again.</div>`; return; }
   _prPriors=new Map(priors.map(r=>[r.report_uid,r]));
   if(!priors.length){ host.innerHTML=`<div class="note ni" style="font-size:12px">No prior reports by other radiologists found for that patient.</div>`; return; }
