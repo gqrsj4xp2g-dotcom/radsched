@@ -31519,6 +31519,7 @@ function _rsRtRefresh(){
   _rsRtDebounce = setTimeout(()=>{ _rsRtDebounce = null; _rsReportsPull(true).then(()=>{ _wrvuInvalidateSummary(); _rsRerenderActive(); }); }, 800);
 }
 function _prLiveRefresh(){
+  try{ _prScorecard.clear(); }catch(_){}   // a new review of me must refresh the blinded scorecard
   _prPull(true).then(()=>{
     if(typeof _prUpdateNavBadge==='function') _prUpdateNavBadge();
     if(document.getElementById('page-peer-review')?.classList.contains('on') && typeof renderPeerReview==='function') renderPeerReview();
