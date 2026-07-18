@@ -31990,6 +31990,20 @@ async function _prLoadScorecard(quarter){
     return data;
   }catch(_){ return null; }
 }
+// Admin quarterly per-rad numbers from the full-table RPC (the 4000-row cache
+// would undercount historical quarters once lifetime reviews exceed it).
+let _prAdminSummary = new Map();       // quarter -> [{reviewed_phys_id,n,mean_score,d1..d4}]
+let _prAdminSummaryLoading = new Set();
+async function _prLoadAdminSummary(quarter){
+  const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
+  if(!sb || !CU) return null;
+  try{
+    const {data,error} = await sb.rpc('rs_peer_review_summary', {p_practice:_rsPracticeId(), p_quarter:quarter});
+    if(error) return null;
+    _prAdminSummary.set(quarter, Array.isArray(data)?data:[]);
+    return data;
+  }catch(_){ return null; }
+}
 function renderPeerReview(){
   const host=document.getElementById('peer-review-body'); if(!host) return;
   if(!CU){ host.innerHTML=`<div class="note ni">Sign in to use peer review.</div>`; return; }
