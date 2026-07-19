@@ -31314,100 +31314,64 @@ async function _migLoadCommPrefs(){
     return JSON.stringify(CU.notifPrefs) !== before;
   }catch(_){ return false; }
 }
-// rs-v115 (migration Phase 3): on-call-acks read-cutover. Merges the secured
-// rs_on_call_acks table (same-practice SELECT) into S.onCallAcks by UNION
-// (physId+date) so it never drops blob acks. Guarded/flag-gated; loads once
-// per practice; any error keeps the blob acks.
-let _migAcksLoadedFor = null;
-async function _migLoadOnCallAcks(){
+// ── #17 CANONICAL CUTOVER (2026-07): rs_on_call_acks + rs_swap_requests are
+// the CANONICAL stores. The blob's swapRequests/onCallAcks keys are GONE
+// (removed from _PERSISTED_KEYS); S.swapRequests / S.onCallAcks are pure
+// table-backed in-memory caches that these loaders REPLACE wholesale.
+// TTL-throttled (20s) so render/apply paths can call them freely; force=true
+// bypasses the throttle (call after your own mutation RPC succeeds).
+// Assignment goes through the S proxy set-trap which fires triggerSave —
+// suppressed via _isRestoring so a cache refresh never schedules a blob push.
+const _MIG_TABLE_TTL_MS = 20000;
+let _migAcksLoadedFor = null, _migAcksLoadedAt = 0;
+async function _migLoadOnCallAcks(force){
   if(_MIG_READ_CUTOVER === false || !CU) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
-  if(_migAcksLoadedFor === pid) return false;
-  // AUDIT FIX (2026-07 deep dive): set the once-guard only after a definitive
-  // SELECT (see _migLoadCommPrefs) — not before the client check, which used to
-  // burn the guard on a transient not-ready and never retry.
+  if(!force && _migAcksLoadedFor === pid && (Date.now() - _migAcksLoadedAt) < _MIG_TABLE_TTL_MS) return false;
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
-    if(!sb) return false;   // transient — retry
+    if(!sb) return false;   // transient — retry on next call
     const { data, error } = await sb.from('rs_on_call_acks')
-      .select('phys_id, ack_date, owner_uid, ts').eq('practice_id', pid);
+      .select('phys_id, ack_date, owner_uid, ts')
+      .eq('practice_id', pid)
+      .order('ack_date', { ascending: true }).order('phys_id', { ascending: true });
     if(error || !Array.isArray(data)) return false;   // transient — retry
-    _migAcksLoadedFor = pid;   // definitive answer received
-    if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
-    let added = 0;
-    for(const row of data){
-      const physId = row.phys_id, date = row.ack_date;
-      if(physId == null || !date) continue;
-      if(!S.onCallAcks.some(a => a.physId === physId && a.date === date)){
-        S.onCallAcks.push({ physId, date, ackBy: row.owner_uid || null, ackAt: row.ts || null });
-        added++;
-      }
+    _migAcksLoadedFor = pid; _migAcksLoadedAt = Date.now();
+    const rows = data.filter(r => r.phys_id != null && r.ack_date)
+      .map(r => ({ physId: r.phys_id, date: r.ack_date, ackBy: r.owner_uid || null, ackAt: r.ts || null }));
+    const changed = JSON.stringify(rows) !== JSON.stringify(S.onCallAcks || []);
+    if(changed){
+      _isRestoring = true;
+      try{ S.onCallAcks = rows; } finally{ _isRestoring = false; }
     }
-    return added > 0;
+    return changed;
   }catch(_){ return false; }
 }
-// ── Migration Phase 2/3: swap requests (rs_swap_requests, owner-RLS) ──────
-// Mirror writes are fire-and-forget (blob stays canonical until Phase 5).
-// RLS verified 2026-07: same-practice SELECT; owner INSERT own pending;
-// owner cannot self-approve; other users cannot touch the row; admin resolves.
-function _migMirrorSwap(sw){
-  try{
-    const sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
-    if(!sb || !CU?.id || !sw) return;
-    sb.from('rs_swap_requests').upsert({
-      practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
-      client_id: sw.id,
-      owner_uid: CU.id,
-      from_phys_id: Number.isFinite(+sw.fromPhysId)?+sw.fromPhysId:null,
-      to_phys_id: Number.isFinite(+sw.toPhysId)?+sw.toPhysId:null,
-      shift_date: sw.date||null,
-      their_date: sw.theirDate||'',
-      shift_type: sw.shiftType||'',
-      site: sw.site||'',
-      reason: sw.reason||'',
-      status: sw.status||'pending',
-      ts: sw.ts||new Date().toISOString()
-    }, { onConflict:'practice_id,client_id' }).then(()=>{},()=>{});
-  }catch(_){}
-}
-function _migMirrorSwapStatus(swapId, status){
-  try{
-    const sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
-    if(!sb) return;
-    sb.from('rs_swap_requests')
-      .update({ status })
-      .eq('practice_id', CU?.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'))
-      .eq('client_id', swapId)
-      .then(()=>{},()=>{});
-  }catch(_){}
-}
-// Read-cutover: union table rows into S.swapRequests (never drops blob entries;
-// blob canonical — table only ADDS rows the blob is missing). Once per practice.
-let _migSwapsLoadedFor = null;
-async function _migLoadSwaps(){
+let _migSwapsLoadedFor = null, _migSwapsLoadedAt = 0;
+async function _migLoadSwaps(force){
   if(_MIG_READ_CUTOVER === false || !CU) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
-  if(_migSwapsLoadedFor === pid) return false;
+  if(!force && _migSwapsLoadedFor === pid && (Date.now() - _migSwapsLoadedAt) < _MIG_TABLE_TTL_MS) return false;
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
-    if(!sb) return false;   // transient — retry
+    if(!sb) return false;   // transient — retry on next call
     const { data, error } = await sb.from('rs_swap_requests')
-      .select('client_id, from_phys_id, to_phys_id, shift_date, their_date, shift_type, site, reason, status, ts')
-      .eq('practice_id', pid);
+      .select('client_id, from_phys_id, to_phys_id, shift_date, their_date, shift_type, site, reason, status, ts, viewed_at, viewed_by')
+      .eq('practice_id', pid)
+      .order('client_id', { ascending: true });
     if(error || !Array.isArray(data)) return false;   // transient — retry
-    _migSwapsLoadedFor = pid;   // definitive
-    if(!Array.isArray(S.swapRequests)) S.swapRequests = [];
-    let added = 0;
-    for(const r of data){
-      if(r.client_id == null) continue;
-      if(!S.swapRequests.some(s => s.id === r.client_id)){
-        S.swapRequests.push({ id:r.client_id, fromPhysId:r.from_phys_id, toPhysId:r.to_phys_id,
-          date:r.shift_date||'', theirDate:r.their_date||'', shiftType:r.shift_type||'',
-          site:r.site||'', reason:r.reason||'', status:r.status||'pending', ts:r.ts||'' });
-        added++;
-      }
+    _migSwapsLoadedFor = pid; _migSwapsLoadedAt = Date.now();
+    const rows = data.filter(r => r.client_id != null)
+      .map(r => ({ id: r.client_id, fromPhysId: r.from_phys_id, toPhysId: r.to_phys_id,
+        date: r.shift_date || '', theirDate: r.their_date || '', shiftType: r.shift_type || '',
+        site: r.site || '', reason: r.reason || '', status: r.status || 'pending', ts: r.ts || '',
+        viewedAt: r.viewed_at || null, viewedBy: r.viewed_by || null }));
+    const changed = JSON.stringify(rows) !== JSON.stringify(S.swapRequests || []);
+    if(changed){
+      _isRestoring = true;
+      try{ S.swapRequests = rows; } finally{ _isRestoring = false; }
     }
-    return added > 0;
+    return changed;
   }catch(_){ return false; }
 }
 // ─────────────────────────────────────────────────────────────────────────
