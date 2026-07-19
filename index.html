@@ -27402,17 +27402,15 @@ function submitShiftListing(){
   if((S.shiftListings||[]).some(l => l.status==='open' && l.shift.kind===kind && l.shift.id===id)){
     setStatus('✕ This shift is already listed for sale.', 'var(--red-t)');return;
   }
-  S.shiftListings.push({
-    id: S.nextId++,
-    sellerPhysId: CU.physId,
-    shift: shiftMeta,
-    note,
-    ts: new Date().toISOString(),
-    status: 'open', // open | completed | cancelled
-    claims: [],
-    acceptedClaimId: null,
-  });
-  triggerSave();
+  // Commit SERVER-SIDE (rs_create_shift_listing): sellerPhysId pinned to the
+  // caller, verifies the shift is actually theirs. Client no longer writes blob.
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ setStatus('✕ Not connected — try again.', 'var(--red-t)'); return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_create_shift_listing',{p_practice:_rsPracticeId(), p_kind:kind, p_shift_id:id, p_note:note}); }
+  catch(e){ setStatus('✕ '+(e&&e.message||'listing failed'), 'var(--red-t)'); return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ setStatus('✕ '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'listing failed'), 'var(--red-t)'); return; }
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   setStatus(`✓ Posted for sale. Colleagues can now request to claim.`, 'var(--green-t)');
   // Clear the form
   ['sl-date','sl-note'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
