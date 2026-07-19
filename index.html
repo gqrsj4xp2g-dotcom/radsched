@@ -27861,11 +27861,9 @@ async function _ssmInitiateSwap(kind, shiftId, toPhysId){
   try{ _res=await _sb.rpc('rs_create_swap_request',{p_practice:_rsPracticeId(), p_kind:kind, p_shift_id:+shiftId, p_to_phys_id:toPhysId, p_their_kind:null, p_their_shift_id:null, p_reason:'(One-click suggestion)'}); }
   catch(e){ if(typeof _toast==='function') _toast('Swap request failed: '+(e&&e.message||e),'err'); return; }
   if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not request swap: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return; }
-  const _newSwap = _res.data.swap;
-  // Migration Phase 2: mirror into the owner-RLS rs_swap_requests table.
-  if(typeof _migMirrorSwap === 'function') _migMirrorSwap(_newSwap);
   if(typeof _audit === 'function') _audit('swap.requested', { fromPhysId: CU.physId, toPhysId, kind, shiftId });
-  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  // #17: the RPC wrote rs_swap_requests (canonical) — refresh the table cache.
+  try{ await _migLoadSwaps(true); }catch(_){}
   if(typeof _afterMutation === 'function') _afterMutation();
   // Notify the target physician so they see it on their dashboard.
   if(typeof _notify === 'function'){
