@@ -32255,14 +32255,19 @@ async function saveCommPrefs(){
   // Sync back to USERS array (CU and USERS row are separate refs)
   const u=USERS.find(x=>x.id===CU.id);
   if(u) u.notifPrefs={...CU.notifPrefs};
-  triggerSave();
-  // rs-v112 (migration Phase 2): mirror this user's prefs into the owner-RLS
-  // rs_comm_prefs table (fire-and-forget; the JSON blob stays canonical).
-  // owner_uid = CU.id (= auth.uid) so the row passes the owner-write policy.
-  // Fully guarded — never blocks or throws.
+  // Commit SERVER-SIDE (rs_set_comm_prefs pins to auth.uid + whitelists the
+  // pref keys). Blob write removed.
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  const st=document.getElementById('cp-status');
+  if(!_sb){ if(st){ st.textContent='✕ Not connected — try again.'; st.style.color='var(--red-t)'; } return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_set_comm_prefs',{p_practice:_rsPracticeId(), p_prefs:{...CU.notifPrefs}}); }
+  catch(e){ if(st){ st.textContent='✕ Save failed: '+(e&&e.message||e); st.style.color='var(--red-t)'; } return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ if(st){ st.textContent='✕ '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'Save failed.'); st.style.color='var(--red-t)'; } return; }
+  // rs-v112 (migration Phase 2): keep the owner-RLS rs_comm_prefs mirror
+  // (fire-and-forget) for the per-user read-cutover. owner_uid = CU.id = auth.uid.
   try{
-    const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
-    if(_sb && CU.id) _sb.from('rs_comm_prefs').upsert({
+    if(CU.id) _sb.from('rs_comm_prefs').upsert({
       practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
       owner_uid: CU.id,
       phys_id: (typeof CU.physId==='number')?CU.physId:null,
@@ -32270,7 +32275,7 @@ async function saveCommPrefs(){
       updated_at: new Date().toISOString()
     }, { onConflict:'practice_id,owner_uid' }).then(()=>{},()=>{});
   }catch(_){}
-  const st=document.getElementById('cp-status');
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   if(st){
     st.textContent='✓ Preferences saved';
     st.style.color='var(--green-t)';
