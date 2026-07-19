@@ -47229,17 +47229,10 @@ async function acknowledgeOnCall(physId, ds){
   catch(e){ if(typeof _toast==='function') _toast('Confirm failed: '+(e&&e.message||e),'err'); return; }
   if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not confirm: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return; }
   if(typeof _audit === 'function') _audit('oncall.confirmed', { physId, date: ds, ackBy: CU?.id });
-  // Keep the owner-RLS rs_on_call_acks mirror (fire-and-forget) for the
-  // per-user read-cutover; owner_uid = CU.id = auth.uid.
-  try{
-    if(CU?.id) _sb.from('rs_on_call_acks').upsert({
-      practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
-      owner_uid: CU.id,
-      phys_id: _pid,
-      ack_date: ds
-    }, { onConflict:'practice_id,owner_uid,ack_date' }).then(()=>{},()=>{});
-  }catch(_){}
-  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  // #17 canonical cutover: rs_acknowledge_oncall wrote rs_on_call_acks (the
+  // canonical store) — the old client-side mirror upsert is gone. Refresh the
+  // table cache so the pill flips immediately.
+  try{ await _migLoadOnCallAcks(true); }catch(_){}
   if(typeof _afterMutation === 'function') _afterMutation();
   if(typeof _toast === 'function') _toast('On-call confirmed for tonight.', 'ok');
   try{ _renderOnCallConfirmation((typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : CU?.role === 'admin'); }catch(_){}
