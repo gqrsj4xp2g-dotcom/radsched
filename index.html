@@ -54693,16 +54693,20 @@ function printAnnotatedCalendar(ym){
  * @param {string} convId
  * @param {string} msgId
  */
-function _toggleChatPin(convId, msgId){
-  if(!S.chatPins) S.chatPins = {};
-  if(!S.chatPins[convId]) S.chatPins[convId] = [];
-  const arr = S.chatPins[convId];
-  const idx = arr.indexOf(msgId);
-  if(idx >= 0) arr.splice(idx, 1);
-  else { arr.push(msgId); if(arr.length > 5) arr.shift(); }
-  if(typeof triggerSave === 'function') triggerSave();
+async function _toggleChatPin(convId, msgId){
+  // Commit SERVER-SIDE (rs_toggle_chat_pin: practice-member only, cap 5).
+  // Blob write removed; re-pull reconciles the pinned banner.
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return; }
+  const _mid = (typeof msgId==='number') ? msgId : parseInt(msgId,10);
+  if(!Number.isFinite(_mid)){ return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_toggle_chat_pin',{p_practice:_rsPracticeId(), p_conv_id:String(convId), p_msg_id:_mid}); }
+  catch(e){ if(typeof _toast==='function') _toast('Pin failed: '+(e&&e.message||e),'err'); return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not pin: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'warn'); return; }
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   if(typeof renderChat === 'function') renderChat();
-  if(typeof _audit === 'function') _audit('chat.pin.toggle', { convId, msgId, pinned: idx < 0 });
+  if(typeof _audit === 'function') _audit('chat.pin.toggle', { convId, msgId, pinned: !!_res.data.pinned });
 }
 
 /**
