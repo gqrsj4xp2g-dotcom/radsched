@@ -12131,6 +12131,12 @@ async function restoreFromBackup(backupId){
     if(!validation.ok && validation.fatal){
       throw new Error('Backup payload failed validation:\n' + (validation.problems||[]).slice(0,5).join('\n'));
     }
+    // #17 canonical cutover: swaps/acks live in rs_swap_requests/rs_on_call_acks
+    // now — a pre-cutover backup's copies are stale dead data. Strip them so the
+    // restored blob stays clean (the tables are intentionally OUTSIDE the
+    // restore blast radius; restoring a blob backup does not roll them back).
+    delete parsed.swapRequests;
+    delete parsed.onCallAcks;
     // 3. Confirm with the user. Show summary stats so they know what they're about to restore.
     const stats = [
       `${(parsed.physicians||[]).length} physician(s)`,
