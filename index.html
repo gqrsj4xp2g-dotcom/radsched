@@ -52102,6 +52102,18 @@ async function _pushToSupabase(){
   // and flashed "⚠ Save failed" on the login screen. Clearing the dirty flag
   // stops the retry loop; the post-login boot pushes explicitly once CU is set.
   if(typeof CU==='undefined' || !CU){ _hasUnsavedChanges=false; return false; }
+  // PHASE 5 (2026-07): non-admins can no longer write the practice blob directly
+  // — RLS `radscheduler_update_scoped` is now admin-same-practice only. Every
+  // legitimate non-admin action persists through a SECURITY DEFINER RPC (which
+  // re-pulls authoritative state), so a direct blob push from a non-admin is at
+  // best redundant and at worst a silent 0-row no-op. Skip it here — but FAIL
+  // SAFE: only skip when we are CERTAIN the user is a non-admin (CU loaded, role
+  // known, _isAdminOrSU available and false). Any uncertainty preserves the
+  // original push path so an admin is NEVER blocked from saving.
+  if(typeof _isAdminOrSU==='function' && CU && CU.role && !_isAdminOrSU()){
+    _hasUnsavedChanges=false;
+    return false;
+  }
   if(_isSaving){
     // Re-entrant call while previous save is in-flight. Mark that we need another push
     // when the current one finishes, so nothing is lost. _hasUnsavedChanges=true signals this.
