@@ -18781,8 +18781,20 @@ function removePhys(id){
     if(Array.isArray(st.irAnchors)) st.irAnchors=st.irAnchors.filter(pid=>pid!==id);
     if(Array.isArray(st.irFillins)) st.irFillins=st.irFillins.filter(pid=>pid!==id);
   });
-  // Also scrub from swap requests / open shift claims so they don't dangle
-  if(Array.isArray(S.swapRequests)) S.swapRequests=S.swapRequests.filter(s=>s.fromPhysId!==id&&s.toPhysId!==id);
+  // Also scrub from swap requests / open shift claims so they don't dangle.
+  // #17: swaps are canonical in rs_swap_requests — the local filter is only the
+  // optimistic cache update; the table rows must be deleted too or they
+  // resurrect on the next table load.
+  if(Array.isArray(S.swapRequests)){
+    const _orphanSwapIds=S.swapRequests.filter(s=>s.fromPhysId===id||s.toPhysId===id).map(s=>s.id);
+    S.swapRequests=S.swapRequests.filter(s=>s.fromPhysId!==id&&s.toPhysId!==id);
+    if(_orphanSwapIds.length){
+      try{
+        const _sbDel=(typeof _initAuthClient==='function')?_initAuthClient():null;
+        if(_sbDel) _sbDel.rpc('rs_delete_swaps',{p_practice:_rsPracticeId(), p_client_ids:_orphanSwapIds}).then(()=>{},()=>{});
+      }catch(_){}
+    }
+  }
   if(Array.isArray(S.openShifts)) S.openShifts.forEach(o=>{ if(o.claimedBy===id) o.claimedBy=null; });
   if(typeof _audit==='function') _audit('physician.remove', {id, name, drCount, irShiftCount, irCallCount, vacCount, holCount, wkndCount, total});
   triggerSave();
