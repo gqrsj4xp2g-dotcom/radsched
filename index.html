@@ -15279,6 +15279,19 @@ function _applyRemoteData(d){
   } catch(e) {
     console.warn('[RS] Holiday auto-sync skipped:', e.message||e);
   }
+
+  // #17 canonical cutover: swaps/acks live in rs_* tables, not the blob — but
+  // every mutation RPC still bumps the blob's savedAt, so this apply (poll,
+  // realtime, or a follower tab's forwarded broadcast) is the practice-wide
+  // "something changed" signal. Piggyback a TTL-throttled table-cache refresh
+  // here; re-render the current page when rows actually changed. Runs in every
+  // tab (leader AND followers), which keeps follower caches fresh too.
+  try{
+    if(typeof _migLoadSwaps === 'function')
+      _migLoadSwaps().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
+    if(typeof _migLoadOnCallAcks === 'function')
+      _migLoadOnCallAcks().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
+  }catch(_){}
 }
 
 let _realtimeSub=null;
