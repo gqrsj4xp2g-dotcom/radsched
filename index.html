@@ -47193,7 +47193,7 @@ function _renderOnCallConfirmation(isAdmin){
 }
 
 // ───── Mark an on-call shift acknowledged (audit + persist + re-render) ─
-function acknowledgeOnCall(physId, ds){
+async function acknowledgeOnCall(physId, ds){
   // Require an authenticated user — this can be reached from the
   // service-worker notification-click bridge (rs:oncall-ack), which
   // may fire when the tab is logged out. Recording an ack with
@@ -47203,35 +47203,35 @@ function acknowledgeOnCall(physId, ds){
     if(typeof _toast === 'function') _toast('Sign in to confirm on-call.', 'err');
     return;
   }
-  // AUDIT FIX (2026-07 deep dive): ownership check. This is reachable from a
-  // URL param (?onCallAck=physId,date) and the SW bridge, so without this a
-  // user could forge an acknowledgment on a colleague's behalf. A physician
-  // may only confirm their OWN on-call; admins/superusers may confirm anyone.
+  // Ownership: a physician may only confirm their OWN on-call; admins may
+  // confirm anyone. (Soft client pre-check; rs_acknowledge_oncall re-enforces
+  // server-side, pinning ackBy to auth.uid.)
   const _adminAck = (typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : (CU.role==='admin'||CU.role==='superuser');
   if(!_adminAck && Number(CU.physId) !== Number(physId)){
     if(typeof _toast === 'function') _toast('You can only confirm your own on-call.', 'err');
     return;
   }
-  if(!Array.isArray(S.onCallAcks)) S.onCallAcks = [];
-  if(_hasOnCallAck(physId, ds)) return; // idempotent
-  S.onCallAcks.push({
-    physId, date: ds,
-    ackBy: CU?.id || null,
-    ackAt: new Date().toISOString(),
-  });
+  if(_hasOnCallAck(physId, ds)) return; // idempotent (soft)
+  // Commit SERVER-SIDE (rs_acknowledge_oncall). Blob write removed.
+  const _pid = Number.isFinite(+physId) ? +physId : null;
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_acknowledge_oncall',{p_practice:_rsPracticeId(), p_phys_id:_pid, p_date:ds}); }
+  catch(e){ if(typeof _toast==='function') _toast('Confirm failed: '+(e&&e.message||e),'err'); return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not confirm: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return; }
   if(typeof _audit === 'function') _audit('oncall.confirmed', { physId, date: ds, ackBy: CU?.id });
-  if(typeof triggerSave === 'function') triggerSave();
-  // rs-v112 (migration Phase 2): mirror this ack into the owner-RLS
-  // rs_on_call_acks table (fire-and-forget; the JSON blob stays canonical).
+  // Keep the owner-RLS rs_on_call_acks mirror (fire-and-forget) for the
+  // per-user read-cutover; owner_uid = CU.id = auth.uid.
   try{
-    const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
-    if(_sb && CU?.id) _sb.from('rs_on_call_acks').upsert({
+    if(CU?.id) _sb.from('rs_on_call_acks').upsert({
       practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
       owner_uid: CU.id,
-      phys_id: Number.isFinite(+physId) ? +physId : null,  // coerce numeric strings (SW bridge sends strings)
+      phys_id: _pid,
       ack_date: ds
     }, { onConflict:'practice_id,owner_uid,ack_date' }).then(()=>{},()=>{});
   }catch(_){}
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   if(typeof _afterMutation === 'function') _afterMutation();
   if(typeof _toast === 'function') _toast('On-call confirmed for tonight.', 'ok');
   try{ _renderOnCallConfirmation((typeof _isAdminOrSU === 'function') ? _isAdminOrSU() : CU?.role === 'admin'); }catch(_){}
