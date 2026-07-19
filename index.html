@@ -25355,19 +25355,29 @@ function sendChatMessage(){
     }
     return;
   }
-  const msg={
-    id:S.nextId++,
-    userId:CU?.id,
-    text,
-    ts:new Date().toISOString(),
-    channel:_chatContext.type==='group'?_chatContext.id:'dm',
-    toGroupId:_chatContext.type==='group'?_chatContext.id:null,
-    toUserId:_chatContext.type==='dm'?_chatContext.toUserId:null,
-    dmId:_chatContext.type==='dm'?_chatContext.id:null,
-  };
-  S.chatMessages.push(msg);
+  // Commit SERVER-SIDE (rs_send_chat_message): the sender (userId) is pinned to
+  // auth.uid() so a client can't post AS another user; caller must be a practice
+  // member. Client no longer writes the blob directly. Append the server-created
+  // message optimistically; realtime reconciles.
+  const _ctx=_chatContext;
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ if(typeof _toast==='function') _toast('Not connected — message not sent.','err'); return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_send_chat_message',{
+    p_practice:_rsPracticeId(), p_text:text,
+    p_channel:_ctx.type==='group'?String(_ctx.id):'dm',
+    p_to_group_id:_ctx.type==='group'?_ctx.id:null,
+    p_to_user_id:_ctx.type==='dm'?_ctx.toUserId:null,
+    p_dm_id:_ctx.type==='dm'?_ctx.id:null }); }
+  catch(e){ if(typeof _toast==='function') _toast('Send failed: '+(e&&e.message||e),'err'); return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){
+    const _m=(_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'send failed';
+    if(typeof _toast==='function') _toast('Could not send: '+_m,'warn'); return;
+  }
+  const msg=_res.data.msg;
+  if(!Array.isArray(S.chatMessages)) S.chatMessages=[];
+  if(!S.chatMessages.some(m=>m.id===msg.id)) S.chatMessages.push(msg);
   inp.value='';
-  triggerSave();
   _renderMessages();
   // Sending your OWN message always jumps to it, even if you were scrolled up.
   try{ const _cm=document.getElementById('chat-messages'); if(_cm) _cm.scrollTop=_cm.scrollHeight; }catch(_){}
