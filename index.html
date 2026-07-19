@@ -9540,8 +9540,10 @@ create table pacs_inbound (
    FEATURE: On-Call Confirmation Push
      → fns:     _scheduleOnCallReminders / acknowledgeOnCall
      → fns:     _renderOnCallConfirmation / _onCallPhysiciansForDate
-     → state:   S.onCallAcks (PERSISTED_KEYS)           ~line 5345
-     → schema:  v2→v3 migration                         ~line 8576
+     → state:   S.onCallAcks — table-backed cache of rs_on_call_acks (#17
+                canonical cutover; hydrated by _migLoadOnCallAcks, written
+                via the rs_acknowledge_oncall RPC — NOT in PERSISTED_KEYS)
+     → schema:  v2→v3 migration (historical)            ~line 8576
      → DOM:     <div id="dash-oncall-confirm">          ~line 1722
      → SW glue: sw.js notificationclick + push handlers
    FEATURE: Slack/Teams Webhook Presets
