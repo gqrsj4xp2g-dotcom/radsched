@@ -14491,6 +14491,17 @@ async function doLogout(){
   CU=null;
   USERS.length=0;
   _ROW_ID='main'; _PRACTICE_ID='main'; _PRACTICES.length=0;
+  // #17 canonical cutover: swaps/acks are table-backed caches — reset the
+  // load gates + clear the caches so a same-tab re-login (even by the same
+  // user) re-hydrates from the tables instead of serving the prior session's
+  // cached rows (the blob no longer re-populates these on login).
+  try{
+    if(typeof _migSwapsLoadedFor !== 'undefined') _migSwapsLoadedFor = null;
+    if(typeof _migAcksLoadedFor !== 'undefined') _migAcksLoadedFor = null;
+    if(typeof _migCommPrefsLoadedFor !== 'undefined') _migCommPrefsLoadedFor = null;
+    _isRestoring = true;
+    try{ S.swapRequests = []; S.onCallAcks = []; } finally{ _isRestoring = false; }
+  }catch(_){}
   // Invalidate the version-gated lookup caches (_dateIdx via
   // _shiftsOnDate, _physByIdMap via _physById) so the NEXT user to
   // log in this tab can't see the previous practice's compiled
