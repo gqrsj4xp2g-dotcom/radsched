@@ -49259,7 +49259,8 @@ async function _markSwapsViewed(){
     if(!_sb) return;
     const _res=await _sb.rpc('rs_mark_swaps_viewed',{p_practice:_rsPracticeId()});
     if(_res && !_res.error && _res.data && _res.data.ok && _res.data.count>0){
-      try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+      // #17: viewed_at/viewed_by now live on rs_swap_requests — refresh the cache.
+      try{ await _migLoadSwaps(true); }catch(_){}
     }
   }catch(_){}
   finally{ _markSwapsViewedInFlight = false; }
