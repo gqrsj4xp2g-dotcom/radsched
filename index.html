@@ -31155,20 +31155,26 @@ function _themeRefreshControls(){
 }
 
 // User picked a new scale — apply immediately, save to their user record.
-function saveFontScale(val){
+async function saveFontScale(val){
   const n = Number(val);
   if(!isFinite(n) || n < 0.5 || n > 2){
     const st=document.getElementById('cp-font-status');
     if(st){st.textContent='✕ Invalid scale.';st.style.color='var(--red-t)';}
     return;
   }
-  _applyFontScale(n);
-  if(CU){
-    CU.fontScale = n;
-    const u = USERS.find(x=>x.id===CU.id);
-    if(u){ u.fontScale = n; triggerSave(); }
-  }
+  _applyFontScale(n); // apply locally for instant feedback
   const st=document.getElementById('cp-font-status');
+  if(CU){
+    // Persist SERVER-SIDE (rs_set_user_pref pins to auth.uid; only fontScale/
+    // calFeedToken are writable). Blob write removed.
+    const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+    if(!_sb){ if(st){ st.textContent='✕ Not connected — try again.'; st.style.color='var(--red-t)'; } return; }
+    let _res;
+    try{ _res=await _sb.rpc('rs_set_user_pref',{p_practice:_rsPracticeId(), p_field:'fontScale', p_value:n}); }
+    catch(e){ if(st){ st.textContent='✕ Save failed: '+(e&&e.message||e); st.style.color='var(--red-t)'; } return; }
+    if(_res.error || !_res.data || _res.data.ok!==true){ if(st){ st.textContent='✕ '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'Save failed.'); st.style.color='var(--red-t)'; } return; }
+    try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  }
   if(st){
     st.textContent = `✓ Text size set to ${Math.round(n*100)}%. Saved.`;
     st.style.color = 'var(--green-t)';
