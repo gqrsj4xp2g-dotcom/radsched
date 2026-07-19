@@ -36986,10 +36986,13 @@ async function unsubscribeFromWebPush(){
     const sub = await reg.pushManager.getSubscription();
     if(sub){ await sub.unsubscribe(); }
     if(CU){
-      CU.pushSubscription = null;
-      const u = USERS.find(x => x.id === CU.id);
-      if(u) u.pushSubscription = null;
-      triggerSave();
+      const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+      if(_sb){
+        try{
+          await _sb.rpc('rs_set_push_subscription',{p_practice:_rsPracticeId(), p_sub: null});
+          try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+        }catch(_){}
+      }
     }
     if(typeof _toast === 'function') _toast('Notifications disabled on this device.', 'ok');
     return true;
