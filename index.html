@@ -27917,10 +27917,8 @@ async function submitSwapRequest(){
   try{ _res=await _sb.rpc('rs_create_swap_request',{p_practice:_rsPracticeId(), p_kind:_myKind, p_shift_id:+(myKey.split(':')[1]), p_to_phys_id:toId, p_their_kind:_theirKind||null, p_their_shift_id:_theirIdStr?+_theirIdStr:null, p_reason:message}); }
   catch(e){ _toast('Swap request failed: '+(e&&e.message||e),'err'); return; }
   if(_res.error || !_res.data || _res.data.ok!==true){ _toast('Could not submit swap: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return; }
-  const _newSwap = _res.data.swap;
-  // Migration Phase 2: mirror into the owner-RLS rs_swap_requests table.
-  if(typeof _migMirrorSwap === 'function') _migMirrorSwap(_newSwap);
-  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  // #17: the RPC wrote rs_swap_requests (canonical) — refresh the table cache.
+  try{ await _migLoadSwaps(true); }catch(_){}
   // Notify the target physician
   const fromName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
   const mDate = dateOf(myShift) || '(date tbd)';
