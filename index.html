@@ -15994,8 +15994,10 @@ function _afterMutation(){
 // ── Reactive persistence system ──
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-  'openShifts','physicians','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds','holidayDefs',
+  'openShifts','physicians','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs',
   'sites','drSubs','irSubs','natLangRules','broadcasts','shiftListings'];
+  // 'swapRequests' removed (#17): it is a table-backed cache now — mutations
+  // persist via rs_* RPCs, not blob pushes.
 
 function _wrapArray(arr){
   ['push','pop','splice','shift','unshift','sort','reverse'].forEach(method=>{
