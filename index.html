@@ -46604,9 +46604,9 @@ async function claimOfferedShift(offerId, claimerPhysId){
   const arr = offer.kind === 'dr' ? S.drShifts : offer.kind === 'ir' ? S.irShifts : null;
   const s = arr?.find(x => x.id === offer.shiftId);
   if(!s){
+    // Pre-check only — don't write the blob here. The offerer/admin can withdraw
+    // the stale offer via rs_cancel_shift_offer; the claim RPC also rejects it.
     if(typeof _toast === 'function') _toast('Original shift no longer exists.', 'err');
-    offer.cancelled = true;
-    if(typeof triggerSave === 'function') triggerSave();
     return;
   }
   // Light eligibility check — vacation, conflict, allowed-sites.
