@@ -36957,12 +36957,17 @@ async function subscribeToWebPush(){
       userVisibleOnly: true,
       applicationServerKey: _urlBase64ToUint8(vapidKey),
     });
-    // Save to user record so the edge function can push to this device.
+    // Save to user record (server-side, pinned to auth.uid) so the edge function
+    // can push to this device. Blob write moved to rs_set_push_subscription.
     if(CU){
-      CU.pushSubscription = sub.toJSON();
-      const u = USERS.find(x => x.id === CU.id);
-      if(u) u.pushSubscription = CU.pushSubscription;
-      triggerSave();
+      const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+      if(_sb){
+        try{
+          const _r=await _sb.rpc('rs_set_push_subscription',{p_practice:_rsPracticeId(), p_sub: sub.toJSON()});
+          if(_r.error || !_r.data || _r.data.ok!==true){ alert('Could not save subscription: '+((_r.data&&_r.data.error)||(_r.error&&_r.error.message)||'failed')); return false; }
+          try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+        }catch(e){ alert('Could not save subscription: '+(e&&e.message||e)); return false; }
+      }
     }
     if(typeof _audit === 'function') _audit('push.subscribe', { endpoint: sub.endpoint });
     if(typeof _toast === 'function') _toast('Notifications enabled on this device.', 'ok');
