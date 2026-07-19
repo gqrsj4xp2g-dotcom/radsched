@@ -46462,8 +46462,19 @@ async function importPracticeArchive(input){
     if(typeof _validateRemotePayload === 'function') _validateRemotePayload(archive.state);
     Object.entries(archive.state).forEach(([k, v]) => {
       if(k === 'users'){ USERS.length = 0; (v || []).forEach(u => USERS.push(u)); return; }
+      // #17 canonical cutover: swaps/acks live in rs_* tables, not the blob.
+      // An archived snapshot of them must NOT clobber the table-backed caches
+      // (it would show stale rows until reload and never persist anywhere).
+      if(k === 'swapRequests' || k === 'onCallAcks') return;
       S[k] = v;
     });
+    // Re-hydrate the table-backed caches fresh after the wholesale state swap.
+    try{
+      if(typeof _migSwapsLoadedFor !== 'undefined') _migSwapsLoadedFor = null;
+      if(typeof _migAcksLoadedFor !== 'undefined') _migAcksLoadedFor = null;
+      if(typeof _migLoadSwaps === 'function') _migLoadSwaps(true).then(()=>{},()=>{});
+      if(typeof _migLoadOnCallAcks === 'function') _migLoadOnCallAcks(true).then(()=>{},()=>{});
+    }catch(_){}
     if(typeof _audit === 'function') _audit('archive.import', { source: archive._practiceId });
     triggerSave();
     if(typeof _afterMutation === 'function') _afterMutation();
