@@ -16574,8 +16574,14 @@ async function switchPractice(id,name){
     // 5. Reassign reactive arrays through the Proxy so each new array is freshly wrapped.
     // _isRestoring=true suppresses triggerSave from firing during the swap.
     ['physicians','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays',
-     'openShifts','chatMessages','chatGroups','swapRequests','holidayBlackouts','holidayNeeds',
+     'openShifts','chatMessages','chatGroups','swapRequests','onCallAcks','holidayBlackouts','holidayNeeds',
      'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'].forEach(k=>{ S[k]=[]; });
+    // #17 canonical cutover: reset the table-cache gates so the new practice's
+    // swaps/acks/comm-prefs reload from their rs_* tables (A→B→A same-session
+    // switches would otherwise serve practice-A's stale caches).
+    if(typeof _migSwapsLoadedFor !== 'undefined') _migSwapsLoadedFor = null;
+    if(typeof _migAcksLoadedFor !== 'undefined') _migAcksLoadedFor = null;
+    if(typeof _migCommPrefsLoadedFor !== 'undefined') _migCommPrefsLoadedFor = null;
     ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
