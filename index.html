@@ -22248,10 +22248,15 @@ async function generateCalendarFeedUrl(){
     }
     // Track that we issued one (for UI display on next visit). Token
     // value is no longer relied on by the URL; just a non-empty
-    // marker.
-    u.calFeedToken = (u.calFeedToken || '1');
-    if(CU) CU.calFeedToken = u.calFeedToken;
-    if(typeof triggerSave === 'function') triggerSave();
+    // marker. Persisted server-side (best-effort — the HMAC URL is
+    // self-contained, so a save failure must NOT block showing it).
+    const _mk = (u.calFeedToken || '1');
+    u.calFeedToken = _mk;
+    if(CU) CU.calFeedToken = _mk;
+    try{
+      const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+      if(_sb) await _sb.rpc('rs_set_user_pref',{p_practice:_rsPracticeId(), p_field:'calFeedToken', p_value:_mk});
+    }catch(_){}
     if(feedEl) feedEl.value = url;
     if(status){
       // Surface a warning if the URL is approaching the practical
