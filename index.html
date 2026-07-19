@@ -49213,18 +49213,27 @@ if(typeof document !== 'undefined'){
 // Open shifts now record claimedAt timestamp on claim. Swap requests
 // record viewedBy timestamps when the recipient opens the swaps page.
 // Both are surfaced inline in their respective tables.
-function _markSwapsViewed(){
-  if(!CU?.physId) return;
+let _markSwapsViewedInFlight = false;
+async function _markSwapsViewed(){
+  if(!CU?.physId || _markSwapsViewedInFlight) return;
   const myId = CU.physId;
-  let any = false;
-  (S.swapRequests || []).forEach(s => {
-    if(s.toPhysId === myId && s.status === 'pending' && !s.viewedAt){
-      s.viewedAt = new Date().toISOString();
-      s.viewedBy = CU.id;
-      any = true;
+  // Only hit the server when there's actually something unviewed to mark
+  // (this fires on any click inside #page-swaps).
+  const hasUnviewed = (S.swapRequests || []).some(s =>
+    s.toPhysId === myId && s.status === 'pending' && !s.viewedAt);
+  if(!hasUnviewed) return;
+  _markSwapsViewedInFlight = true;
+  try{
+    // Commit SERVER-SIDE (rs_mark_swaps_viewed pins to auth.uid — only marks
+    // swaps addressed to the caller). Blob write removed.
+    const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+    if(!_sb) return;
+    const _res=await _sb.rpc('rs_mark_swaps_viewed',{p_practice:_rsPracticeId()});
+    if(_res && !_res.error && _res.data && _res.data.ok && _res.data.count>0){
+      try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
     }
-  });
-  if(any) triggerSave();
+  }catch(_){}
+  finally{ _markSwapsViewedInFlight = false; }
 }
 // Call when the swaps page is rendered. _refreshCurrentPage already
 // invokes renderSwaps; we hook in there.
