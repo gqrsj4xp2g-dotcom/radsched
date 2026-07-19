@@ -11883,9 +11883,19 @@ function _repairDataIntegrity(){
   const removeOrphan = (key, refField, kind) => {
     const before = (S[key] || []).length;
     if(refField === 'fromOrTo'){
+      // #17: swaps are canonical in rs_swap_requests — delete the orphan rows
+      // from the table too, or they resurrect on the next table load.
+      const _orphanIds = (S[key] || []).filter(r =>
+        !(physIds.has(r.fromPhysId) && physIds.has(r.toPhysId))).map(r => r.id);
       S[key] = (S[key] || []).filter(r =>
         physIds.has(r.fromPhysId) && physIds.has(r.toPhysId)
       );
+      if(key === 'swapRequests' && _orphanIds.length){
+        try{
+          const _sbDel = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+          if(_sbDel) _sbDel.rpc('rs_delete_swaps', { p_practice: _rsPracticeId(), p_client_ids: _orphanIds }).then(()=>{},()=>{});
+        }catch(_){}
+      }
     } else if(refField === 'claimedBy-nullable'){
       // Don't drop the open shift — just clear the orphan reference.
       (S[key] || []).forEach(r => {
