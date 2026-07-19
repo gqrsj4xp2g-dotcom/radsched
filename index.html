@@ -13837,6 +13837,11 @@ function clearAllData(){
   // Home / Remote" pseudo-site; irGroups retains the default N/S; nextId
   // is the manifest's 100).
   _resetPersistedState();
+  // #17 canonical cutover: swaps/acks are table-backed caches outside the
+  // manifest — clear them explicitly. NOTE: the rs_swap_requests /
+  // rs_on_call_acks TABLE rows intentionally survive this reset (they're the
+  // practice's historical record); an admin can purge them separately.
+  S.swapRequests=[]; S.onCallAcks=[];
   S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
   S.irGroups=['North','South'];
   USERS.length=0;
