@@ -10255,13 +10255,16 @@ const _PERSISTED_KEYS = [
   // Communication + messaging
   {key:'chatMessages',      type:'array'},
   {key:'chatGroups',        type:'array'},
-  {key:'swapRequests',      type:'array'},
+  // NOTE (#17 canonical cutover, 2026-07): 'swapRequests' and 'onCallAcks' are
+  // intentionally ABSENT — they live canonically in the rs_swap_requests /
+  // rs_on_call_acks tables now. S.swapRequests / S.onCallAcks are table-backed
+  // in-memory caches hydrated by _migLoadSwaps / _migLoadOnCallAcks. Do NOT
+  // re-add them here: doing so would resurrect the blob copies and let stale
+  // blob applies clobber the table-loaded caches.
   {key:'broadcasts',        type:'array'},
   {key:'shiftListings',     type:'array'},
   // Shift trade marketplace (one-sided "give-up board")
   {key:'shiftOffers',       type:'array'},
-  // On-call confirmation acks (1 row per (date, physId) acknowledgement)
-  {key:'onCallAcks',        type:'array'},
   // Locked months: ['2026-01', '2026-02'] — admins explicitly published
   // these and want to block accidental edits. Override is admin-only.
   {key:'lockedMonths',      type:'array'},
