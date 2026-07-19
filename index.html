@@ -25651,6 +25651,12 @@ async function resolveSwap(id,status){
       const ok=confirm(`Approving this swap conflicts with scheduling rules:\n\n• ${conflicts.join('\n• ')}\n\nApprove anyway?`);
       if(!ok) return;
     }
+    // Commit the status to the canonical table BEFORE reassigning shifts, so a
+    // failed commit never leaves moved shifts with a still-pending swap.
+    let _rr;
+    try{ _rr=await _sbRs.rpc('rs_resolve_swap',{p_practice:_rsPracticeId(), p_client_id:id, p_status:status}); }
+    catch(e){ if(typeof _toast==='function') _toast('Resolve failed: '+(e&&e.message||e),'err'); return; }
+    if(_rr.error || !_rr.data || _rr.data.ok!==true){ if(typeof _toast==='function') _toast('Could not resolve: '+((_rr.data&&_rr.data.error)||(_rr.error&&_rr.error.message)||'failed'),'err'); return; }
     const moved=moveAssignments(s.fromPhysId,s.toPhysId,s.date);
     const movedBack=s.theirDate?moveAssignments(s.toPhysId,s.fromPhysId,s.theirDate):0;
     if(!moved){
@@ -25658,15 +25664,19 @@ async function resolveSwap(id,status){
     } else if(s.theirDate&&!movedBack){
       alert(`Return leg incomplete: no shift found for ${pname(s.toPhysId)} on ${s.theirDate}. Only the ${s.date} leg was reassigned — review the calendar.`);
     }
+    triggerSave();   // persists the shift reassignment (admin blob push)
+  } else {
+    // Deny / other: table status commit only — nothing in the blob changes.
+    let _rr;
+    try{ _rr=await _sbRs.rpc('rs_resolve_swap',{p_practice:_rsPracticeId(), p_client_id:id, p_status:status}); }
+    catch(e){ if(typeof _toast==='function') _toast('Resolve failed: '+(e&&e.message||e),'err'); return; }
+    if(_rr.error || !_rr.data || _rr.data.ok!==true){ if(typeof _toast==='function') _toast('Could not resolve: '+((_rr.data&&_rr.data.error)||(_rr.error&&_rr.error.message)||'failed'),'err'); return; }
   }
-  s.status=status;
-  // Migration Phase 2: mirror the resolution into rs_swap_requests (admin RLS path).
-  if(typeof _migMirrorSwapStatus === 'function') _migMirrorSwapStatus(id, status);
+  s.status=status;   // optimistic cache update (rs_resolve_swap wrote the canonical row)
   if(typeof _audit==='function') _audit('swap.resolve', {id, status, fromPhysId:s.fromPhysId, toPhysId:s.toPhysId, date:s.date});
   if(typeof _emitWebhookEvent==='function')
     _emitWebhookEvent(status === 'approved' ? 'swap.approved' : 'swap.denied',
       { swapId: id, fromPhys: pname(s.fromPhysId), toPhys: pname(s.toPhysId), date: s.date });
-  triggerSave();
   renderSwaps();
   // Also refresh any calendar views that might be showing the swapped shift
   if(typeof renderDRCal==='function' && document.getElementById('page-dr-cal')?.classList.contains('on')) renderDRCal();
