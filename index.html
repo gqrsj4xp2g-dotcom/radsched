@@ -25600,10 +25600,15 @@ function renderSwaps(){
       <div class="rs-empty-body">Approved and denied swap requests are archived here.</div>
     </div>`;
 }
-function resolveSwap(id,status){
+async function resolveSwap(id,status){
   if(!_adminOnly('resolve swap'))return;
   const s=(S.swapRequests||[]).find(x=>x.id===id);if(!s)return;
-  if(s.status===status){triggerSave();renderSwaps();return;} // idempotent
+  if(s.status===status){renderSwaps();return;} // idempotent
+  // #17 canonical cutover: commit the status to rs_swap_requests FIRST (via the
+  // role-admin rs_resolve_swap RPC — the table's own admin RLS branch needs
+  // AAL2, which not every admin has). Only reassign shifts after it sticks.
+  const _sbRs=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sbRs){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return; }
   if(status==='approved'){
     // AUDIT FIX (2026-07 deep dive): this used to execute only HALF of a two-sided
     // swap (the fromPhys→toPhys leg on s.date; s.theirDate was never touched, so the
