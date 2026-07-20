@@ -14267,7 +14267,7 @@ function _showPasswordResetPanel(){
 async function _submitNewPassword(){
   const pw  = document.getElementById('rs-pw')?.value || '';
   const pw2 = document.getElementById('rs-pw2')?.value || '';
-  if(pw.length < 8){ showErr('Password must be at least 8 characters.'); return; }
+  { const pe=_passwordPolicyError(pw); if(pe){ showErr(pe); return; } }
   if(pw !== pw2){ showErr('Passwords do not match.'); return; }
   const sb = _initAuthClient();
   if(!sb){ showErr('Supabase not configured.'); return; }
@@ -14395,7 +14395,7 @@ async function doRegister(){
   const pw=document.getElementById('rf-pw').value;
   const pw2=document.getElementById('rf-pw2').value;
   if(!first||!last||!email||!pw){showErr('All fields are required.');return;}
-  if(pw.length<8){showErr('Password must be at least 8 characters.');return;}
+  { const pe=_passwordPolicyError(pw); if(pe){showErr(pe);return;} }
   if(pw!==pw2){showErr('Passwords do not match.');return;}
   const btn=document.querySelector('#af-reg .abtn');
   if(btn) btn.textContent='Creating account…';
@@ -28051,10 +28051,7 @@ async function adminCreateAccount(){
     setMsg('<span style="color:var(--red-t)">All fields required.</span>');
     return;
   }
-  if(pw.length<8){
-    setMsg('<span style="color:var(--red-t)">Password must be at least 8 characters.</span>');
-    return;
-  }
+  { const pe=_passwordPolicyError(pw); if(pe){ setMsg('<span style="color:var(--red-t)">'+escHtml(pe)+'</span>'); return; } }
   if(USERS.find(u=>(u.email||'').toLowerCase()===email)){
     setMsg('<span style="color:var(--red-t)">A user with that email already exists in this practice.</span>');
     return;
@@ -31306,7 +31303,7 @@ async function changeMyPassword(){
     if(st){ st.textContent = txt; st.style.color = color; }
   };
   if(!pw || !pw2){ setStatus('Fill in both password fields.','var(--red-t)'); return; }
-  if(pw.length < 8){ setStatus('Password must be at least 8 characters.','var(--red-t)'); return; }
+  { const pe=_passwordPolicyError(pw); if(pe){ setStatus(pe,'var(--red-t)'); return; } }
   if(pw !== pw2){ setStatus('Passwords do not match.','var(--red-t)'); return; }
 
   const sb = _initAuthClient();
