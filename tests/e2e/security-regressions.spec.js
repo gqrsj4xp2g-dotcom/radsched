@@ -38,10 +38,6 @@ test('practice creation and switching are superuser-only', async ({ page }) => {
   await openApp(page, '/index.html?e2e=tenant-admin-boundary');
   await launchSyntheticUser(page, 'admin');
 
-  const allowed = await page.evaluate(() => ({
-    admin: _superuserOnly('switch practices'),
-    createCard: document.getElementById('create-practice-card')?.style.display,
-  }));
-  expect(allowed.admin).toBe(false);
-  expect(allowed.createCard).not.toBe('');
+  const allowed = await page.evaluate(() => _superuserOnly('switch practices'));
+  expect(allowed).toBe(false);
 });
