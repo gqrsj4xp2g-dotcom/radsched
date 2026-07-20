@@ -102,7 +102,7 @@ if (htmlBuild && htmlSw && swVersion) {
 
 // Local/prod shell hygiene.
 check('No Cloudflare email-decoder shim in app shell', !/(cdn-cgi|email-decode|cloudflare-static)/.test(index), 'Remove injected CDN scripts from index.html.');
-check('No stale create-user adminCount snippet remains', !/\badminCount\b/.test(index) && !/\badminCount\b/.test(read('supabase/functions/create-user/index.ts')), 'Use privilegedCount/admin+superuser bootstrap logic.');
+check('No stale create-user adminCount snippet remains', !/\badminCount\b/.test(index) && !/\badminCount\b/.test(read('supabase/functions/create-user/index.ts')), 'Bootstrap must be dashboard-only.');
 check('Managed CSS sources do not start with marker text', !/^\s*Edit the source file/m.test([cssAuth, cssMobile, cssTokens].join('\n---\n')), 'Marker text outside comments can invalidate following CSS.');
 check('Token source comment avoids nested CSS comment delimiters', !/between\s+\/\*/.test(cssTokens), 'Nested /* */ inside comments can corrupt CSS parsing.');
 check('Mobile drawer CSS is present in built shell', /@media\(max-width:760px\)[\s\S]{0,800}\.sidebar\s*\{[\s\S]{0,320}position:fixed/.test(index), 'Mobile sidebar must be off-canvas on phones.');
@@ -157,7 +157,7 @@ const createUser = read('supabase/functions/create-user/index.ts');
 const adminOps = read('supabase/functions/admin-ops/index.ts');
 check('Dashboard source uses admin-or-superuser gate', /_isAdminOrSU\(\)/.test(srcDash), 'src/parts/js-render-dash.js');
 check('Dashboard source does not use admin-only isAdm', !/const\s+isAdm\s*=\s*CU\.role\s*={2,3}\s*['"]admin['"]/.test(srcDash));
-check('Practice switcher uses admin-or-superuser gate', /renderPracticesPage[\s\S]{0,1800}_isAdminOrSU\(\)/.test(index));
+check('Practice switcher is superuser-only', /renderPracticesPage[\s\S]{0,1800}_isSU\(\)/.test(index) && /switchPractice\(id,name\)[\s\S]{0,160}_superuserOnly/.test(index));
 check('Practice list escapes practice names', /<td><code>\$\{escHtml\(p\.id\)\}<\/code><\/td>/.test(index) && /\$\{escHtml\(p\.name\)\}/.test(index));
 
 const widgetFn = extractFunctionWindow(index, 'renderWidgetPage', 900);
@@ -177,7 +177,8 @@ check('Backup restore preview wizard exists', /function\s+previewBackupRestore\(
 check('Stress-test revert opens backup restore UI', /function\s+renderRestoreFromBackups\(/.test(index) && /renderRestoreFromBackups\(\)/.test(index) && /renderBackupPicker\('backup-picker'\)/.test(index));
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
-check('create-user bootstrap counts privileged roles', /privilegedCount/.test(createUser) && /role\s*===\s*["']superuser["']/.test(createUser));
+check('create-user has no user-metadata bootstrap promotion', !/privilegedCount/.test(createUser) && !/userMeta\.role/.test(createUser));
+check('create-user scopes tenant admins to caller practice', /targetAllowed/.test(createUser) && /Administrators may only manage users in their own practice/.test(createUser));
 check('create-user requires admin MFA/AAL2', /function\s+hasAal2/.test(createUser) && /mfa_required/.test(createUser));
 check('create-user has per-caller rate limit', /function\s+rateLimit/.test(createUser) && /Too many user-management requests/.test(createUser));
 check('create-user protects superuser mutation paths', [
