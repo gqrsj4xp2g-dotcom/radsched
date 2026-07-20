@@ -13,6 +13,22 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
+const RATE_BUCKETS = new Map<string, { n: number; t: number }>()
+function rateLimit(key: string, cap: number): boolean {
+  const now = Date.now(), b = RATE_BUCKETS.get(key)
+  if (!b || now - b.t > 60_000) { RATE_BUCKETS.set(key, { n: 1, t: now }); return true }
+  if (b.n >= cap) return false
+  b.n++; return true
+}
+
+function jwtClaims(token: string): Record<string, unknown> {
+  try {
+    const p = token.split('.')[1] || ''
+    const s = p.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(p.length / 4) * 4, '=')
+    return JSON.parse(atob(s))
+  } catch { return {} }
+}
+
 async function requireAdmin(req: Request): Promise<Response | null> {
   const auth = req.headers.get('Authorization') || ''
   const jwt = auth.replace(/^Bearer\s+/i, '')
@@ -28,6 +44,8 @@ async function requireAdmin(req: Request): Promise<Response | null> {
 
   const role = String(data.user.app_metadata?.role || '')
   if (role !== 'admin' && role !== 'superuser') return json({ error: 'Admin role required.' }, 403)
+  if (String(jwtClaims(jwt).aal || '').toLowerCase() !== 'aal2') return json({ error: 'Admin MFA verification required.' }, 403)
+  if (!rateLimit(data.user.id, 20)) return json({ error: 'Too many Maps requests; slow down.' }, 429)
   return null
 }
 
