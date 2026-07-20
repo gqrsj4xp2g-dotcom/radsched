@@ -15257,7 +15257,7 @@ function _applyRemoteData(d){
     }
   }
   // Track when this data was saved so poll can detect remote changes
-  if(d.savedAt) S._remoteSavedAt = d.savedAt;
+  if(d._dbSavedAt || d.savedAt) S._remoteSavedAt = d._dbSavedAt || d.savedAt;
   // AUDIT FIX (2026-07 deep dive): invalidate the version-gated lookup caches
   // (_dateIdx via _shiftsOnDate, _physByIdMap via _physById). triggerSave normally
   // bumps them, but it is suppressed by _isRestoring during a remote apply — so
@@ -52108,11 +52108,14 @@ async function _pullSavedAt(rowId){
 async function _pullFromSupabase(){
   if(!_initSupabase())return null;
   try{
-    const {data,error}=await _supabase.from(_TABLE).select('data').eq('id',_ROW_ID).single();
+    const {data,error}=await _supabase.from(_TABLE).select('data,saved_at').eq('id',_ROW_ID).single();
     if(error&&error.code!=='PGRST116')throw error;
     _pullFailCount = 0; // success — reset counter
     _lastPullFailed = false;  // definitive answer (row present OR confirmed absent)
-    return data?JSON.parse(data.data):null;
+    if(!data) return null;
+    const parsed=JSON.parse(data.data);
+    parsed._dbSavedAt=data.saved_at||parsed.savedAt||null;
+    return parsed;
   }catch(e){
     _lastPullFailed = true;
     _pullFailCount++;
