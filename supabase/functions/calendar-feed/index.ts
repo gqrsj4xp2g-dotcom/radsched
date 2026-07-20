@@ -18,6 +18,7 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Cache-Control": "private, no-store",
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -237,6 +238,15 @@ serve(async (req) => {
       return new Response("Missing or invalid token", { status: 401, headers: CORS });
     }
 
+    // This legacy endpoint looked up bearer tokens by downloading every
+    // practice blob. Calendar subscriptions now use signed, scoped v2 URLs
+    // served by widget-data. Fail closed instead of retaining an unbounded
+    // service-role scan and a second token system.
+    return new Response("Legacy calendar feed retired. Generate a new calendar URL in RadScheduler.", {
+      status: 410,
+      headers: CORS,
+    });
+
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -286,7 +296,7 @@ serve(async (req) => {
         ...CORS,
         "Content-Type": "text/calendar; charset=utf-8",
         "Content-Disposition": `inline; filename="radscheduler.ics"`,
-        "Cache-Control": "public, max-age=900", // 15 min cache
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (e: any) {
