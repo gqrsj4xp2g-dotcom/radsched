@@ -31,6 +31,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SB_URL  = Deno.env.get('SUPABASE_URL')!;
 const SVC_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -65,6 +66,35 @@ function jsonResp(body: unknown, status = 200): Response {
 
 function codeFingerprint(code: string): string {
   return String(code || '').trim().slice(-8);
+}
+
+function jwtAal(token: string): string {
+  try {
+    const part = token.split('.')[1] || '';
+    return String(JSON.parse(fromB64Url(part))?.aal || '').toLowerCase();
+  } catch { return ''; }
+}
+
+function randomSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let raw = '';
+  for (const b of bytes) raw += String.fromCharCode(b);
+  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function practiceSigningSecret(sb: any, practiceId: string, create = false): Promise<string | null> {
+  const { data, error } = await sb.from('rs_widget_secrets')
+    .select('secret').eq('practice_id', practiceId).maybeSingle();
+  if (error) throw new Error('pairing secret lookup failed: ' + error.message);
+  if (data?.secret) return String(data.secret);
+  if (!create) return null;
+  const secret = randomSecret();
+  const { data: created, error: createErr } = await sb.from('rs_widget_secrets')
+    .upsert({ practice_id: practiceId, secret }, { onConflict: 'practice_id', ignoreDuplicates: true })
+    .select('secret').single();
+  if (createErr) throw new Error('pairing secret creation failed: ' + createErr.message);
+  return String(created?.secret || secret);
 }
 
 // Strip practice-level secrets from the blob before handing it to the widget.
@@ -386,8 +416,9 @@ Deno.serve(async (req: Request) => {
     // Verify HMAC against the practice's server-side secret. The
     // ICS GET path only accepts cal-feed tokens (so a leaked widget
     // pairing can't be reused to subscribe to a physician's calendar).
-    const practiceSecret = (practice && practice.cfg && typeof practice.cfg._widgetSecret === 'string')
-      ? practice.cfg._widgetSecret : null;
+    let practiceSecret: string | null = null;
+    try { practiceSecret = await practiceSigningSecret(sb, payload.practiceId); }
+    catch (e) { return new Response((e as Error).message, { status: 500, headers: CORS }); }
     try { await _verifyHmac(payload, practiceSecret, 'cal-feed'); }
     catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const physName = `${payload.physFirst || ''} ${payload.physLast || ''}`.trim() || `Physician ${payload.physId}`;
@@ -408,15 +439,93 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); }
   catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
   if (typeof body !== 'object' || body == null) return jsonResp({ error: 'invalid body' }, 400);
+  const sb = createClient(SB_URL, SVC_KEY);
+  const action = body.action || 'read';
+
+  // Pairing/calendar credentials are issued only by this server. The signing
+  // key never crosses the trust boundary into the browser or practice blob.
+  if (action === 'issue') {
+    const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!jwt) return jsonResp({ error: 'authenticated session required' }, 401);
+    const authClient = createClient(SB_URL, ANON_KEY);
+    const { data: authData, error: authErr } = await authClient.auth.getUser(jwt);
+    if (authErr || !authData?.user) return jsonResp({ error: 'invalid or expired session' }, 401);
+    const user = authData.user;
+    const meta = user.app_metadata || {};
+    const role = String(meta.role || '');
+    const practiceId = String(body.practiceId || '');
+    const physId = +body.physId;
+    const purpose = body.purpose === 'cal-feed' ? 'cal-feed' : 'widget';
+    if (!practiceId || !physId) return jsonResp({ error: 'practiceId and physId are required' }, 400);
+    if (role !== 'superuser' && String(meta.practiceId || '') !== practiceId) {
+      return jsonResp({ error: 'cross-practice issuance denied' }, 403);
+    }
+    const { data: issueRow, error: issueErr } = await sb.from('radscheduler')
+      .select('data,saved_at').eq('id', practiceId).single();
+    if (issueErr || !issueRow) return jsonResp({ error: 'practice not found' }, 404);
+    const issuePractice = typeof issueRow.data === 'string' ? JSON.parse(issueRow.data) : issueRow.data;
+    const physician = (issuePractice.physicians || []).find((p: any) => +p.id === physId);
+    if (!physician) return jsonResp({ error: 'physician not found in practice' }, 404);
+    if (purpose === 'widget') {
+      if (!['admin', 'superuser'].includes(role) || jwtAal(jwt) !== 'aal2') {
+        return jsonResp({ error: 'admin MFA verification required to issue a widget pairing' }, 403);
+      }
+    } else {
+      const ownsPhysician = (issuePractice.users || []).some((u: any) =>
+        String(u?.id || '') === user.id && +u?.physId === physId
+      );
+      if (!ownsPhysician) return jsonResp({ error: 'calendar feeds may only be issued for your linked physician' }, 403);
+    }
+    const secret = await practiceSigningSecret(sb, practiceId, true);
+    if (!secret) return jsonResp({ error: 'pairing secret unavailable' }, 500);
+    const days = Math.max(1, Math.min(+(body.days || (purpose === 'widget' ? 30 : 365)), 365));
+    const issuedAt = new Date().toISOString();
+    const exp = new Date(Date.now() + days * 86400_000).toISOString();
+    const pairingId = purpose === 'widget'
+      ? Math.max(+(issuePractice.nextId || 100), ...(issuePractice.widgetPairings || []).map((p: any) => +p?.id || 0)) + 1
+      : undefined;
+    const unsigned: any = {
+      v: 2,
+      ...(purpose === 'widget' ? { pairingId } : { kind: 'cal-feed' }),
+      practiceId,
+      physId,
+      physLast: physician.last || '',
+      physFirst: physician.first || '',
+      sbUrl: SB_URL,
+      sbAnonKey: ANON_KEY,
+      issuedAt,
+      exp,
+    };
+    const sig = await hmacB64Url(secret, JSON.stringify(unsigned));
+    const code = btoa(JSON.stringify({ ...unsigned, sig }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    if (purpose === 'widget') {
+      if (!Array.isArray(issuePractice.widgetPairings)) issuePractice.widgetPairings = [];
+      issuePractice.widgetPairings.push({
+        id: pairingId,
+        physId,
+        issuedAt,
+        exp,
+        issuedBy: user.id,
+        fingerprint: codeFingerprint(code),
+      });
+      issuePractice.nextId = Math.max(+(issuePractice.nextId || 0), pairingId!);
+      const { data: saved, error: saveErr } = await sb.rpc('rs_save_practice_cas', {
+        p_practice: practiceId,
+        p_data: JSON.stringify(issuePractice),
+        p_expected_saved_at: issueRow.saved_at || null,
+      });
+      if (saveErr) return jsonResp({ error: 'pairing registry save failed: ' + saveErr.message }, 500);
+      if (!saved?.ok) return jsonResp({ error: 'practice changed while issuing; retry' }, 409);
+    }
+    return jsonResp({ ok: true, code, exp, pairingId, purpose });
+  }
   let payload: any;
   // POST path: widget operations (read practice / add+edit+delete
   // credit). Stage-1 decode (no HMAC verify yet — need the practice's
   // server-side secret first).
   try { payload = _decodeEnvelope(body.code); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
-  const sb = createClient(SB_URL, SVC_KEY);
-  const action = body.action || 'read';
-
   // Action allowlist — reject anything we don't explicitly support
   // before we waste a DB read on it.
   const ALLOWED_ACTIONS = new Set(['read', 'add-credit', 'edit-credit', 'delete-credit', 'peer-open']);
@@ -447,8 +556,9 @@ Deno.serve(async (req: Request) => {
   if (rdErr) return jsonResp({ error: 'practice fetch failed: ' + rdErr.message }, 500);
   if (!row) return jsonResp({ error: 'practice not found' }, 404);
   const practice = parsePracticeData((row as any).data);
-  const practiceSecret = (practice && practice.cfg && typeof practice.cfg._widgetSecret === 'string')
-    ? practice.cfg._widgetSecret : null;
+  let practiceSecret: string | null = null;
+  try { practiceSecret = await practiceSigningSecret(sb, payload.practiceId); }
+  catch (e) { return jsonResp({ error: String((e as Error).message) }, 500); }
   try { await _verifyHmac(payload, practiceSecret, 'widget'); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   try { assertActiveWidgetPairing(practice, payload, body.code); }
@@ -466,8 +576,7 @@ Deno.serve(async (req: Request) => {
     if (freshErr) throw new Error('practice refresh failed: ' + freshErr.message);
     if (!freshRow) throw new Error('practice not found');
     const fresh = parsePracticeData((freshRow as any).data);
-    const freshSecret = (fresh && fresh.cfg && typeof fresh.cfg._widgetSecret === 'string')
-      ? fresh.cfg._widgetSecret : null;
+    const freshSecret = await practiceSigningSecret(sb, payload.practiceId);
     await _verifyHmac(payload, freshSecret, 'widget');
     assertActiveWidgetPairing(fresh, payload, body.code);
     if (!Array.isArray(fresh.physicianCredits)) fresh.physicianCredits = [];
