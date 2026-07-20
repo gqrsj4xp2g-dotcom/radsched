@@ -1300,19 +1300,20 @@ function _resetSilentFail(){
 }
 
 function showUpdateBanner(payload){
-  if(!payload || !payload.latestVersion || !payload.downloadUrl) return;
+  if(!payload || !payload.latestVersion || !payload.releaseUrl) return;
   // Avoid re-rendering the same banner twice on rapid re-checks.
   if(_lastUpdatePayload && _lastUpdatePayload.latestVersion === payload.latestVersion) return;
   _lastUpdatePayload = payload;
-  // After 2 consecutive silent-install failures, fall back to the
-  // manual download-and-open-installer banner.
-  if(_silentFailCount() >= 2){
-    _renderManualBanner(payload);
-    return;
-  }
-  _renderSilentBanner(payload);
-  // Kick off the silent update immediately. No user click required.
-  _startSilentUpdate(payload);
+  const el = document.getElementById('update-banner');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="text">
+      🚀 Signed update available: <strong>v${escHtml(payload.latestVersion)}</strong>
+      <span style="color:var(--ink3)">(installed: v${escHtml(payload.currentVersion || '?')})</span>
+    </div>
+    <div class="actions"><button class="btn" id="upd-release">Open release page</button></div>`;
+  el.style.display = 'flex';
+  document.getElementById('upd-release').onclick = () => window.rsWidget.openExternal(payload.releaseUrl);
 }
 
 function _renderSilentBanner(payload){
