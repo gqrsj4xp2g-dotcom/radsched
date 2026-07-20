@@ -15,17 +15,19 @@ RadScheduler authorization is enforced in two places:
 | Open Tools / Settings / user management | yes | yes | no |
 | Create or edit users through `create-user` | yes | yes | no |
 | Grant or modify `superuser` | yes | no | no |
-| Switch between practices | yes | yes, when assigned | no |
+| Create or switch between practices | yes with `aal2` | no | no |
 | Restore backups through `admin-ops` | any practice | own practice only | no |
-| Cross-practice RLS access | yes with `aal2` | yes with `aal2` | no |
+| Cross-practice RLS access | yes with `aal2` | no | no |
 | Run destructive admin operations | yes with `aal2` | yes with `aal2` | no |
 
 ## Enforcement checklist
 
 - Privileged roles come from `app_metadata.role`.
 - Tenant scope comes from `app_metadata.practiceId`.
-- Admin/superuser cross-practice DB paths require `aal2` through
-  `public.radscheduler_admin_aal2()`.
+- Only superusers have cross-practice DB paths, and those require `aal2`
+  through `public.radscheduler_admin_aal2()`.
+- Tenant administrators require `aal2` and are restricted to their assigned
+  practice through `public.radscheduler_admin_same_practice(target_practice_id)`.
 - Same-practice access for every role is scoped with
   `public.radscheduler_non_admin_same_practice(target_practice_id)`.
 - `create-user` requires `aal2` and blocks non-superusers from creating,
