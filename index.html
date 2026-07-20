@@ -15077,6 +15077,9 @@ function _applyRemoteData(d){
   if(Array.isArray(d.shiftPickGroups)) S.shiftPickGroups = d.shiftPickGroups.slice();
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
   if(d.cfg)Object.assign(S.cfg,d.cfg);
+  // Widget signing material is server-only as of v2 issuance. Drop any stale
+  // client copy so an old tab cannot reintroduce it on its next save.
+  if(S.cfg) delete S.cfg._widgetSecret;
   if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
   // driveTimes is a nested {site → {site → mins}} object. Storing the
   // remote reference directly means a future remote payload could share
