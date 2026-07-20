@@ -14508,6 +14508,9 @@ async function doLogout(){
     if(typeof _migSwapsLoadedFor !== 'undefined') _migSwapsLoadedFor = null;
     if(typeof _migAcksLoadedFor !== 'undefined') _migAcksLoadedFor = null;
     if(typeof _migCommPrefsLoadedFor !== 'undefined') _migCommPrefsLoadedFor = null;
+    // Drop any table load already in flight — without this a SELECT that was
+    // awaited before logout could commit the old session's rows after it.
+    if(typeof _migTableGen !== 'undefined') _migTableGen++;
     _isRestoring = true;
     try{ S.swapRequests = []; S.onCallAcks = []; } finally{ _isRestoring = false; }
   }catch(_){}
@@ -16627,6 +16630,9 @@ async function switchPractice(id,name){
     if(typeof _migSwapsLoadedFor !== 'undefined') _migSwapsLoadedFor = null;
     if(typeof _migAcksLoadedFor !== 'undefined') _migAcksLoadedFor = null;
     if(typeof _migCommPrefsLoadedFor !== 'undefined') _migCommPrefsLoadedFor = null;
+    // Drop any table load already in flight for the OLD practice — its rows
+    // must not land in the new practice's caches when the await resolves.
+    if(typeof _migTableGen !== 'undefined') _migTableGen++;
     ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
@@ -31103,12 +31109,14 @@ async function _migLoadCommPrefs(force){
     // rebuilt USERS from the blob and clobbered the earlier hydration.
     return _migApplyCommPrefs();
   }
+  const gen = (typeof _migTableGen !== 'undefined') ? _migTableGen : 0;
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;   // transient — retry when the client is ready
     const { data, error } = await sb.from('rs_comm_prefs')
       .select('owner_uid, prefs').eq('practice_id', pid);
     if(error) return false;   // transient — retry (gate not set, so we try again)
+    if(gen !== _migTableGen || !CU) return false;   // logout/switch landed mid-flight — drop stale rows
     _migCommPrefsLoadedFor = pid;   // definitive answer received
     _migCommPrefsLoadedAt = Date.now();
     const map = {};
@@ -31129,11 +31137,17 @@ async function _migLoadCommPrefs(force){
 // Assignment goes through the S proxy set-trap which fires triggerSave —
 // suppressed via _isRestoring so a cache refresh never schedules a blob push.
 const _MIG_TABLE_TTL_MS = 20000;
+// Generation counter for the table loaders (same pattern as _wrvuSummaryGen):
+// doLogout/switchPractice bump it, and any load that was in flight across the
+// bump abandons its result instead of committing the old session's/practice's
+// rows into the fresh caches.
+let _migTableGen = 0;
 let _migAcksLoadedFor = null, _migAcksLoadedAt = 0;
 async function _migLoadOnCallAcks(force){
   if(_MIG_READ_CUTOVER === false || !CU) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
   if(!force && _migAcksLoadedFor === pid && (Date.now() - _migAcksLoadedAt) < _MIG_TABLE_TTL_MS) return false;
+  const gen = _migTableGen;
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;   // transient — retry on next call
@@ -31142,6 +31156,7 @@ async function _migLoadOnCallAcks(force){
       .eq('practice_id', pid)
       .order('ack_date', { ascending: true }).order('phys_id', { ascending: true });
     if(error || !Array.isArray(data)) return false;   // transient — retry
+    if(gen !== _migTableGen || !CU) return false;   // logout/switch landed mid-flight — drop stale rows
     _migAcksLoadedFor = pid; _migAcksLoadedAt = Date.now();
     const rows = data.filter(r => r.phys_id != null && r.ack_date)
       .map(r => ({ physId: r.phys_id, date: r.ack_date, ackBy: r.owner_uid || null, ackAt: r.ts || null }));
@@ -31158,6 +31173,7 @@ async function _migLoadSwaps(force){
   if(_MIG_READ_CUTOVER === false || !CU) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
   if(!force && _migSwapsLoadedFor === pid && (Date.now() - _migSwapsLoadedAt) < _MIG_TABLE_TTL_MS) return false;
+  const gen = _migTableGen;
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;   // transient — retry on next call
@@ -31166,6 +31182,7 @@ async function _migLoadSwaps(force){
       .eq('practice_id', pid)
       .order('client_id', { ascending: true });
     if(error || !Array.isArray(data)) return false;   // transient — retry
+    if(gen !== _migTableGen || !CU) return false;   // logout/switch landed mid-flight — drop stale rows
     _migSwapsLoadedFor = pid; _migSwapsLoadedAt = Date.now();
     const rows = data.filter(r => r.client_id != null)
       .map(r => ({ id: r.client_id, fromPhysId: r.from_phys_id, toPhysId: r.to_phys_id,
@@ -49788,7 +49805,9 @@ function _computeMonthlyReportCard(ym){
   }
 
   // ── Swap activity ─────────────────────────────────────────────────────
-  const swaps = (S.swapRequests || []).filter(r => inMonth((r.createdAt || '').slice(0, 10)));
+  // Table-sourced rows (#17 cutover) carry `ts`, not `createdAt` — without the
+  // fallback the monthly report counted zero swaps forever.
+  const swaps = (S.swapRequests || []).filter(r => inMonth((r.ts || r.createdAt || '').slice(0, 10)));
   const swapsByStatus = swaps.reduce((acc, r) => {
     const k = r.status || 'pending';
     acc[k] = (acc[k] || 0) + 1;
