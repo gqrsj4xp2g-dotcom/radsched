@@ -32319,18 +32319,10 @@ async function saveCommPrefs(){
   try{ _res=await _sb.rpc('rs_set_comm_prefs',{p_practice:_rsPracticeId(), p_prefs:{...CU.notifPrefs}}); }
   catch(e){ if(st){ st.textContent='✕ Save failed: '+(e&&e.message||e); st.style.color='var(--red-t)'; } return; }
   if(_res.error || !_res.data || _res.data.ok!==true){ if(st){ st.textContent='✕ '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'Save failed.'); st.style.color='var(--red-t)'; } return; }
-  // rs-v112 (migration Phase 2): keep the owner-RLS rs_comm_prefs mirror
-  // (fire-and-forget) for the per-user read-cutover. owner_uid = CU.id = auth.uid.
-  try{
-    if(CU.id) _sb.from('rs_comm_prefs').upsert({
-      practice_id: CU.practiceId || (typeof _ROW_ID!=='undefined'?_ROW_ID:'main'),
-      owner_uid: CU.id,
-      phys_id: (typeof CU.physId==='number')?CU.physId:null,
-      prefs: CU.notifPrefs||{},
-      updated_at: new Date().toISOString()
-    }, { onConflict:'practice_id,owner_uid' }).then(()=>{},()=>{});
-  }catch(_){}
-  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  // #17 canonical cutover: rs_set_comm_prefs upserts rs_comm_prefs directly —
+  // the old client-side mirror upsert and the blob re-pull are gone (prefs no
+  // longer live in the blob). Force-refresh the table cache to reconcile.
+  try{ await _migLoadCommPrefs(true); }catch(_){}
   if(st){
     st.textContent='✓ Preferences saved';
     st.style.color='var(--green-t)';
