@@ -17,9 +17,10 @@ Before inviting real users, open **Authentication → Security** and enable
 leaked-password protection. This dashboard setting is not exposed to the
 public browser client, so treat it as a required manual go-live check.
 
-Enterprise deployments should apply every file in `docs/sql/` in order.
-`07-immutable-audit-chain.sql` is the append-only/hash-chain hardening layer
-for `radscheduler_audit`, so run it only after the audit side table exists.
+The executable schema history is `supabase/migrations/`; `docs/sql/` is
+reference material only. Link the intended project, review the migration list,
+and apply the checked-in migrations with `supabase db push --linked`. Never
+copy an isolated historical policy example into an existing production schema.
 
 ### Run the SQL
 
@@ -240,8 +241,9 @@ the `icons/` directory to any static host. Apply the same headers as
 
 ## 3. Autopush from local disk to GitHub <a id="autopush"></a>
 
-Optional. If you prefer to edit `index.html` locally and have changes
-pushed to your repo automatically:
+Optional. The watcher runs the local release checks when files change. It does
+not commit or push; production publishing requires an intentional reviewed
+commit/PR:
 
 ```bash
 brew install fswatch
