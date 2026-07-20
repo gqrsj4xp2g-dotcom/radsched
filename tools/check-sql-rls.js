@@ -8,6 +8,9 @@ const targets = [
   ...fs.readdirSync(path.join(root, 'docs/sql'))
     .filter(name => name.endsWith('.sql'))
     .map(name => `docs/sql/${name}`),
+  ...fs.readdirSync(path.join(root, 'supabase/migrations'))
+    .filter(name => name.includes('rs_security_atomic_tenant_widget_hardening') && name.endsWith('.sql'))
+    .map(name => `supabase/migrations/${name}`),
 ];
 
 const issues = [];

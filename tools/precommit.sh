@@ -7,9 +7,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CHECK_ALL=0
+if [ "${1:-}" = "--all" ]; then CHECK_ALL=1; fi
 
 # Only run if the deployable shell or its managed sources are staged.
-if ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/.*|\.github/.*|supabase/functions/.*|edge-functions/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-migration-drift\.js|check-enterprise-readiness\.js|check-security-headers\.js|check-environment-config\.js|check-rbac-matrix\.js|check-toc\.sh))$'; then
+if [ "$CHECK_ALL" -ne 1 ] && ! git diff --cached --name-only | grep -Eq '^(index\.html|sw\.js|manifest\.webmanifest|src/parts/.*|docs/.*|\.github/.*|supabase/.*|edge-functions/.*|widget/.*|tools/(smoke-check\.js|check-sql-rls\.js|check-migration-drift\.js|check-enterprise-readiness\.js|check-security-headers\.js|check-environment-config\.js|check-rbac-matrix\.js|check-toc\.sh))$'; then
   exit 0
 fi
 

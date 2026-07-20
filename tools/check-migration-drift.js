@@ -4,6 +4,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const sqlDir = path.join(root, 'docs/sql');
+const migrationDir = path.join(root, 'supabase/migrations');
 const hardeningPath = path.join(sqlDir, '04-rls-advisor-hardening.sql');
 const hardening = fs.readFileSync(hardeningPath, 'utf8');
 const allSql = fs.readdirSync(sqlDir)
@@ -13,6 +14,31 @@ const allSql = fs.readdirSync(sqlDir)
   .join('\n\n');
 
 const failures = [];
+
+const migrationFiles = fs.existsSync(migrationDir)
+  ? fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()
+  : [];
+if (migrationFiles.length < 56) {
+  failures.push(`supabase/migrations: expected fetched remote history plus local hardening migration (found ${migrationFiles.length}, need >= 56)`);
+}
+const versions = migrationFiles.map(name => name.split('_')[0]);
+if (new Set(versions).size !== versions.length) failures.push('supabase/migrations: duplicate migration version');
+const securityMigrationName = migrationFiles.find(name => name.includes('rs_security_atomic_tenant_widget_hardening'));
+if (!securityMigrationName) {
+  failures.push('supabase/migrations: missing atomic tenant/widget security migration');
+} else {
+  const securityMigration = fs.readFileSync(path.join(migrationDir, securityMigrationName), 'utf8');
+  const requiredSecurityObjects = [
+    ['atomic practice save RPC', /create\s+or\s+replace\s+function\s+public\.rs_save_practice_cas/i],
+    ['widget secret private table', /create\s+table\s+if\s+not\s+exists\s+public\.rs_widget_secrets/i],
+    ['superuser-only global helper', /app_metadata[\s\S]{0,120}role'\)\s*=\s*'superuser'/i],
+    ['same-practice admin MFA', /radscheduler_admin_same_practice[\s\S]{0,700}->>\s*'aal'\)\s*=\s*'aal2'/i],
+    ['CAS public revoke', /revoke\s+all\s+on\s+function\s+public\.rs_save_practice_cas[\s\S]*?from\s+public,\s*anon/i],
+  ];
+  for (const [label, pattern] of requiredSecurityObjects) {
+    if (!pattern.test(securityMigration)) failures.push(`${securityMigrationName}: missing ${label}`);
+  }
+}
 
 function requireMatch(scope, label, pattern) {
   if (!pattern.test(scope.text)) {

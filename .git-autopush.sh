@@ -77,7 +77,7 @@ fswatch --one-per-batch --latency 1 \
   fi
 
   log "  detected change → running release checks"
-  if ./tools/precommit.sh; then
+  if ./tools/precommit.sh --all; then
     log "  ✓ checks passed; changes are ready for human review and an intentional push"
   else
     log "  ✗ checks failed; production remains unchanged"
