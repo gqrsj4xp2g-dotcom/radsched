@@ -15316,10 +15316,11 @@ function _applyRemoteData(d){
       _migLoadOnCallAcks().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
     // #17: comm-prefs are table-canonical too — keep the practice-wide prefs
     // hydration fresh so the client-side recipient filters (_notify/broadcast/
-    // publish) see everyone's current choices. No re-render needed: prefs only
-    // affect outbound filtering, not what's on screen (renderCommPrefs does its
-    // own load+render pass).
-    if(typeof _migLoadCommPrefs === 'function') _migLoadCommPrefs().then(()=>{},()=>{});
+    // publish) see everyone's current choices. Re-render on change so an OPEN
+    // 🔔 Notifications page shows the corrected checkboxes instead of staying
+    // stale until Save silently writes old values back.
+    if(typeof _migLoadCommPrefs === 'function')
+      _migLoadCommPrefs().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
   }catch(_){}
 }
 
