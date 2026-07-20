@@ -31354,11 +31354,44 @@ async function changeMyPassword(){
 const _MIG_READ_CUTOVER = true;
 let _migCommPrefsLoadedFor = null;
 let _migCommPrefsLoadedAt = 0;
+// Last-fetched prefs map (owner_uid → prefs) + the practice it belongs to.
+// Kept so _migApplyCommPrefs can re-hydrate SYNCHRONOUSLY after
+// _applyRemoteData rebuilds USERS from the blob (which resurrects the stale
+// frozen blob copies) — without waiting out the TTL or re-querying.
+let _migCommPrefsMap = null;
+let _migCommPrefsMapFor = null;
+// Apply the cached table prefs onto USERS[] + CU. Synchronous, idempotent,
+// zero network. Returns true if anything changed.
+function _migApplyCommPrefs(){
+  const pid = CU ? (CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main')) : null;
+  if(!_migCommPrefsMap || !pid || _migCommPrefsMapFor !== pid) return false;
+  const map = _migCommPrefsMap;
+  let changed = false;
+  (USERS || []).forEach(u => {
+    const t = map[u.id];
+    if(!t) return;   // no table row (legacy/bootstrap user) — keep blob/default prefs
+    const merged = { ...(u.notifPrefs || {}), ...t };   // table wins, defaults fill gaps
+    if(JSON.stringify(merged) !== JSON.stringify(u.notifPrefs || {})){
+      u.notifPrefs = merged; changed = true;
+    }
+  });
+  if(CU && map[CU.id]){
+    const mergedCU = { ...(CU.notifPrefs || {}), ...map[CU.id] };
+    if(JSON.stringify(mergedCU) !== JSON.stringify(CU.notifPrefs || {})){
+      CU.notifPrefs = mergedCU; changed = true;
+    }
+  }
+  return changed;
+}
 async function _migLoadCommPrefs(force){
   if(_MIG_READ_CUTOVER === false || !CU || !CU.id) return false;
   const pid = CU.practiceId || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
   if(!force && _migCommPrefsLoadedFor === pid &&
-     (Date.now() - _migCommPrefsLoadedAt) < _MIG_TABLE_TTL_MS) return false;
+     (Date.now() - _migCommPrefsLoadedAt) < _MIG_TABLE_TTL_MS){
+    // Within TTL we still re-APPLY the cached map — a blob apply may have just
+    // rebuilt USERS from the blob and clobbered the earlier hydration.
+    return _migApplyCommPrefs();
+  }
   try{
     const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
     if(!sb) return false;   // transient — retry when the client is ready
@@ -31371,22 +31404,9 @@ async function _migLoadCommPrefs(force){
     (data || []).forEach(r => {
       if(r && r.owner_uid && r.prefs && typeof r.prefs === 'object') map[r.owner_uid] = r.prefs;
     });
-    let changed = false;
-    (USERS || []).forEach(u => {
-      const t = map[u.id];
-      if(!t) return;   // no table row (legacy/bootstrap user) — keep blob/default prefs
-      const merged = { ...(u.notifPrefs || {}), ...t };   // table wins, defaults fill gaps
-      if(JSON.stringify(merged) !== JSON.stringify(u.notifPrefs || {})){
-        u.notifPrefs = merged; changed = true;
-      }
-    });
-    if(CU && map[CU.id]){
-      const mergedCU = { ...(CU.notifPrefs || {}), ...map[CU.id] };
-      if(JSON.stringify(mergedCU) !== JSON.stringify(CU.notifPrefs || {})){
-        CU.notifPrefs = mergedCU; changed = true;
-      }
-    }
-    return changed;
+    _migCommPrefsMap = map;
+    _migCommPrefsMapFor = pid;
+    return _migApplyCommPrefs();
   }catch(_){ return false; }
 }
 // ── #17 CANONICAL CUTOVER (2026-07): rs_on_call_acks + rs_swap_requests are
