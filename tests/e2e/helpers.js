@@ -116,6 +116,23 @@ async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mf
       from(tableName) {
         return tableApi(tableName);
       },
+      async rpc(name, args = {}) {
+        if (name === 'rs_save_practice_cas') {
+          const id = args.p_practice;
+          const existing = mockRows.find(row => String(row?.id) === String(id));
+          const current = existing?.saved_at || null;
+          const expected = args.p_expected_saved_at || null;
+          if (current !== expected) {
+            return { data: { ok: false, conflict: true, current_saved_at: current }, error: null };
+          }
+          let parsed = {};
+          try { parsed = JSON.parse(args.p_data); } catch (_) {}
+          const savedAt = parsed.savedAt || new Date().toISOString();
+          replaceById(mockRows, { id, data: args.p_data, saved_at: savedAt });
+          return { data: { ok: true, saved_at: savedAt }, error: null };
+        }
+        return { data: null, error: null };
+      },
       channel() {
         return {
           on() { return this; },
