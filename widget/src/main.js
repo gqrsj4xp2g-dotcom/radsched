@@ -370,6 +370,11 @@ function createWindow(){
       nodeIntegration: false,
     },
   });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const localPage = new URL('file://' + path.join(__dirname, 'renderer.html')).href;
+    if(targetUrl !== localPage) event.preventDefault();
+  });
   mainWindow.loadFile(path.join(__dirname, 'renderer.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('closed', () => { mainWindow = null; });
