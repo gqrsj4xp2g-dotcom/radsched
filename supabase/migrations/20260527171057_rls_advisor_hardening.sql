@@ -9,9 +9,18 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM authenticated;
+-- This helper was created manually in some early production projects but is
+-- intentionally absent from fresh installs. Keep the hardening migration
+-- replayable in both states.
+DO $block$
+BEGIN
+  IF to_regprocedure('public.rls_auto_enable()') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM authenticated';
+  END IF;
+END
+$block$;
 
 DROP POLICY IF EXISTS practices_read_authenticated ON public.practices;
 DROP POLICY IF EXISTS practices_insert_admin_only ON public.practices;
