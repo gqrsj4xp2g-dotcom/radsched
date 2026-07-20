@@ -10339,7 +10339,12 @@ function _buildPersistedPayload(pathKind){
       // Fall back to an empty default so the payload is schema-complete
       out[entry.key] = entry.type === 'array' ? [] : entry.type === 'object' ? {} : null;
     } else {
-      out[entry.key] = v;
+      if(entry.key === 'cfg' && typeof v === 'object'){
+        out[entry.key] = {...v};
+        delete out[entry.key]._widgetSecret;
+      } else {
+        out[entry.key] = v;
+      }
     }
   }
   return out;
@@ -14989,7 +14994,7 @@ function _applyRemoteData(d){
   // because it would clobber fresh local changes. _lastLocalChange is updated on every
   // triggerSave(); _lastSaved is updated on successful push. If there are local changes
   // newer than both the remote data AND the last successful push, bail.
-  const remoteSaved = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+  const remoteSaved = (d._dbSavedAt||d.savedAt) ? new Date(d._dbSavedAt||d.savedAt).getTime() : 0;
   const localSaved  = S._lastSaved ? S._lastSaved.getTime() : 0;
   const localChange = S._lastLocalChange || 0;
   if(localChange > remoteSaved && localChange > localSaved){
