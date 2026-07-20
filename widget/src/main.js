@@ -229,26 +229,9 @@ async function checkForUpdates(opts){
 }
 
 // ─── Pairing-code persistence ─────────────────────────────────────
-// As of v1.0.3 we store the pairing code as a plain text file with
-// 0600 permissions (only the current user can read it). Previously
-// we used Electron's safeStorage which encrypts via macOS Keychain
-// — but since we ad-hoc sign our builds (no Apple Developer ID),
-// every release has a different code signature and macOS prompts
-// for the Keychain password on each install.
-//
-// Threat-model note: the pairing code contains the practice's
-// Supabase anon key (which is PUBLIC by design — RLS gates access)
-// + an HMAC-signed payload identifying the physician. An attacker
-// with filesystem access on the user's Mac could read the pairing
-// and view that physician's read-only schedule, but they could
-// equally just install the widget themselves and request a fresh
-// pairing — the encryption-at-rest provided marginal security.
-//
-// Migration: on first run after upgrading from a safeStorage build
-// (1.0.0–1.0.2), we'll see an encrypted file. Try a single
-// safeStorage decrypt (one final Keychain prompt for upgraders);
-// on success, immediately rewrite as plain text. From then on,
-// no more Keychain access.
+// Pairing codes are bearer credentials and are encrypted at rest with
+// Electron safeStorage (Keychain on macOS, DPAPI on Windows). Existing
+// plaintext files are accepted once and immediately re-encrypted.
 // Primary pairing store: Electron's user-data dir. Survives most
 // updates, but on rare occasions macOS clears app data when an
 // installer "replaces" a bundle, OR a productName change between
@@ -264,12 +247,8 @@ const STORE_PATH = () => path.join(app.getPath('userData'), 'pairing.bin');
 //   • Windows NSIS silent install + reinstall
 //   • productName / appId changes between builds
 //
-// We dual-write on every savePairing(). On load, if STORE_PATH is
-// missing or corrupt, we restore from the backup. The backup is in
-// the user's home dir (chmod 0600) — same security posture as the
-// primary (only the current user can read it). It carries the same
-// PUBLIC anon key the pairing code already had, so no extra secrets
-// are at rest.
+// We dual-write the encrypted bytes on every savePairing(). On load, if
+// STORE_PATH is missing or corrupt, we restore from the encrypted backup.
 const os = require('os');
 const BACKUP_STORE_PATH = () => path.join(os.homedir(), '.radscheduler-widget-pairing');
 
@@ -286,7 +265,11 @@ function _isPlainPairingText(s){
 
 function _writePairingFile(p, codeStr){
   try{
-    fs.writeFileSync(p, codeStr, { encoding: 'utf8', mode: 0o600 });
+    if(!safeStorage || !safeStorage.isEncryptionAvailable()){
+      throw new Error('OS credential encryption is unavailable; refusing to persist bearer credential');
+    }
+    const encrypted = safeStorage.encryptString(String(codeStr || ''));
+    fs.writeFileSync(p, encrypted, { mode: 0o600 });
     try{ fs.chmodSync(p, 0o600); }catch(_){}
     return true;
   }catch(e){ console.error('[pairing] write failed for', p, e.message); return false; }
@@ -303,33 +286,28 @@ function savePairing(codeStr){
   } else if(!primaryOk){
     console.warn('[pairing] primary write failed, backup OK — pairing will be restored on next launch');
   }
+  return primaryOk || backupOk;
 }
 
 function _readPairingFromFile(p){
-  // Returns the plaintext pairing code if the file contains one, or
-  // null otherwise. Handles legacy safeStorage encryption + the
-  // "trust the bytes" fallback.
+  // Returns the decrypted pairing code, or a legacy plaintext code that
+  // loadPairing() will immediately migrate back to encrypted storage.
   try{
     if(!fs.existsSync(p)) return null;
     const buf = fs.readFileSync(p);
-    const asText = buf.toString('utf8');
-    if(_isPlainPairingText(asText)) return asText.trim();
-    // Legacy 1.0.0–1.0.2 builds wrote safeStorage-encrypted bytes.
     if(safeStorage && safeStorage.isEncryptionAvailable()){
       try{
         const decrypted = safeStorage.decryptString(buf);
         if(decrypted && _isPlainPairingText(decrypted)){
-          console.log('[pairing] migrating encrypted file → plaintext (one-time)');
           return decrypted;
         }
       }catch(e){
         console.warn('[pairing] safeStorage decrypt failed for', p, ':', e.message);
       }
     }
-    // Last-ditch: maybe the file is plaintext but doesn't match our
-    // shape regex (e.g., a stray newline). Return as-is so the
-    // renderer can decide; if it's truly corrupt the decode will fail
-    // and we'll prompt re-pair from the renderer side.
+    // One-time compatibility for versions that wrote plaintext with 0600.
+    const asText = buf.toString('utf8');
+    if(_isPlainPairingText(asText)) console.warn('[pairing] migrating legacy plaintext credential to safeStorage');
     return _isPlainPairingText(asText.trim()) ? asText.trim() : null;
   }catch(e){
     console.error('[pairing] read failed for', p, ':', e.message);
@@ -341,12 +319,10 @@ function loadPairing(){
   // Try the primary store first.
   let code = _readPairingFromFile(STORE_PATH());
   if(code){
-    // If the backup is missing or stale, mirror the primary forward
-    // so future updates have a safety net.
-    const backup = _readPairingFromFile(BACKUP_STORE_PATH());
-    if(backup !== code){
-      _writePairingFile(BACKUP_STORE_PATH(), code);
-    }
+    // Always rewrite both copies. This migrates plaintext and refreshes a
+    // missing/stale backup without retaining readable bearer credentials.
+    _writePairingFile(STORE_PATH(), code);
+    _writePairingFile(BACKUP_STORE_PATH(), code);
     return code;
   }
   // Primary missing or corrupt — restore from backup (the update
@@ -469,7 +445,7 @@ function createTray(){
 
 // ─── IPC handlers ────────────────────────────────────────────────
 ipcMain.handle('rs:get-pairing', () => loadPairing());
-ipcMain.handle('rs:save-pairing', (_, code) => { savePairing(code); return true; });
+ipcMain.handle('rs:save-pairing', (_, code) => savePairing(code));
 ipcMain.handle('rs:clear-pairing', () => { clearPairing(); return true; });
 ipcMain.handle('rs:open-external', (_, url) => {
   // Defense in depth: only allow http(s) URLs. Without this, a future
