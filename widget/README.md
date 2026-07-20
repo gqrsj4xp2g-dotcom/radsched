@@ -38,8 +38,9 @@ Every 5 minutes it pulls the practice's shared state from Supabase
 | **Drive-time credit** | `cfg.driveTimeWRVUPerHour × driveTimes[physId][site] / 60` |
 | **Today's shifts** | DR/IR shifts, IR call, weekend call, holidays whose date matches today |
 
-The widget is **read-only** — it never mutates state. Everything is
-derived client-side from the practice JSON.
+Schedule data is read-only. Explicit user actions can add or edit the paired
+physician's productivity credits or open a peer-review task through the
+authenticated widget proxy; every write is tenant-scoped and conflict-safe.
 
 ## Build
 
@@ -55,16 +56,15 @@ npm run build:all     # → both (only on platforms that can cross-compile)
 
 ### Code signing
 
-Distribution-quality builds need code signing. `electron-builder`
-auto-detects certs from your environment:
+Production builds require code signing. `electron-builder` auto-detects
+certificates from your environment:
 
 - **macOS**: set `CSC_LINK` (path to a `.p12` file) and `CSC_KEY_PASSWORD`,
   plus `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` for
   notarization.
 - **Windows**: set `CSC_LINK` to a `.pfx`/EV token + `CSC_KEY_PASSWORD`.
 
-Without signing the apps still run, but users see "unidentified
-developer" warnings on first launch.
+The build is configured to fail if signing is unavailable.
 
 ### Icons
 
@@ -84,9 +84,8 @@ The code is base64-encoded JSON containing:
 - Supabase URL + anon key (public-by-design; RLS gates real access)
 - Issued-at timestamp
 - Expiration timestamp (default 30 days)
-- HMAC-SHA256 signature over the rest using the anon key as the
-  shared secret (proves the code was issued by an admin who had
-  access to the practice's Supabase config).
+- A pairing ID and HMAC-SHA256 signature created by the server with a
+  private, per-practice key that is never returned to the browser or widget.
 
 The widget validates the signature before trusting any field, then
 persists the code via Electron's `safeStorage` (OS keychain on mac/win).

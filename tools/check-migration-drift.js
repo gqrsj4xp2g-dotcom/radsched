@@ -18,8 +18,33 @@ const failures = [];
 const migrationFiles = fs.existsSync(migrationDir)
   ? fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()
   : [];
-if (migrationFiles.length < 56) {
-  failures.push(`supabase/migrations: expected fetched remote history plus local hardening migration (found ${migrationFiles.length}, need >= 56)`);
+if (migrationFiles.length < 58) {
+  failures.push(`supabase/migrations: expected fetched remote history plus local hardening migrations (found ${migrationFiles.length}, need >= 58)`);
+}
+const ingestHashMigrationName = migrationFiles.find(name => name.includes('rs_hash_ingest_credentials'));
+if (!ingestHashMigrationName) {
+  failures.push('supabase/migrations: missing hashed ingest-credential migration');
+} else {
+  const ingestHashMigration = fs.readFileSync(path.join(migrationDir, ingestHashMigrationName), 'utf8');
+  const requiredIngestHardening = [
+    ['one-way token digest', /extensions\.digest\(token,\s*'sha256'\)/i],
+    ['plaintext token removal', /update\s+public\.rs_ingest_tokens\s+set\s+token\s*=\s*null/i],
+    ['unique token hash index', /unique\s+index[\s\S]*rs_ingest_tokens_token_hash/i],
+    ['one-time rotation token', /return\s+v_token/i],
+  ];
+  for (const [label, pattern] of requiredIngestHardening) {
+    if (!pattern.test(ingestHashMigration)) failures.push(`${ingestHashMigrationName}: missing ${label}`);
+  }
+}
+const serviceDenyMigrationName = migrationFiles.find(name => name.includes('rs_service_table_deny_policies'));
+if (!serviceDenyMigrationName) {
+  failures.push('supabase/migrations: missing explicit client-deny policies for server-only tables');
+} else {
+  const serviceDenyMigration = fs.readFileSync(path.join(migrationDir, serviceDenyMigrationName), 'utf8');
+  for (const table of ['rs_ingest_tokens', 'rs_widget_secrets']) {
+    const policyPattern = new RegExp(`create\\s+policy\\s+${table}_deny_clients[\\s\\S]*?on\\s+public\\.${table}[\\s\\S]*?using\\s*\\(false\\)[\\s\\S]*?with\\s+check\\s*\\(false\\)`, 'i');
+    if (!policyPattern.test(serviceDenyMigration)) failures.push(`${serviceDenyMigrationName}: missing explicit deny policy for ${table}`);
+  }
 }
 const versions = migrationFiles.map(name => name.split('_')[0]);
 if (new Set(versions).size !== versions.length) failures.push('supabase/migrations: duplicate migration version');

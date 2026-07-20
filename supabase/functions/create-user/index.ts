@@ -31,6 +31,7 @@ async function resolveCaller(token: string): Promise<{
         "Authorization": "Bearer " + token,
         "apikey": ANON_KEY,
       },
+      signal: AbortSignal.timeout(10_000),
     });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -69,6 +70,35 @@ function normalizeAuthRole(value: unknown, fallback = "user"): string | null {
     ? fallback
     : String(value).trim().toLowerCase();
   return AUTH_ROLES.has(raw) ? raw : null;
+}
+
+function cleanText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (text.length > maxLength || /[\u0000-\u001f\u007f]/.test(text)) return null;
+  return text;
+}
+
+function cleanPracticeId(value: unknown): string | null {
+  const practiceId = cleanText(value, 200);
+  return practiceId ? practiceId : null;
+}
+
+function cleanEmail(value: unknown, allowEmpty = false): string | null {
+  const email = cleanText(value, 254);
+  if (email === null || (!email && !allowEmpty)) return null;
+  if (!email) return "";
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email.toLowerCase() : null;
+}
+
+function cleanPhysId(value: unknown): number | null | undefined {
+  if (value === null || value === "") return null;
+  const n = typeof value === "number" ? value : (typeof value === "string" ? Number(value) : NaN);
+  return Number.isSafeInteger(n) && n > 0 && n <= 2_147_483_647 ? n : undefined;
+}
+
+function validUserId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -163,8 +193,16 @@ serve(async (req) => {
       }, 403);
     }
 
-    const body = await req.json().catch(() => ({}));
-    const action = body.action || "create";
+    const declaredLength = +(req.headers.get("content-length") || 0);
+    if (declaredLength > 65_536) return json({ error: "Request body too large" }, 413);
+    const rawBody = await req.text().catch(() => "");
+    if (new TextEncoder().encode(rawBody).length > 65_536) return json({ error: "Request body too large" }, 413);
+    let body: any;
+    try { body = JSON.parse(rawBody); }
+    catch (_e) { return json({ error: "Invalid JSON body" }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid JSON body" }, 400);
+    const action = body.action == null ? "create" : body.action;
+    if (typeof action !== "string") return json({ error: "action must be a string" }, 400);
     if (!new Set(["create", "delete", "update", "lookup"]).has(action)) {
       return json({ error: "Unknown user-management action" }, 400);
     }
@@ -176,7 +214,7 @@ serve(async (req) => {
     };
 
     if (action === "delete") {
-      if (!body.userId) return json({ error: "userId required for delete" }, 400);
+      if (!validUserId(body.userId)) return json({ error: "a valid userId is required for delete" }, 400);
       if (body.userId === caller.id) return json({ error: "Use the Supabase dashboard to delete your own account." }, 400);
       const { data: target, error: targetErr } = await admin.auth.admin.getUserById(body.userId);
       if (targetErr) return json({ error: "Delete fetch failed: " + targetErr.message }, 500);
@@ -191,7 +229,7 @@ serve(async (req) => {
     }
 
     if (action === "update") {
-      if (!body.userId) return json({ error: "userId required for update" }, 400);
+      if (!validUserId(body.userId)) return json({ error: "a valid userId is required for update" }, 400);
       const { data: existing, error: fetchErr } = await admin.auth.admin.getUserById(body.userId);
       if (fetchErr) return json({ error: "Update fetch failed: " + fetchErr.message }, 500);
       const existingMeta = (existing?.user?.user_metadata as Record<string, unknown>) || {};
@@ -208,7 +246,9 @@ serve(async (req) => {
       if (requestedRole === "superuser" && callerRole !== "superuser") {
         return json({ error: "Only a superuser can grant the superuser role." }, 403);
       }
-      const requestedPractice = body.practiceId !== undefined ? String(body.practiceId || "").trim() : String(existingApp.practiceId || "");
+      const requestedPractice = body.practiceId !== undefined
+        ? cleanPracticeId(body.practiceId)
+        : cleanPracticeId(existingApp.practiceId);
       if (!requestedPractice) return json({ error: "practiceId is required" }, 400);
       if (!isSuperuser && requestedPractice !== callerPractice) {
         return json({ error: "Administrators may only manage users in their own practice." }, 403);
@@ -218,18 +258,34 @@ serve(async (req) => {
       }
       const patch: Record<string, unknown> = { ...existingMeta };
       if (requestedRole !== undefined) patch.role = requestedRole;
-      if (body.physId !== undefined) patch.physId = body.physId == null ? null : body.physId;
-      if (body.first !== undefined) patch.first = body.first;
-      if (body.last !== undefined) patch.last = body.last;
-      if (body.practiceId !== undefined) patch.practiceId = body.practiceId;
-      if (body.notifyEmail !== undefined) patch.notifyEmail = body.notifyEmail;
+      if (body.physId !== undefined) {
+        const physId = cleanPhysId(body.physId);
+        if (physId === undefined) return json({ error: "physId must be a positive integer or null" }, 400);
+        patch.physId = physId;
+      }
+      if (body.first !== undefined) {
+        const first = cleanText(body.first, 100);
+        if (first === null) return json({ error: "first must be text up to 100 characters" }, 400);
+        patch.first = first;
+      }
+      if (body.last !== undefined) {
+        const last = cleanText(body.last, 100);
+        if (last === null) return json({ error: "last must be text up to 100 characters" }, 400);
+        patch.last = last;
+      }
+      if (body.practiceId !== undefined) patch.practiceId = requestedPractice;
+      if (body.notifyEmail !== undefined) {
+        const notifyEmail = cleanEmail(body.notifyEmail, true);
+        if (notifyEmail === null) return json({ error: "notifyEmail is invalid" }, 400);
+        patch.notifyEmail = notifyEmail;
+      }
       // app_metadata is server-side-only and powers RLS policies. Mirror role +
       // practiceId changes here so the security gating stays in sync with the
       // user-facing fields.
       const appPatch: Record<string, unknown> = { ...existingApp };
       let appChanged = false;
       if (requestedRole !== undefined)   { appPatch.role       = requestedRole;   appChanged = true; }
-      if (body.practiceId !== undefined) { appPatch.practiceId = body.practiceId; appChanged = true; }
+      if (body.practiceId !== undefined) { appPatch.practiceId = requestedPractice; appChanged = true; }
       const upPayload: Record<string, unknown> = { user_metadata: patch };
       if (appChanged) upPayload.app_metadata = appPatch;
       const upRes = await admin.auth.admin.updateUserById(body.userId, upPayload);
@@ -243,8 +299,8 @@ serve(async (req) => {
     }
 
     if (action === "lookup") {
-      const email = (body.email || "").trim().toLowerCase();
-      if (!email) return json({ error: "email required for lookup" }, 400);
+      const email = cleanEmail(body.email);
+      if (!email) return json({ error: "a valid email is required for lookup" }, 400);
       const existing = await findUserByEmail(admin, email);
       if (!existing) return json({ ok: true, found: false });
       if (!targetAllowed(existing)) return json({ ok: true, found: false });
@@ -262,18 +318,24 @@ serve(async (req) => {
     // Default: create a new auth user. Writes role + practiceId into BOTH
     // app_metadata (for RLS gating; server-side-only, users can't modify) and
     // user_metadata (for app-level conveniences like display name and physId).
-    const { email, password, first, last, role, physId, practiceId } = body;
-    if (!email || !password) return json({ error: "email and password required" }, 400);
-    if (typeof password !== "string" || password.length < 12 ||
+    const { password, role } = body;
+    const email = cleanEmail(body.email);
+    const first = body.first == null ? "" : cleanText(body.first, 100);
+    const last = body.last == null ? "" : cleanText(body.last, 100);
+    const physId = body.physId == null ? null : cleanPhysId(body.physId);
+    if (!email) return json({ error: "email address is invalid" }, 400);
+    if (first === null || last === null) return json({ error: "first and last must be text up to 100 characters" }, 400);
+    if (physId === undefined) return json({ error: "physId must be a positive integer or null" }, 400);
+    if (typeof password !== "string" || password.length < 12 || password.length > 256 ||
         !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-      return json({ error: "password must be at least 12 characters and include upper, lower, number, and symbol" }, 400);
+      return json({ error: "password must be 12–256 characters and include upper, lower, number, and symbol" }, 400);
     }
     const requestedCreateRole = normalizeAuthRole(role, "user");
     if (!requestedCreateRole) return json({ error: "role must be one of: user, admin, superuser" }, 400);
     if (requestedCreateRole === "superuser" && callerRole !== "superuser") {
       return json({ error: "Only a superuser can create another superuser account." }, 403);
     }
-    const requestedPractice = String(practiceId || callerPractice || "").trim();
+    const requestedPractice = cleanPracticeId(body.practiceId || callerPractice);
     if (!requestedPractice) return json({ error: "practiceId is required" }, 400);
     if (!isSuperuser && requestedPractice !== callerPractice) {
       return json({ error: "Administrators may only create users in their own practice." }, 403);

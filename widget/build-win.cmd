@@ -4,7 +4,7 @@ REM
 REM What it does:
 REM   1. Verifies Node.js is installed (must download from nodejs.org first)
 REM   2. Runs `npm install` if node_modules isn't already populated
-REM   3. Builds an unsigned .exe installer via electron-builder
+REM   3. Builds a signed .exe installer via electron-builder
 REM   4. Opens the dist folder in Explorer
 REM
 REM Run from inside widget\:
@@ -51,6 +51,14 @@ if not exist "build\icon.png" (
 )
 
 REM === 4. Build ======================================================
+if "%CSC_LINK%"=="" (
+  echo CSC_LINK is required for signed production builds.
+  exit /b 1
+)
+if "%CSC_KEY_PASSWORD%"=="" (
+  echo CSC_KEY_PASSWORD is required for signed production builds.
+  exit /b 1
+)
 echo.
 echo Building .exe via electron-builder...
 call npm run build:win
@@ -64,8 +72,6 @@ echo.
 echo === Build complete. Output: ===
 dir /b "dist\*.exe" 2>nul
 echo.
-echo Distribute the installer .exe to physicians. They double-click to
-echo install. SmartScreen may warn "unrecognized app" on first launch —
-echo click "More info" then "Run anyway" to bypass. Then paste the
-echo pairing code in the widget.
+echo Distribute the signed installer .exe to physicians. They double-click
+echo to install, then paste the pairing code in the widget.
 explorer dist

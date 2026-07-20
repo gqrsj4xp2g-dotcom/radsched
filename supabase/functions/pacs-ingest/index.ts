@@ -18,6 +18,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const MAX_BODY = 3_000_000;      // reject bodies larger than ~3MB
 const MAX_TEXT = 100_000;        // cap stored report_text
 
@@ -113,7 +114,7 @@ function parseFHIR(res: any): ParseResult {
   // Pick the first TEXTUAL attachment (skip PDF/binary, which atob→text would
   // store as mojibake). No contentType is assumed textual.
   const pf = (res.presentedForm || []).find((a: any) => {
-    const ct = (a?.contentType || "").toLowerCase();
+    const ct = String(a?.contentType || "").toLowerCase();
     return a?.data && (!ct || ct.startsWith("text/"));
   });
   if (!body && pf?.data) body = decodePresentedForm(pf);
@@ -152,7 +153,8 @@ function decodePresentedForm(pf: any): string {
 // Body-part taxonomy for like-for-like matching — exam string when present,
 // else the report head. Order: A+P combo first, spine before chest, etc.
 function deriveBodyPart(exam: string, text: string): string {
-  const s = ((exam && exam.trim()) ? exam : String(text || "").slice(0, 300)).toLowerCase();
+  const examText = String(exam || "").trim();
+  const s = (examText || String(text || "").slice(0, 300)).toLowerCase();
   if (/abdom/.test(s) && /pelvi/.test(s)) return "ABDOMEN_PELVIS";
   if (/\b[ctl][- ]?spine\b|cervical spine|thoracic spine|lumbar spine|\bspine\b|vertebr|sacrum|coccyx/.test(s)) return "SPINE";
   if (/\b(head|brain|skull|cranial|sella|orbits?)\b|\biac\b/.test(s)) return "HEAD";
@@ -171,7 +173,8 @@ function deriveBodyPart(exam: string, text: string): string {
 // Modality — exam string when present (so a report BODY mentioning "compared to
 // prior CT" can't flip an MRI to CT). Decide PET/NM and MR before plain CT.
 function deriveModality(exam: string, text: string): string {
-  const s = ((exam && exam.trim()) ? exam : String(text || "").slice(0, 200)).toLowerCase();
+  const examText = String(exam || "").trim();
+  const s = (examText || String(text || "").slice(0, 200)).toLowerCase();
   if (/\bpet\b|positron/.test(s)) return "PET";                 // PET/CT is nuclear
   if (/nuclear|scintigra|\bspect\b|\bnm\b/.test(s)) return "NM";
   if (/\bct angiog|\bcta\b/.test(s)) return "CTA";
@@ -190,11 +193,40 @@ async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const RATE_BUCKETS = new Map<string, { count: number; resetAt: number }>();
+function rateAllowed(key: string, limit = 240): boolean {
+  const now = Date.now();
+  const current = RATE_BUCKETS.get(key);
+  if (!current || current.resetAt <= now) {
+    RATE_BUCKETS.set(key, { count: 1, resetAt: now + 60_000 });
+    if (RATE_BUCKETS.size > 2_000) {
+      for (const [bucket, state] of RATE_BUCKETS) if (state.resetAt <= now) RATE_BUCKETS.delete(bucket);
+    }
+    return true;
+  }
+  if (current.count >= limit) return false;
+  current.count += 1;
+  return true;
+}
+
+function clientAddress(req: Request): string {
+  return (req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for") || "unknown")
+    .split(",")[0].trim().slice(0, 80);
+}
+
+function jwtAal(token: string): string {
+  try {
+    const part = token.split(".")[1] || "";
+    const padded = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
+    return String(JSON.parse(atob(padded))?.aal || "").toLowerCase();
+  } catch (_) { return ""; }
+}
+
 // Map an interpreter string to a physId. An alias matches only when ALL of its
 // words appear as WHOLE tokens in the interpreter (no loose substring — "smith"
 // must not match "smithson"). If 0 or >1 physicians match, we DON'T guess.
 function mapInterpreter(interpreter: string, physicians: any[]): number | null {
-  const raw = (interpreter || "").toLowerCase().replace(/[.,&^]/g, " ").replace(/\s+/g, " ").trim();
+  const raw = String(interpreter || "").toLowerCase().replace(/[.,&^]/g, " ").replace(/\s+/g, " ").trim();
   if (!raw || !Array.isArray(physicians)) return null;
   const tokens = new Set(raw.split(" ").filter((t) => t.length > 1));
   if (!tokens.size) return null;
@@ -218,23 +250,49 @@ serve(async (req: Request) => {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token) return json({ error: "missing ingest token" }, 401);
+  if (!rateAllowed(`ip:${clientAddress(req)}`, 120)) return json({ error: "ingest rate limit exceeded" }, 429);
 
   const cl = +(req.headers.get("content-length") || 0);
   if (cl && cl > MAX_BODY) return json({ error: "payload too large" }, 413);
-  const rawBody = await req.text();
-  if (rawBody.length > MAX_BODY) return json({ error: "payload too large" }, 413);
+  const rawBody = await req.text().catch(() => "");
+  if (new TextEncoder().encode(rawBody).length > MAX_BODY) return json({ error: "payload too large" }, 413);
 
   const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  const { data: tok } = await sb.from("rs_ingest_tokens").select("practice_id").eq("token", token).maybeSingle();
-  if (!tok?.practice_id) return json({ error: "invalid ingest token" }, 401);
-  const practice_id = tok.practice_id as string;
-
   let payload: any;
   try { payload = JSON.parse(rawBody); } catch (_) { return json({ error: "body must be JSON" }, 400); }
-  if (!payload || typeof payload !== "object") return json({ error: "body must be a JSON object" }, 400);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return json({ error: "body must be a JSON object" }, 400);
 
-  const fmt = (payload.format || "").toLowerCase();
+  // Machine credentials are stored only as SHA-256 digests. For the in-app
+  // admin test tool, an AAL2 admin JWT is also accepted and scoped strictly to
+  // its app_metadata.practiceId; body-supplied practice IDs are never trusted
+  // for the machine-token path.
+  const tokenHash = await sha256Hex(token);
+  const { data: tok, error: tokErr } = await sb.from("rs_ingest_tokens")
+    .select("practice_id").eq("token_hash", tokenHash).maybeSingle();
+  if (tokErr) return json({ error: "ingest credential verification is temporarily unavailable" }, 503);
+  let practice_id = String(tok?.practice_id || "");
+  let rateKey = `machine:${tokenHash.slice(0, 16)}`;
+  if (!practice_id) {
+    const authClient = createClient(SUPABASE_URL, ANON_KEY);
+    const { data: authData, error: authErr } = await authClient.auth.getUser(token);
+    if (authErr || !authData?.user) return json({ error: "invalid ingest token" }, 401);
+    const appMeta = authData.user.app_metadata || {};
+    const role = String(appMeta.role || "").toLowerCase();
+    const assignedPractice = String(appMeta.practiceId || "");
+    const requestedPractice = String(payload.practice_id || "");
+    if (!['admin', 'superuser'].includes(role) || jwtAal(token) !== 'aal2') {
+      return json({ error: "admin MFA verification required for interactive ingest" }, 403);
+    }
+    if (!requestedPractice || (role !== 'superuser' && requestedPractice !== assignedPractice)) {
+      return json({ error: "interactive ingest practice is not authorized" }, 403);
+    }
+    practice_id = requestedPractice;
+    rateKey = `admin:${authData.user.id}`;
+  }
+  if (!rateAllowed(rateKey)) return json({ error: "ingest rate limit exceeded" }, 429);
+
+  const fmt = String(payload.format || "").toLowerCase();
   let parsed: ParseResult;
   if (fmt === "hl7") parsed = parseHL7(payload.message || payload.hl7 || "");
   else if (fmt === "fhir") parsed = parseFHIR(payload.resource || payload.report || payload);
@@ -247,10 +305,12 @@ serve(async (req: Request) => {
     body: payload.report_text || payload.text || "",
   }] };
   if (parsed.error) return json({ error: parsed.error }, 422);
-  const reports = parsed.reports || [];
+  const reports = (parsed.reports || []).slice(0, 200);
   if (!reports.length) return json({ error: "no reports parsed" }, 422);
 
-  const { data: row } = await sb.from("radscheduler").select("data").eq("id", practice_id).maybeSingle();
+  const { data: row, error: rowErr } = await sb.from("radscheduler").select("data").eq("id", practice_id).maybeSingle();
+  if (rowErr) return json({ error: "practice lookup is temporarily unavailable" }, 503);
+  if (!row) return json({ error: "practice not found" }, 404);
   let physicians: any[] = [];
   try { physicians = JSON.parse(row?.data || "{}").physicians || []; } catch (_) {}
   const strip = payload.deid === true || payload.strip_mrn === true;
@@ -327,7 +387,9 @@ serve(async (req: Request) => {
     }
     results.push({ report_uid, phys_id, matched: phys_id != null });
   }
-  sb.from("rs_ingest_tokens").update({ last_used_at: new Date().toISOString() }).eq("token", token).then(() => {});
+  if (tok?.practice_id) {
+    sb.from("rs_ingest_tokens").update({ last_used_at: new Date().toISOString() }).eq("token_hash", tokenHash).then(() => {});
+  }
 
   // Backward-compatible response: top-level fields reflect the first stored
   // report (the common single-report case), plus a full per-report array.

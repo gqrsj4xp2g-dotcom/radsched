@@ -72,7 +72,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'ANTHROPIC_API_KEY not configured in Supabase Edge Function secrets.' }, 500);
     }
 
-    const body = await req.json();
+    const declaredLength = +(req.headers.get('content-length') || 0);
+    if (declaredLength > 750_000) return json({ error: 'AI request body is too large.' }, 413);
+    const rawBody = await req.text();
+    if (new TextEncoder().encode(rawBody).length > 750_000) return json({ error: 'AI request body is too large.' }, 413);
+    let body: any;
+    try { body = JSON.parse(rawBody); }
+    catch { return json({ error: 'Invalid JSON body.' }, 400); }
     if (!Array.isArray(body?.messages)) return json({ error: 'messages[] is required.' }, 400);
     if (body.messages.length > 100 || JSON.stringify(body.messages).length > 500_000) {
       return json({ error: 'AI conversation payload is too large.' }, 413);
@@ -80,8 +86,11 @@ Deno.serve(async (req: Request) => {
     if (body.system != null && String(body.system).length > 50_000) return json({ error: 'system prompt is too large.' }, 413);
     if (Array.isArray(body.tools) && body.tools.length > 100) return json({ error: 'too many tools.' }, 413);
     const maxTokens = Math.max(1, Math.min(Number(body.max_tokens) || 4096, 4096));
+    const requestedModel = String(body.model || 'claude-sonnet-4-6');
+    const allowedModels = new Set(['claude-sonnet-4-6', 'claude-haiku-4-5']);
+    if (!allowedModels.has(requestedModel)) return json({ error: 'Requested AI model is not allowed.' }, 400);
     const upstreamBody = {
-      model: String(body.model || 'claude-sonnet-4-6'),
+      model: requestedModel,
       max_tokens: maxTokens,
       system: body.system,
       tools: Array.isArray(body.tools) ? body.tools : undefined,
@@ -96,6 +105,7 @@ Deno.serve(async (req: Request) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(upstreamBody),
+      signal: AbortSignal.timeout(60_000),
     });
 
     const data = await anthropicResp.json();
