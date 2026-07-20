@@ -483,7 +483,8 @@ async function runDigest(sbUrl: string, sbService: string) {
     for (const u of users) {
       const deliveryEmail = (u.notifyEmail || u.email || '').trim().toLowerCase();
       if (!deliveryEmail || !u.physId) { skipped++; continue; }
-      if (u.notifPrefs?.master === false || u.notifPrefs?.digest === false) { skipped++; continue; }
+      const prefs = prefsByPractice.get(r.id)?.get(u.id) ?? u.notifPrefs;
+      if (prefs?.master === false || prefs?.digest === false) { skipped++; continue; }
       const phys = physicians.find(p => p.id === u.physId);
       const myShifts = [
         ...drShifts.filter(s => s.physId === u.physId && s.date >= today && s.date <= next7End),
