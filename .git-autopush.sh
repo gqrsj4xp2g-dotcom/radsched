@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # RadScheduler — disk-watch GitHub autosync
 #
-# Watches the repository for changes; commits + pushes any unignored Git
-# change to the configured remote. Debounces 3 sec so rapid successive saves
-# cluster into one commit.
+# Watches the repository for changes and runs the full local release checks.
+# It never stages, commits, or pushes automatically; production changes require
+# an intentional reviewed commit/PR.
 #
 # Run from launchd (recommended) or manually for one-shot:
 #   bash ~/RadApp/.git-autopush.sh
@@ -50,13 +50,8 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! git remote get-url origin >/dev/null 2>&1; then
-  log "ERROR: no 'origin' remote configured"
-  exit 1
-fi
-
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-log "▶ Watching ${REPO_DIR}/${WATCH_PATH} → origin/${CURRENT_BRANCH}"
+log "▶ Watching ${REPO_DIR}/${WATCH_PATH} on ${CURRENT_BRANCH} (validation only; no automatic push)"
 
 # fswatch outputs one line per change. -l 1 sets the latency to 1s so we
 # don't fire on every micro-write of a save. Read in a loop with a debounce
@@ -81,16 +76,10 @@ fswatch --one-per-batch --latency 1 \
     continue
   fi
 
-  STAMP="$(date '+%Y-%m-%d %H:%M:%S')"
-  log "  detected change → committing"
-  if git add -A -- . \
-     && git commit -m "rs: disk autosave ${STAMP}" >/dev/null 2>&1; then
-    if git push origin "${CURRENT_BRANCH}" 2>&1; then
-      log "  ✓ pushed to origin/${CURRENT_BRANCH}"
-    else
-      log "  ✗ push failed (check ~/Library/Logs/rs-autopush.err)"
-    fi
+  log "  detected change → running release checks"
+  if ./tools/precommit.sh; then
+    log "  ✓ checks passed; changes are ready for human review and an intentional push"
   else
-    log "  commit failed (likely no actual change after filter)"
+    log "  ✗ checks failed; production remains unchanged"
   fi
 done

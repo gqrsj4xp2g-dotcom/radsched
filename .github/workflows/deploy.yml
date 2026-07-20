@@ -114,11 +114,20 @@ jobs:
       - name: Build index.html from src/parts
         run: ./tools/build-index.sh
 
+      - name: Assemble public site artifact
+        run: |
+          mkdir -p _site/icons _site/edge-functions/send-notification _site/supabase/functions/create-user _site/supabase/functions/admin-ops
+          cp index.html 404.html manifest.webmanifest robots.txt sw.js _site/
+          cp -R icons/. _site/icons/
+          cp edge-functions/send-notification/index.ts _site/edge-functions/send-notification/
+          cp supabase/functions/create-user/index.ts _site/supabase/functions/create-user/
+          cp supabase/functions/admin-ops/index.ts _site/supabase/functions/admin-ops/
+
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: .
+          path: _site
 
   deploy:
     needs: build
