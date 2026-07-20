@@ -48016,47 +48016,26 @@ async function generateWidgetPairing(){
   // Clamp pairing-code lifetime. 30d is default; 365d hard ceiling so
   // even an unsupervised admin can't issue 10-year tokens.
   const clampedDays = Math.max(1, Math.min(days, 365));
-  const issuedAt = new Date().toISOString();
-  const exp = new Date(Date.now() + clampedDays * 86400000).toISOString();
-  const pairingId = S.nextId++;
-  const payload = {
-    v: 2,                          // bumped — v2 signs with practice secret, not anon key
-    pairingId,
-    practiceId,
-    physId,
-    physLast: phys.last || '',
-    physFirst: phys.first || '',
-    sbUrl,
-    sbAnonKey: sbKey,
-    issuedAt,
-    exp,
-  };
-  // Sign with the per-practice secret (server-only). Previously we
-  // signed with `sbKey` (the PUBLIC anon key), which let anyone with
-  // the URL+anon key forge a code for any practiceId/physId. The
-  // edge function fetches the practice row by practiceId, reads the
-  // secret, and verifies. An attacker without practice access can't
-  // read the secret → can't forge a valid signature.
-  const secret = _getOrCreateWidgetSecret();
-  const body = JSON.stringify(payload);
-  payload.sig = await _hmacB64Url(secret, body);
-  const code = _b64url(JSON.stringify(payload));
-  // Store the active pairing record so admins can revoke + audit.
-  if(!Array.isArray(S.widgetPairings)) S.widgetPairings = [];
-  S.widgetPairings.push({
-    id: pairingId,
-    physId,
-    issuedAt,
-    exp,
-    issuedBy: CU?.id || null,
-    fingerprint: code.slice(-8),  // last 8 chars to identify it without storing the full code
-  });
-  if(typeof _audit === 'function') _audit('widget.pairing.generated', { physId, exp });
-  if(typeof triggerSave === 'function') triggerSave();
-  const pairingSaved = await _flushWidgetPairingSave();
-  if(!pairingSaved && typeof _toast === 'function'){
-    _toast('Pairing code created, but Supabase sync is still pending. Wait for the save indicator before sending it.', 'warn');
+  // The server issues and registers the credential atomically. The HMAC key
+  // never enters this browser or the practice blob.
+  let issued;
+  try{
+    const response = await _fetchWithTimeout(`${sbUrl}/functions/v1/widget-data`, {
+      method:'POST',
+      headers:await _edgeAuthHeaders(),
+      body:JSON.stringify({ action:'issue', purpose:'widget', practiceId, physId, days:clampedDays }),
+    }, 15000);
+    issued = await response.json().catch(()=>({}));
+    if(!response.ok || !issued?.code) throw new Error(issued?.error || `Pairing service returned ${response.status}`);
+  }catch(e){
+    _toast?.('Pairing could not be issued: '+(e?.message||e), 'err');
+    return;
   }
+  const code = issued.code;
+  const exp = issued.exp;
+  if(typeof _audit === 'function') _audit('widget.pairing.generated', { physId, exp, pairingId:issued.pairingId });
+  // Refresh the local pairing registry written atomically by the server.
+  try{ const fresh=await _pullFromSupabase(); if(fresh) _applyRemoteData(fresh); }catch(_){}
   // Render result with copy button.
   const result = document.getElementById('wpair-result');
   if(result){
