@@ -124,7 +124,6 @@ serve(async (req) => {
       }, 401);
     }
     const caller = callerRes.user as any;
-    const userMeta = caller.user_metadata || {};
     const appMeta = caller.app_metadata || {};
 
     // SECURITY: callerRole comes from app_metadata ONLY.
@@ -133,45 +132,24 @@ serve(async (req) => {
     // self-promote and then mint admin accounts / change their own
     // practiceId (defeating multi-tenant RLS). app_metadata is
     // server-side-only and powers the RLS policies — use it strictly.
-    let callerRole = normalizeAuthRole(appMeta.role, "") || "";
+    const callerRole = normalizeAuthRole(appMeta.role, "") || "";
+    const callerPractice = String(appMeta.practiceId || "").trim();
 
-    // Need an admin client for bootstrap detection + privileged ops.
+    // Need an admin client for privileged operations. Initial bootstrap is
+    // deliberately dashboard-only: user_metadata is self-editable and must
+    // never be able to create the first administrator.
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-
-    // BOOTSTRAP fallback: if NO privileged account exists yet system-wide
-    // AND the caller claims user_metadata.role==="admin", give them a
-    // one-time pass AND promote their app_metadata.role to admin so the
-    // next call uses the strict path. This is the only path that lets a
-    // brand-new project bootstrap its first admin without manual SQL.
-    if (callerRole !== "admin" && callerRole !== "superuser" && normalizeAuthRole(userMeta.role, "") === "admin") {
-      try {
-        const list = await admin.auth.admin.listUsers({ page: 1, perPage: 50 });
-        const privilegedCount = (list.data?.users || []).filter((u: any) => {
-          const role = normalizeAuthRole(u.app_metadata?.role, "");
-          return role === "admin" || role === "superuser";
-        }).length;
-        if (privilegedCount === 0) {
-          await admin.auth.admin.updateUserById(caller.id, {
-            app_metadata: {
-              ...appMeta,
-              role: "admin",
-              practiceId: appMeta.practiceId || userMeta.practiceId || "main",
-            },
-          });
-          callerRole = "admin";
-        }
-      } catch (e) {
-        console.warn("[create-user] bootstrap check failed:", e);
-      }
-    }
 
     if (callerRole !== "admin" && callerRole !== "superuser") {
       return json({
         error: "Caller is not an admin or superuser (app_metadata.role: " + (appMeta.role || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",
         caller_email: caller.email,
       }, 403);
+    }
+    if (callerRole === "admin" && !callerPractice) {
+      return json({ error: "Admin account is missing app_metadata.practiceId. A superuser must repair the account before user management is allowed." }, 403);
     }
 
     if (!rateLimit(String(caller.id || caller.email || "unknown"), 30)) {
@@ -187,12 +165,22 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body.action || "create";
+    if (!new Set(["create", "delete", "update", "lookup"]).has(action)) {
+      return json({ error: "Unknown user-management action" }, 400);
+    }
+
+    const isSuperuser = callerRole === "superuser";
+    const targetAllowed = (target: any): boolean => {
+      if (isSuperuser) return true;
+      return String(target?.app_metadata?.practiceId || "") === callerPractice;
+    };
 
     if (action === "delete") {
       if (!body.userId) return json({ error: "userId required for delete" }, 400);
       if (body.userId === caller.id) return json({ error: "Use the Supabase dashboard to delete your own account." }, 400);
       const { data: target, error: targetErr } = await admin.auth.admin.getUserById(body.userId);
       if (targetErr) return json({ error: "Delete fetch failed: " + targetErr.message }, 500);
+      if (!target?.user || !targetAllowed(target.user)) return json({ error: "User not found in your practice." }, 404);
       const targetRole = normalizeAuthRole(target?.user?.app_metadata?.role, "user");
       if (targetRole === "superuser" && callerRole !== "superuser") {
         return json({ error: "Only a superuser can delete another superuser account." }, 403);
@@ -209,6 +197,7 @@ serve(async (req) => {
       const existingMeta = (existing?.user?.user_metadata as Record<string, unknown>) || {};
       const existingApp  = (existing?.user?.app_metadata  as Record<string, unknown>) || {};
       const existingRole = normalizeAuthRole(existingApp.role, "user");
+      if (!existing?.user || !targetAllowed(existing.user)) return json({ error: "User not found in your practice." }, 404);
       const requestedRole = body.role !== undefined ? normalizeAuthRole(body.role, "") : undefined;
       if (body.role !== undefined && !requestedRole) {
         return json({ error: "role must be one of: user, admin, superuser" }, 400);
@@ -218,6 +207,11 @@ serve(async (req) => {
       }
       if (requestedRole === "superuser" && callerRole !== "superuser") {
         return json({ error: "Only a superuser can grant the superuser role." }, 403);
+      }
+      const requestedPractice = body.practiceId !== undefined ? String(body.practiceId || "").trim() : String(existingApp.practiceId || "");
+      if (!requestedPractice) return json({ error: "practiceId is required" }, 400);
+      if (!isSuperuser && requestedPractice !== callerPractice) {
+        return json({ error: "Administrators may only manage users in their own practice." }, 403);
       }
       if (body.userId === caller.id && requestedRole !== undefined && requestedRole !== callerRole) {
         return json({ error: "Use the Supabase dashboard to change your own privileged role." }, 400);
@@ -253,6 +247,7 @@ serve(async (req) => {
       if (!email) return json({ error: "email required for lookup" }, 400);
       const existing = await findUserByEmail(admin, email);
       if (!existing) return json({ ok: true, found: false });
+      if (!targetAllowed(existing)) return json({ ok: true, found: false });
       return json({
         ok: true,
         found: true,
@@ -269,11 +264,19 @@ serve(async (req) => {
     // user_metadata (for app-level conveniences like display name and physId).
     const { email, password, first, last, role, physId, practiceId } = body;
     if (!email || !password) return json({ error: "email and password required" }, 400);
-    if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);
+    if (typeof password !== "string" || password.length < 12 ||
+        !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      return json({ error: "password must be at least 12 characters and include upper, lower, number, and symbol" }, 400);
+    }
     const requestedCreateRole = normalizeAuthRole(role, "user");
     if (!requestedCreateRole) return json({ error: "role must be one of: user, admin, superuser" }, 400);
     if (requestedCreateRole === "superuser" && callerRole !== "superuser") {
       return json({ error: "Only a superuser can create another superuser account." }, 403);
+    }
+    const requestedPractice = String(practiceId || callerPractice || "").trim();
+    if (!requestedPractice) return json({ error: "practiceId is required" }, 400);
+    if (!isSuperuser && requestedPractice !== callerPractice) {
+      return json({ error: "Administrators may only create users in their own practice." }, 403);
     }
 
     const createRes = await admin.auth.admin.createUser({
@@ -282,14 +285,14 @@ serve(async (req) => {
       email_confirm: true,
       app_metadata: {
         role: requestedCreateRole,
-        practiceId: practiceId || "main",
+        practiceId: requestedPractice,
       },
       user_metadata: {
         role: requestedCreateRole,
         first: first || "",
         last: last || "",
         physId: physId == null ? null : physId,
-        practiceId: practiceId || "main",
+        practiceId: requestedPractice,
         joined: new Date().toISOString().slice(0, 10),
       },
     });
@@ -299,7 +302,7 @@ serve(async (req) => {
       const errStatus = createRes.error.status || 400;
       if (errStatus === 422 || /already.*registered|email.*exists/i.test(errMsg)) {
         const existing = await findUserByEmail(admin, email);
-        if (existing) {
+        if (existing && targetAllowed(existing)) {
           return json({
             error: errMsg,
             email_exists: true,
@@ -312,7 +315,7 @@ serve(async (req) => {
         }
       }
       return json(
-        { error: errMsg, status: errStatus },
+        { error: (errStatus === 422 ? "Unable to create user with those credentials." : errMsg), status: errStatus },
         errStatus
       );
     }

@@ -164,22 +164,22 @@ function renderMySched(){
     (shiftsByDate[c.date]||[]).forEach(s=>{
       const cls=s.shift==='1st'?'e1':s.shift==='2nd'?'e2':s.shift==='3rd'?'e3':'ehome';
       const anc=p.anchorSite&&s.site!==p.anchorSite?' eanc':'';
-      const siteSh=(s.site||'').split(' ')[0];
+      const siteSh=escHtml((s.site||'').split(' ')[0]);
       // Slot label badge — shows the named position when admin set one.
       // Lets physicians know "you're at Reading-Room-A" not just "you're at Main".
       const slotBadge = s.slotLabel
-        ? `<div style="font-size:9px;font-weight:700;color:var(--blue-t);background:rgba(96,165,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${(s.slotLabel||'').replace(/</g,'&lt;')}</div>`
+        ? `<div style="font-size:9px;font-weight:700;color:var(--blue-t);background:rgba(96,165,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${escHtml(s.slotLabel||'')}</div>`
         : '';
       if(s.shift==='Home'){
-        evs+=`<div class="ev ${cls}${anc}" title="Home @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
+        evs+=`<div class="ev ${cls}${anc}" title="Home @ ${escHtml(s.site||'')}${s.slotLabel?' · '+escHtml(s.slotLabel):''}">
           <div style="font-weight:700;font-size:11px">🏠 Home</div>
           <div style="font-size:9px;opacity:.7">${siteSh}</div>
           ${slotBadge}
         </div>`;
       } else {
-        evs+=`<div class="ev ${cls}${anc}" title="${s.shift} Shift @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
-          <div style="font-weight:700;font-size:11px">${s.shift} Shift</div>
-          <div style="font-size:9px;opacity:.7">${siteSh}${s.sub?' · '+s.sub.slice(0,6):''}</div>
+        evs+=`<div class="ev ${cls}${anc}" title="${escHtml(s.shift||'')} Shift @ ${escHtml(s.site||'')}${s.slotLabel?' · '+escHtml(s.slotLabel):''}">
+          <div style="font-weight:700;font-size:11px">${escHtml(s.shift||'')} Shift</div>
+          <div style="font-size:9px;opacity:.7">${siteSh}${s.sub?' · '+escHtml(s.sub.slice(0,6)):''}</div>
           ${slotBadge}
         </div>`;
       }
@@ -187,9 +187,9 @@ function renderMySched(){
     wk.forEach(w=>{
       const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
       if(c.date===sat||c.date===sun){
-        evs+=`<div class="ev ewk" title="Weekend Call @ ${w.site}">
+        evs+=`<div class="ev ewk" title="Weekend Call @ ${escHtml(w.site||'')}">
           <div style="font-weight:700;font-size:11px">📞 Wknd Call</div>
-          <div style="font-size:9px;opacity:.7">${(w.site||'').split(' ')[0]}</div>
+          <div style="font-size:9px;opacity:.7">${escHtml((w.site||'').split(' ')[0])}</div>
         </div>`;
       }
     });
@@ -200,10 +200,10 @@ function renderMySched(){
       if(!show) return;
       if(ic.callType==='weekend'){
         const isStart=ic.date===c.date;
-        evs+=`<div class="ev ewk" title="Weekend Call (${ic.irGroup}) @ ${ic.site}">
+        evs+=`<div class="ev ewk" title="Weekend Call (${escHtml(ic.irGroup||'')}) @ ${escHtml(ic.site||'')}">
           <div style="font-weight:700;font-size:11px">📞 ${isStart?'▶ ':''}Wknd Call</div>
-          <div style="font-size:9px;opacity:.85">${ic.irGroup}</div>
-          <div style="font-size:9px;opacity:.7">${(ic.site||'').split(' ')[0]}</div>
+          <div style="font-size:9px;opacity:.85">${escHtml(ic.irGroup||'')}</div>
+          <div style="font-size:9px;opacity:.7">${escHtml((ic.site||'').split(' ')[0])}</div>
         </div>`;
       } else {
         // Daily (weekday) IR call covers the entire group — it is NOT
@@ -214,20 +214,20 @@ function renderMySched(){
         // represents the GROUP as the call owner, with the physician
         // prominent. Hospital info (if any) stays on the adjacent IR shift
         // chip where it belongs.
-        evs+=`<div class="ev eir" title="Daily Call (${ic.irGroup})">
+        evs+=`<div class="ev eir" title="Daily Call (${escHtml(ic.irGroup||'')})">
           <div style="font-weight:700;font-size:11px">📟 Daily Call</div>
-          <div style="font-size:9px;opacity:.85">${ic.irGroup}</div>
+          <div style="font-size:9px;opacity:.85">${escHtml(ic.irGroup||'')}</div>
         </div>`;
       }
     });
     irSh.filter(s=>s.date===c.date).forEach(s=>{
       const shCls=s.shift==='Home'?'ehome':s.shift==='1st'?'eir':s.shift==='2nd'?'e2':'e3';
-      const siteSh=(s.site||'').split(' ')[0];
+      const siteSh=escHtml((s.site||'').split(' ')[0]);
       const _irSlotBadge = s.slotLabel
-        ? `<div style="font-size:9px;font-weight:700;color:var(--purple-t,#a78bfa);background:rgba(167,139,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${(s.slotLabel||'').replace(/</g,'&lt;')}</div>`
+        ? `<div style="font-size:9px;font-weight:700;color:var(--purple-t,#a78bfa);background:rgba(167,139,250,0.15);padding:0 4px;border-radius:3px;display:inline-block;margin-top:1px">🏷 ${escHtml(s.slotLabel||'')}</div>`
         : '';
       if(s.shift==='Home'){
-        evs+=`<div class="ev ${shCls}" title="IR Home @ ${s.site}${s.slotLabel?' · '+s.slotLabel:''}">
+        evs+=`<div class="ev ${shCls}" title="IR Home @ ${escHtml(s.site||'')}${s.slotLabel?' · '+escHtml(s.slotLabel):''}">
           <div style="font-weight:700;font-size:11px">🏠 Home</div>
           <div style="font-size:9px;opacity:.7">IR · ${siteSh}</div>
           ${_irSlotBadge}
