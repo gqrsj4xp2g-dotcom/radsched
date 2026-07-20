@@ -47955,17 +47955,7 @@ async function _hmacB64Url(secret, msg){
 // (service role) when verifying. Outsiders cannot forge codes without
 // first compromising practice-level access.
 function _getOrCreateWidgetSecret(){
-  if(!S.cfg) S.cfg = {};
-  if(typeof S.cfg._widgetSecret !== 'string' || S.cfg._widgetSecret.length < 24){
-    // 32 random bytes → 43 base64url chars. Plenty for HMAC-SHA256.
-    const buf = new Uint8Array(32);
-    crypto.getRandomValues(buf);
-    let s = ''; for(let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
-    S.cfg._widgetSecret = btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-    if(typeof _audit === 'function') _audit('widget.secret.created', {});
-    if(typeof triggerSave === 'function') triggerSave();
-  }
-  return S.cfg._widgetSecret;
+  throw new Error('Widget signing keys are server-only; use widget-data action=issue.');
 }
 
 async function _flushWidgetPairingSave(){
