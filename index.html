@@ -11910,11 +11910,8 @@ function _repairDataIntegrity(){
       S[key] = (S[key] || []).filter(r =>
         physIds.has(r.fromPhysId) && physIds.has(r.toPhysId)
       );
-      if(key === 'swapRequests' && _orphanIds.length){
-        try{
-          const _sbDel = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
-          if(_sbDel) _sbDel.rpc('rs_delete_swaps', { p_practice: _rsPracticeId(), p_client_ids: _orphanIds }).then(()=>{},()=>{});
-        }catch(_){}
+      if(key === 'swapRequests' && _orphanIds.length && typeof _rsDeleteSwapRows === 'function'){
+        _rsDeleteSwapRows(_orphanIds, 'integrity repair');
       }
     } else if(refField === 'claimedBy-nullable'){
       // Don't drop the open shift — just clear the orphan reference.
@@ -18814,11 +18811,8 @@ function removePhys(id){
   if(Array.isArray(S.swapRequests)){
     const _orphanSwapIds=S.swapRequests.filter(s=>s.fromPhysId===id||s.toPhysId===id).map(s=>s.id);
     S.swapRequests=S.swapRequests.filter(s=>s.fromPhysId!==id&&s.toPhysId!==id);
-    if(_orphanSwapIds.length){
-      try{
-        const _sbDel=(typeof _initAuthClient==='function')?_initAuthClient():null;
-        if(_sbDel) _sbDel.rpc('rs_delete_swaps',{p_practice:_rsPracticeId(), p_client_ids:_orphanSwapIds}).then(()=>{},()=>{});
-      }catch(_){}
+    if(_orphanSwapIds.length && typeof _rsDeleteSwapRows==='function'){
+      _rsDeleteSwapRows(_orphanSwapIds, 'physician removed');
     }
   }
   if(Array.isArray(S.openShifts)) S.openShifts.forEach(o=>{ if(o.claimedBy===id) o.claimedBy=null; });
@@ -25578,18 +25572,22 @@ function renderSwaps(){
   const renderCard=(s)=>{
     const status=s.status||'pending';
     const cls=status==='approved'?'tg':status==='denied'?'tr':'ta';
+    // Escape EVERY table-sourced field (review fix): date/shiftType/status ride
+    // from rs_swap_requests text columns into innerHTML — treat them as
+    // untrusted like reason already was. The numeric coercion on s.id keeps a
+    // non-numeric id from breaking out of the onclick attribute.
     return`<div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div style="font-weight:700">${pnameHtml(s.fromPhysId)} → ${pnameHtml(s.toPhysId)}</div>
-          <div style="font-size:11px;color:var(--txt2)">${s.date} · ${s.shiftType||'Shift'}</div>
-          ${s.reason?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${String(s.reason).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`:''}
+          <div style="font-size:11px;color:var(--txt2)">${escHtml(s.date||'')} · ${escHtml(s.shiftType||'Shift')}</div>
+          ${s.reason?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${escHtml(String(s.reason))}</div>`:''}
         </div>
-        <span class="tag ${cls}">${status}</span>
+        <span class="tag ${cls}">${escHtml(String(status))}</span>
       </div>
       ${_isAdminOrSU()&&status==='pending'?`<div style="margin-top:8px;display:flex;gap:6px">
-        <button class="bsm bg" onclick="resolveSwap(${s.id},'approved')">Approve</button>
-        <button class="bsm br" onclick="resolveSwap(${s.id},'denied')">Deny</button>
+        <button class="bsm bg" onclick="resolveSwap(${+s.id||0},'approved')">Approve</button>
+        <button class="bsm br" onclick="resolveSwap(${+s.id||0},'denied')">Deny</button>
       </div>`:''}
     </div>`;
   };
@@ -25618,22 +25616,11 @@ async function resolveSwap(id,status){
   const _sbRs=(typeof _initAuthClient==='function')?_initAuthClient():null;
   if(!_sbRs){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return; }
   if(status==='approved'){
-    // AUDIT FIX (2026-07 deep dive): this used to execute only HALF of a two-sided
-    // swap (the fromPhys→toPhys leg on s.date; s.theirDate was never touched, so the
-    // counterparty ended up carrying both shifts), skipped IR calls entirely (an IR
-    // call swap moved the paired day shift but left the call behind), and performed
-    // no rule checks. Now: both legs move, all four assignment collections are
-    // covered, and vacation/site-restriction conflicts are surfaced for an explicit
-    // admin override before anything is reassigned.
-    const moveAssignments=(physFrom, physTo, d)=>{
-      let n=0;
-      const tag=x=>{x.physId=physTo;x.notes=(x.notes?x.notes+' ':'')+'[swap-approved]';n++;};
-      (S.drShifts||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
-      (S.irShifts||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
-      (S.irCalls||[]).filter(x=>x.physId===physFrom&&x.date===d).forEach(tag);
-      (S.weekendCalls||[]).filter(x=>x.physId===physFrom&&(x.satDate===d||x.sunDate===d||x.date===d)).forEach(tag);
-      return n;
-    };
+    // AUDIT FIX (2026-07 deep dive): both legs move, all four assignment
+    // collections are covered, and vacation/site-restriction conflicts are
+    // surfaced for an explicit admin override before anything is reassigned.
+    // The reassignment itself now happens SERVER-SIDE inside rs_resolve_swap
+    // (same transaction as the status commit).
     // Rule checks: warn (don't hard-block) so the admin can consciously override.
     const onVac=(pid,d)=>(S.vacations||[]).some(v=>v.physId===pid&&v.start<=d&&v.end>=d);
     const siteOf=(pid,d)=>{
@@ -25659,20 +25646,22 @@ async function resolveSwap(id,status){
       const ok=confirm(`Approving this swap conflicts with scheduling rules:\n\n• ${conflicts.join('\n• ')}\n\nApprove anyway?`);
       if(!ok) return;
     }
-    // Commit the status to the canonical table BEFORE reassigning shifts, so a
-    // failed commit never leaves moved shifts with a still-pending swap.
+    // ATOMIC APPROVE (review fix): rs_resolve_swap now commits the status AND
+    // reassigns both legs' shifts server-side in ONE transaction — the table
+    // and the schedule can no longer diverge (previously the shift moves rode
+    // a separate client blob push that could fail or die with the tab).
     let _rr;
     try{ _rr=await _sbRs.rpc('rs_resolve_swap',{p_practice:_rsPracticeId(), p_client_id:id, p_status:status}); }
     catch(e){ if(typeof _toast==='function') _toast('Resolve failed: '+(e&&e.message||e),'err'); return; }
     if(_rr.error || !_rr.data || _rr.data.ok!==true){ if(typeof _toast==='function') _toast('Could not resolve: '+((_rr.data&&_rr.data.error)||(_rr.error&&_rr.error.message)||'failed'),'err'); return; }
-    const moved=moveAssignments(s.fromPhysId,s.toPhysId,s.date);
-    const movedBack=s.theirDate?moveAssignments(s.toPhysId,s.fromPhysId,s.theirDate):0;
+    const moved=+(_rr.data.moved||0), movedBack=+(_rr.data.movedBack||0);
     if(!moved){
       alert(`No shift found for ${pname(s.fromPhysId)} on ${s.date}. The swap request was approved but no shift was reassigned. It may have already been modified.`);
     } else if(s.theirDate&&!movedBack){
       alert(`Return leg incomplete: no shift found for ${pname(s.toPhysId)} on ${s.theirDate}. Only the ${s.date} leg was reassigned — review the calendar.`);
     }
-    triggerSave();   // persists the shift reassignment (admin blob push)
+    // Pull the authoritative post-approve schedule (the server mutated the blob).
+    try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   } else {
     // Deny / other: table status commit only — nothing in the blob changes.
     let _rr;
@@ -25681,6 +25670,10 @@ async function resolveSwap(id,status){
     if(_rr.error || !_rr.data || _rr.data.ok!==true){ if(typeof _toast==='function') _toast('Could not resolve: '+((_rr.data&&_rr.data.error)||(_rr.error&&_rr.error.message)||'failed'),'err'); return; }
   }
   s.status=status;   // optimistic cache update (rs_resolve_swap wrote the canonical row)
+  // Force-refresh the swaps cache from the canonical table — the optimistic
+  // write above may have touched an orphaned row if another tab's refresh
+  // replaced S.swapRequests while the RPC was in flight (review fix).
+  try{ await _migLoadSwaps(true); }catch(_){}
   if(typeof _audit==='function') _audit('swap.resolve', {id, status, fromPhysId:s.fromPhysId, toPhysId:s.toPhysId, date:s.date});
   if(typeof _emitWebhookEvent==='function')
     _emitWebhookEvent(status === 'approved' ? 'swap.approved' : 'swap.denied',
@@ -31196,6 +31189,26 @@ async function _migLoadSwaps(force){
     }
     return changed;
   }catch(_){ return false; }
+}
+// Delete canonical swap rows (rs_delete_swaps RPC) with FAILURE SURFACING
+// (review fix): the old fire-and-forget callers silently diverged — the local
+// cache dropped the rows while the table kept them, so they resurrected on
+// the next load. On failure we warn the admin and force-reload the cache so
+// the UI reflects the canonical table instead of lying.
+function _rsDeleteSwapRows(clientIds, why){
+  if(!Array.isArray(clientIds) || !clientIds.length) return;
+  const onFail = (msg) => {
+    if(typeof _toast === 'function')
+      _toast(`Could not delete ${clientIds.length} swap record${clientIds.length===1?'':'s'}${why?` (${why})`:''}: ${msg}. They will reappear on refresh.`, 'warn');
+    try{ _migLoadSwaps(true).then(ch => { if(ch && typeof renderSwaps === 'function' && document.getElementById('page-swaps')?.classList.contains('on')) renderSwaps(); }, ()=>{}); }catch(_){}
+  };
+  try{
+    const sb = (typeof _initAuthClient === 'function') ? _initAuthClient() : null;
+    if(!sb){ onFail('not connected'); return; }
+    sb.rpc('rs_delete_swaps', { p_practice: _rsPracticeId(), p_client_ids: clientIds }).then(
+      res => { if(res.error || !res.data || res.data.ok !== true) onFail((res.data && res.data.error) || (res.error && res.error.message) || 'failed'); },
+      e => onFail((e && e.message) || String(e)));
+  }catch(e){ onFail((e && e.message) || String(e)); }
 }
 // ─────────────────────────────────────────────────────────────────────────
 // PACS reports store (rs_reports) — shared client module (2026-07)
