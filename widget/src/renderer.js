@@ -75,18 +75,11 @@ function decodePairingCode(code){
 
 async function verifyPairing(payload){
   if(!payload || !payload.sig || !payload.sbAnonKey || !payload.sbUrl || !payload.practiceId || !payload.physId) return false;
-  const { sig, ...rest } = payload;
   const tokenVersion = +(payload.v || 1);
-  if(tokenVersion >= 2){
-    // v2+ codes are signed with a per-practice secret that is intentionally
-    // not shipped to the desktop widget. The widget can validate only the
-    // envelope shape locally; the widget-data edge function verifies the
-    // HMAC against the server-side practice secret before returning data.
-    return true;
-  }
-  const body = JSON.stringify(rest);
-  const expected = await hmacB64Url(rest.sbAnonKey, body);
-  return expected === sig;
+  // v1 codes were signed with the public anon key and can be forged. v2+
+  // signatures are verified by widget-data against a server-only secret and
+  // an active pairing registry entry.
+  return tokenVersion >= 2 && payload.pairingId != null;
 }
 
 function fmtDate(d){
