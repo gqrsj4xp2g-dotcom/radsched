@@ -445,6 +445,21 @@ async function runDigest(sbUrl: string, sbService: string) {
   const sb = createClient(sbUrl, sbService);
   const { data: rows, error } = await sb.from('radscheduler').select('id, data');
   if (error) throw error;
+  // #17 canonical cutover: notification prefs live in rs_comm_prefs now; the
+  // blob's users[].notifPrefs is a frozen legacy copy, authoritative only for
+  // bootstrap users with no table row. Load the whole prefs table once
+  // (service role bypasses RLS) and prefer it per user below.
+  const prefsByPractice = new Map<string, Map<string, Record<string, boolean>>>();
+  try {
+    const { data: prefRows } = await sb.from('rs_comm_prefs').select('practice_id, owner_uid, prefs');
+    for (const p of prefRows || []) {
+      if (!p?.practice_id || !p?.owner_uid) continue;
+      if (!prefsByPractice.has(p.practice_id)) prefsByPractice.set(p.practice_id, new Map());
+      prefsByPractice.get(p.practice_id)!.set(String(p.owner_uid), (p.prefs || {}) as Record<string, boolean>);
+    }
+  } catch (e) {
+    console.warn('digest: rs_comm_prefs load failed — falling back to blob prefs', e);
+  }
   let sent = 0, skipped = 0;
   const today = new Date().toISOString().slice(0, 10);
   const next7End = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
