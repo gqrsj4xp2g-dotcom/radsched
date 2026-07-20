@@ -148,24 +148,15 @@ async function _verifyHmac(
   requiredPurpose: 'widget' | 'cal-feed' | 'any',
 ): Promise<void> {
   const { sig, ...rest } = payload;
-  // v2+ tokens are signed with the practice's server-side secret.
-  // v1 (legacy) tokens are signed with the public anon key — we
-  // accept those ONLY if the practice has NOT yet rotated to a
-  // server-side secret (i.e. legacy practice, never re-issued). Once
-  // the practice has a server-side secret, v1 tokens are rejected
-  // even if the HMAC against the anon key matches. This forces a
-  // one-time re-issue per pairing on the next launch but eliminates
-  // forgeability.
+  // Only v2+ tokens are accepted. Legacy v1 tokens were signed with the
+  // public anon key and were therefore forgeable by any site visitor.
   const tokenVersion = +(payload.v || 1);
+  if (tokenVersion < 2) throw new Error('legacy pairing code rejected — ask an administrator to re-pair this widget');
+  if (!practiceSecret) throw new Error('practice pairing secret is not configured');
   let matched = false;
   if (practiceSecret) {
     const expected = await hmacB64Url(practiceSecret, JSON.stringify(rest));
     matched = expected === sig;
-  }
-  // Legacy v1 fallback — only when practice has no server secret yet.
-  if (!matched && tokenVersion < 2 && !practiceSecret && payload.sbAnonKey) {
-    const legacy = await hmacB64Url(payload.sbAnonKey, JSON.stringify(rest));
-    matched = legacy === sig;
   }
   if (!matched) throw new Error('signature mismatch — pairing must be re-issued');
   const actual = payloadPurpose(payload);
@@ -175,16 +166,12 @@ async function _verifyHmac(
 }
 
 function assertActiveWidgetPairing(practice: any, payload: any, code: string): void {
-  // SECURITY: distinguish a MISSING widgetPairings field (a true legacy
-  // practice from before pairing-tracking → allow) from a PRESENT-but-EMPTY
-  // array (every pairing was revoked). The old `if(!pairings.length) return`
-  // conflated them, so revoking the LAST pairing failed open — a revoked code
-  // still authorized read + all credit writes. An empty array must now fall
-  // through to find() (→ undefined → throw).
-  if (!Array.isArray(practice?.widgetPairings)) return; // true legacy practice
+  // The registry is mandatory. Missing and empty registries both fail closed;
+  // an administrator must issue a tracked v2 pairing before access works.
+  if (!Array.isArray(practice?.widgetPairings)) throw new Error('pairing registry is not configured');
   const pairings = practice.widgetPairings;
   const tokenVersion = +(payload?.v || 1);
-  if (tokenVersion < 2 && payload?.pairingId == null) return; // legacy anon-key tokens were not revocable.
+  if (tokenVersion < 2 || payload?.pairingId == null) throw new Error('untracked legacy pairing rejected');
   const fp = codeFingerprint(code);
   const pairingId = payload?.pairingId != null ? +payload.pairingId : null;
   const now = Date.now();
@@ -411,7 +398,7 @@ Deno.serve(async (req: Request) => {
         ...CORS,
         'Content-Type': 'text/calendar; charset=utf-8',
         'Content-Disposition': `inline; filename="radscheduler-${payload.physId}.ics"`,
-        'Cache-Control': 'public, max-age=600',  // calendar clients can cache 10 min
+        'Cache-Control': 'private, no-store',
       },
     });
   }
@@ -473,9 +460,9 @@ Deno.serve(async (req: Request) => {
     return jsonResp({ data: sanitizeForWidget(practice) });
   }
 
-  async function loadFreshPracticeForWrite(): Promise<any> {
+  async function loadFreshPracticeForWrite(): Promise<{ practice: any; savedAt: string | null }> {
     const { data: freshRow, error: freshErr } = await sb
-      .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+      .from('radscheduler').select('data,saved_at').eq('id', payload.practiceId).single();
     if (freshErr) throw new Error('practice refresh failed: ' + freshErr.message);
     if (!freshRow) throw new Error('practice not found');
     const fresh = parsePracticeData((freshRow as any).data);
@@ -484,13 +471,18 @@ Deno.serve(async (req: Request) => {
     await _verifyHmac(payload, freshSecret, 'widget');
     assertActiveWidgetPairing(fresh, payload, body.code);
     if (!Array.isArray(fresh.physicianCredits)) fresh.physicianCredits = [];
-    return fresh;
+    return { practice: fresh, savedAt: (freshRow as any).saved_at || null };
   }
 
-  async function writePracticeData(nextPractice: any) {
-    return sb.from('radscheduler')
-      .update({ data: JSON.stringify(nextPractice) })
-      .eq('id', payload.practiceId);
+  async function writePracticeData(nextPractice: any, expectedSavedAt: string | null) {
+    const { data, error } = await sb.rpc('rs_save_practice_cas', {
+      p_practice: payload.practiceId,
+      p_data: JSON.stringify(nextPractice),
+      p_expected_saved_at: expectedSavedAt,
+    });
+    if (error) return { error, conflict: false };
+    if (!data?.ok) return { error: new Error('practice changed during widget edit; refresh and retry'), conflict: true };
+    return { error: null, conflict: false };
   }
 
   // Helper: allocate against the freshest practice row so a widget write
@@ -513,9 +505,10 @@ Deno.serve(async (req: Request) => {
     const ts = (c.ts || new Date().toISOString()).toString().slice(0, 40);
     if (!hours || hours <= 0 || hours > 24) return jsonResp({ error: 'hours must be in (0, 24]' }, 400);
     if (!reason) return jsonResp({ error: 'reason is required' }, 400);
-    let latest: any;
-    try { latest = await loadFreshPracticeForWrite(); }
+    let snapshot: { practice: any; savedAt: string | null };
+    try { snapshot = await loadFreshPracticeForWrite(); }
     catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
+    const latest = snapshot.practice;
     // Soft cap on credit history per physician — protects against
     // accidental flood (e.g. a buggy widget retry loop).
     const myCreditCount = latest.physicianCredits.filter((c: any) => c.physId === payload.physId).length;
@@ -530,8 +523,8 @@ Deno.serve(async (req: Request) => {
       createdAt: new Date().toISOString(),
     };
     latest.physicianCredits.push(credit);
-    const { error: wrErr } = await writePracticeData(latest);
-    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    const write = await writePracticeData(latest, snapshot.savedAt);
+    if (write.error) return jsonResp({ error: 'write failed: ' + write.error.message }, write.conflict ? 409 : 500);
     return jsonResp({ ok: true, credit });
   }
 
@@ -540,9 +533,10 @@ Deno.serve(async (req: Request) => {
     const id = +body.creditId;
     const patch = body.patch || {};
     if (!id) return jsonResp({ error: 'creditId required' }, 400);
-    let latest: any;
-    try { latest = await loadFreshPracticeForWrite(); }
+    let snapshot: { practice: any; savedAt: string | null };
+    try { snapshot = await loadFreshPracticeForWrite(); }
     catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
+    const latest = snapshot.practice;
     const idx = latest.physicianCredits.findIndex((c: any) => c.id === id);
     if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
     const credit = latest.physicianCredits[idx];
@@ -560,8 +554,8 @@ Deno.serve(async (req: Request) => {
     if (patch.ts != null) credit.ts = String(patch.ts).slice(0, 40);
     credit.updatedAt = new Date().toISOString();
     latest.physicianCredits[idx] = credit;
-    const { error: wrErr } = await writePracticeData(latest);
-    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    const write = await writePracticeData(latest, snapshot.savedAt);
+    if (write.error) return jsonResp({ error: 'write failed: ' + write.error.message }, write.conflict ? 409 : 500);
     return jsonResp({ ok: true, credit });
   }
 
@@ -569,17 +563,18 @@ Deno.serve(async (req: Request) => {
   if (action === 'delete-credit') {
     const id = +body.creditId;
     if (!id) return jsonResp({ error: 'creditId required' }, 400);
-    let latest: any;
-    try { latest = await loadFreshPracticeForWrite(); }
+    let snapshot: { practice: any; savedAt: string | null };
+    try { snapshot = await loadFreshPracticeForWrite(); }
     catch (e) { return jsonResp({ error: String((e as Error).message) }, 409); }
+    const latest = snapshot.practice;
     const idx = latest.physicianCredits.findIndex((c: any) => c.id === id);
     if (idx < 0) return jsonResp({ error: 'credit not found' }, 404);
     if (latest.physicianCredits[idx].physId !== payload.physId) {
       return jsonResp({ error: 'cannot delete another physician\'s credit' }, 403);
     }
     latest.physicianCredits.splice(idx, 1);
-    const { error: wrErr } = await writePracticeData(latest);
-    if (wrErr) return jsonResp({ error: 'write failed: ' + wrErr.message }, 500);
+    const write = await writePracticeData(latest, snapshot.savedAt);
+    if (write.error) return jsonResp({ error: 'write failed: ' + write.error.message }, write.conflict ? 409 : 500);
     return jsonResp({ ok: true });
   }
 
