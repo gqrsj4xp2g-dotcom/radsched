@@ -15314,6 +15314,12 @@ function _applyRemoteData(d){
       _migLoadSwaps().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
     if(typeof _migLoadOnCallAcks === 'function')
       _migLoadOnCallAcks().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
+    // #17: comm-prefs are table-canonical too — keep the practice-wide prefs
+    // hydration fresh so the client-side recipient filters (_notify/broadcast/
+    // publish) see everyone's current choices. No re-render needed: prefs only
+    // affect outbound filtering, not what's on screen (renderCommPrefs does its
+    // own load+render pass).
+    if(typeof _migLoadCommPrefs === 'function') _migLoadCommPrefs().then(()=>{},()=>{});
   }catch(_){}
 }
 
