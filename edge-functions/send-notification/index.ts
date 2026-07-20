@@ -58,6 +58,16 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// Notification categories are authorization boundaries, not cosmetic labels.
+// End users may initiate only person-to-person workflow messages; direct
+// channel access, broadcasts, schedule changes, and integrations require an
+// MFA-gated admin session in the app and an admin/superuser role here.
+const SELF_SERVICE_BATCH_KINDS = new Set(['chatDM', 'chatMention', 'chatGroup', 'swapReq']);
+const ADMIN_BATCH_KINDS = new Set([
+  'broadcast', 'broadcast-test', 'schedulePublish', 'shiftAssign', 'shiftRemove',
+  'swapRes', 'holiday', 'vacation', 'openShift', 'tumorBoard', 'clinic', 'test',
+]);
+
 function ok(body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     headers: { 'content-type': 'application/json', ...corsHeaders },
@@ -138,6 +148,7 @@ Deno.serve(async (req) => {
   let callerUid = 'cron:digest-run';
   let callerRole = 'cron';
   let callerPid = '';
+  let callerEmail = '';
 
   if (isCronDigest) {
     if (!rateLimit(callerUid, 5)) return err(429, 'Too many digest requests; slow down.');
@@ -161,31 +172,63 @@ Deno.serve(async (req) => {
     const appMeta = (userData.user.app_metadata || {}) as { role?: string; practiceId?: string };
     callerRole = appMeta.role || '';
     callerPid  = appMeta.practiceId || '';
+    callerEmail = String(userData.user.email || '').trim().toLowerCase();
+    if (!callerPid) return err(403, 'Account is missing a practice assignment');
 
     // Rate limit per-caller — applies to all non-cron requests.
     if (!rateLimit(callerUid, 60)) return err(429, 'Too many requests; slow down.');
   }
 
   try {
+    const privileged = callerRole === 'admin' || callerRole === 'superuser';
+    const isSelfServiceBatch = SELF_SERVICE_BATCH_KINDS.has(body.kind);
+    const isAdminBatch = ADMIN_BATCH_KINDS.has(body.kind);
+
+    if (isSelfServiceBatch) {
+      if (!rateLimit(`${callerUid}:self-service`, 12)) return err(429, 'Too many messages; slow down.');
+      if (!Array.isArray(body.recipients) || !body.recipients.length || !body.subject || !body.body) {
+        return err(400, 'Message requires recipients, subject, and body');
+      }
+      if (body.recipients.length > 25) return err(400, 'Message recipient limit is 25');
+      body.html = undefined;
+      body.subject = `[RadScheduler ${body.kind}] ${String(body.subject).slice(0, 180)}`;
+      body.body = `${String(body.body).slice(0, 20_000)}\n\nSent by authenticated user ${callerEmail || callerUid}.`;
+      return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
+    }
+
+    if (isAdminBatch) {
+      if (!privileged) return err(403, 'Admin role required for this notification');
+      if (!Array.isArray(body.recipients) || !body.recipients.length || !body.subject || !body.body) {
+        return err(400, 'Notification requires recipients, subject, and body');
+      }
+      body.html = undefined;
+      return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
+    }
+
     switch (body.kind) {
-      case 'email':   return ok(await sendEmail(body, sbUrl, sbService, callerPid));
-      case 'sms':     return ok(await sendSMS(body, sbUrl, sbService, callerPid));
-      case 'push':    return ok(await sendPush(body, sbUrl, sbService, callerPid));
-      case 'webhook': return ok(await sendWebhook(body, callerRole));
+      case 'email':
+      case 'sms':
+      case 'push':
+      case 'webhook': {
+        if (!privileged) return err(403, 'Admin role required for direct delivery channels');
+        if (body.kind === 'email') return ok(await sendEmail(body, sbUrl, sbService, callerPid));
+        if (body.kind === 'sms') return ok(await sendSMS(body, sbUrl, sbService, callerPid));
+        if (body.kind === 'push') return ok(await sendPush(body, sbUrl, sbService, callerPid));
+        return ok(await sendWebhook(body, callerRole));
+      }
       case 'digest-run': {
         // digest-run is a privileged fanout. Reject unless either:
         //   (a) caller has admin role in their tenant (manual digest),
         //   (b) the special cron header is present + matches the env
         //       secret (pg_cron self-invocation).
         if (!isCronDigest && callerRole !== 'admin' && callerRole !== 'superuser') return err(403, 'Admin role or cron secret required');
-        return ok(await runDigest(sbUrl, sbService));
+        return ok(await runDigest(
+          sbUrl,
+          sbService,
+          (isCronDigest || callerRole === 'superuser') ? undefined : callerPid,
+        ));
       }
-      default: {
-        if (Array.isArray(body.recipients) && body.recipients.length && body.subject && body.body) {
-          return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
-        }
-        return err(400, `Unknown kind: ${body.kind}`);
-      }
+      default: return err(400, `Unknown kind: ${body.kind}`);
     }
   } catch (e) {
     console.error(`[send-notification] ${body.kind} failed:`, e instanceof Error ? e.message : String(e));
@@ -263,9 +306,8 @@ async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?
     const inPractice = await _recipientInPractice('email', b.to, sbUrl, sbService, callerPid);
     if (!inPractice) throw new Error('Recipient is not a member of your practice. Refusing to send.');
   }
-  // Length-cap the HTML fallback and escape user-provided body to
-  // prevent injection. Caller can still pass explicit `html` for rich
-  // emails — they're trusted to escape themselves there.
+  // Always derive HTML from escaped plain text. Accepting caller-provided
+  // HTML here turned the function into a tenant-scoped phishing relay.
   const safeBody = (b.body || '').slice(0, 100_000);
   const htmlFallback = safeBody ? `<p>${escHtml(safeBody).replace(/\n/g, '<br>')}</p>` : undefined;
   const resp = await fetch('https://api.resend.com/emails', {
@@ -274,7 +316,7 @@ async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?
     body: JSON.stringify({
       from, to: b.to, subject: b.subject,
       text: safeBody,
-      html: b.html || htmlFallback,
+      html: htmlFallback,
     }),
   });
   if (!resp.ok) throw new Error(`Resend ${resp.status}: ${await resp.text()}`);
@@ -301,7 +343,6 @@ async function sendEmailBatch(b: Body, sbUrl: string, sbService: string, callerP
         to: email,
         subject: b.subject,
         body: b.body,
-        html: b.html,
       }, sbUrl, sbService, callerPid);
       sent++;
       results.push({ email, ok: true, detail });
@@ -441,9 +482,11 @@ async function sendWebhook(b: Body, callerRole?: string) {
 // Invoked by Supabase pg_cron (set up SQL trigger separately). Walks
 // every practice's `S.users` + their notification preferences, builds a
 // per-user digest, and queues an email per recipient.
-async function runDigest(sbUrl: string, sbService: string) {
+async function runDigest(sbUrl: string, sbService: string, practiceId?: string) {
   const sb = createClient(sbUrl, sbService);
-  const { data: rows, error } = await sb.from('radscheduler').select('id, data');
+  let rowsQuery = sb.from('radscheduler').select('id, data');
+  if (practiceId) rowsQuery = rowsQuery.eq('id', practiceId);
+  const { data: rows, error } = await rowsQuery;
   if (error) throw error;
   // #17 canonical cutover: notification prefs live in rs_comm_prefs now; the
   // blob's users[].notifPrefs is a frozen legacy copy, authoritative only for
@@ -451,7 +494,9 @@ async function runDigest(sbUrl: string, sbService: string) {
   // (service role bypasses RLS) and prefer it per user below.
   const prefsByPractice = new Map<string, Map<string, Record<string, boolean>>>();
   try {
-    const { data: prefRows } = await sb.from('rs_comm_prefs').select('practice_id, owner_uid, prefs');
+    let prefsQuery = sb.from('rs_comm_prefs').select('practice_id, owner_uid, prefs');
+    if (practiceId) prefsQuery = prefsQuery.eq('practice_id', practiceId);
+    const { data: prefRows } = await prefsQuery;
     for (const p of prefRows || []) {
       if (!p?.practice_id || !p?.owner_uid) continue;
       if (!prefsByPractice.has(p.practice_id)) prefsByPractice.set(p.practice_id, new Map());
