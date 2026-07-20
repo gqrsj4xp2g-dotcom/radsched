@@ -22259,40 +22259,17 @@ function downloadMyCalendar(){
 // extra round-trip to the table.
 async function _calendarFeedUrlFor(_legacyTokenIgnored){
   const base = _getUrl();
-  const key  = _getKey();
-  if(!base || !key) return '';
+  if(!base || !_getKey()) return '';
   if(!CU?.physId){ return ''; }
-  const phys = (typeof _physById === 'function') ? _physById(CU.physId) : null;
-  if(!phys) return '';
-  // Payload mirrors the widget-data pairing-code shape so the edge
-  // function's verifyAndDecode() accepts it without changes. Marked
-  // with kind:'cal-feed' so future telemetry can distinguish widget
-  // vs calendar usage.
-  const issuedAt = new Date().toISOString();
-  // 1-year expiration (calendar clients re-fetch; the URL itself is
-  // long-lived but a leaked token shouldn't be valid forever). Renews
-  // on every "Generate URL" click.
-  const exp = new Date(Date.now() + 365*86400*1000).toISOString();
-  // v=2 if we have the secret helper available, v=1 legacy otherwise.
-  // The verifier rejects v=2 unless signed with the practice secret,
-  // so version is set IN LOCKSTEP with the signing key choice.
-  const hasSecretFn = (typeof _getOrCreateWidgetSecret === 'function');
-  const tokenVersion = hasSecretFn ? 2 : 1;
-  const signingKey = hasSecretFn ? _getOrCreateWidgetSecret() : key;
-  const body = {
-    v: tokenVersion, kind: 'cal-feed',
-    practiceId: (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main'),
-    physId: phys.id,
-    physLast: phys.last || '',
-    physFirst: phys.first || '',
-    sbUrl: base,
-    sbAnonKey: key,
-    issuedAt, exp,
-  };
-  // Sign with the per-practice secret (NOT the public anon key). See
-  // generateWidgetPairing() for the threat-model rationale.
-  const sig = await _hmacB64Url(signingKey, JSON.stringify(body));
-  const code = _b64url(JSON.stringify({ ...body, sig }));
+  const practiceId = (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
+  const response = await _fetchWithTimeout(`${base}/functions/v1/widget-data`, {
+    method:'POST',
+    headers:await _edgeAuthHeaders(),
+    body:JSON.stringify({ action:'issue', purpose:'cal-feed', practiceId, physId:CU.physId, days:365 }),
+  }, 15000);
+  const issued = await response.json().catch(()=>({}));
+  if(!response.ok || !issued?.code) throw new Error(issued?.error || `Calendar service returned ${response.status}`);
+  const code = issued.code;
   // webcal:// makes most calendar apps recognize this as a
   // subscribable feed. URL-encode the code so '+' / '/' that might
   // sneak in survive the URL parsing.
