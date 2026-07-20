@@ -131,7 +131,7 @@ Recommended baseline:
 
 ```
 Content-Security-Policy: default-src 'self' data: blob:;
-  script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh;
+  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh;
   style-src 'self' 'unsafe-inline';
   connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://maps.googleapis.com https://api.github.com https://raw.githubusercontent.com;
   img-src 'self' data: blob: https://maps.googleapis.com;
