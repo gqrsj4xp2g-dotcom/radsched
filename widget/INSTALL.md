@@ -18,28 +18,17 @@ That script:
 1. Installs Node.js via Homebrew if you don't already have it
 2. Runs `npm install` (one-time, ~2 min)
 3. Generates a placeholder icon (replace `widget/build/icon.png` with your real 512×512 PNG before distribution)
-4. Builds an unsigned `.dmg` and `.zip` into `widget/dist/`
+4. Builds a signed, notarized `.dmg` into `widget/dist/`
 5. Opens the dist folder in Finder
 
 The output file you distribute is `widget/dist/RadScheduler-Widget-1.0.0.dmg` (or the `-arm64` variant for Apple Silicon).
 
-### "The app won't open" / "unidentified developer" / "app is damaged"
+### "The app won't open" / signature warning
 
-Expected for unsigned, un-notarized builds. **Important:** on **macOS 15 (Sequoia) and macOS 26**, the old right-click → **Open** shortcut no longer works for un-notarized apps — Gatekeeper blocks them outright, and a widget downloaded from a GitHub release carries the `com.apple.quarantine` flag that triggers this. This is the single most common reason the widget "won't launch" on a modern Mac. Use one of these:
-
-**Option A — Settings (per physician, no Terminal):**
-1. Double-click the app once (it will be blocked).
-2. Open **System Settings → Privacy & Security**, scroll to the bottom.
-3. Next to "RadScheduler Widget was blocked…", click **Open Anyway**, then confirm.
-4. From then on it launches normally.
-
-**Option B — Terminal (one command, most reliable):**
-```bash
-xattr -dr com.apple.quarantine "/Applications/RadScheduler Widget.app"
-```
-Then double-click to launch.
-
-**The real fix** is to notarize the build with an Apple Developer ID so neither step is needed — see *Code signing* below. Until the app is notarized, every downloaded copy needs Option A or B on first launch.
+Do not bypass Gatekeeper or remove quarantine attributes. Confirm that the
+release workflow completed signing and notarization, then replace the download
+with the correctly signed artifact. A production build now fails when signing
+credentials are missing.
 
 ---
 
@@ -56,18 +45,16 @@ That script does the same thing as the mac script but produces `widget\dist\RadS
 
 ### "SmartScreen says unrecognized app"
 
-Same situation as macOS. First-time launch:
-
-1. Click **More info** in the SmartScreen warning
-2. Click **Run anyway**
-
-To eliminate it, see *Code signing* below.
+Do not instruct physicians to bypass SmartScreen. Confirm that the installer
+was produced by the signed release workflow and that the signing certificate
+is valid. Publisher reputation may take time to establish for a new standard
+certificate, but unsigned installers must not be distributed.
 
 ---
 
-## Code signing (optional, for distribution-quality builds)
+## Code signing (required)
 
-If you want installers that don't trigger OS warnings, you need code-signing certs:
+Production installers require code-signing certificates:
 
 ### macOS
 
@@ -235,11 +222,11 @@ Within 6 hours every physician's widget shows the update banner. If you want to 
 
 Electron supports full background download + auto-install via the `electron-updater` package, but it requires **code-signed builds** on macOS to satisfy Gatekeeper. We use the simpler "browser-download" pattern instead so:
 
-- Unsigned builds work fine (typical for internal practice distribution)
-- The physician sees the file size + can cancel mid-download
-- One mechanism for both macOS and Windows
+- Every distributed installer remains signed and independently verifiable
+- The physician chooses when to open the canonical GitHub release page
+- The application never downloads or executes an installer itself
 
-When you eventually obtain code-signing certs and want in-place updates, the swap is ~30 lines in `widget/src/main.js` (replace the `checkForUpdates()` body with `appUpdater.checkForUpdates()`).
+Do not add in-place installation without a separate threat review, signature verification, and rollback design.
 
 ### Configuring the update repo
 

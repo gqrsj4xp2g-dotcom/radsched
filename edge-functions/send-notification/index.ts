@@ -25,7 +25,7 @@
 //   RS_CRON_SECRET               — shared secret for scheduled digest fanout
 //
 // Request body (JSON):
-//   { kind: 'email',   to: 'user@example.com', subject: '...', body: '...', html: '...' }
+//   { kind: 'email',   to: 'user@example.com', subject: '...', body: '...' }
 //   { kind: 'broadcast', recipients: [{ email, name }], subject: '...', body: '...' }
 //   { kind: 'sms',     to: '+15551234567',     body: '...' }
 //   { kind: 'push',    userId: '<auth-user-id>', title: '...', body: '...', url?: '...' }
@@ -117,8 +117,8 @@ function jwtAal(token: string): string {
 // external DNS could still redirect, but they can't directly target
 // 169.254.169.254 / 127.0.0.1 / 10.x / internal hostnames.
 function isPrivateHost(host: string): boolean {
-  const h = host.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
   if (h === 'metadata' || h === 'metadata.google.internal') return true;
   // IPv4 literal checks
   const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
@@ -129,10 +129,16 @@ function isPrivateHost(host: string): boolean {
     if (a === 169 && b === 254) return true;         // link-local incl. AWS/GCP metadata
     if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
     if (a === 192 && b === 168) return true;         // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+    if (a === 198 && (b === 18 || b === 19)) return true; // benchmark networks
     if (a === 0) return true;                        // 0.0.0.0/8
+    if (a >= 224) return true;                       // multicast/reserved
   }
-  // IPv6 loopback / link-local literals
-  if (h === '::1' || h.startsWith('[::1]') || h.startsWith('fe80:') || h.startsWith('[fe80')) return true;
+  // IPv6 unspecified, loopback, link-local, unique-local, multicast, and
+  // IPv4-mapped literals are never valid outbound webhook destinations.
+  if (h === '::' || h === '::1' || h.startsWith('fe8') || h.startsWith('fe9') ||
+      h.startsWith('fea') || h.startsWith('feb') || h.startsWith('fc') ||
+      h.startsWith('fd') || h.startsWith('ff') || h.includes('::ffff:')) return true;
   return false;
 }
 
@@ -144,10 +150,17 @@ Deno.serve(async (req) => {
   const sbAnon = Deno.env.get('SUPABASE_ANON_KEY')!;
   const sbService = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+  const declaredLength = +(req.headers.get('content-length') || 0);
+  if (declaredLength > 262_144) return err(413, 'Request body too large');
+  let rawBody = '';
+  try { rawBody = await req.text(); }
+  catch { return err(400, 'Could not read request body'); }
+  if (new TextEncoder().encode(rawBody).length > 262_144) return err(413, 'Request body too large');
   let body: Body;
-  try { body = await req.json(); }
+  try { body = JSON.parse(rawBody); }
   catch { return err(400, 'Invalid JSON body'); }
-  if (!body.kind) return err(400, 'Missing kind');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return err(400, 'Invalid JSON body');
+  if (typeof body.kind !== 'string' || !body.kind || body.kind.length > 80) return err(400, 'Missing or invalid kind');
 
   const cronHdr = req.headers.get('x-rs-cron-secret') || '';
   const cronSecret = Deno.env.get('RS_CRON_SECRET') || '';
@@ -212,6 +225,8 @@ Deno.serve(async (req) => {
       if (!Array.isArray(body.recipients) || !body.recipients.length || !body.subject || !body.body) {
         return err(400, 'Notification requires recipients, subject, and body');
       }
+      body.subject = String(body.subject).slice(0, 998);
+      body.body = String(body.body).slice(0, 100_000);
       body.html = undefined;
       return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
     }
@@ -289,8 +304,8 @@ async function _recipientInPractice(
 // only replaced \n→<br>, allowing an attacker (via body field) to
 // inject <script> / <a href> / phishing markup that the recipient's
 // mail client would render — coming from the practice's verified
-// sender domain. Anything explicitly passed in `html` is still trusted
-// (the caller has chosen to pass HTML), so admin-built templates work.
+// sender domain. Caller-provided HTML is never rendered; delivery HTML
+// is always derived from escaped plain text.
 function escHtml(s: string): string {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -305,16 +320,19 @@ async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?
   const apiKey = Deno.env.get('RESEND_API_KEY');
   const from = resendFrom();
   if (!apiKey) throw new Error('RESEND_API_KEY not configured');
-  if (!b.to || !b.subject) throw new Error('email requires { to, subject }');
-  if (typeof b.to !== 'string' || b.to.length > 254) throw new Error('email "to" invalid');
-  if (b.subject.length > 998) throw new Error('email subject too long');
+  if (typeof b.to !== 'string' || typeof b.subject !== 'string') throw new Error('email requires text { to, subject }');
+  if (b.body != null && typeof b.body !== 'string') throw new Error('email body must be text');
+  const to = b.to.trim().toLowerCase();
+  const subject = b.subject.trim();
+  if (!to || to.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error('email "to" invalid');
+  if (!subject || subject.length > 998) throw new Error('email subject invalid');
   if (b.body && b.body.length > 100_000) throw new Error('email body too long');
   // Multi-tenant guard — the recipient address must belong to a user
   // or physician in the caller's practice. The runDigest path passes
   // sbUrl/sbService/callerPid empty (server-side fanout); when those
   // are missing we trust the caller as a server-internal call.
   if (sbUrl && sbService && callerPid) {
-    const inPractice = await _recipientInPractice('email', b.to, sbUrl, sbService, callerPid);
+    const inPractice = await _recipientInPractice('email', to, sbUrl, sbService, callerPid);
     if (!inPractice) throw new Error('Recipient is not a member of your practice. Refusing to send.');
   }
   // Always derive HTML from escaped plain text. Accepting caller-provided
@@ -325,10 +343,11 @@ async function sendEmail(b: Body, sbUrl?: string, sbService?: string, callerPid?
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from, to: b.to, subject: b.subject,
+      from, to, subject,
       text: safeBody,
       html: htmlFallback,
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!resp.ok) throw new Error(`Resend ${resp.status}: ${await resp.text()}`);
   return { ok: true, kind: 'email', detail: await resp.json() };
@@ -376,21 +395,23 @@ async function sendSMS(b: Body, sbUrl?: string, sbService?: string, callerPid?: 
   const token = Deno.env.get('TWILIO_AUTH_TOKEN');
   const from = Deno.env.get('TWILIO_FROM_NUMBER');
   if (!sid || !token || !from) throw new Error('Twilio creds not configured');
-  if (!b.to || !b.body) throw new Error('sms requires { to, body }');
-  if (b.to.length > 20 || !/^\+?[\d\-\s().]+$/.test(b.to)) throw new Error('sms "to" invalid');
-  if (b.body.length > 1600) throw new Error('sms body too long');
+  if (typeof b.to !== 'string' || typeof b.body !== 'string') throw new Error('sms requires text { to, body }');
+  const to = b.to.trim();
+  if (!to || to.length > 20 || !/^\+?[\d\-\s().]+$/.test(to)) throw new Error('sms "to" invalid');
+  if (!b.body || b.body.length > 1600) throw new Error('sms body invalid');
   // Multi-tenant guard for SMS (mirrors email path).
   if (sbUrl && sbService && callerPid) {
-    const inPractice = await _recipientInPractice('phone', b.to, sbUrl, sbService, callerPid);
+    const inPractice = await _recipientInPractice('phone', to, sbUrl, sbService, callerPid);
     if (!inPractice) throw new Error('Recipient is not a member of your practice. Refusing to send.');
   }
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
   const auth = btoa(`${sid}:${token}`);
-  const params = new URLSearchParams({ From: from, To: b.to, Body: b.body });
+  const params = new URLSearchParams({ From: from, To: to, Body: b.body });
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!resp.ok) throw new Error(`Twilio ${resp.status}: ${await resp.text()}`);
   return { ok: true, kind: 'sms', detail: await resp.json() };
@@ -402,7 +423,9 @@ async function sendPush(b: Body, sbUrl: string, sbService: string, callerPid?: s
   const priv = Deno.env.get('VAPID_PRIVATE_KEY');
   const subject = Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@example.com';
   if (!pub || !priv) throw new Error('VAPID keys not configured');
-  if (!b.userId) throw new Error('push requires { userId }');
+  if (typeof b.userId !== 'string' || !b.userId || b.userId.length > 128) throw new Error('push requires a valid { userId }');
+  if (b.title != null && typeof b.title !== 'string') throw new Error('push title must be text');
+  if (b.body != null && typeof b.body !== 'string') throw new Error('push body must be text');
   webpush.setVapidDetails(subject, pub, priv);
   // Multi-tenant scoping — previously the function scanned EVERY
   // practice's users[] for a matching userId, which let an attacker
@@ -434,11 +457,16 @@ async function sendPush(b: Body, sbUrl: string, sbService: string, callerPid?: s
   // Length-cap payload — sw.js displays this verbatim. Browser push
   // services typically cap at 4KB; we cap earlier so we never get
   // surprise 413s.
+  const requestedUrl = String(b.url || '/');
+  const safeUrl = requestedUrl.startsWith('/') && !requestedUrl.startsWith('//')
+    ? requestedUrl.slice(0, 1024)
+    : '/';
+  const title = (b.title || 'RadScheduler').slice(0, 100);
   const payload = JSON.stringify({
-    title: (b.title || 'RadScheduler').slice(0, 100),
+    title,
     body: (b.body || '').slice(0, 500),
-    url: (b.url || '/').slice(0, 1024),
-    tag: 'rs-' + (b.title || '').toLowerCase().replace(/\s+/g, '-').slice(0, 40),
+    url: safeUrl,
+    tag: 'rs-' + title.toLowerCase().replace(/\s+/g, '-').slice(0, 40),
   });
   await webpush.sendNotification(subscription as never, payload);
   return { ok: true, kind: 'push' };
@@ -446,8 +474,8 @@ async function sendPush(b: Body, sbUrl: string, sbService: string, callerPid?: s
 
 // ─── Outbound webhooks ─────────────────────────────────────────────────
 async function sendWebhook(b: Body, callerRole?: string) {
-  if (!b.url) throw new Error('webhook requires { url }');
-  if (!/^https?:\/\//.test(b.url)) throw new Error('webhook url must be http(s)');
+  if (typeof b.url !== 'string' || !b.url) throw new Error('webhook requires a text { url }');
+  if (!/^https:\/\//.test(b.url)) throw new Error('webhook url must use https');
   if (b.url.length > 2048) throw new Error('webhook url too long');
   // Only admins can configure + invoke webhooks. Without this gate, a
   // physician-tier user could POST to any URL the practice's edge
@@ -457,13 +485,16 @@ async function sendWebhook(b: Body, callerRole?: string) {
   let parsed: URL;
   try { parsed = new URL(b.url); }
   catch { throw new Error('webhook url malformed'); }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    throw new Error('webhook url must be credential-free HTTPS');
+  }
   if (isPrivateHost(parsed.hostname)) {
     throw new Error('webhook url targets a private/internal host — refusing.');
   }
   // Length-cap the JSON body to keep error responses from being
   // weaponized as data exfil channels.
-  const bodyStr = JSON.stringify(b.payload || {});
-  if (bodyStr.length > 32_768) throw new Error('webhook payload too large (>32KB)');
+  const bodyStr = JSON.stringify(b.payload ?? {});
+  if (new TextEncoder().encode(bodyStr).length > 32_768) throw new Error('webhook payload too large (>32KB)');
   // 10s timeout — webhooks shouldn't be long-running fetches; if the
   // remote is slow we don't want to tie up edge resources.
   const ctrl = new AbortController();

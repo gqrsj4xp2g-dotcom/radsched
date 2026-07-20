@@ -147,7 +147,7 @@ if (edgePathsLiteral) {
   for (const [, name, srcPath] of entries) {
     check(`Edge source exists for ${name}`, nonEmpty(srcPath), srcPath);
   }
-  check('Embedded edge source fallbacks are blanked at runtime', /_EDGE_FN_SOURCES\[name\]\s*=\s*''/.test(index));
+  check('No stale edge source is embedded in the app shell', !/_EDGE_FN_SOURCES/.test(index));
 }
 
 // Privileged role gates. These are intentionally specific because the app has

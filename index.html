@@ -8477,12 +8477,12 @@ IMPRESSION: Three-level lumbar kyphoplasty without complication.`,
       <div style="font-size:12px;color:var(--txt2);margin-bottom:8px">Your PACS system POSTs each signed report (HL7 ORU, FHIR DiagnosticReport, or JSON) to this URL with the bearer token below. Reports are attributed to physicians by the report's interpreter field and flow to the 📈 wRVU tracker, 💊 CPT coding, and ⚖️ peer review.</div>
       <div class="fg"><label>Endpoint URL</label>
         <input id="pacs-endpoint-url" type="text" readonly placeholder="Click Reveal to load" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px"></div>
-      <div class="fg"><label>Ingest token <small style="color:var(--txt3)">— send as <code>Authorization: Bearer &lt;token&gt;</code></small></label>
+      <div class="fg"><label>Ingest credential <small style="color:var(--txt3)">— send as <code>Authorization: Bearer &lt;token&gt;</code></small></label>
         <div class="flex" style="gap:6px;align-items:center">
           <input id="pacs-ingest-token" type="text" readonly value="••••••••••••" style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px">
-          <button class="bt bxs" onclick="pacsRevealToken()">Reveal</button>
+          <button class="bt bxs" onclick="pacsRevealToken()">Check status</button>
           <button class="bt bxs" onclick="pacsRotateToken()" style="color:var(--red-t)">Rotate</button></div></div>
-      <div id="pacs-token-status" style="font-size:11px;color:var(--txt3);margin-top:4px">The token is practice-scoped and lets a system append reports. Rotate it if it may have leaked.</div>
+      <div id="pacs-token-status" style="font-size:11px;color:var(--txt3);margin-top:4px">The token is practice-scoped, stored only as a hash, and shown once when rotated.</div>
     </div>
     <div class="g2" style="gap:14px;align-items:start">
       <div class="card">
@@ -10353,6 +10353,8 @@ function _buildPersistedPayload(pathKind){
       if(entry.key === 'cfg' && typeof v === 'object'){
         out[entry.key] = {...v};
         delete out[entry.key]._widgetSecret;
+        delete out[entry.key].mapsKey;
+        delete out[entry.key].gmapsKey;
       } else {
         out[entry.key] = v;
       }
@@ -12177,46 +12179,19 @@ async function restoreFromBackup(backupId){
     // 4. Prefer the service-role edge wrapper for the destructive write. It
     //    verifies the caller's admin role and AAL2 session server-side, writes
     //    the row, and records side-table audit/telemetry evidence.
-    try{
-      const result = await _invokeEdgeFn('admin-ops', {
-        action: 'restore-backup',
-        backupId,
-        practiceId: _ROW_ID,
-      });
-      const restored = (result?.payload && typeof result.payload === 'object') ? result.payload : {
-        ...parsed,
-        savedAt: result?.savedAt || new Date().toISOString(),
-        _restoredFromBackup: backupId,
-        _restoredAt: result?.savedAt || new Date().toISOString(),
-      };
-      _applyRemoteData(restored);
-      if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
-      if(Array.isArray(result?.warnings) && result.warnings.length){
-        console.warn('[RS] admin-ops restore warnings:', result.warnings);
-      }
-      if(typeof _toast === 'function') _toast(`✓ Restored from backup ${backupId}`, 'ok');
-      return true;
-    }catch(edgeErr){
-      const missingFunction = edgeErr?.status === 404 || edgeErr?.status === 405;
-      const authBlocked = edgeErr?.status === 401 || edgeErr?.status === 403 || edgeErr?.body?.mfa_required;
-      if(authBlocked || !missingFunction) throw edgeErr;
-      console.warn('[RS] admin-ops restore wrapper is not deployed; falling back to direct RLS write.', edgeErr);
-    }
-
-    // 5. Backward-compatible fallback for installs that have not deployed
-    //    admin-ops yet. RLS still enforces the active practice and AAL2 policy.
-    parsed.savedAt = new Date().toISOString();
-    parsed._restoredFromBackup = backupId;
-    parsed._restoredAt = parsed.savedAt;
-    const { error: writeErr } = await _supabase.from(_TABLE).upsert({
-      id: _ROW_ID,
-      data: JSON.stringify(parsed),
+    const result = await _invokeEdgeFn('admin-ops', {
+      action: 'restore-backup',
+      backupId,
+      practiceId: _ROW_ID,
     });
-    if(writeErr) throw writeErr;
-    if(typeof _audit === 'function') _audit('admin.restoreBackup', {backupId, savedAt: parsed.savedAt, via:'direct-fallback'});
-    // 6. Re-apply locally so the current session reflects the restore without a reload.
-    _applyRemoteData(parsed);
+    if(!result?.payload || typeof result.payload !== 'object') {
+      throw new Error('Restore service returned no committed payload. Reload and verify before making edits.');
+    }
+    _applyRemoteData(result.payload);
     if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+    if(Array.isArray(result?.warnings) && result.warnings.length){
+      console.warn('[RS] admin-ops restore warnings:', result.warnings);
+    }
     if(typeof _toast === 'function') _toast(`✓ Restored from backup ${backupId}`, 'ok');
     return true;
   }catch(e){
@@ -13844,8 +13819,8 @@ function clearAllData(){
     irGroups:S.irGroups,
   };
   const usersBackup=[...USERS];
-  // Reset to minimal seed — fresh practice. No demo physicians, no demo
-  // user accounts, only the superuser. Customers who click Reset get the
+  // Reset to a clean practice. No demo physicians or embedded user accounts;
+  // authenticated identities are hydrated from Supabase Auth. Customers get the
   // same clean slate a brand-new install gets. Preserves the "At Home /
   // Remote" pseudo-site since code assumes it always exists.
   //
@@ -13863,9 +13838,6 @@ function clearAllData(){
   S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
   S.irGroups=['North','South'];
   USERS.length=0;
-  USERS.push(
-    {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'}
-  );
   try{
     const freshHTML=_buildSaveHTML();
     // Restore backup in memory
@@ -13886,9 +13858,7 @@ function clearAllData(){
 
 
 
-let USERS = /*USERS_START*/[
-  {id:'su1',email:'mnboulous@gmail.com',pw:'',role:'superuser',first:'M',last:'Boulous',physId:null,practiceId:'*',joined:'2024-01-01'},
-]/*USERS_END*/;
+let USERS = /*USERS_START*/[]/*USERS_END*/;
 let CU = null;           // current user
 let _PRACTICE_ID='main'; // active practice row id
 let _PRACTICES=[];       // all practices (admin only for switching)
@@ -14146,9 +14116,9 @@ function _hydrateUserFromSession(sbUser){
     : null;
   const metaPhysId = _readPhysId(appMeta) ?? _readPhysId(userMeta);
   let u=USERS.find(x=>x.email===email);
-  // Practice ID — prefer app_metadata (RLS-authoritative); fall back to user_metadata
-  // for backwards compatibility with older accounts that haven't been backfilled.
-  _ROW_ID = appMeta.practiceId || userMeta.practiceId || 'main';
+  // Practice assignment is security-sensitive and comes only from server-issued
+  // app_metadata. User-editable metadata must never steer tenant selection.
+  _ROW_ID = appMeta.practiceId || '__unassigned__';
   _PRACTICE_ID = _ROW_ID;
   // Remember for pre-login preloads (see _preloadUsers) so the login screen
   // reads THIS practice's row next time, not the hardcoded 'main' row.
@@ -15091,6 +15061,7 @@ function _applyRemoteData(d){
   // Widget signing material is server-only as of v2 issuance. Drop any stale
   // client copy so an old tab cannot reintroduce it on its next save.
   if(S.cfg) delete S.cfg._widgetSecret;
+  if(S.cfg){ delete S.cfg.mapsKey; delete S.cfg.gmapsKey; }
   if(d.vacPicking)Object.assign(S.vacPicking,d.vacPicking);
   // driveTimes is a nested {site → {site → mins}} object. Storing the
   // remote reference directly means a future remote payload could share
@@ -16145,7 +16116,7 @@ let S=/*S_START*/{
   timeLogEntries:[],
   irGroups:['North','South'],
   wkndNeeds:{},
-  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,mapsKey:'',shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
+  cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
     // wRVU defaults per shift type. Overridden per-shift by s.wRVUGoal,
     // per-physician by p.wRVUMultiplier (1.0 = standard expectation).
     // 'IR <shift>' keys (IR 1st/2nd/3rd/Home) cover IR ROSTER shifts —
@@ -20183,32 +20154,25 @@ function _getGMapsKey(){ return localStorage.getItem(_GMAPS_KEY_LS)||''; }
 function _setGMapsKey(k){
   // Wrap in try/catch — Safari Private mode and storage-disabled environments
   // throw on every setItem call. Failing silently here is fine because the
-  // key is also stored in S.cfg.gmapsKey via the DB save path; this LS write
-  // is only an optimization for cross-tab key reuse.
+  // The key is intentionally browser-local and never enters practice data.
   try{
     if(k) localStorage.setItem(_GMAPS_KEY_LS,k);
     else localStorage.removeItem(_GMAPS_KEY_LS);
-  }catch(_){ /* localStorage unavailable; rely on in-memory + DB copy */ }
+  }catch(_){ /* localStorage unavailable */ }
 }
 
 function saveGMapsKey(){
   if(!_adminOnly('change Google Maps key')) return;
   const k=document.getElementById('gmaps-key')?.value.trim()||'';
   _setGMapsKey(k);
-  S.cfg.mapsKey=k; // also persist in shared DB so scheduled refresh can use it
-  triggerSave();
+  if(S.cfg){ delete S.cfg.mapsKey; delete S.cfg.gmapsKey; }
   const msg=document.getElementById('gmaps-key-msg');
-  if(msg) msg.innerHTML=k?'<span style="color:var(--green-t)">✓ Key saved (browser + shared DB for scheduled refresh).</span>':'<span style="color:var(--txt3)">Key cleared.</span>';
+  if(msg) msg.innerHTML=k?'<span style="color:var(--green-t)">✓ Key saved in this browser only.</span>':'<span style="color:var(--txt3)">Key cleared.</span>';
 }
 
 function _restoreGMapsKeyField(){
   const el=document.getElementById('gmaps-key');
-  // Prefer localStorage; fall back to DB-stored key
-  const lsKey=_getGMapsKey();
-  const dbKey=S.cfg?.mapsKey||'';
-  const key=lsKey||dbKey;
-  if(key&&!lsKey) _setGMapsKey(key); // sync DB key → localStorage
-  if(el) el.value=key;
+  if(el) el.value=_getGMapsKey();
 }
 
 async function testMapsKey(){
@@ -30320,261 +30284,11 @@ function renderAIAgent(){
    so copy-paste preserves all characters (especially <, >, &).
 ═══════════════════════════════════════════════════ */
 
-const _EDGE_FN_SOURCES = {
-  'send-notification': [
-    'import { serve } from "https://deno.land/std@0.168.0/http/server.ts";',
-    '',
-    'const RESEND_KEY = Deno.env.get("RESEND_API_KEY");',
-    'const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "onboarding@resend.dev";',
-    'const FROM_NAME  = Deno.env.get("FROM_NAME")  || "RadScheduler";',
-    '',
-    'const CORS = {',
-    '  "Access-Control-Allow-Origin": "*",',
-    '  "Access-Control-Allow-Methods": "POST, OPTIONS",',
-    '  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
-    '};',
-    '',
-    'function escapeHtml(s) {',
-    '  return String(s)',
-    '    .replace(/&/g, "&amp;")',
-    '    .replace(/</g, "&lt;")',
-    '    .replace(/>/g, "&gt;");',
-    '}',
-    '',
-    'serve(async (req) => {',
-    '  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });',
-    '  try {',
-    '    if (!RESEND_KEY) throw new Error("RESEND_API_KEY not configured in function secrets");',
-    '    const payload = await req.json();',
-    '    const { subject, body, recipients, kind } = payload;',
-    '    if (!subject || !body || !Array.isArray(recipients) || !recipients.length) {',
-    '      throw new Error("subject, body, and recipients[] required");',
-    '    }',
-    '',
-    '    // Simple markdown-to-HTML transform for line breaks, bold, italic.',
-    '    // Body is escaped first, then markers are reintroduced as real HTML tags.',
-    '    let html = escapeHtml(body)',
-    String.raw`      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")`,
-    String.raw`      .replace(/\*([^*]+)\*/g, "<em>$1</em>")`,
-    String.raw`      .replace(/\n/g, "<br>");`,
-    '',
-    '    const unsubNote = (kind === "broadcast" || kind === "broadcast-test")',
-    '      ? \'<hr style="margin-top:24px;border:none;border-top:1px solid #eee"><p style="font-size:11px;color:#999">You received this because broadcast notifications are enabled on your account. Manage preferences in RadScheduler → Notifications.</p>\'',
-    '      : "";',
-    '',
-    '    const htmlWrapped = \'<div style="font-family:system-ui,-apple-system,sans-serif;max-width:600px;line-height:1.6">\' + html + unsubNote + \'</div>\';',
-    '',
-    '    const results = [];',
-    '    for (const r of recipients) {',
-    '      if (!r || !r.email) { results.push({ ok:false, error:"missing email" }); continue; }',
-    '      const resp = await fetch("https://api.resend.com/emails", {',
-    '        method: "POST",',
-    '        headers: {',
-    '          "Authorization": "Bearer " + RESEND_KEY,',
-    '          "Content-Type": "application/json",',
-    '        },',
-    '        body: JSON.stringify({',
-    '          from: FROM_NAME + " <" + FROM_EMAIL + ">",',
-    '          to: [r.email],',
-    '          subject: subject,',
-    '          html: htmlWrapped,',
-    '        }),',
-    '      });',
-    '      const respBody = await resp.json().catch(() => ({}));',
-    '      results.push({ email: r.email, ok: resp.ok, status: resp.status, id: respBody.id, error: respBody.message });',
-    '    }',
-    '    return new Response(JSON.stringify({ ok: true, sent: results.length, results }), {',
-    '      headers: { ...CORS, "Content-Type": "application/json" },',
-    '    });',
-    '  } catch (e) {',
-    '    console.error("[send-notification] error:", e);',
-    '    return new Response(JSON.stringify({ error: String(e && e.message ? e.message : e) }), {',
-    '      status: 500,',
-    '      headers: { ...CORS, "Content-Type": "application/json" },',
-    '    });',
-    '  }',
-    '});',
-  ].join('\n'),
-
-  'create-user': [
-    'import { serve } from "https://deno.land/std@0.168.0/http/server.ts";',
-    'import { createClient } from "https://esm.sh/@supabase/supabase-js@2";',
-    '',
-    'const SUPABASE_URL = Deno.env.get("SUPABASE_URL");',
-    'const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");',
-    'const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");',
-    '',
-    'const CORS = {',
-    '  "Access-Control-Allow-Origin": "*",',
-    '  "Access-Control-Allow-Methods": "POST, OPTIONS",',
-    '  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
-    '};',
-    '',
-    'function json(body, status) {',
-    '  return new Response(JSON.stringify(body), {',
-    '    status: status || 200,',
-    '    headers: { ...CORS, "Content-Type": "application/json" },',
-    '  });',
-    '}',
-    '',
-    'serve(async (req) => {',
-    '  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });',
-    '  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);',
-    '',
-    '  try {',
-    '    if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {',
-    '      return json({ error: "Missing required env vars. Ensure SUPABASE_SERVICE_ROLE_KEY secret is set (SUPABASE_URL and SUPABASE_ANON_KEY are auto-provided by Supabase)." }, 500);',
-    '    }',
-    '',
-    '    // 1. Verify caller is an authenticated admin',
-    '    const authHeader = req.headers.get("Authorization") || "";',
-    String.raw`    const token = authHeader.replace(/^Bearer\s+/i, "");` + '',
-    '    if (!token) return json({ error: "Missing Authorization bearer token" }, 401);',
-    '',
-    '    const userClient = createClient(SUPABASE_URL, ANON_KEY, {',
-    '      global: { headers: { Authorization: "Bearer " + token } },',
-    '    });',
-    '    const userRes = await userClient.auth.getUser();',
-    '    if (userRes.error || !userRes.data || !userRes.data.user) {',
-    '      return json({ error: "Invalid or expired session token", detail: userRes.error && userRes.error.message }, 401);',
-    '    }',
-    '    const caller = userRes.data.user;',
-    '    const appMeta = caller.app_metadata || {};',
-    '    const userMeta = caller.user_metadata || {};',
-    '    // SECURITY: callerRole comes from app_metadata ONLY. user_metadata',
-    '    // is user-mutable via sb.auth.updateUser({data:...}) — trusting it',
-    '    // for admin gating lets any logged-in user self-promote and then',
-    '    // re-create their own account with admin role.',
-    '    //',
-    '    // Bootstrap: for a brand-new project that has NO admin yet, the',
-    '    // first-call path is: admin types role=admin into user_metadata via',
-    '    // the Supabase dashboard, signs in, and the dashboard ALSO writes',
-    '    // role=admin into app_metadata (manual one-time step). Subsequent',
-    '    // role assignments happen via this function with the proper check.',
-    '    const callerRole = appMeta.role;',
-    '    // Boot-strap fallback: a user with user_metadata.role==="admin" AND',
-    '    // no privileged account yet in the system gets a one-time pass.',
-    '    // Count app_metadata.role values of admin/superuser — zero means',
-    '    // we are bootstrapping. Mark this account by also writing role to app_meta',
-    '    // before returning so the next call uses the strict path.',
-    '    const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {',
-    '      auth: { autoRefreshToken: false, persistSession: false },',
-    '    });',
-    '    let allowed = callerRole === "admin" || callerRole === "superuser";',
-    '    if (!allowed && userMeta.role === "admin") {',
-    '      // Count existing admins. Limit the listUsers scan to a single',
-    '      // page (50 by default) which is plenty for the bootstrap check.',
-    '      const list = await adminClient.auth.admin.listUsers({ page: 1, perPage: 50 });',
-    '      const privilegedCount = (list.data?.users || []).filter(u => ["admin","superuser"].includes(String(u.app_metadata?.role || "").toLowerCase())).length;',
-    '      if (privilegedCount === 0) {',
-    '        // No admins yet — promote this caller and proceed.',
-    '        await adminClient.auth.admin.updateUserById(caller.id, {',
-    '          app_metadata: { ...appMeta, role: "admin", practiceId: appMeta.practiceId || userMeta.practiceId || "main" },',
-    '        });',
-    '        allowed = true;',
-    '      }',
-    '    }',
-    '    if (!allowed) {',
-    '      return json({',
-    '        error: "Caller is not an admin or superuser (app_metadata.role=" + (callerRole || "none") + "). Set app_metadata.role=admin via the Supabase dashboard for the first admin; subsequent admins are promoted through this function by an existing admin.",',
-    '      }, 403);',
-    '    }',
-    '',
-    '    // 2. Parse request body',
-    '    const body = await req.json().catch(() => ({}));',
-    '    const action = body.action || "create";',
-    '',
-    '    // adminClient was already created above for the bootstrap check.',
-    '',
-    '    if (action === "delete") {',
-    '      if (!body.userId) return json({ error: "userId required for delete" }, 400);',
-    '      const delRes = await adminClient.auth.admin.deleteUser(body.userId);',
-    '      if (delRes.error) return json({ error: "Delete failed: " + delRes.error.message }, 500);',
-    '      return json({ ok: true, deleted: body.userId });',
-    '    }',
-    '',
-    '    if (action === "update") {',
-    '      // Caller is verified admin (above). Only admins can mutate',
-    '      // app_metadata via the service role; this is the canonical',
-    '      // path for role / practiceId / physId changes. Mirror to',
-    '      // user_metadata so UI labels stay in sync.',
-    '      if (!body.userId) return json({ error: "userId required for update" }, 400);',
-    '      const targetRes = await adminClient.auth.admin.getUserById(body.userId);',
-    '      if (targetRes.error || !targetRes.data?.user) return json({ error: "target user not found" }, 404);',
-    '      const tgt = targetRes.data.user;',
-    '      const newApp = { ...(tgt.app_metadata || {}) };',
-    '      const newUsr = { ...(tgt.user_metadata || {}) };',
-    '      const allowed = ["role", "practiceId", "physId", "first", "last"];',
-    '      for (const k of allowed) {',
-    '        if (body[k] !== undefined) {',
-    '          newApp[k] = body[k];',
-    '          newUsr[k] = body[k];',
-    '        }',
-    '      }',
-    '      const updRes = await adminClient.auth.admin.updateUserById(body.userId, { app_metadata: newApp, user_metadata: newUsr });',
-    '      if (updRes.error) return json({ error: "update failed: " + updRes.error.message }, 500);',
-    '      return json({ ok: true, id: body.userId });',
-    '    }',
-    '',
-    '    // Default: create a new auth user',
-    '    const { email, password, first, last, role, physId, practiceId } = body;',
-    '    if (!email || !password) return json({ error: "email and password required" }, 400);',
-    '    if (password.length < 8) return json({ error: "password must be at least 8 characters" }, 400);',
-    '',
-    '    // app_metadata is server-side-only (users cannot modify it via client SDK),',
-    '    // so RLS policies that gate by role/practiceId reference app_metadata, not',
-    '    // user_metadata. We write to both blocks: app_metadata for security gating,',
-    '    // user_metadata for app-level conveniences (display name, physId link, etc.).',
-    '    const createRes = await adminClient.auth.admin.createUser({',
-    '      email: email,',
-    '      password: password,',
-    '      email_confirm: true,',
-    '      app_metadata: {',
-    '        role: role || "user",',
-    '        practiceId: practiceId || "main",',
-    '      },',
-    '      user_metadata: {',
-    '        role: role || "user",',
-    '        first: first || "",',
-    '        last: last || "",',
-    '        physId: physId == null ? null : physId,',
-    '        practiceId: practiceId || "main",',
-    '        joined: new Date().toISOString().slice(0, 10),',
-    '      },',
-    '    });',
-    '',
-    '    if (createRes.error) {',
-    '      return json({ error: createRes.error.message, status: createRes.error.status }, createRes.error.status || 400);',
-    '    }',
-    '    if (!createRes.data || !createRes.data.user) {',
-    '      return json({ error: "createUser returned no user object" }, 500);',
-    '    }',
-    '',
-    '    return json({',
-    '      ok: true,',
-    '      id: createRes.data.user.id,',
-    '      email: createRes.data.user.email,',
-    '    });',
-    '  } catch (e) {',
-    '    console.error("[create-user] unhandled error:", e);',
-    '    return json({ error: "Unhandled error: " + (e && e.message ? e.message : String(e)) }, 500);',
-    '  }',
-    '});',
-  ].join('\n'),
-};
-
 const _EDGE_FN_SOURCE_PATHS = {
   'send-notification': 'edge-functions/send-notification/index.ts',
   'create-user': 'supabase/functions/create-user/index.ts',
   'admin-ops': 'supabase/functions/admin-ops/index.ts',
 };
-
-// Old builds embedded function source here, which drifted from the files
-// actually deployed to Supabase. Always load the current source from the
-// repo artifact instead, so the setup panel cannot hand admins stale code.
-for(const name of Object.keys(_EDGE_FN_SOURCE_PATHS)){
-  if(_EDGE_FN_SOURCES[name]) _EDGE_FN_SOURCES[name] = '';
-}
 
 async function _loadEdgeFnSource(fnName){
   const path = _EDGE_FN_SOURCE_PATHS[fnName];
@@ -30821,11 +30535,14 @@ async function _notify(kind, opts){
     // Map recipients with their resolved delivery address
     const recipList = recipients.map(u=>({email:_deliveryEmail(u), name:`${u.first||''} ${u.last||''}`.trim()}));
 
-    // Admin alert inbox — a global CC address that gets a copy of every outgoing alert.
-    // Useful when no admin users have real email addresses set but you still want
-    // an audit trail / catch-all in a monitored inbox. Configured in Settings.
+    // Admin alert inbox receives operational notices only. Never copy private
+    // chats, mentions, group messages, or user-to-user swap requests.
+    const adminCopyKinds = new Set([
+      'shiftAssign','shiftRemove','swapRes','holiday','vacation','openShift',
+      'broadcast','broadcast-test','schedulePublish','tumorBoard','clinic','test'
+    ]);
     const adminInbox = (typeof S!=='undefined' && S?.cfg?.adminAlertEmail) ? String(S.cfg.adminAlertEmail).trim() : '';
-    if(adminInbox && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminInbox) &&
+    if(adminCopyKinds.has(kind) && adminInbox && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminInbox) &&
        !recipList.some(r=>r.email===adminInbox.toLowerCase())){
       recipList.push({email: adminInbox.toLowerCase(), name: 'Admin Alerts'});
     }
@@ -31672,8 +31389,8 @@ function _rsTeardown(){
   _wrvuKicked = false; _prKicked = false; _prWatcherStarted = false;
   try{ if(typeof _prUpdateNavBadge === 'function') _prUpdateNavBadge(); }catch(_){}
 }
-// Admin-only ingest-token accessors (SECURITY DEFINER RPCs; the token row is
-// otherwise service-role-locked). Used by the PACS Connections tab.
+// Admin-only ingest-credential accessors. The database stores only a hash;
+// get returns a masked status and rotate returns the new secret exactly once.
 async function _rsGetIngestToken(){
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb) return null;
@@ -31690,15 +31407,12 @@ async function _rsRotateIngestToken(){
 // same pacs-ingest edge function a live PACS feed hits — using the practice's
 // ingest token. Returns the endpoint JSON ({ok, report_uid, phys_id, matched…}).
 async function _rsIngestPaste(format, payload){
-  const token = await _rsGetIngestToken();
-  if(!token) return {error:'No ingest token available (admin only).'};
   const base = (typeof _getUrl==='function' && _getUrl()) ? _getUrl() : _SUPABASE_URL;
-  const anon = (typeof _getKey==='function' && _getKey()) ? _getKey() : _SUPABASE_KEY;
   try{
     const res = await fetch(base.replace(/\/$/,'') + '/functions/v1/pacs-ingest', {
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':anon},
-      body:JSON.stringify(Object.assign({format}, payload))
+      headers:await _edgeAuthHeaders(),
+      body:JSON.stringify({...payload, format, practice_id:_rsPracticeId()})
     });
     return await res.json().catch(()=>({error:'Unexpected response from ingest endpoint.'}));
   }catch(e){ return {error:String((e&&e.message)||e)}; }
@@ -32295,11 +32009,15 @@ async function pacsRevealToken(){
   const st=document.getElementById('pacs-token-status');
   const urlEl=document.getElementById('pacs-endpoint-url'), tokEl=document.getElementById('pacs-ingest-token');
   if(urlEl) urlEl.value=_pacsEndpointUrl();
-  if(st) st.textContent='Loading token…';
+  if(st) st.textContent='Checking credential status…';
   const tok=await _rsGetIngestToken();
-  if(!tok){ if(st){ st.textContent='Only admins can view the ingest token.'; st.style.color='var(--red-t)'; } return; }
+  if(!tok){
+    if(tokEl) tokEl.value='Not configured';
+    if(st){ st.textContent='No credential is configured. Rotate to issue one, then copy it immediately.'; st.style.color='var(--txt3)'; }
+    return;
+  }
   if(tokEl) tokEl.value=tok;
-  if(st){ st.textContent='Token shown. Keep it secret; rotate if it may have leaked.'; st.style.color='var(--txt3)'; }
+  if(st){ st.textContent='Credential is configured. The stored hash cannot reveal the token; rotate if you need a replacement.'; st.style.color='var(--txt3)'; }
 }
 async function pacsRotateToken(){
   if(typeof _adminOnly==='function' && !_adminOnly('rotate the ingest token')) return;
@@ -32310,7 +32028,7 @@ async function pacsRotateToken(){
   if(!tok){ if(st){ st.textContent='Rotation failed (admin only).'; st.style.color='var(--red-t)'; } return; }
   const urlEl=document.getElementById('pacs-endpoint-url'), tokEl=document.getElementById('pacs-ingest-token');
   if(urlEl) urlEl.value=_pacsEndpointUrl(); if(tokEl) tokEl.value=tok;
-  if(st){ st.textContent='✓ New token issued — update your PACS feed with it now.'; st.style.color='var(--green-t)'; }
+  if(st){ st.textContent='✓ New token issued and shown once — copy it into your PACS feed now. It cannot be revealed later.'; st.style.color='var(--green-t)'; }
 }
 
 async function saveCommPrefs(){
@@ -47909,14 +47627,8 @@ async function _hmacB64Url(secret, msg){
   return _b64url(s);
 }
 
-// Generate (or read) a per-practice widget HMAC secret. The original
-// design used the public anon key as the HMAC secret — but that key
-// is in the published page source, so anyone could forge pairing
-// codes with it (cross-tenant data exposure). The fix: each practice
-// has its own random secret stored only in the DB. The main app reads
-// it (RLS-gated) when generating codes; the edge function reads it
-// (service role) when verifying. Outsiders cannot forge codes without
-// first compromising practice-level access.
+// Pairing credentials are issued and verified only by the widget-data
+// service. The browser never receives the server-side signing key.
 function _getOrCreateWidgetSecret(){
   throw new Error('Widget signing keys are server-only; use widget-data action=issue.');
 }

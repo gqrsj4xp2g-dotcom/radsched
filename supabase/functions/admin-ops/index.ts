@@ -116,6 +116,7 @@ async function resolveCaller(token: string): Promise<{
         "Authorization": "Bearer " + token,
         "apikey": ANON_KEY,
       },
+      signal: AbortSignal.timeout(10_000),
     });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -171,17 +172,27 @@ serve(async (req) => {
       }, 403);
     }
 
-    const body = await req.json().catch(() => ({}));
+    const declaredLength = +(req.headers.get("content-length") || 0);
+    if (declaredLength > 65_536) return json({ error: "Request body too large" }, 413);
+    const rawBody = await req.text().catch(() => "");
+    if (new TextEncoder().encode(rawBody).length > 65_536) return json({ error: "Request body too large" }, 413);
+    let body: any;
+    try { body = JSON.parse(rawBody); }
+    catch (_e) { return json({ error: "Invalid JSON body" }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid JSON body" }, 400);
     const action = String(body.action || "").trim();
     if (action !== "restore-backup") {
       return json({ error: "Unsupported admin operation.", allowed_actions: ["restore-backup"] }, 400);
     }
 
     const backupId = cleanId(body.backupId);
-    const requestedPracticeId = cleanId(body.practiceId || appMeta.practiceId || "main");
-    const callerPracticeId = cleanId(appMeta.practiceId || "main");
+    const requestedPracticeId = cleanId(body.practiceId || appMeta.practiceId);
+    const callerPracticeId = cleanId(appMeta.practiceId);
     if (!backupId) return json({ error: "backupId is required." }, 400);
     if (!requestedPracticeId) return json({ error: "practiceId is required." }, 400);
+    if (callerRole === "admin" && !callerPracticeId) {
+      return json({ error: "Admin account is missing app_metadata.practiceId." }, 403);
+    }
     if (callerRole !== "superuser" && requestedPracticeId !== callerPracticeId) {
       return json({ error: "Admins can restore only their own practice backups." }, 403);
     }
@@ -217,6 +228,16 @@ serve(async (req) => {
       _restoredFromBackup: backupId,
       _restoredAt: savedAt,
     };
+    // Canonical side-table data is intentionally outside a blob-backup
+    // restore. Never resurrect stale copies or a legacy browser-visible
+    // widget signing key from an older backup.
+    delete (restored as any).swapRequests;
+    delete (restored as any).onCallAcks;
+    if ((restored as any).cfg && typeof (restored as any).cfg === "object") {
+      delete (restored as any).cfg._widgetSecret;
+      delete (restored as any).cfg.mapsKey;
+      delete (restored as any).cfg.gmapsKey;
+    }
 
     const { data: currentRow, error: currentErr } = await admin
       .from("radscheduler").select("saved_at").eq("id", requestedPracticeId).maybeSingle();
@@ -230,6 +251,8 @@ serve(async (req) => {
     if (!(writeResult as any)?.ok) {
       return json({ error: "Practice changed while the restore was being prepared. No data was overwritten; retry after reviewing the latest save." }, 409);
     }
+    const committedAt = String((writeResult as any)?.saved_at || savedAt);
+    (restored as any)._dbSavedAt = committedAt;
 
     const warnings: string[] = [];
     const auditRow = {
@@ -270,7 +293,7 @@ serve(async (req) => {
       action,
       backupId,
       practiceId: requestedPracticeId,
-      savedAt,
+      savedAt: committedAt,
       payload: restored,
       warnings,
     });

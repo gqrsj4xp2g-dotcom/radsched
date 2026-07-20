@@ -5,16 +5,14 @@
 #   1. Installs Node.js via Homebrew if missing
 #   2. Runs `npm install` if node_modules isn't already populated
 #   3. Generates a placeholder icon from the system if none exists
-#   4. Builds an unsigned .dmg + .zip via electron-builder
+#   4. Builds a signed, notarized .dmg via electron-builder
 #   5. Reveals the output in Finder
 #
 # Run from the repo root or from inside widget/:
 #   ./widget/build-mac.sh
 #
-# Skip code-signing for an internal-distribution build — installers will
-# work but show "unidentified developer" on first launch (right-click →
-# Open to bypass). For a fully-signed build, set CSC_LINK +
-# CSC_KEY_PASSWORD before running. See README.md.
+# Signing and notarization are mandatory. Set CSC_LINK, CSC_KEY_PASSWORD,
+# APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID. See README.md.
 
 set -e
 
@@ -77,6 +75,12 @@ PY
 fi
 
 # ── 4. Build ────────────────────────────────────────────────────────
+for required in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+  if [ -z "${!required:-}" ]; then
+    echo "✖ $required is required for signed, notarized production builds."
+    exit 1
+  fi
+done
 echo "▶ Building .dmg + .zip via electron-builder…"
 npm run build:mac
 
@@ -87,9 +91,8 @@ if [ -d "$DIST" ]; then
   echo "✓ Build complete. Output:"
   ls -lh "$DIST"/*.dmg "$DIST"/*.zip 2>/dev/null
   echo ""
-  echo "Distribute the .dmg to physicians. They double-click → drag to"
-  echo "Applications → first launch right-click → Open (to bypass the"
-  echo "unsigned-app warning). Then they paste the pairing code."
+  echo "Distribute the signed, notarized .dmg to physicians. They"
+  echo "double-click → drag to Applications → paste the pairing code."
   open "$DIST"
 else
   echo "✖ Build did not produce a dist/ directory. Check the npm output above."

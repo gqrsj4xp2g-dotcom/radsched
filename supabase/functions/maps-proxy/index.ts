@@ -79,7 +79,7 @@ async function distMatrix(
     url.searchParams.set('departure_time', normalizeDepartureTime(depTime))
     url.searchParams.set('traffic_model',  model)
   }
-  const resp = await fetch(url.toString())
+  const resp = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) })
   if (!resp.ok) throw new Error(`Maps API HTTP ${resp.status}`)
   const data = await resp.json()
   if (data.status !== 'OK' && data.status !== 'PARTIAL_SUCCESS')
@@ -95,13 +95,19 @@ Deno.serve(async (req: Request) => {
   if (authError) return authError
 
   try {
-    const body = await req.json()
+    const declaredLength = +(req.headers.get('content-length') || 0)
+    if (declaredLength > 65_536) return json({ error: 'Maps request body is too large' }, 413)
+    const rawBody = await req.text()
+    if (new TextEncoder().encode(rawBody).length > 65_536) return json({ error: 'Maps request body is too large' }, 413)
+    const body = JSON.parse(rawBody)
     const { origins, destinations, mapsKey, departureTime, returnTime, trafficModel } = body
 
     if (!origins?.length || !destinations?.length)
       throw new Error('origins and destinations are required')
     if (!Array.isArray(origins) || !Array.isArray(destinations))
       throw new Error('origins and destinations must be arrays')
+    if (![...origins, ...destinations].every(v => typeof v === 'string' && v.trim().length > 0 && v.length <= 500))
+      throw new Error('origins and destinations contain an invalid address')
     if (origins.length > 25 || destinations.length > 25 || origins.length * destinations.length > 100)
       throw new Error('Maps request too large')
 

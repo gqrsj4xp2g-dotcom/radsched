@@ -149,16 +149,15 @@ function _applyPhysicianAccent(hexColor){
 //
 // The edge function:
 //   1. Receives the full pairing code in the request body
-//   2. Verifies the HMAC signature. Legacy v1 codes use the anon key;
-//      v2+ codes use the server-side per-practice widget secret.
+//   2. Verifies the v2 HMAC signature with the private, server-side
+//      per-practice widget secret. Forgeable legacy v1 codes are rejected.
 //   3. Uses the SERVICE ROLE (server-side only) to fetch the row
 //   4. Returns the practice JSON wrapped as { data: {...} }
 //
 // No RLS changes needed; service role key never leaves the server.
 //
-// We pass the FULL signed pairing code as the body and the public
-// anon key as Authorization. The function is verify_jwt:false so
-// PostgREST doesn't reject before our handler even runs.
+// The handler authenticates the signed pairing credential itself;
+// the publishable project key only identifies the Supabase project.
 async function fetchPracticeData(p){
   if(!_lastPairingCode){
     throw new Error('Internal: pairing code not in scope. Re-launch the widget.');
@@ -928,7 +927,9 @@ function renderCreditsTab(){
 }
 
 function _renderCreditItem(c){
-  const isEditing = _creditEditingId === c.id;
+  const creditId = Number.isSafeInteger(+c.id) && +c.id > 0 ? +c.id : 0;
+  const hours = Number.isFinite(+c.hours) ? Math.max(0, Math.min(24, +c.hours)) : 0;
+  const isEditing = creditId > 0 && _creditEditingId === creditId;
   if(isEditing){
     // Convert ISO timestamp to datetime-local string for the input.
     const tsLocal = (() => {
@@ -939,25 +940,25 @@ function _renderCreditItem(c){
     })();
     return `<div class="credit-item editing">
       <div class="row1">
-        <input type="datetime-local" id="ce-ts-${c.id}" value="${escHtml(tsLocal)}" style="flex:1;font-size:11px">
-        <input type="number" id="ce-hr-${c.id}" min="0.1" max="24" step="0.25" value="${c.hours}" style="width:70px;font-size:11px">
+        <input type="datetime-local" id="ce-ts-${creditId}" value="${escHtml(tsLocal)}" style="flex:1;font-size:11px">
+        <input type="number" id="ce-hr-${creditId}" min="0.1" max="24" step="0.25" value="${escHtml(hours)}" style="width:70px;font-size:11px">
       </div>
-      <textarea id="ce-rs-${c.id}" rows="2">${escHtml(c.reason || '')}</textarea>
+      <textarea id="ce-rs-${creditId}" rows="2">${escHtml(c.reason || '')}</textarea>
       <div class="actions" style="justify-content:flex-end">
-        <button data-credit-save="${c.id}">Save</button>
-        <button data-credit-cancel="${c.id}">Cancel</button>
+        <button data-credit-save="${creditId}">Save</button>
+        <button data-credit-cancel="${creditId}">Cancel</button>
       </div>
     </div>`;
   }
   return `<div class="credit-item">
     <div class="row1">
       <span class="when">${escHtml(_fmtTs(c.ts))}</span>
-      <span class="hrs">${(+c.hours).toFixed(1)}h</span>
+      <span class="hrs">${hours.toFixed(1)}h</span>
     </div>
     <div class="reason">${escHtml(c.reason || '')}</div>
     <div class="actions" style="justify-content:flex-end">
-      <button data-credit-edit="${c.id}">Edit</button>
-      <button class="del" data-credit-del="${c.id}">Delete</button>
+      ${creditId > 0 ? `<button data-credit-edit="${creditId}">Edit</button>
+      <button class="del" data-credit-del="${creditId}">Delete</button>` : ''}
     </div>
   </div>`;
 }
@@ -1267,37 +1268,10 @@ function _toggleSettingsMenu(anchor){
   }, 0);
 }
 
-// ─── Zero-click auto-update ─────────────────────────────────────
-// Subscribed to three main-process events:
-//   • rs:update-available           — a newer release exists
-//   • rs:update-info                — interactive feedback
-//   • rs:update-download-progress   — % progress while downloading
-//
-// As of v1.1.4: updates are FULLY automatic. The moment main detects
-// a new release, we:
-//   1. Show an unobtrusive banner ("📥 Updating to vX…")
-//   2. Download silently in the background (with progress)
-//   3. Quit + detached helper script swaps the .app / runs NSIS /S
-//   4. Re-launch into the new version
-//
-// User sees the widget close + reopen with the new version, ~5-15s
-// after the new release is detected. No clicks, no installer prompts.
-//
-// Failure handling: if the silent path fails twice in a row (write
-// permission issue, disk full, network), we fall back to the
-// previous "Update now" button so the user has an explicit path.
+// ─── Signed update notification ──────────────────────────────────
+// The widget only notifies the user and opens the release page in the
+// system browser. Installation remains under OS signature and user control.
 let _lastUpdatePayload = null;
-let _silentUpdateStarted = false;
-const _SILENT_FAIL_KEY = 'rs-widget-silent-fail-count';
-function _silentFailCount(){
-  try{ return +(localStorage.getItem(_SILENT_FAIL_KEY) || 0); }catch(_){ return 0; }
-}
-function _bumpSilentFail(){
-  try{ localStorage.setItem(_SILENT_FAIL_KEY, String(_silentFailCount() + 1)); }catch(_){}
-}
-function _resetSilentFail(){
-  try{ localStorage.removeItem(_SILENT_FAIL_KEY); }catch(_){}
-}
 
 function showUpdateBanner(payload){
   if(!payload || !payload.latestVersion || !payload.releaseUrl) return;
@@ -1314,103 +1288,6 @@ function showUpdateBanner(payload){
     <div class="actions"><button class="btn" id="upd-release">Open release page</button></div>`;
   el.style.display = 'flex';
   document.getElementById('upd-release').onclick = () => window.rsWidget.openExternal(payload.releaseUrl);
-}
-
-function _renderSilentBanner(payload){
-  const el = document.getElementById('update-banner');
-  if(!el) return;
-  el.innerHTML = `
-    <div class="text">
-      📥 Updating to <strong>v${escHtml(payload.latestVersion)}</strong>…
-      <span style="color:var(--ink3)">(from v${escHtml(payload.currentVersion)})</span>
-      <div id="upd-progress" style="margin-top:4px;font-size:11px;color:var(--ink3)">
-        Downloading… <span id="upd-pct">0%</span>
-        <div style="height:3px;background:rgba(255,255,255,0.15);border-radius:2px;margin-top:3px;overflow:hidden">
-          <div id="upd-bar" style="width:0%;height:100%;background:#3b82f6;transition:width .15s"></div>
-        </div>
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
-    </div>`;
-  el.style.display = 'flex';
-  document.getElementById('upd-notes').onclick = () => {
-    window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
-  };
-}
-
-function _renderManualBanner(payload){
-  // Fallback after silent path failed — give the user a button so
-  // they can take over manually.
-  const el = document.getElementById('update-banner');
-  if(!el) return;
-  const sizeStr = payload.assetSizeMB ? ` (${payload.assetSizeMB} MB)` : '';
-  el.innerHTML = `
-    <div class="text">
-      🚀 Update available: <strong>v${escHtml(payload.latestVersion)}</strong>
-      <span style="color:var(--ink3)">(silent install failed — please update manually)</span>
-    </div>
-    <div class="actions">
-      <button class="btn" id="upd-download" title="${escHtml(payload.assetName || '')}">⬇ Update now${escHtml(sizeStr)}</button>
-      <button class="btn ghost" id="upd-notes" title="View release notes">Notes</button>
-    </div>`;
-  el.style.display = 'flex';
-  document.getElementById('upd-download').onclick = async () => {
-    const btn = document.getElementById('upd-download');
-    if(btn){ btn.disabled = true; btn.textContent = '⏳ Downloading…'; }
-    const res = await window.rsWidget.downloadAndInstall({
-      url: payload.downloadUrl, name: payload.assetName,
-    });
-    if(res?.ok){
-      if(btn) btn.textContent = '✓ Installer opened';
-      _resetSilentFail();
-    } else if(btn){
-      btn.disabled = false;
-      btn.textContent = '⚠ Failed — open in browser';
-      btn.onclick = () => window.rsWidget.openExternal(payload.downloadUrl);
-    }
-  };
-  document.getElementById('upd-notes').onclick = () => {
-    window.rsWidget.openExternal(payload.releaseUrl || payload.downloadUrl);
-  };
-}
-
-async function _startSilentUpdate(payload){
-  if(_silentUpdateStarted) return;
-  if(!window.rsWidget.silentUpdate) return;  // older preload — skip
-  _silentUpdateStarted = true;
-  try{
-    const res = await window.rsWidget.silentUpdate({
-      url: payload.downloadUrl, name: payload.assetName,
-    });
-    if(res?.ok){
-      _resetSilentFail();
-      // Banner shows "Restarting…" briefly before main fires app.quit().
-      const el = document.getElementById('update-banner');
-      if(el){
-        el.innerHTML = `<div class="text">✓ Update downloaded — restarting now…</div><div class="actions"></div>`;
-      }
-    } else {
-      _bumpSilentFail();
-      console.warn('[update] silent install failed:', res?.error);
-      _silentUpdateStarted = false;
-      // Fall back to manual banner so the user can still take action.
-      _renderManualBanner(payload);
-    }
-  }catch(e){
-    _bumpSilentFail();
-    console.warn('[update] silent install threw:', e);
-    _silentUpdateStarted = false;
-    _renderManualBanner(payload);
-  }
-}
-
-function showUpdateProgress(p){
-  if(!p) return;
-  const pct = document.getElementById('upd-pct');
-  const bar = document.getElementById('upd-bar');
-  if(pct) pct.textContent = (p.pct || 0) + '%';
-  if(bar) bar.style.width = (p.pct || 0) + '%';
 }
 
 function showUpdateInfo(info){
@@ -1433,7 +1310,6 @@ function showUpdateInfo(info){
 
 if(window.rsWidget.onUpdateAvailable) window.rsWidget.onUpdateAvailable(showUpdateBanner);
 if(window.rsWidget.onUpdateInfo) window.rsWidget.onUpdateInfo(showUpdateInfo);
-if(window.rsWidget.onUpdateProgress) window.rsWidget.onUpdateProgress(showUpdateProgress);
 
 // Boot
 bindHeader();

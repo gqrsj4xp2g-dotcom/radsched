@@ -1,16 +1,13 @@
 // widget-data — read/write proxy for the RadScheduler desktop widget.
 //
-// Why this exists: the widget runs as an unauthenticated public client
-// (only the practice's anon key, no user JWT). The radscheduler table's
-// RLS policies require authenticated access, so direct PostgREST access
-// returns 401/permission denied for table radscheduler.
+// The desktop widget authenticates with a short-lived, signed pairing
+// credential rather than a browser user session.
 //
 // Auth model:
 //   1. The widget POSTs the full pairing code (the same base64 blob
 //      the admin generated in RadScheduler) as { code }.
-//   2. We decode + verify the HMAC-SHA256 signature. Legacy v1 codes use
-//      the anon key as the shared secret; v2+ codes use the server-side
-//      per-practice widget secret stored in the practice row.
+//   2. We decode + verify the HMAC-SHA256 signature using the server-side
+//      per-practice widget secret stored in a service-role-only table.
 //   3. For v2+ codes, we also confirm the code is still present in the
 //      active widgetPairings list so admin revocation takes effect.
 //   4. On verify-success we use the SERVICE ROLE key (server-side only)
@@ -38,6 +35,31 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+type RateState = { count: number; resetAt: number };
+const rateBuckets = new Map<string, RateState>();
+
+function clientAddress(req: Request): string {
+  return (req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'unknown')
+    .split(',')[0].trim().slice(0, 80);
+}
+
+function rateAllowed(key: string, limit: number, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const current = rateBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    if (rateBuckets.size > 5_000) {
+      for (const [bucket, state] of rateBuckets) {
+        if (state.resetAt <= now) rateBuckets.delete(bucket);
+      }
+    }
+    return true;
+  }
+  if (current.count >= limit) return false;
+  current.count += 1;
+  return true;
+}
 
 function fromB64Url(s: string): string {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -68,6 +90,13 @@ function codeFingerprint(code: string): string {
   return String(code || '').trim().slice(-8);
 }
 
+function constantTimeEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 function jwtAal(token: string): string {
   try {
     const part = token.split('.')[1] || '';
@@ -92,9 +121,15 @@ async function practiceSigningSecret(sb: any, practiceId: string, create = false
   const secret = randomSecret();
   const { data: created, error: createErr } = await sb.from('rs_widget_secrets')
     .upsert({ practice_id: practiceId, secret }, { onConflict: 'practice_id', ignoreDuplicates: true })
-    .select('secret').single();
+    .select('secret').maybeSingle();
   if (createErr) throw new Error('pairing secret creation failed: ' + createErr.message);
-  return String(created?.secret || secret);
+  if (created?.secret) return String(created.secret);
+  // Another request may have inserted the row between the lookup and upsert.
+  // Re-read instead of returning the losing request's transient secret.
+  const { data: raced, error: racedErr } = await sb.from('rs_widget_secrets')
+    .select('secret').eq('practice_id', practiceId).single();
+  if (racedErr || !raced?.secret) throw new Error('pairing secret creation could not be confirmed');
+  return String(raced.secret);
 }
 
 // Strip practice-level secrets from the blob before handing it to the widget.
@@ -151,22 +186,29 @@ function payloadPurpose(payload: any): 'widget' | 'cal-feed' {
 //      passed back into _verifyHmac().
 function _decodeEnvelope(code: string): any {
   if (!code || typeof code !== 'string') throw new Error('missing code');
+  if (code.length > 8_192) throw new Error('pairing code is too large');
   let payload: any;
   try { payload = JSON.parse(fromB64Url(code.trim())); }
   catch (_) { throw new Error('malformed code'); }
-  if (!payload.sig || !payload.practiceId || !payload.physId) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('malformed code');
+  if (typeof payload.sig !== 'string' || payload.sig.length !== 43 ||
+      typeof payload.practiceId !== 'string' || !payload.practiceId.trim() || payload.practiceId.length > 200 ||
+      /[\u0000-\u001f\u007f]/.test(payload.practiceId) ||
+      !Number.isSafeInteger(+payload.physId) || +payload.physId <= 0) {
     throw new Error('pairing payload missing required fields');
   }
   // exp is now REQUIRED. Tokens without an expiry are forever-valid
   // and outlive any reasonable threat-model assumption.
   if (!payload.exp) throw new Error('pairing has no expiry — re-issue required');
-  if (new Date(payload.exp).getTime() < Date.now()) {
+  const expiry = new Date(payload.exp).getTime();
+  if (!Number.isFinite(expiry)) throw new Error('pairing expiry is invalid');
+  if (expiry < Date.now()) {
     throw new Error('pairing expired');
   }
   // Hard ceiling: reject tokens with absurd expiry (e.g. 100 years
   // out) — a misissued token shouldn't live longer than the company.
   const maxExp = Date.now() + 366 * 86400_000 * 2; // ~2 years
-  if (new Date(payload.exp).getTime() > maxExp) {
+  if (expiry > maxExp) {
     throw new Error('pairing expiry too far in the future');
   }
   return payload;
@@ -186,7 +228,7 @@ async function _verifyHmac(
   let matched = false;
   if (practiceSecret) {
     const expected = await hmacB64Url(practiceSecret, JSON.stringify(rest));
-    matched = expected === sig;
+    matched = constantTimeEqual(expected, sig);
   }
   if (!matched) throw new Error('signature mismatch — pairing must be re-issued');
   const actual = payloadPurpose(payload);
@@ -215,14 +257,6 @@ function assertActiveWidgetPairing(practice: any, payload: any, code: string): v
     return true;
   });
   if (!match) throw new Error('pairing revoked or not active — ask admin to issue a fresh code');
-}
-
-// Legacy wrapper kept for the GET ICS path which fetches the practice
-// inside the handler. Returns the decoded payload after envelope
-// checks; HMAC verification is done by the caller after fetching the
-// practice's secret.
-async function verifyAndDecode(_code: string, _requiredPurpose: 'widget' | 'cal-feed' | 'any'): Promise<any> {
-  throw new Error('verifyAndDecode is deprecated — use _decodeEnvelope + _verifyHmac');
 }
 
 // ── ICS calendar feed ────────────────────────────────────────────
@@ -396,6 +430,12 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'GET') {
     const url = new URL(req.url);
     const code = url.searchParams.get('code') || '';
+    if (!rateAllowed(`ics-ip:${clientAddress(req)}`, 300)) {
+      return new Response('Too many calendar requests.', { status: 429, headers: { ...CORS, 'Cache-Control': 'private, no-store' } });
+    }
+    if (!rateAllowed(`ics:${clientAddress(req)}:${codeFingerprint(code)}`, 120)) {
+      return new Response('Too many calendar requests.', { status: 429, headers: { ...CORS, 'Cache-Control': 'private, no-store' } });
+    }
     const action = url.searchParams.get('action') || 'ics';
     if (action !== 'ics') {
       return new Response('Use POST for read/write actions; GET only supports action=ics.', { status: 405, headers: CORS });
@@ -404,23 +444,21 @@ Deno.serve(async (req: Request) => {
     try { payload = _decodeEnvelope(code); }
     catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const sb = createClient(SB_URL, SVC_KEY);
+    // Authenticate the envelope before reading any practice data.
+    let practiceSecret: string | null = null;
+    try { practiceSecret = await practiceSigningSecret(sb, payload.practiceId); }
+    catch (_) { return new Response('Calendar credential verification failed.', { status: 500, headers: CORS }); }
+    try { await _verifyHmac(payload, practiceSecret, 'cal-feed'); }
+    catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const { data, error } = await sb
       .from('radscheduler').select('data').eq('id', payload.practiceId).single();
-    if (error) return new Response('Practice fetch failed: ' + error.message, { status: 500, headers: CORS });
+    if (error) return new Response('Calendar data is temporarily unavailable.', { status: 500, headers: CORS });
     if (!data) return new Response('Practice not found', { status: 404, headers: CORS });
     const practice = (function parse(raw: any){
       if (raw == null) return {};
       if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
       return raw;
     })((data as any).data);
-    // Verify HMAC against the practice's server-side secret. The
-    // ICS GET path only accepts cal-feed tokens (so a leaked widget
-    // pairing can't be reused to subscribe to a physician's calendar).
-    let practiceSecret: string | null = null;
-    try { practiceSecret = await practiceSigningSecret(sb, payload.practiceId); }
-    catch (e) { return new Response((e as Error).message, { status: 500, headers: CORS }); }
-    try { await _verifyHmac(payload, practiceSecret, 'cal-feed'); }
-    catch (e) { return new Response('Invalid or expired calendar feed URL: ' + (e as Error).message, { status: 401, headers: CORS }); }
     const physName = `${payload.physFirst || ''} ${payload.physLast || ''}`.trim() || `Physician ${payload.physId}`;
     const ics = buildICSForPhysician(practice, payload.physId, physName);
     return new Response(ics, {
@@ -435,12 +473,19 @@ Deno.serve(async (req: Request) => {
   }
 
   if (req.method !== 'POST') return jsonResp({ error: 'POST or GET only' }, 405);
+  const declaredLength = +(req.headers.get('content-length') || 0);
+  if (declaredLength > 65_536) return jsonResp({ error: 'request body too large' }, 413);
+  let rawBody = '';
+  try { rawBody = await req.text(); }
+  catch (_) { return jsonResp({ error: 'could not read request body' }, 400); }
+  if (new TextEncoder().encode(rawBody).length > 65_536) return jsonResp({ error: 'request body too large' }, 413);
   let body: any;
-  try { body = await req.json(); }
+  try { body = JSON.parse(rawBody); }
   catch (_) { return jsonResp({ error: 'invalid JSON body' }, 400); }
-  if (typeof body !== 'object' || body == null) return jsonResp({ error: 'invalid body' }, 400);
+  if (typeof body !== 'object' || body == null || Array.isArray(body)) return jsonResp({ error: 'invalid body' }, 400);
   const sb = createClient(SB_URL, SVC_KEY);
   const action = body.action || 'read';
+  if (!rateAllowed(`post-ip:${clientAddress(req)}`, 300)) return jsonResp({ error: 'too many requests; retry shortly' }, 429);
 
   // Pairing/calendar credentials are issued only by this server. The signing
   // key never crosses the trust boundary into the browser or practice blob.
@@ -451,19 +496,28 @@ Deno.serve(async (req: Request) => {
     const { data: authData, error: authErr } = await authClient.auth.getUser(jwt);
     if (authErr || !authData?.user) return jsonResp({ error: 'invalid or expired session' }, 401);
     const user = authData.user;
+    if (!rateAllowed(`issue:${clientAddress(req)}:${user.id}`, 10)) {
+      return jsonResp({ error: 'too many credential issuance requests; retry shortly' }, 429);
+    }
     const meta = user.app_metadata || {};
     const role = String(meta.role || '');
-    const practiceId = String(body.practiceId || '');
+    const practiceId = typeof body.practiceId === 'string' ? body.practiceId.trim() : '';
     const physId = +body.physId;
     const purpose = body.purpose === 'cal-feed' ? 'cal-feed' : 'widget';
-    if (!practiceId || !physId) return jsonResp({ error: 'practiceId and physId are required' }, 400);
+    if (!practiceId || practiceId.length > 200 || /[\u0000-\u001f\u007f]/.test(practiceId) ||
+        !Number.isSafeInteger(physId) || physId <= 0) {
+      return jsonResp({ error: 'practiceId and a valid physId are required' }, 400);
+    }
     if (role !== 'superuser' && String(meta.practiceId || '') !== practiceId) {
       return jsonResp({ error: 'cross-practice issuance denied' }, 403);
     }
     const { data: issueRow, error: issueErr } = await sb.from('radscheduler')
       .select('data,saved_at').eq('id', practiceId).single();
     if (issueErr || !issueRow) return jsonResp({ error: 'practice not found' }, 404);
-    const issuePractice = typeof issueRow.data === 'string' ? JSON.parse(issueRow.data) : issueRow.data;
+    let issuePractice: any;
+    try { issuePractice = typeof issueRow.data === 'string' ? JSON.parse(issueRow.data) : issueRow.data; }
+    catch (_) { return jsonResp({ error: 'practice data is malformed' }, 500); }
+    if (!issuePractice || typeof issuePractice !== 'object') return jsonResp({ error: 'practice data is malformed' }, 500);
     const physician = (issuePractice.physicians || []).find((p: any) => +p.id === physId);
     if (!physician) return jsonResp({ error: 'physician not found in practice' }, 404);
     if (purpose === 'widget') {
@@ -478,7 +532,9 @@ Deno.serve(async (req: Request) => {
     }
     const secret = await practiceSigningSecret(sb, practiceId, true);
     if (!secret) return jsonResp({ error: 'pairing secret unavailable' }, 500);
-    const days = Math.max(1, Math.min(+(body.days || (purpose === 'widget' ? 30 : 365)), 365));
+    const requestedDays = body.days == null ? (purpose === 'widget' ? 30 : 365) : +body.days;
+    if (!Number.isFinite(requestedDays)) return jsonResp({ error: 'days must be a number' }, 400);
+    const days = Math.max(1, Math.min(Math.floor(requestedDays), 365));
     const issuedAt = new Date().toISOString();
     const exp = new Date(Date.now() + days * 86400_000).toISOString();
     const pairingId = purpose === 'widget'
@@ -530,6 +586,10 @@ Deno.serve(async (req: Request) => {
   // before we waste a DB read on it.
   const ALLOWED_ACTIONS = new Set(['read', 'add-credit', 'edit-credit', 'delete-credit', 'peer-open']);
   if (!ALLOWED_ACTIONS.has(action)) return jsonResp({ error: `unknown action: ${action}` }, 400);
+  const requestLimit = action === 'read' ? 120 : 20;
+  if (!rateAllowed(`widget:${action}:${clientAddress(req)}:${codeFingerprint(body.code)}`, requestLimit)) {
+    return jsonResp({ error: 'too many widget requests; retry shortly' }, 429);
+  }
 
   // Helper: the radscheduler table's `data` column is text (NOT jsonb)
   // — the main app stores JSON.stringify(...) into it. PostgREST
@@ -546,21 +606,17 @@ Deno.serve(async (req: Request) => {
     return raw;
   }
 
-  // Single fetch up-front so we can verify HMAC against the practice's
-  // server-side secret BEFORE dispatching to any action. This costs
-  // one extra DB round-trip on read-only calls vs. the legacy code
-  // path, but: (a) the legacy path also did one fetch for read, (b)
-  // verifying HMAC is the only way to prove the caller is authorized.
-  const { data: row, error: rdErr } = await sb
-    .from('radscheduler').select('data').eq('id', payload.practiceId).single();
-  if (rdErr) return jsonResp({ error: 'practice fetch failed: ' + rdErr.message }, 500);
-  if (!row) return jsonResp({ error: 'practice not found' }, 404);
-  const practice = parsePracticeData((row as any).data);
+  // Verify the signed envelope before reading any practice data.
   let practiceSecret: string | null = null;
   try { practiceSecret = await practiceSigningSecret(sb, payload.practiceId); }
-  catch (e) { return jsonResp({ error: String((e as Error).message) }, 500); }
+  catch (_) { return jsonResp({ error: 'pairing credential verification failed' }, 500); }
   try { await _verifyHmac(payload, practiceSecret, 'widget'); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
+  const { data: row, error: rdErr } = await sb
+    .from('radscheduler').select('data').eq('id', payload.practiceId).single();
+  if (rdErr) return jsonResp({ error: 'practice data is temporarily unavailable' }, 500);
+  if (!row) return jsonResp({ error: 'practice not found' }, 404);
+  const practice = parsePracticeData((row as any).data);
   try { assertActiveWidgetPairing(practice, payload, body.code); }
   catch (e) { return jsonResp({ error: String((e as Error).message) }, 401); }
   if (!Array.isArray(practice.physicianCredits)) practice.physicianCredits = [];
