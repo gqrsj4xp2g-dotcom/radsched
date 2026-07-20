@@ -53,7 +53,8 @@ probe create-user POST "200,400,401,403,405"
 probe admin-ops POST "200,400,401,403,405"
 probe send-notification POST "200,400,401,403,405"
 probe widget-data GET "200,400,401,403,405"
-probe calendar-feed GET "200,400,401,403,405"
+# This legacy endpoint is deliberately retired and must remain unavailable.
+probe calendar-feed GET "410"
 probe maps-proxy POST "200,400,401,403,405"
 probe ai-proxy POST "200,400,401,403,405"
 
