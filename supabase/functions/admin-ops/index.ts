@@ -218,10 +218,18 @@ serve(async (req) => {
       _restoredAt: savedAt,
     };
 
-    const { error: writeErr } = await admin
-      .from("radscheduler")
-      .upsert({ id: requestedPracticeId, data: JSON.stringify(restored) });
+    const { data: currentRow, error: currentErr } = await admin
+      .from("radscheduler").select("saved_at").eq("id", requestedPracticeId).maybeSingle();
+    if (currentErr) return json({ error: "Restore version check failed: " + currentErr.message }, 500);
+    const { data: writeResult, error: writeErr } = await admin.rpc("rs_save_practice_cas", {
+      p_practice: requestedPracticeId,
+      p_data: JSON.stringify(restored),
+      p_expected_saved_at: (currentRow as any)?.saved_at || null,
+    });
     if (writeErr) return json({ error: "Restore write failed: " + writeErr.message }, 500);
+    if (!(writeResult as any)?.ok) {
+      return json({ error: "Practice changed while the restore was being prepared. No data was overwritten; retry after reviewing the latest save." }, 409);
+    }
 
     const warnings: string[] = [];
     const auditRow = {
