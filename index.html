@@ -10118,6 +10118,14 @@ function _adminOnly(action){
   }
   return true;
 }
+function _superuserOnly(action){
+  if(!_adminOnly(action)) return false;
+  if(!_isSU()){
+    if(typeof _toast==='function') _toast('🔒 Superuser only — cannot '+action+'.', 'warn');
+    return false;
+  }
+  return true;
+}
 
 
 /* ─── RESET / CLEAR FUNCTIONS ─── */
@@ -16562,18 +16570,18 @@ async function renderPracticesPage(){
       <td><code>${escHtml(p.id)}</code></td>
       <td style="font-weight:600">${escHtml(p.name)}</td>
       <td style="text-align:center">${cur?'<span class="tag tg">Active</span>':
-        (_isAdminOrSU()?`<button class="ba bsm" onclick="switchPractice('${escName(p.id)}','${escName(p.name)}')">Switch</button>`:'')}</td>
+        (_isSU()?`<button class="ba bsm" onclick="switchPractice('${escName(p.id)}','${escName(p.name)}')">Switch</button>`:'')}</td>
     </tr>`;
   });
   html+='</tbody></table>';
   el.innerHTML=html;
   // Show/hide create card (admin/superuser only)
   const cc=document.getElementById('create-practice-card');
-  if(cc)cc.style.display=_isAdminOrSU()?'':'none';
+  if(cc)cc.style.display=_isSU()?'':'none';
 }
 
 async function createPractice(){
-  if(!_adminOnly('create a practice'))return;
+  if(!_superuserOnly('create a practice'))return;
   const name=(document.getElementById('np-name')||{}).value?.trim();
   const id=(document.getElementById('np-id')||{}).value?.trim().toLowerCase().replace(/[^a-z0-9-]/g,'-');
   if(!name||!id){_toast('Enter both a name and an ID.', 'err');return;}
@@ -16616,6 +16624,7 @@ async function createPractice(){
 }
 
 async function switchPractice(id,name){
+  if(!_superuserOnly('switch practices')) return;
   if(!confirm(`Switch to practice "${name}" (${id})? Any unsaved changes in the current practice will be saved first.`))return;
   // 1. Flush any pending debounced save for the CURRENT practice before switching
   clearTimeout(_saveTimeout); _saveTimeout=null;
