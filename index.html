@@ -9901,6 +9901,11 @@ let _MFA_STATUS={loaded:false,currentLevel:'unknown',nextLevel:'unknown',verifie
 
 // Superuser check — superusers have cross-practice authority and all admin privileges
 function _isSU(){ return CU?.role==='superuser'; }
+function _passwordPolicyError(pw){
+  if(typeof pw!=='string' || pw.length<12) return 'Password must be at least 12 characters.';
+  if(!/[a-z]/.test(pw)||!/[A-Z]/.test(pw)||!/\d/.test(pw)||!/[^A-Za-z0-9]/.test(pw)) return 'Password must include upper, lower, number, and symbol.';
+  return '';
+}
 // Admin OR superuser — for UI gating and internal permission checks
 function _isAdminOrSU(){ return CU?.role==='admin'||CU?.role==='superuser'; }
 function _adminMfaRequired(){
