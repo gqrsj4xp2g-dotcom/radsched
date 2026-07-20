@@ -537,7 +537,10 @@ async function _downloadToTemp(url, onProgress){
   });
 }
 
-ipcMain.handle('rs:silent-update', async (_evt, { url, name }) => {
+// Retained temporarily for source-history readability, but deliberately not
+// exposed on the production IPC channel. Release assets must be signed and
+// installed through the OS/browser approval flow.
+ipcMain.handle('rs:disabled-silent-update', async (_evt, { url, name }) => {
   if(!url || !name) return { ok:false, error:'missing url/name' };
   // Step 1 — background download with progress reports.
   const dl = await _downloadToTemp(url, (p) => {
@@ -638,7 +641,7 @@ ipcMain.handle('rs:silent-update', async (_evt, { url, name }) => {
 //
 // We send progress back to the renderer so the banner shows a
 // determinate progress bar instead of a spinner.
-ipcMain.handle('rs:download-and-install', async (_evt, { url, name }) => {
+ipcMain.handle('rs:disabled-download-and-install', async (_evt, { url, name }) => {
   if(!url || !name){ return { ok:false, error:'missing url or name' }; }
   const downloadsDir = app.getPath('downloads');
   const target = path.join(downloadsDir, name);
