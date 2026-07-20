@@ -102,6 +102,14 @@ function rateLimit(key: string, capPerMinute: number): boolean {
   b.n++; return true;
 }
 
+function jwtAal(token: string): string {
+  try {
+    const part = token.split('.')[1] || '';
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+    return String(JSON.parse(atob(padded))?.aal || '').toLowerCase();
+  } catch { return ''; }
+}
+
 // SSRF guard: reject webhook URLs that resolve to private / link-local
 // / loopback addresses, or to hostnames that look like cloud metadata.
 // Cheap host-based check — doesn't DNS-resolve (Edge runtimes can't
@@ -149,6 +157,7 @@ Deno.serve(async (req) => {
   let callerRole = 'cron';
   let callerPid = '';
   let callerEmail = '';
+  let callerAal = '';
 
   if (isCronDigest) {
     if (!rateLimit(callerUid, 5)) return err(429, 'Too many digest requests; slow down.');
@@ -173,6 +182,7 @@ Deno.serve(async (req) => {
     callerRole = appMeta.role || '';
     callerPid  = appMeta.practiceId || '';
     callerEmail = String(userData.user.email || '').trim().toLowerCase();
+    callerAal = jwtAal(jwt);
     if (!callerPid) return err(403, 'Account is missing a practice assignment');
 
     // Rate limit per-caller — applies to all non-cron requests.
@@ -181,6 +191,7 @@ Deno.serve(async (req) => {
 
   try {
     const privileged = callerRole === 'admin' || callerRole === 'superuser';
+    const privilegedAal2 = privileged && callerAal === 'aal2';
     const isSelfServiceBatch = SELF_SERVICE_BATCH_KINDS.has(body.kind);
     const isAdminBatch = ADMIN_BATCH_KINDS.has(body.kind);
 
@@ -197,7 +208,7 @@ Deno.serve(async (req) => {
     }
 
     if (isAdminBatch) {
-      if (!privileged) return err(403, 'Admin role required for this notification');
+      if (!privilegedAal2) return err(403, 'Admin MFA verification required for this notification');
       if (!Array.isArray(body.recipients) || !body.recipients.length || !body.subject || !body.body) {
         return err(400, 'Notification requires recipients, subject, and body');
       }
@@ -210,7 +221,7 @@ Deno.serve(async (req) => {
       case 'sms':
       case 'push':
       case 'webhook': {
-        if (!privileged) return err(403, 'Admin role required for direct delivery channels');
+        if (!privilegedAal2) return err(403, 'Admin MFA verification required for direct delivery channels');
         if (body.kind === 'email') return ok(await sendEmail(body, sbUrl, sbService, callerPid));
         if (body.kind === 'sms') return ok(await sendSMS(body, sbUrl, sbService, callerPid));
         if (body.kind === 'push') return ok(await sendPush(body, sbUrl, sbService, callerPid));
@@ -221,7 +232,7 @@ Deno.serve(async (req) => {
         //   (a) caller has admin role in their tenant (manual digest),
         //   (b) the special cron header is present + matches the env
         //       secret (pg_cron self-invocation).
-        if (!isCronDigest && callerRole !== 'admin' && callerRole !== 'superuser') return err(403, 'Admin role or cron secret required');
+        if (!isCronDigest && !privilegedAal2) return err(403, 'Admin MFA verification or cron secret required');
         return ok(await runDigest(
           sbUrl,
           sbService,
