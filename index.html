@@ -31470,6 +31470,51 @@ function _wrvuStat(label,val,sub){
     <div style="font-size:12px;color:var(--txt2);margin-top:2px">${escHtml(label)}</div>
     ${sub?`<div style="font-size:10px;color:var(--txt3)">${escHtml(sub)}</div>`:''}</div>`;
 }
+// ── Expected wRVU from ASSIGNED shifts ────────────────────────────────────
+// Cumulative expectation for the period = (distinct assigned shift-days) ×
+// (expected wRVU per shift-day). Days are deduped per (phys, date) across all
+// four assignment collections — an IR call plus its auto-paired day shift is
+// ONE working day. DR "Home" placeholder shifts are not working days.
+// Rate: S.cfg.wrvuExpectedPerDay when the admin has set one, otherwise AUTO =
+// the practice's own actual wRVU-to-date ÷ assigned shift-days-to-date this
+// period (self-calibrating; shown as "auto" in the UI).
+function _wrvuAssignedDays(from, toExclusive, capIso){
+  const cap = capIso && capIso < toExclusive ? capIso : toExclusive;
+  const byPid = new Map();   // pid -> {days:Set, daysToDate:Set}
+  const add = (pid, d, isWork) => {
+    if(pid == null || !d || !isWork) return;
+    if(d < from || d >= toExclusive) return;
+    if(!byPid.has(pid)) byPid.set(pid, {days:new Set(), daysToDate:new Set()});
+    const g = byPid.get(pid);
+    g.days.add(d);
+    if(d < cap) g.daysToDate.add(d);
+  };
+  (S.drShifts||[]).forEach(s => add(s.physId, s.date, (s.shift||'') !== 'Home'));
+  (S.irShifts||[]).forEach(s => add(s.physId, s.date, true));
+  (S.irCalls||[]).forEach(c => add(c.physId, c.date, true));
+  (S.weekendCalls||[]).forEach(w => {
+    add(w.physId, w.satDate || w.date, true);
+    add(w.physId, w.sunDate, true);
+  });
+  return byPid;
+}
+function _wrvuExpectedRate(byPhys, assigned){
+  const cfg = +(S.cfg && S.cfg.wrvuExpectedPerDay);
+  if(isFinite(cfg) && cfg > 0) return {rate: cfg, mode: 'configured'};
+  let wrvu = 0, days = 0;
+  byPhys.forEach(g => { wrvu += g.wrvu; });
+  assigned.forEach(g => { days += g.daysToDate.size; });
+  return {rate: days > 0 ? wrvu / days : 0, mode: 'auto'};
+}
+function _wrvuSetExpectedRate(v){
+  if(!_adminOnly('set the expected wRVU rate')) return;
+  if(!S.cfg) S.cfg = {};
+  const n = parseFloat(v);
+  if(isFinite(n) && n > 0) S.cfg.wrvuExpectedPerDay = Math.round(n*100)/100;
+  else delete S.cfg.wrvuExpectedPerDay;
+  triggerSave();
+  renderWrvu();
+}
 // Server-side per-phys wRVU totals for the period — authoritative over the
 // FULL rs_reports table (the 3000-row cache would silently undercount a busy
 // practice). Cached per period; invalidated by live updates.
@@ -31546,13 +31591,26 @@ function renderWrvu(){
       const g=byPhys.get(r.phys_id); g.count++; g.wrvu+=(+r.wrvu||0); });
   }
 
+  // Expected-wRVU basis: distinct assigned shift-days this period, capped at
+  // "through today" for pacing. Rate = configured or auto (practice actuals).
+  const _n=new Date();
+  const _todayIso=`${_n.getFullYear()}-${String(_n.getMonth()+1).padStart(2,'0')}-${String(_n.getDate()).padStart(2,'0')}`;
+  const _capIso=_todayIso<range.to?_todayIso:range.to;   // days BEFORE today count as elapsed
+  const assigned=_wrvuAssignedDays(range.from, range.to, _capIso);
+  const exp=_wrvuExpectedRate(byPhys, assigned);
+  const expFor=pid=>{ const g=assigned.get(pid); return g?{full:g.days.size*exp.rate, toDate:g.daysToDate.size*exp.rate, days:g.days.size, daysToDate:g.daysToDate.size}:{full:0,toDate:0,days:0,daysToDate:0}; };
+
   if(myPid!=null){
     const mine=byPhys.get(myPid)||{wrvu:0,count:0};
     const avg=mine.count?mine.wrvu/mine.count:0;
+    const me=expFor(myPid);
+    const pace=me.toDate>0?100*mine.wrvu/me.toDate:null;
     html+=`<div class="flex" style="gap:12px;flex-wrap:wrap;margin-bottom:14px">
       ${_wrvuStat('My wRVU', mine.wrvu.toFixed(1), range.label)}
       ${_wrvuStat('My reports', String(mine.count), 'signed')}
-      ${_wrvuStat('Avg wRVU / report', avg.toFixed(2), '')}</div>`;
+      ${_wrvuStat('Avg wRVU / report', avg.toFixed(2), '')}
+      ${_wrvuStat('Expected wRVU', me.full.toFixed(1), `${me.days} shift-day${me.days===1?'':'s'} × ${exp.rate.toFixed(1)} (${exp.mode})`)}
+      ${_wrvuStat('Pace vs expected', pace==null?'—':pace.toFixed(0)+'%', me.daysToDate?`${mine.wrvu.toFixed(1)} of ${me.toDate.toFixed(1)} to date`:'no shift-days elapsed yet')}</div>`;
   } else {
     html+=`<div class="note ni" style="margin-bottom:14px">Your login isn't linked to a physician record, so your personal wRVU can't be shown.${isAdm?' Practice totals are below.':''}</div>`;
   }
@@ -31561,24 +31619,44 @@ function renderWrvu(){
   }
 
   if(isAdm){
-    const list=[...byPhys.values()].sort((a,b)=>b.wrvu-a.wrvu);
+    // Union: physicians with actuals ∪ physicians with assigned shift-days, so
+    // someone who hasn't signed anything still shows their expected target.
+    const pids=new Set([...byPhys.keys()]);
+    assigned.forEach((g,pid)=>{ if(g.days.size>0) pids.add(pid); });
+    const list=[...pids].map(pid=>({...(byPhys.get(pid)||{pid,wrvu:0,count:0}), pid}))
+      .sort((a,b)=>b.wrvu-a.wrvu);
     const totWrvu=list.reduce((s,g)=>s+g.wrvu,0), totCnt=list.reduce((s,g)=>s+g.count,0);
+    const totExp=list.reduce((s,g)=>s+expFor(g.pid).full,0);
+    const cfgRate=+(S.cfg&&S.cfg.wrvuExpectedPerDay);
     html+=`<div class="card" style="margin-bottom:14px">
-      <div class="card-title">Practice leaderboard <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${escHtml(range.label)} · ${totWrvu.toFixed(1)} wRVU / ${totCnt} reports</span></div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span>Practice leaderboard <span style="font-weight:400;color:var(--txt3);font-size:11px">— ${escHtml(range.label)} · ${totWrvu.toFixed(1)} wRVU / ${totCnt} reports · expected ${totExp.toFixed(1)}</span></span>
+        <label style="font-weight:400;font-size:11px;color:var(--txt3)">Expected wRVU / shift-day
+          <input type="number" min="0" step="0.5" value="${isFinite(cfgRate)&&cfgRate>0?cfgRate:''}" placeholder="auto ${exp.mode==='auto'?exp.rate.toFixed(1):''}"
+            style="width:70px;margin-left:4px;padding:2px 6px;font-size:11px;border:1px solid var(--bdr);border-radius:4px;background:var(--bg2);color:var(--txt1)"
+            onchange="_wrvuSetExpectedRate(this.value)" title="Blank = auto (practice actual wRVU ÷ assigned shift-days to date this period)"></label>
+      </div>
       ${list.length? `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
           <th style="padding:5px 8px">#</th><th style="padding:5px 8px">Radiologist</th><th style="padding:5px 8px;text-align:right">wRVU</th>
-          <th style="padding:5px 8px;text-align:right">Reports</th><th style="padding:5px 8px;text-align:right">Avg</th><th style="padding:5px 8px;text-align:right">Share</th></tr></thead>
+          <th style="padding:5px 8px;text-align:right">Reports</th><th style="padding:5px 8px;text-align:right">Avg</th>
+          <th style="padding:5px 8px;text-align:right" title="Assigned shift-days this period × expected rate">Expected</th>
+          <th style="padding:5px 8px;text-align:right" title="Actual wRVU vs expected-to-date (elapsed shift-days only)">Pace</th>
+          <th style="padding:5px 8px;text-align:right">Share</th></tr></thead>
         <tbody>${list.map((g,i)=>{const p=_physById(g.pid);const nm=p?`${escHtml(p.last)}, ${escHtml(p.first)}`:('#'+g.pid);
           const avg=g.count?(g.wrvu/g.count):0, share=totWrvu?100*g.wrvu/totWrvu:0;
+          const e=expFor(g.pid), pace=e.toDate>0?100*g.wrvu/e.toDate:null;
+          const paceCol=pace==null?'var(--txt3)':pace>=90?'var(--green-t)':pace>=60?'var(--amber-t,#d97706)':'var(--red-t)';
           return `<tr style="border-bottom:1px solid var(--bdr);${g.pid===myPid?'background:rgba(37,99,235,0.08)':''}">
             <td style="padding:4px 8px;color:var(--txt3)">${i+1}</td>
-            <td style="padding:4px 8px"><a href="#" onclick="_wrvuSetRad('${g.pid}');return false" style="color:var(--blue)">${nm}</a></td>
+            <td style="padding:4px 8px"><a href="#" onclick="_wrvuSetRad('${+g.pid||0}');return false" style="color:var(--blue)">${nm}</a></td>
             <td style="padding:4px 8px;text-align:right;font-weight:700;tabular-nums">${g.wrvu.toFixed(1)}</td>
             <td style="padding:4px 8px;text-align:right;tabular-nums">${g.count}</td>
             <td style="padding:4px 8px;text-align:right;tabular-nums">${avg.toFixed(2)}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums;color:var(--txt2)" title="${e.days} shift-day${e.days===1?'':'s'} assigned">${e.full?e.full.toFixed(1):'—'}</td>
+            <td style="padding:4px 8px;text-align:right;tabular-nums;color:${paceCol}">${pace==null?'—':pace.toFixed(0)+'%'}</td>
             <td style="padding:4px 8px;text-align:right;tabular-nums;color:var(--txt3)">${share.toFixed(0)}%</td></tr>`;}).join('')}</tbody></table></div>`
-      : `<div class="note ni" style="font-size:12px">No signed reports in this period yet.</div>`}
+      : `<div class="note ni" style="font-size:12px">No signed reports or assigned shifts in this period yet.</div>`}
       ${unmatched>0?`<div style="font-size:11px;color:var(--txt3);margin-top:8px">${unmatched} report${unmatched===1?'':'s'} couldn't be matched to a radiologist (interpreter name unrecognized). Set each physician's PACS name aliases under People &amp; Practice → Physicians.</div>`:''}
     </div>`;
   }
