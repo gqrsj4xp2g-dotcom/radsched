@@ -6297,11 +6297,7 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
 
   <div class="card">
     <div class="card-title">Slot Configuration</div>
-    <div class="note ni mb8" >Configure physician slot needs per site and shift type. Adjust by week. The auto-assign engine reads these values to determine daily demand.</div>
-    <div class="flexe" style="margin-bottom:10px;gap:8px">
-      <div class="fg m0" ><label>Month</label><input id="ss-mo" type="month" oninput="renderSiteSlots()"></div>
-      <div id="ss-week-tabs" class="flex" style="flex-wrap:wrap;gap:3px"></div>
-    </div>
+    <div class="note ni mb8" >Global, long-term physician slot needs per site and shift type — applies to <strong>every week</strong>. The auto-assign engine reads these values to determine daily demand.</div>
     <div id="ss-content"></div>
   </div>
 </div>
@@ -15387,6 +15383,10 @@ function _applyRemoteData(d){
     // stale until Save silently writes old values back.
     if(typeof _migLoadCommPrefs === 'function')
       _migLoadCommPrefs().then(ch => { if(ch && typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }, ()=>{});
+    // Slot config is global/long-term: normalize any legacy per-week variance
+    // in memory (no save) so the auto-assign engine sees uniform values even
+    // before an admin opens Site Management (which persists the normalization).
+    if(typeof _ssNormalizeGlobalSlots === 'function') _ssNormalizeGlobalSlots(false);
   }catch(_){}
 }
 
@@ -26950,15 +26950,55 @@ function renderSiteSlots(){
   // Management"). renderSitesList writes to BOTH anchors — sites-list (in
   // Settings) and sites-list-ssl (on this tab) — so they stay in sync.
   renderSitesList();
-  const ym=document.getElementById('ss-mo')?.value||_todayLocalYM();
-  const [y,m]=ym.split('-').map(Number);
-  const first=new Date(y,m-1,1);
-  const weeks=Math.ceil((first.getDay()+new Date(y,m,0).getDate())/7);
-  const tabsEl=document.getElementById('ss-week-tabs');if(!tabsEl)return;
-  const aw=+tabsEl.querySelector('.wktab.on')?.dataset?.w||1;
-  tabsEl.innerHTML='';
-  for(let w=1;w<=weeks;w++){const b=document.createElement('button');b.className='wktab'+(w===aw?' on':'');b.textContent='Wk '+w;b.dataset.w=w;b.onclick=function(){document.querySelectorAll('.wktab').forEach(x=>x.classList.remove('on'));this.classList.add('on');renderSlotGrid(ym,+this.dataset.w);};tabsEl.appendChild(b);}
-  renderSlotGrid(ym,aw);
+  // 2026-07: slot configuration is GLOBAL/long-term — no month or week
+  // dimension in the UI. Storage still keys site|week|shift for engine
+  // compatibility; normalize any legacy per-week variance (max wins), then
+  // render one grid (week 1 is the canonical read).
+  _ssNormalizeGlobalSlots(true);
+  renderSlotGrid(_todayLocalYM(),1);
+}
+// Collapse legacy per-week slot variance into uniform values across weeks
+// 1–5: each site|shift gets its MAX total across weeks; each sub gets its
+// max across weeks. Idempotent; persist=true saves when something changed.
+function _ssNormalizeGlobalSlots(persist){
+  let changed=false;
+  const slots=S.siteSlots||{}, subs=S.siteSlotsSubs||{};
+  const groups={};   // `${site}|${sh}` -> max
+  Object.keys(slots).forEach(k=>{
+    const m=/^(.+)\|([1-5])\|([^|]+)$/.exec(k); if(!m) return;
+    const g=`${m[1]}|${m[3]}`;
+    const v=+slots[k]||0;
+    if(groups[g]==null||v>groups[g]) groups[g]=v;
+  });
+  Object.entries(groups).forEach(([g,max])=>{
+    const [site,sh]=[g.slice(0,g.lastIndexOf('|')),g.slice(g.lastIndexOf('|')+1)];
+    [1,2,3,4,5].forEach(w=>{
+      const k=`${site}|${w}|${sh}`;
+      if((+slots[k]||0)!==max){ slots[k]=max; changed=true; }
+    });
+  });
+  const subGroups={};   // `${site}|${sh}` -> {sub: max}
+  Object.keys(subs).forEach(k=>{
+    const m=/^(.+)\|([1-5])\|([^|]+)$/.exec(k); if(!m) return;
+    const g=`${m[1]}|${m[3]}`;
+    subGroups[g]=subGroups[g]||{};
+    Object.entries(subs[k]||{}).forEach(([sub,v])=>{
+      if(subGroups[g][sub]==null||+v>subGroups[g][sub]) subGroups[g][sub]=+v||0;
+    });
+  });
+  Object.entries(subGroups).forEach(([g,map])=>{
+    const [site,sh]=[g.slice(0,g.lastIndexOf('|')),g.slice(g.lastIndexOf('|')+1)];
+    [1,2,3,4,5].forEach(w=>{
+      const k=`${site}|${w}|${sh}`;
+      const cur=JSON.stringify(subs[k]||{});
+      if(cur!==JSON.stringify(map)){ subs[k]={...map}; changed=true; }
+    });
+  });
+  if(changed&&persist&&typeof triggerSave==='function'){
+    if(typeof _audit==='function') _audit('siteSlots.normalizeGlobal',{});
+    triggerSave();
+  }
+  return changed;
 }
 
 // Sister function of addSite() wired to the Site Management tab's add-form.
@@ -27121,24 +27161,20 @@ function _ssSetTotalSlot(siteName, week, sh, val){
   if(!_adminOnly('change site slot')) return;
   if(!S.siteSlots) S.siteSlots = {};
   const newCount = parseInt(val) || 0;
-  S.siteSlots[`${siteName}|${week}|${sh}`] = newCount;
-  // Prune labels for indices that exceed the NEW max-count across all weeks.
-  // Only prune when reduction shrinks the max, not on every count change.
+  // GLOBAL config: one value per site+shift — write every week key so the
+  // engine (which reads by week-of-month) always sees the same number.
+  [1,2,3,4,5].forEach(w => { S.siteSlots[`${siteName}|${w}|${sh}`] = newCount; });
+  // Prune labels for indices at/beyond the new count.
   if(S.siteSlotLabels){
-    let maxNow = 0;
-    [1,2,3,4,5].forEach(w => {
-      const v = S.siteSlots[`${siteName}|${w}|${sh}`] ?? 0;
-      if(v > maxNow) maxNow = v;
-    });
     Object.keys(S.siteSlotLabels).forEach(k => {
       const m = /^(.+)\|([^|]+)\|#(\d+)$/.exec(k);
       if(!m) return;
       if(m[1] !== siteName || m[2] !== sh) return;
-      if(+m[3] >= maxNow) delete S.siteSlotLabels[k];
+      if(+m[3] >= newCount) delete S.siteSlotLabels[k];
     });
   }
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
+  renderSlotGrid(_todayLocalYM(), 1);
 }
 
 // Writer for a per-slot DR label. Sanitized + persisted. Empty string deletes.
@@ -27155,25 +27191,25 @@ function _setSiteSlotLabel(siteName, sh, slotIdx, val){
 function _ssSetSubSlot(siteName, week, sh, sub, val){
   if(!_adminOnly('change site sub-slot')) return;
   if(!S.siteSlotsSubs) S.siteSlotsSubs = {};
-  const key = `${siteName}|${week}|${sh}`;
-  if(!S.siteSlotsSubs[key]) S.siteSlotsSubs[key] = {};
   const n = parseInt(val) || 0;
-  if(n <= 0){
-    delete S.siteSlotsSubs[key][sub];
-  } else {
-    S.siteSlotsSubs[key][sub] = n;
-  }
-  if(Object.keys(S.siteSlotsSubs[key]).length === 0) delete S.siteSlotsSubs[key];
+  // GLOBAL config: apply to every week key uniformly.
+  [1,2,3,4,5].forEach(w => {
+    const key = `${siteName}|${w}|${sh}`;
+    if(!S.siteSlotsSubs[key]) S.siteSlotsSubs[key] = {};
+    if(n <= 0) delete S.siteSlotsSubs[key][sub];
+    else S.siteSlotsSubs[key][sub] = n;
+    if(Object.keys(S.siteSlotsSubs[key]).length === 0) delete S.siteSlotsSubs[key];
+  });
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
+  renderSlotGrid(_todayLocalYM(), 1);
 }
 
 function _ssClearSubSlots(siteName, week, sh){
   if(!S.siteSlotsSubs) return;
-  const key = `${siteName}|${week}|${sh}`;
-  delete S.siteSlotsSubs[key];
+  // GLOBAL config: clear across every week key.
+  [1,2,3,4,5].forEach(w => { delete S.siteSlotsSubs[`${siteName}|${w}|${sh}`]; });
   triggerSave();
-  renderSlotGrid(document.getElementById('ss-mo')?.value || _todayLocalYM(), week);
+  renderSlotGrid(_todayLocalYM(), 1);
 }
 
 /* ─── IR SLOTS ─── */
