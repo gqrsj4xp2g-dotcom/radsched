@@ -26843,30 +26843,40 @@ function editSiteFillins(i){
 function renderWkndNeeds(){
   const el=document.getElementById('wknd-needs');
   if(!el)return;
-  // 2026-07 redesign: each count is filled for BOTH the day and swing shift
-  // of the weekend; subspecialty rows fill before the General row. Per-weekend
-  // overrides live on the DR Weekends tab.
+  // 2026-07: separate Day and Swing columns per subspecialty; legacy single
+  // numbers show in both columns until re-saved. Subspecialty rows are
+  // staffed before the General row.
   const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  el.innerHTML=(S.drSubs||[]).map(s=>{
-    // Safe JS string literal for the onchange so subspecialty names with quotes/
-    // apostrophes don't break the attribute. _setWkndNeed does the admin check.
+  const rowFor=(s,label)=>{
     const jsLit = escHtml(JSON.stringify(String(s)));
+    const d=_wkndNeedCount(S.wkndNeeds?.[s],'day'), sw=_wkndNeedCount(S.wkndNeeds?.[s],'swing');
     return `<div class="row">
-      <span style="font-size:12px;min-width:140px">${escHtml(s)}</span>
-      <input type="number" min="0" max="10" value="${S.wkndNeeds?.[s]||0}" style="width:55px"
-        onchange="_setWkndNeed(${jsLit}, this.value)">
+      <span style="font-size:12px;min-width:140px">${label}</span>
+      <input type="number" min="0" max="10" value="${d}" style="width:55px" title="Day-shift need"
+        onchange="_setWkndNeed(${jsLit}, 'day', this.value)">
+      <input type="number" min="0" max="10" value="${sw}" style="width:55px" title="Swing-shift need"
+        onchange="_setWkndNeed(${jsLit}, 'swing', this.value)">
     </div>`;
-  }).join('')+`<div class="row">
-      <span style="font-size:12px;min-width:140px"><em>General (no sub)</em></span>
-      <input type="number" min="0" max="10" value="${S.wkndNeeds?.['']||0}" style="width:55px"
-        onchange="_setWkndNeed('', this.value)">
-    </div>
-    <div class="muted-xs mt8">Counts fill both the Day and the Swing shift. Subspecialty rows are staffed before General. Per-weekend overrides: DR Weekends tab.</div>`;
+  };
+  el.innerHTML=`<div class="row" style="border-bottom:1px solid var(--bdr)">
+      <span style="font-size:10px;min-width:140px;text-transform:uppercase;color:var(--txt3)">Subspecialty</span>
+      <span class="fs-xs fw6" style="width:55px;text-align:center">☀️ Day</span>
+      <span class="fs-xs fw6" style="width:55px;text-align:center">🌙 Swing</span>
+    </div>`
+    +(S.drSubs||[]).map(s=>rowFor(s,escHtml(s))).join('')
+    +rowFor('','<em>General (no sub)</em>')
+    +`<div class="muted-xs mt8">Per weekend (weekly). Subspecialty rows are staffed before General; non-Eastern radiologists can only fill Swing.</div>`;
 }
-function _setWkndNeed(sub, val){
+function _setWkndNeed(sub, wshift, val){
   if(!_adminOnly('change weekend needs')) return;
   if(!S.wkndNeeds) S.wkndNeeds = {};
-  S.wkndNeeds[sub] = parseInt(val) || 0;
+  const cur=S.wkndNeeds[sub];
+  // Normalize to the {day, swing} shape, preserving the other column
+  // (legacy plain numbers meant "both shifts").
+  const obj=(cur&&typeof cur==='object')?{...cur}
+    :{day:_wkndNeedCount(cur,'day'), swing:_wkndNeedCount(cur,'swing')};
+  obj[wshift]=Math.max(0,parseInt(val)||0);
+  S.wkndNeeds[sub]=obj;
   triggerSave();
 }
 function addDRSub(){
@@ -40471,6 +40481,13 @@ function _wkndYearCount(pid, year, previewArr){
 function _wkndNeedsFor(satDate){
   return {...(S.wkndNeeds||{})};
 }
+// A need value is either a legacy NUMBER (applies to both shifts) or an
+// object {day:n, swing:m} (separate per-shift counts, 2026-07 columns).
+function _wkndNeedCount(need, wshift){
+  if(need==null) return 0;
+  if(typeof need==='object') return Math.max(0,parseInt(need[wshift])||0);
+  return Math.max(0,parseInt(need)||0);
+}
 function _setWkndSummerCap(v){
   if(!_adminOnly('change weekend caps')) return;
   if(!S.cfg) S.cfg={};
@@ -40504,13 +40521,13 @@ function _wkndPlanRange(fromIso, toIso){
     const sunDate=addDays(sat,1);
     if(isHolidayBlackout(sat)&&isHolidayBlackout(sunDate)) return;   // holiday call covers it
     const entries=Object.entries(_wkndNeedsFor(sat))
-      .filter(([,need])=>(+need||0)>0)
+      .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
       .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));
     entries.forEach(([sub,need])=>{
       ['day','swing'].forEach(wshift=>{
         let have=S.weekendCalls.filter(w=>(w.satDate||w.date)===sat&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
                 +plan.filter(a=>a.satDate===sat&&(a.sub||'')===sub&&a.wshift===wshift).length;
-        while(have<(+need||0)){
+        while(have<_wkndNeedCount(need,wshift)){
           const pool=drs.filter(p=>{
             if(!p.shiftElig?.wknd)return false;
             if(_drDayFte(p)<=0)return false;
@@ -41174,14 +41191,14 @@ function previewAA(){
       // merged over the global defaults, and the configured COUNT is honored
       // (the old pass hard-capped at 1 and even assigned subs with need=0).
       const _needEntries=Object.entries(_wkndNeedsFor(c.date))
-        .filter(([,need])=>(+need||0)>0)
+        .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
         .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));   // subs first, general last
       const _yr=c.date.slice(0,4);
       _needEntries.forEach(([sub,need])=>{
         ['day','swing'].forEach(wshift=>{
           let ex=S.weekendCalls.filter(w=>(w.satDate||w.date)===c.date&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
                 +preview.filter(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&(a.sub||'')===sub&&((a.wshift||'day')===wshift)).length;
-          while(ex<(+need||0)){
+          while(ex<_wkndNeedCount(need,wshift)){
             const pool=drs.filter(p=>{
               if(!p.shiftElig.wknd)return false;
               // Diagnostic weekend call keys on DAY-shift DR FTE: a 2nd/3rd-
