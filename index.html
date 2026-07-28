@@ -3100,7 +3100,14 @@ tbody tr:hover{background:var(--bg3)}
           <option value="DR">DR Only</option><option value="IR">IR Only</option><option value="MIXED">Mixed DR + IR</option>
         </select>
       </div>
-      <div class="fg" id="p-drfte-w"><label>DR FTE</label><input id="p-drfte" type="number" min="0" max="1" step=".05" value="1.0" style="width:75px"></div>
+      <div class="fg" id="p-drfte-w"><label>DR FTE</label><input id="p-drfte" type="number" min="0" max="1" step=".05" value="1.0" style="width:75px">
+        <div class="flex mt8" style="gap:8px;flex-wrap:wrap">
+          <span class="fg m0"><label class="fs-xs">Day FTE</label><input id="p-drfte-day" type="number" min="0" max="1" step=".05" placeholder="—" style="width:65px"></span>
+          <span class="fg m0"><label class="fs-xs">2nd Shift FTE</label><input id="p-drfte-s2" type="number" min="0" max="1" step=".05" placeholder="—" style="width:65px"></span>
+          <span class="fg m0"><label class="fs-xs">3rd Shift FTE</label><input id="p-drfte-s3" type="number" min="0" max="1" step=".05" placeholder="—" style="width:65px"></span>
+        </div>
+        <div class="muted-xs mt8">Optional split of the DR FTE by shift. Diagnostic weekend call keys on the <strong>Day FTE</strong>: 2nd/3rd-shift-only radiologists get none; a 0.75-day radiologist carries 0.75 of the max call responsibility. Blank = legacy (all DR FTE counts as day if 1st-shift-eligible).</div>
+      </div>
       <div class="fg" id="p-irfte-w" style="display:none"><label>IR FTE</label><input id="p-irfte" type="number" min="0" max="1" step=".05" value="0" style="width:75px"></div>
     </div>
     <div class="g2" id="p-ir-w" style="display:none">
@@ -3764,18 +3771,21 @@ tbody tr:hover{background:var(--bg3)}
       <div class="fg m0"><label>Max weekends per summer (Jun–Aug)</label>
         <input type="number" min="0" max="20" style="width:80px" id="wknd-summer-cap"
           onchange="_setWkndSummerCap(this.value)" placeholder="2"></div>
-      <div class="fg m0"><label>Max weekends per year (base × total FTE)</label>
+      <div class="fg m0"><label>Max weekends per year (base × day-shift DR FTE)</label>
         <input type="number" min="0" max="60" step="0.5" style="width:80px" id="wknd-year-cap"
           onchange="_setWkndYearCapBase(this.value)" placeholder="No cap"></div>
     </div>
   </div>
   <div class="ibox">
-    <div class="card-title m0 mb8">Per-weekend subspecialty needs
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Overrides the global defaults (Settings → Weekend Call Needs) for one specific weekend</span>
+    <div class="card-title m0 mb8">Weekend auto-assign
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Fills Day + Swing per subspecialty need (weekly, Settings → Weekend Call Needs) — subspecialty spots first, then General. Honors the EST rule, day-FTE rule, summer/year caps.</span>
     </div>
-    <div class="fg m0 mb8"><label>Saturday</label>
-      <input id="wknd-week-date" type="date" onchange="_renderWkndWeekNeeds()" style="width:160px"></div>
-    <div id="wknd-week-needs"><span class="muted-xs">Pick a Saturday to set this weekend’s subspecialty needs.</span></div>
+    <div class="flex" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fg m0"><label>Month</label><input id="wkaa-month" type="month" style="width:150px"></div>
+      <button class="bp bsm" onclick="previewWkAA()">👁 Preview</button>
+      <button class="bg bsm" onclick="applyWkAA()" id="wkaa-apply-btn" disabled>✓ Apply</button>
+    </div>
+    <div id="wkaa-result" class="mt8"></div>
   </div>
   <div class="card scroll-x" ><table><thead><tr><th>Physician</th><th>Saturday</th><th>Sunday</th><th>Shift</th><th>Sub</th><th>Site</th><th>Type</th><th></th></tr></thead><tbody id="wk-tbody"></tbody></table></div>
 </div>
@@ -6201,7 +6211,7 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Weekend Call Needs by Subspecialty (per month)</div>
+        <div class="card-title">Weekend Call Needs by Subspecialty (per weekend, weekly)</div>
         <div id="wknd-needs"></div>
       </div>
       <div class="card" style="border:1px dashed var(--bdr2)">
@@ -9511,7 +9521,7 @@ create table pacs_inbound (
         builder, bulk, burnout, call-day-site, click-empty-cell, command,
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
-        min-staffing, sell/buy,
+        min-staffing, sell/buy, standalone,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -18565,6 +18575,10 @@ function editPhys(id){
   const _roleNow = p.role || 'DR';
   const _drDefault = (_roleNow==='DR'||_roleNow==='MIXED') ? 1 : 0;
   document.getElementById('p-drfte').value = (p.drFte!=null) ? p.drFte : _drDefault;
+  // Optional per-shift split of the DR FTE (blank when unset — legacy records)
+  document.getElementById('p-drfte-day').value = p.drFteDay ?? '';
+  document.getElementById('p-drfte-s2').value  = p.drFteS2 ?? '';
+  document.getElementById('p-drfte-s3').value  = p.drFteS3 ?? '';
   const irfteEl=document.getElementById('p-irfte');
   if(irfteEl) irfteEl.value=p.irFte??0;
   // IR fields
@@ -18654,6 +18668,11 @@ function _saveEditPhys(id){
   // DR FTE only when role uses it (see addPhys). Without this guard, the
   // hidden field's stale value would survive an IR-only edit.
   p.drFte=(role==='DR'||role==='MIXED')?(parseFloat(document.getElementById('p-drfte').value)||0):0;
+  // Per-shift DR FTE split (optional; blank = null = legacy inference)
+  const _fteSplit=idv=>{const v=document.getElementById(idv)?.value;if(v===''||v==null)return null;const n=parseFloat(v);return isFinite(n)?Math.max(0,Math.min(1,n)):null;};
+  p.drFteDay=(role==='DR'||role==='MIXED')?_fteSplit('p-drfte-day'):null;
+  p.drFteS2 =(role==='DR'||role==='MIXED')?_fteSplit('p-drfte-s2'):null;
+  p.drFteS3 =(role==='DR'||role==='MIXED')?_fteSplit('p-drfte-s3'):null;
   p.irFte=role!=='DR'?(parseFloat(document.getElementById('p-irfte')?.value)||0):0;
   p.irGroup=role!=='DR'?(document.getElementById('p-irgrp')?.value||null):null;
   p.irSitePrim=role!=='DR'?(document.getElementById('p-irsiteprim')?.value||null):null;
@@ -18706,7 +18725,7 @@ function cancelEditPhys(){
   document.getElementById('phys-submit-btn').className='bp';
   document.getElementById('phys-cancel-btn').style.display='none';
   // Reset all fields
-  ['p-first','p-last','p-address','p-pacsnames'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['p-first','p-last','p-address','p-pacsnames','p-drfte-day','p-drfte-s2','p-drfte-s3'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('p-deg').value='MD';
   document.getElementById('p-role').value='DR';
   roleUI();
@@ -18761,8 +18780,12 @@ function addPhys(){
     const v = parseInt(document.getElementById('p-home-pref')?.value);
     _drHomePctPref = (isFinite(v) && v >= 0 && v <= 100) ? v : 50;
   }
+  const _addFteSplit=idv=>{const v=document.getElementById(idv)?.value;if(v===''||v==null)return null;const n=parseFloat(v);return isFinite(n)?Math.max(0,Math.min(1,n)):null;};
   S.physicians.push({
     id:S.nextId++,first,last,degree,role,drFte,irFte,
+    drFteDay:(role==='DR'||role==='MIXED')?_addFteSplit('p-drfte-day'):null,
+    drFteS2:(role==='DR'||role==='MIXED')?_addFteSplit('p-drfte-s2'):null,
+    drFteS3:(role==='DR'||role==='MIXED')?_addFteSplit('p-drfte-s3'):null,
     irGroup:role!=='DR'?document.getElementById('p-irgrp').value:null,
     irSitePrim:role!=='DR'?document.getElementById('p-irsiteprim').value:null,
     anchorSite:anchor,allowedSites:allowed.length?allowed:S.sites.map(s=>s.name),
@@ -40388,15 +40411,25 @@ function _physIsEastern(p){
   if(/\b(TEXAS|CALIFORNIA|ILLINOIS|TENNESSEE|ARIZONA|COLORADO|MINNESOTA|MISSOURI|WISCONSIN|OREGON|WASHINGTON|NEVADA|UTAH|KANSAS|OKLAHOMA|LOUISIANA|ALABAMA|MISSISSIPPI|ARKANSAS|IOWA|NEBRASKA|WYOMING|MONTANA|IDAHO)\b/.test(a)) return false;
   return true;
 }
+// DAY-shift DR FTE — the basis of diagnostic weekend call responsibility.
+// Explicit split (p.drFteDay) wins; legacy records without a split infer from
+// shift eligibility: 1st-shift-eligible → all of drFte counts as day, a
+// 2nd/3rd-shift-only radiologist → 0 (no diagnostic weekend call).
+function _drDayFte(p){
+  if(!p) return 0;
+  if(p.drFteDay!=null&&isFinite(+p.drFteDay)) return Math.max(0,+p.drFteDay);
+  if(p.shiftElig&&p.shiftElig.s1===false) return 0;
+  return +p.drFte||0;
+}
 function _wkndIsSummer(d){ if(!d) return false; const y=d.slice(0,4); return d>=`${y}-06-01`&&d<=`${y}-08-31`; }
 function _wkndSummerCap(){ const c=+(S.cfg?.wkndSummerCap); return isFinite(c)&&c>0?c:2; }
 function _wkndYearCap(p){
   const base=+(S.cfg?.wkndYearCapBase);
   if(!isFinite(base)||base<=0) return null;
-  // Scaled by the radiologist's INHERENT total FTE (drFte + irFte) — same
-  // principle as the vacation minimum-weeks: one practice base number, each
-  // person's cap follows from their own FTE, no per-person multipliers.
-  return Math.round(base*((+p.drFte||0)+(+p.irFte||0)));
+  // Scaled by the radiologist's DAY-shift DR FTE: one practice base number,
+  // each person's cap follows from their own day FTE — a 0.75-day radiologist
+  // carries 0.75 of the max call responsibility; 2nd/3rd-shift-only carry 0.
+  return Math.round(base*_drDayFte(p));
 }
 function _wkndSummerCount(pid, year, previewArr){
   const s0=`${year}-06-01`, s1=`${year}-08-31`;
@@ -40411,12 +40444,10 @@ function _wkndYearCount(pid, year, previewArr){
   if(previewArr) n+=previewArr.filter(a=>a.type==='wk'&&a.physId===pid&&String(a.satDate||a.date||'').startsWith(pre)).length;
   return n;
 }
-// Needs for one weekend: per-weekend override (cfg.wkndNeedsByWeekend[satDate])
-// merged over the global per-sub defaults. '' key = general (no subspecialty).
+// Needs for one weekend = the global WEEKLY per-sub needs (Settings →
+// Weekend Call Needs). '' key = general (no subspecialty).
 function _wkndNeedsFor(satDate){
-  const base={...(S.wkndNeeds||{})};
-  const ov=S.cfg?.wkndNeedsByWeekend?.[satDate];
-  return (ov&&typeof ov==='object')?{...base,...ov}:base;
+  return {...(S.wkndNeeds||{})};
 }
 function _setWkndSummerCap(v){
   if(!_adminOnly('change weekend caps')) return;
@@ -40430,33 +40461,119 @@ function _setWkndYearCapBase(v){
   const n=+v; if(v===''||!isFinite(n)||n<=0) delete S.cfg.wkndYearCapBase; else S.cfg.wkndYearCapBase=n;
   triggerSave();
 }
-function _setWkndWeekNeed(satDate, sub, val){
-  if(!_adminOnly('change weekend needs')) return;
-  if(!S.cfg) S.cfg={};
-  if(!S.cfg.wkndNeedsByWeekend||typeof S.cfg.wkndNeedsByWeekend!=='object') S.cfg.wkndNeedsByWeekend={};
-  const wk=S.cfg.wkndNeedsByWeekend[satDate]||{};
-  if(val===''||val==null){ delete wk[sub]; }
-  else wk[sub]=Math.max(0,parseInt(val)||0);
-  if(Object.keys(wk).length) S.cfg.wkndNeedsByWeekend[satDate]=wk;
-  else delete S.cfg.wkndNeedsByWeekend[satDate];
-  triggerSave();
+// ── Standalone DR weekend call auto-assign (DR Weekends tab) ─────────────
+// Pure planner: for every Saturday of the month, fill Day + Swing per the
+// WEEKLY subspecialty needs — subspecialty slots before General — honoring
+// the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly
+// caps, vacations, adjacent-weekend and same-weekend double-booking guards.
+// Preview is side-effect-free; Apply materializes weekendCalls + open shifts
+// for unfillable slots.
+let _wkAAPlan=null;
+function _wkndPlanMonth(ym){
+  const plan=[], gaps=[];
+  const [y,m]=ym.split('-').map(Number);
+  const yr=String(y);
+  const sats=[];
+  for(let d=new Date(y,m-1,1); d.getMonth()===m-1; d.setDate(d.getDate()+1)){
+    if(d.getDay()===6) sats.push(fmtDate(d));
+  }
+  const drs=(S.physicians||[]).filter(p=>p.drFte>0);
+  const adjacentInPlan=(pid,sat)=>plan.some(a=>a.physId===pid&&Math.abs((parseDateLocal(a.satDate)-parseDateLocal(sat))/86400000)===7);
+  sats.forEach(sat=>{
+    const sunDate=addDays(sat,1);
+    if(isHolidayBlackout(sat)&&isHolidayBlackout(sunDate)) return;   // holiday call covers it
+    const entries=Object.entries(_wkndNeedsFor(sat))
+      .filter(([,need])=>(+need||0)>0)
+      .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));
+    entries.forEach(([sub,need])=>{
+      ['day','swing'].forEach(wshift=>{
+        let have=S.weekendCalls.filter(w=>(w.satDate||w.date)===sat&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
+                +plan.filter(a=>a.satDate===sat&&(a.sub||'')===sub&&a.wshift===wshift).length;
+        while(have<(+need||0)){
+          const pool=drs.filter(p=>{
+            if(!p.shiftElig?.wknd)return false;
+            if(_drDayFte(p)<=0)return false;
+            if(sub&&!(p.drSubs||[]).includes(sub))return false;
+            if(wshift==='day'&&!_physIsEastern(p))return false;
+            const vd=vacDays(p.id);
+            if(vd.has(sat)||vd.has(sunDate))return false;
+            if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
+            if(S.weekendCalls.some(w=>(w.satDate||w.date)===sat&&w.physId===p.id))return false;
+            if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,sat))return false;
+            if(adjacentInPlan(p.id,sat))return false;
+            if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCap())return false;
+            const yc=_wkndYearCap(p);
+            if(yc!=null&&_wkndYearCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=yc)return false;
+            const ctx={physId:p.id,date:sat,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'};
+            if(typeof natLangRulesOk==='function'&&!natLangRulesOk(ctx))return false;
+            if(typeof tbRulesOk==='function'&&!tbRulesOk(p,ctx))return false;
+            return true;
+          }).sort((a,b)=>{
+            // Fairness: fewest weekends this year first (ratio to cap when set),
+            // then fewer summer weekends, then id for stability.
+            const pv=plan.map(x=>({type:'wk',...x}));
+            const ra=_wkndYearCount(a.id,yr,pv)/(_wkndYearCap(a)||99);
+            const rb=_wkndYearCount(b.id,yr,pv)/(_wkndYearCap(b)||99);
+            if(Math.abs(ra-rb)>0.001) return ra-rb;
+            const sa=_wkndSummerCount(a.id,yr,pv), sb=_wkndSummerCount(b.id,yr,pv);
+            if(sa!==sb) return sa-sb;
+            return a.id-b.id;
+          });
+          if(pool.length){
+            const p=pool[0];
+            plan.push({physId:p.id,satDate:sat,sunDate,sub,site:p.anchorSite||p.drSite||'',wshift});
+          } else {
+            gaps.push({satDate:sat,sub,wshift});
+            break;
+          }
+          have++;
+        }
+      });
+    });
+  });
+  return {plan,gaps};
 }
-function _renderWkndWeekNeeds(){
-  const host=document.getElementById('wknd-week-needs'); if(!host) return;
-  const sat=document.getElementById('wknd-week-date')?.value;
-  if(!sat){ host.innerHTML='<span class="muted-xs">Pick a Saturday to set this weekend’s subspecialty needs.</span>'; return; }
-  const ov=S.cfg?.wkndNeedsByWeekend?.[sat]||{};
-  const subs=[...(S.drSubs||[]),''];
-  host.innerHTML=subs.map(s=>{
-    const jsLit=escHtml(JSON.stringify(String(s)));
-    const base=S.wkndNeeds?.[s]??'';
-    return `<div class="row">
-      <span style="font-size:12px;min-width:140px">${s===''?'<em>General (no sub)</em>':escHtml(s)}</span>
-      <input type="number" min="0" max="10" value="${ov[s]??''}" placeholder="${base===''?'0':base}"
-        style="width:55px" onchange="_setWkndWeekNeed('${escHtml(sat)}', ${jsLit}, this.value)">
-      <span class="muted-xs">blank = default</span>
-    </div>`;
+function previewWkAA(){
+  if(!_adminOnly('auto-assign weekend call')) return;
+  const ym=document.getElementById('wkaa-month')?.value;
+  if(!ym){ _toast('Pick a month first.','err'); return; }
+  _wkAAPlan={ym,..._wkndPlanMonth(ym)};
+  const host=document.getElementById('wkaa-result'); if(!host) return;
+  const {plan,gaps}=_wkAAPlan;
+  const bySat={};
+  plan.forEach(a=>{ (bySat[a.satDate]=bySat[a.satDate]||[]).push(a); });
+  gaps.forEach(g=>{ (bySat[g.satDate]=bySat[g.satDate]||[]).push({...g,gap:true}); });
+  const rows=Object.keys(bySat).sort().map(sat=>{
+    const items=bySat[sat].map(a=>a.gap
+      ?`<span class="tag tr" title="No eligible candidate">${escHtml(a.sub||'General')} ${a.wshift} — GAP</span>`
+      :`<span class="tag ${a.wshift==='swing'?'ta':'tb'}">${escHtml(a.sub||'General')} ${a.wshift}: ${pnameHtml(a.physId)}</span>`).join(' ');
+    return `<div class="row"><span class="fw6" style="min-width:90px">${escHtml(sat)}</span><span>${items}</span></div>`;
   }).join('');
+  host.innerHTML=plan.length||gaps.length
+    ?`<div class="muted-xs mb8">${plan.length} assignment${plan.length===1?'':'s'} · ${gaps.length} gap${gaps.length===1?'':'s'} (gaps become claimable open shifts on Apply)</div>${rows}`
+    :'<div class="note ni" style="font-size:12px">Nothing to assign — set weekly subspecialty needs under Settings → Weekend Call Needs.</div>';
+  const btn=document.getElementById('wkaa-apply-btn');
+  if(btn) btn.disabled=!(plan.length||gaps.length);
+}
+function applyWkAA(){
+  if(!_adminOnly('auto-assign weekend call')) return;
+  if(!_wkAAPlan||!(_wkAAPlan.plan.length||_wkAAPlan.gaps.length)){ _toast('Run Preview first.','warn'); return; }
+  const {plan,gaps,ym}=_wkAAPlan;
+  plan.forEach(a=>{
+    S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate,sunDate:a.sunDate,sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift,notes:'Auto'});
+  });
+  gaps.forEach(g=>{
+    S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'TBD',group:'DR',claimedBy:null,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
+  });
+  if(typeof _audit==='function') _audit('weekendCall.autoAssign',{month:ym,assigned:plan.length,gaps:gaps.length});
+  triggerSave();
+  _wkAAPlan=null;
+  const btn=document.getElementById('wkaa-apply-btn'); if(btn) btn.disabled=true;
+  const host=document.getElementById('wkaa-result');
+  if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} posted as open shifts`:''}.</div>`;
+  if(typeof _toast==='function') _toast(`Weekend auto-assign applied — ${plan.length} assigned.`,'ok');
+  renderWkBuilder();
+  if(typeof _afterMutation==='function') _afterMutation();
 }
 let _editingWkId = null;
 function startEditWkCall(id){
@@ -40600,6 +40717,8 @@ function addWkCall(){
   const sub=document.getElementById('wk-sub').value;const site=document.getElementById('wk-site').value;
   const wshift=document.getElementById('wk-wshift')?.value||'day';
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
+  // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend call.
+  if(_drDayFte(p)<=0&&!confirm(`${p.last} has no day-shift DR FTE — diagnostic weekend call doesn't apply to 2nd/3rd-shift-only radiologists.\n\nAssign anyway (admin override)?`))return;
   // EST rule: non-Eastern physicians (by home address) take swing only.
   if(wshift==='day'&&!_physIsEastern(p)&&!confirm(`${p.last} is outside Eastern time (by address) — day shifts aren't allowed, only swing.\n\nAssign the DAY shift anyway (admin override)?`))return;
   // Summer cap (Jun–Aug, default 2) + yearly cap (base × total FTE)
@@ -41012,6 +41131,9 @@ function previewAA(){
           while(ex<(+need||0)){
             const pool=drs.filter(p=>{
               if(!p.shiftElig.wknd)return false;
+              // Diagnostic weekend call keys on DAY-shift DR FTE: a 2nd/3rd-
+              // shift-only radiologist (day FTE 0) gets no weekend call.
+              if(_drDayFte(p)<=0)return false;
               if(sub&&!p.drSubs.includes(sub))return false;
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
