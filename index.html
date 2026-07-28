@@ -2428,6 +2428,7 @@ tbody tr:hover{background:var(--bg3)}
           <!-- Manual builders -->
           <div class="snav-item admin-only" onclick="nav('dr-builder',this)" data-pg="dr-builder">DR Schedule Builder</div>
           <div class="snav-item admin-only" onclick="nav('dr-weekends',this)" data-pg="dr-weekends">DR Weekend Call</div>
+          <div class="snav-item admin-only" onclick="nav('wk-aa',this)" data-pg="wk-aa">DR Weekend Auto-Assign</div>
           <div class="snav-item admin-only" onclick="nav('ir-shifts',this)" data-pg="ir-shifts">IR Shift Builder</div>
           <div class="snav-item admin-only" onclick="nav('ir-builder',this)" data-pg="ir-builder">IR Call Builder</div>
           <!-- Auto-assign cluster — visually grouped under one label -->
@@ -3776,18 +3777,39 @@ tbody tr:hover{background:var(--bg3)}
           onchange="_setWkndYearCapBase(this.value)" placeholder="No cap"></div>
     </div>
   </div>
-  <div class="ibox">
-    <div class="card-title m0 mb8">Weekend auto-assign
-      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Fills Day + Swing per subspecialty need (weekly, Settings → Weekend Call Needs) — subspecialty spots first, then General. Honors the EST rule, day-FTE rule, summer/year caps.</span>
-    </div>
-    <div class="flex" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
-      <div class="fg m0"><label>Month</label><input id="wkaa-month" type="month" style="width:150px"></div>
-      <button class="bp bsm" onclick="previewWkAA()">👁 Preview</button>
-      <button class="bg bsm" onclick="applyWkAA()" id="wkaa-apply-btn" disabled>✓ Apply</button>
-    </div>
-    <div id="wkaa-result" class="mt8"></div>
-  </div>
+  <div class="note ni">Bulk assignment lives in the <a href="#" onclick="nav('wk-aa');return false" style="color:var(--blue);font-weight:600">DR Weekend Auto-Assign</a> tab (semiannual / annual runs).</div>
   <div class="card scroll-x" ><table><thead><tr><th>Physician</th><th>Saturday</th><th>Sunday</th><th>Shift</th><th>Sub</th><th>Site</th><th>Type</th><th></th></tr></thead><tbody id="wk-tbody"></tbody></table></div>
+</div>
+
+<!-- DR WEEKEND AUTO-ASSIGN -->
+<div id="page-wk-aa" class="page admin-only">
+  <div class="pg-title">DR Weekend Auto-Assign</div>
+  <div class="ibox">
+    <div class="g3">
+      <div class="fg"><label>Year</label>
+        <select id="wkaa-yr" style="width:90px">
+          <option value="2024">2024</option>
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+          <option value="2027">2027</option>
+          <option value="2028">2028</option>
+        </select>
+      </div>
+      <div class="fg"><label>Period</label>
+        <select id="wkaa-period" style="width:175px">
+          <option value="year">Annual — Jan through Dec</option>
+          <option value="H1">H1 — Jan through Jun</option>
+          <option value="H2">H2 — Jul through Dec</option>
+        </select>
+      </div>
+    </div>
+    <div class="flexe" style="gap:8px;margin-top:8px">
+      <button class="ba" onclick="previewWkAA()">▶ Preview</button>
+      <button class="bp" id="wkaa-apply-btn" style="display:none" onclick="applyWkAA()">✓ Apply All</button>
+    </div>
+  </div>
+  <div class="note ni mb8">Each weekend gets a <strong>Day</strong> and a <strong>Swing</strong> shift per subspecialty need (weekly needs: Settings → Weekend Call Needs). Subspecialty spots fill before General. Honors the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly caps, vacations, and blocks back-to-back weekends. Unfillable slots become claimable open shifts on Apply.</div>
+  <div class="card" id="wkaa-box"><p class="txt3">Configure and click Preview.</p></div>
 </div>
 
 <!-- AUTO-ASSIGN DR -->
@@ -15994,7 +16016,7 @@ function _refreshCurrentPage(){
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
-    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
+    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,
     'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRWeekBuilder,
     'ir-shift-auto':renderIRShiftAutoPage,'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
@@ -17263,7 +17285,7 @@ function nav(pg, el, subTab, opts){
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
-    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,
+    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,'unfilled':renderUnfilled,fte:_renderFTECurrent,holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,'practices':renderPracticesPage,'widget':renderWidgetPage,
@@ -17543,7 +17565,7 @@ function renderDash(){
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
-  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
+  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','wk-aa','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
   // Null guard — see dash-greet comment above.
   const dm=document.getElementById('dash-metrics');
   if(dm) dm.innerHTML=[
@@ -40469,12 +40491,11 @@ function _setWkndYearCapBase(v){
 // Preview is side-effect-free; Apply materializes weekendCalls + open shifts
 // for unfillable slots.
 let _wkAAPlan=null;
-function _wkndPlanMonth(ym){
+function _wkndPlanRange(fromIso, toIso){
   const plan=[], gaps=[];
-  const [y,m]=ym.split('-').map(Number);
-  const yr=String(y);
+  const yr=fromIso.slice(0,4);
   const sats=[];
-  for(let d=new Date(y,m-1,1); d.getMonth()===m-1; d.setDate(d.getDate()+1)){
+  for(let d=parseDateLocal(fromIso); fmtDate(d)<=toIso; d.setDate(d.getDate()+1)){
     if(d.getDay()===6) sats.push(fmtDate(d));
   }
   const drs=(S.physicians||[]).filter(p=>p.drFte>0);
@@ -40533,46 +40554,71 @@ function _wkndPlanMonth(ym){
   });
   return {plan,gaps};
 }
+function _wkaaRange(){
+  const yr=document.getElementById('wkaa-yr')?.value||String(new Date().getFullYear());
+  const period=document.getElementById('wkaa-period')?.value||'year';
+  if(period==='H1') return {from:`${yr}-01-01`, to:`${yr}-06-30`, label:`H1 ${yr}`};
+  if(period==='H2') return {from:`${yr}-07-01`, to:`${yr}-12-31`, label:`H2 ${yr}`};
+  return {from:`${yr}-01-01`, to:`${yr}-12-31`, label:`${yr} (annual)`};
+}
+function renderWkAA(){
+  // Static controls; just reset any stale preview state on tab entry.
+  const btn=document.getElementById('wkaa-apply-btn');
+  if(btn&&!_wkAAPlan) btn.style.display='none';
+}
 function previewWkAA(){
   if(!_adminOnly('auto-assign weekend call')) return;
-  const ym=document.getElementById('wkaa-month')?.value;
-  if(!ym){ _toast('Pick a month first.','err'); return; }
-  _wkAAPlan={ym,..._wkndPlanMonth(ym)};
-  const host=document.getElementById('wkaa-result'); if(!host) return;
+  const r=_wkaaRange();
+  _wkAAPlan={label:r.label,..._wkndPlanRange(r.from,r.to)};
+  const host=document.getElementById('wkaa-box'); if(!host) return;
   const {plan,gaps}=_wkAAPlan;
   const bySat={};
   plan.forEach(a=>{ (bySat[a.satDate]=bySat[a.satDate]||[]).push(a); });
   gaps.forEach(g=>{ (bySat[g.satDate]=bySat[g.satDate]||[]).push({...g,gap:true}); });
-  const rows=Object.keys(bySat).sort().map(sat=>{
+  const sats=Object.keys(bySat).sort();
+  // Group rows under month headings for long (semiannual/annual) runs
+  let lastMonth='', rows='';
+  sats.forEach(sat=>{
+    const mo=sat.slice(0,7);
+    if(mo!==lastMonth){
+      lastMonth=mo;
+      const lbl=parseDateLocal(sat).toLocaleString('default',{month:'long',year:'numeric'});
+      rows+=`<div class="fw7 mt8 mb8" style="border-bottom:1px solid var(--bdr);padding-bottom:3px">${escHtml(lbl)}</div>`;
+    }
     const items=bySat[sat].map(a=>a.gap
       ?`<span class="tag tr" title="No eligible candidate">${escHtml(a.sub||'General')} ${a.wshift} — GAP</span>`
       :`<span class="tag ${a.wshift==='swing'?'ta':'tb'}">${escHtml(a.sub||'General')} ${a.wshift}: ${pnameHtml(a.physId)}</span>`).join(' ');
-    return `<div class="row"><span class="fw6" style="min-width:90px">${escHtml(sat)}</span><span>${items}</span></div>`;
-  }).join('');
+    rows+=`<div class="row"><span class="fw6" style="min-width:90px">${escHtml(sat)}</span><span>${items}</span></div>`;
+  });
+  // Per-physician load summary (like the IR preview's totals)
+  const loads={};
+  plan.forEach(a=>{ loads[a.physId]=(loads[a.physId]||0)+1; });
+  const loadLine=Object.entries(loads).sort((a,b)=>b[1]-a[1])
+    .map(([pid,n])=>`${pnameHtml(+pid)}: ${n}`).join(' · ');
   host.innerHTML=plan.length||gaps.length
-    ?`<div class="muted-xs mb8">${plan.length} assignment${plan.length===1?'':'s'} · ${gaps.length} gap${gaps.length===1?'':'s'} (gaps become claimable open shifts on Apply)</div>${rows}`
+    ?`<div class="muted-xs mb8">${escHtml(_wkAAPlan.label)} — ${plan.length} assignment${plan.length===1?'':'s'} · ${gaps.length} gap${gaps.length===1?'':'s'} (gaps become claimable open shifts on Apply)</div>
+      ${loadLine?`<div class="muted-xs mb8">Load: ${loadLine}</div>`:''}${rows}`
     :'<div class="note ni" style="font-size:12px">Nothing to assign — set weekly subspecialty needs under Settings → Weekend Call Needs.</div>';
   const btn=document.getElementById('wkaa-apply-btn');
-  if(btn) btn.disabled=!(plan.length||gaps.length);
+  if(btn) btn.style.display=(plan.length||gaps.length)?'':'none';
 }
 function applyWkAA(){
   if(!_adminOnly('auto-assign weekend call')) return;
   if(!_wkAAPlan||!(_wkAAPlan.plan.length||_wkAAPlan.gaps.length)){ _toast('Run Preview first.','warn'); return; }
-  const {plan,gaps,ym}=_wkAAPlan;
+  const {plan,gaps,label}=_wkAAPlan;
   plan.forEach(a=>{
     S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate,sunDate:a.sunDate,sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift,notes:'Auto'});
   });
   gaps.forEach(g=>{
     S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'TBD',group:'DR',claimedBy:null,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
   });
-  if(typeof _audit==='function') _audit('weekendCall.autoAssign',{month:ym,assigned:plan.length,gaps:gaps.length});
+  if(typeof _audit==='function') _audit('weekendCall.autoAssign',{period:label,assigned:plan.length,gaps:gaps.length});
   triggerSave();
   _wkAAPlan=null;
-  const btn=document.getElementById('wkaa-apply-btn'); if(btn) btn.disabled=true;
-  const host=document.getElementById('wkaa-result');
-  if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} posted as open shifts`:''}.</div>`;
+  const btn=document.getElementById('wkaa-apply-btn'); if(btn) btn.style.display='none';
+  const host=document.getElementById('wkaa-box');
+  if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied ${escHtml(label)}: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} posted as open shifts`:''}.</div>`;
   if(typeof _toast==='function') _toast(`Weekend auto-assign applied — ${plan.length} assigned.`,'ok');
-  renderWkBuilder();
   if(typeof _afterMutation==='function') _afterMutation();
 }
 let _editingWkId = null;
@@ -40620,6 +40666,13 @@ function saveEditWkCall(id){
   }
   const _wsEl = document.getElementById(`wke-wshift-${id}`);
   const _newWs = _wsEl?.value || w.wshift || 'day';
+  // No back-to-back weekends — inherent to all weekend call (warn on edit;
+  // exclude this record itself when the date didn't move).
+  if(typeof _hasAdjacentWeekend==='function'){
+    const _adj=(S.weekendCalls||[]).some(x=>x.id!==id&&x.physId===newPid&&
+      Math.abs((parseDateLocal(x.satDate||x.date)-parseDateLocal(newSat))/86400000)===7);
+    if(_adj&&!confirm('Back-to-back weekend call: this physician covers an adjacent weekend.\n\nSave anyway (admin override)?')) return;
+  }
   // EST rule: non-Eastern physicians (by home address) take swing only.
   if(_newWs==='day'){
     const _p=S.physicians.find(x=>x.id===newPid);
@@ -41143,6 +41196,10 @@ function previewAA(){
               // Same physician shouldn't hold two shifts the same weekend
               if(preview.some(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&a.physId===p.id))return false;
               if(S.weekendCalls.some(w=>(w.satDate||w.date)===c.date&&w.physId===p.id))return false;
+              // No back-to-back weekend call — inherent to ALL weekend
+              // assignment (matches the IR rule + the manual-add block).
+              if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,c.date))return false;
+              if(preview.some(a=>a.type==='wk'&&a.physId===p.id&&Math.abs((parseDateLocal(a.satDate||a.date)-parseDateLocal(c.date))/86400000)===7))return false;
               // Summer cap: ≤ N weekends Jun 1 – Aug 31 (default 2)
               if(_wkndIsSummer(c.date)&&_wkndSummerCount(p.id,_yr,preview)>=_wkndSummerCap())return false;
               // Yearly cap × DR FTE (unset = no cap)
