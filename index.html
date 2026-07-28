@@ -9487,6 +9487,7 @@ create table pacs_inbound (
         builder, bulk, burnout, call-day-site, click-empty-cell, command,
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
+        min-staffing, sell/buy,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -10323,6 +10324,7 @@ const _PERSISTED_KEYS = [
   {key:'auditLog',          type:'array'},
   // Vacation picking state
   {key:'vacPicking',        type:'object'},
+  {key:'vacSurveys',        type:'array'},   // sell/buy vacation surveys (responses via rs_vac_survey_respond RPC)
   // Per-site/shift physician caps and sub-need minimums. Used by
   // _siteCap()/_subNeed() during auto-assign and slot rendering.
   // Audit fix: previously written to S.siteCaps / S.shiftSubNeeds by
@@ -14919,7 +14921,7 @@ function _validateRemotePayload(d){
   // every object key SHOULD be an object. Wrong types likely mean either a
   // corrupt save or a payload from a much-older / much-newer client. Patch
   // the local field after warning so the app stays functional.
-  const arrayKeys = ['physicians','drSubs','irSubs','sites','irGroups','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups','tumorBoards','clinics','publishLog'];
+  const arrayKeys = ['physicians','drSubs','irSubs','sites','irGroups','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups','tumorBoards','clinics','publishLog','vacSurveys'];
   const objectKeys = ['siteSlots','siteSlotsSubs','irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','wkndNeeds','cfg','driveTimes','vacPicking'];
   arrayKeys.forEach(k => {
     if(k in d && !Array.isArray(d[k])){
@@ -16099,6 +16101,7 @@ let S=/*S_START*/{
     {name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]},
   ],
   vacations:[],
+  vacSurveys:[],
   drShifts:[],
   weekendCalls:[],
   // irShifts: non-call daily procedure shifts (separate from on-call schedule)
@@ -16151,6 +16154,7 @@ let S=/*S_START*/{
   nextId:100,
   aaPreview:[],iraPreview:[],irsaPreview:[],
   vacPicking:{year:new Date().getFullYear(),defaultRounds:12,roundOpen:1,viewRound:1,
+    minWorking:null,minWeeksBase:null,extraSlots:{},
     seniority:[],physRounds:{},physSection:{},sectionLimits:{},totalWeekLimit:{},
     picks:{},assignments:{}},
   chatMessages:[],
@@ -21410,31 +21414,74 @@ function _vacWeeks(year){
 }
 
 // Check if a week is available for a physician (returns {ok,reason})
+// ── Min-staffing capacity model (2026-07 redesign) ────────────────────────
+// The old model capped "max physicians off per week". The setting is now the
+// MINIMUM RADIOLOGISTS WORKING (vp.minWorking): allowed-off for a week =
+// eligible roster − minWorking, plus any admin-granted per-week extra slots
+// (vp.extraSlots[weekNum]). The legacy totalWeekLimit.default still acts as a
+// fallback ceiling for practices that never set minWorking.
+function _vacEligibleCount(){
+  return (S.physicians||[]).filter(p=>((+p.drFte||0)+(+p.irFte||0))>0).length;
+}
+// FTE-scaled minimum weeks off (advisory): admin base × physician total FTE.
+function _vacMinWeeks(physId){
+  const base=+(S.vacPicking?.minWeeksBase);
+  if(!isFinite(base)||base<=0) return null;
+  const p=(S.physicians||[]).find(x=>x.id===physId); if(!p) return null;
+  return Math.round(base*((+p.drFte||0)+(+p.irFte||0)));
+}
+function _vacAllowedOff(wn){
+  const vp=S.vacPicking||{};
+  const extra=+(vp.extraSlots?.[wn])||0;
+  const minW=+(vp.minWorking);
+  if(isFinite(minW)&&minW>0) return Math.max(0,_vacEligibleCount()-minW)+extra;
+  const legacy=vp.totalWeekLimit?.default;
+  if(legacy!=null) return (+legacy||0)+extra;
+  return null;   // uncapped
+}
+// Distinct physicians off during a picking week, counted from REAL S.vacations
+// overlap — so manually-entered time off counts against staffing too, not just
+// picking assignments (which sync into S.vacations). Sold-back = working.
+function _vacOffCount(wn, year, exceptPhysId){
+  const week=_vacWeeks(year).find(w=>w.week===wn); if(!week) return 0;
+  const off=new Set();
+  (S.vacations||[]).forEach(v=>{
+    if(v.type==='Vacation Sold Back'||v.type==='whatif') return;
+    if(exceptPhysId!=null&&v.physId===exceptPhysId) return;
+    if(v.start<=week.end&&v.end>=week.start) off.add(v.physId);
+  });
+  return off.size;
+}
 function _vacWeekAvail(wn, physId, year){
   const vp=S.vacPicking;
+  const yr=year||vp.year||new Date().getFullYear();
   // Already assigned to this physician
   if(Object.values(vp.assignments?.[physId]||{}).includes(wn))
     return{ok:false,reason:'Already your week'};
-  // Count who has this week assigned
-  let total=0; const secCnt={};
-  Object.entries(vp.assignments||{}).forEach(([pid,rds])=>{
-    Object.values(rds).forEach(aw=>{
-      if(aw===wn){
-        total++;
-        const sec=vp.physSection?.[+pid]||null;
-        if(sec) secCnt[sec]=(secCnt[sec]||0)+1;
-      }
-    });
-  });
-  // Total limit
-  const totLim=vp.totalWeekLimit?.default;
-  if(totLim!=null&&total>=totLim) return{ok:false,reason:`Full (${total}/${totLim})`};
-  // Section limit
+  // Min-staffing check against everyone actually off that week
+  const allowed=_vacAllowedOff(wn);
+  if(allowed!=null){
+    const total=_vacOffCount(wn,yr,physId);
+    if(total>=allowed){
+      const minW=+(vp.minWorking);
+      return{ok:false,reason:(isFinite(minW)&&minW>0)
+        ?`Full (${total}/${allowed} off — min ${minW} working)`
+        :`Full (${total}/${allowed})`};
+    }
+  }
+  // Section limit (counted from picking assignments, as before)
   const mySec=vp.physSection?.[physId]||null;
   if(mySec){
     const secLim=vp.sectionLimits?.[mySec];
-    if(secLim!=null&&(secCnt[mySec]||0)>=secLim)
-      return{ok:false,reason:`${mySec} full (${secCnt[mySec]||0}/${secLim})`};
+    if(secLim!=null){
+      let secCnt=0;
+      Object.entries(vp.assignments||{}).forEach(([pid,rds])=>{
+        if(+pid===physId) return;
+        if(vp.physSection?.[+pid]===mySec&&Object.values(rds).includes(wn)) secCnt++;
+      });
+      if(secCnt>=secLim)
+        return{ok:false,reason:`${mySec} full (${secCnt}/${secLim})`};
+    }
   }
   return{ok:true};
 }
@@ -21600,16 +21647,21 @@ function renderVacSetup(){
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Total Week Cap
-        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Max physicians off per week (all sections)</span>
+      <div class="card-title">Staffing Floor
+        <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Capacity = roster − minimum working (+ per-week extra slots on the Calendar tab)</span>
       </div>
-      <div class="flex" style="gap:8px;align-items:flex-end">
-        <div class="fg m0" ><label>Max per week</label>
-          <input id="vacp-total-lim" type="number" min="0" max="50" placeholder="No limit"
-            value="${vp.totalWeekLimit?.default??''}" style="width:90px">
+      <div class="flex" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg m0" ><label>Min radiologists working / week</label>
+          <input id="vacp-min-working" type="number" min="0" max="200" placeholder="No floor"
+            value="${vp.minWorking??''}" style="width:110px">
+        </div>
+        <div class="fg m0" ><label>Min weeks off (base × FTE)</label>
+          <input id="vacp-min-weeks" type="number" min="0" max="26" step="0.5" placeholder="None"
+            value="${vp.minWeeksBase??''}" style="width:110px">
         </div>
         <button class="bt bsm" onclick="saveVacSetup()">Save</button>
       </div>
+      <div class="muted-xs mt8">Eligible roster now: ${_vacEligibleCount()} radiologists${(isFinite(+vp.minWorking)&&+vp.minWorking>0)?` → up to ${Math.max(0,_vacEligibleCount()-+vp.minWorking)} off per week (before extra slots)`:''}. Min-weeks is advisory: each radiologist's target = base × their total FTE, shown on the Rounds and Calendar tabs.</div>
     </div>
   </div>
   <div class="card mb12" >
@@ -21643,6 +21695,7 @@ function renderVacSetup(){
     const rds=vp.physRounds?.[p.id]??'';
     const opts=`<option value="">— default (${vp.defaultRounds??12}) —</option>`+
       secOptions.map(s=>`<option${sec===s?' selected':''}>${s}</option>`).join('');
+    const minWk=_vacMinWeeks(p.id);
     html+=`<tr>
       <td class="fw6">${pnameHtml(p.id)}</td>
       <td><span class="tag ${p.role==='IR'?'tt':p.role==='MIXED'?'ta':'tb'}">${p.role}</span></td>
@@ -21650,24 +21703,167 @@ function renderVacSetup(){
         ${opts}</select></td>
       <td><input type="number" min="0" max="52" placeholder="${vp.defaultRounds??12}"
         value="${rds}" style="width:60px;font-size:11px"
-        onchange="setPhysVacRounds(${p.id},this.value)"></td>
+        onchange="setPhysVacRounds(${p.id},this.value)">${minWk!=null?`<span class="muted-xs" title="Minimum weeks off: base ${vp.minWeeksBase} × FTE ${((+p.drFte||0)+(+p.irFte||0)).toFixed(2)}"> min ${minWk}</span>`:''}</td>
     </tr>`;
   });
   html+=`</tbody></table></div></div>`;
+  // ── Sell/buy survey card ──
+  const sv=_vacCurrentSurvey();
+  const eligible=(S.physicians||[]).filter(p=>((+p.drFte||0)+(+p.irFte||0))>0);
+  let svBody='';
+  if(!sv||sv.status==='applied'){
+    svBody=`${sv?`<div class="muted-xs mb8">Last survey (${escHtml(String(sv.year))}) applied ${escHtml((sv.appliedAt||'').slice(0,10))} — ${(sv.responses||[]).length} response${(sv.responses||[]).length===1?'':'s'}.</div>`:''}
+      <button class="bp bsm" onclick="vacSurveyCreate()">📨 Start ${vp.year||''} survey &amp; notify radiologists</button>
+      <div class="muted-xs mt8">Every radiologist is asked: keep your weeks, sell some back, or buy extra. Applying the survey adjusts their picking rounds automatically.</div>`;
+  } else {
+    const resp=sv.responses||[];
+    const respBy=new Set(resp.map(r=>r.physId));
+    const pending=eligible.filter(p=>!respBy.has(p.id));
+    svBody=`<div class="mb8"><span class="tag ${sv.status==='open'?'tg':'ta'}">${sv.status.toUpperCase()}</span>
+        <span class="muted-xs"> ${resp.length}/${eligible.length} responded${pending.length?` — waiting on ${pending.map(p=>escHtml(p.last)).join(', ')}`:''}</span></div>
+      ${resp.length?`<div class="scroll-x mb8"><table style="font-size:11px"><thead><tr class="txt3" style="font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+        <th class="tal" style="padding:4px 8px">Radiologist</th><th class="tal" style="padding:4px 8px">Answer</th><th class="tal" style="padding:4px 8px">Δ weeks</th><th class="tal" style="padding:4px 8px">When</th></tr></thead><tbody>
+        ${resp.map(r=>{const d=r.action==='buy'?`+${r.weeks}`:r.action==='sell'?`−${r.weeks}`:'0';
+          return `<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:4px 8px">${pnameHtml(r.physId)}</td>
+            <td style="padding:4px 8px"><span class="tag ${r.action==='buy'?'tg':r.action==='sell'?'ta':'tb'}">${escHtml(r.action)}</span></td>
+            <td style="padding:4px 8px" class="fw6">${d}</td>
+            <td style="padding:4px 8px" class="muted-xs">${escHtml((r.ts||'').slice(0,10))}</td></tr>`;}).join('')}
+      </tbody></table></div>`:'<div class="muted-xs mb8">No responses yet.</div>'}
+      ${sv.status==='open'
+        ?`<button class="bt bsm" onclick="vacSurveyClose()">Close survey</button>`
+        :`<button class="bp bsm" onclick="vacSurveyApply()">✓ Apply adjustments to rounds</button>
+          <button class="bt bsm" onclick="vacSurveyReopen()">Reopen</button>`}`;
+  }
+  html+=`<div class="card mb12">
+    <div class="card-title">Sell / Buy Vacation Survey
+      <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:6px">Run before picking starts — answers adjust each radiologist's week count</span>
+    </div>${svBody}</div>`;
   document.getElementById('vacp-content').innerHTML=html;
 }
 
 function saveVacSetup(){
   const vp=S.vacPicking;
-  vp.year=+document.getElementById('vacp-year')?.value||2026;
-  vp.defaultRounds=+document.getElementById('vacp-def-rounds')?.value||12;
-  vp.roundOpen=+document.getElementById('vacp-open-round')?.value||1;
-  const tl=document.getElementById('vacp-total-lim')?.value;
-  if(!vp.totalWeekLimit) vp.totalWeekLimit={};
-  vp.totalWeekLimit.default=tl?+tl:null;
+  // Each field only writes when its input EXISTS in the DOM. The Rounds tab's
+  // "Advance to Round" button calls this while the Setup inputs are absent \u2014
+  // the old unconditional reads silently reset year/rounds/caps every advance.
+  const _el=id=>document.getElementById(id);
+  if(_el('vacp-year'))       vp.year=+_el('vacp-year').value||2026;
+  if(_el('vacp-def-rounds')) vp.defaultRounds=+_el('vacp-def-rounds').value||12;
+  if(_el('vacp-open-round')) vp.roundOpen=+_el('vacp-open-round').value||1;
+  if(_el('vacp-min-working')){
+    const mw=_el('vacp-min-working').value;
+    vp.minWorking=mw!==''?Math.max(0,+mw||0):null;
+  }
+  if(_el('vacp-min-weeks')){
+    const mwk=_el('vacp-min-weeks').value;
+    vp.minWeeksBase=mwk!==''?Math.max(0,+mwk||0):null;
+  }
   triggerSave();
   const msg=document.getElementById('vacp-save-msg');
   if(msg){msg.textContent='\u2713 Saved';setTimeout(()=>{msg.textContent='';},2500);}
+}
+// Admin: per-week extra vacation slots (added on top of the min-staffing cap).
+function setVacExtraSlots(wn, val){
+  if(!_adminOnly('set extra vacation slots')) return;
+  const vp=S.vacPicking;
+  if(!vp.extraSlots||typeof vp.extraSlots!=='object') vp.extraSlots={};
+  const n=+val;
+  if(!val||isNaN(n)||n<=0) delete vp.extraSlots[wn];
+  else vp.extraSlots[wn]=Math.floor(n);
+  if(typeof _audit==='function') _audit('vacPick.extraSlots',{week:wn,slots:vp.extraSlots[wn]||0});
+  triggerSave();
+  if(typeof renderVacCalendar==='function') renderVacCalendar();
+}
+// ── Sell/buy vacation survey (pre-picking) ────────────────────────────────
+// Admin opens a survey; every radiologist answers keep / sell N / buy N from
+// My Schedule → Vacation (response lands via the rs_vac_survey_respond DEFINER
+// RPC — non-admins can't write the blob directly). On APPLY, each answer
+// adjusts the physician's round count (weeks entitlement): buy adds rounds,
+// sell removes them, floored at 0.
+function _vacCurrentSurvey(){
+  const arr=S.vacSurveys||[];
+  return arr.length?arr[arr.length-1]:null;
+}
+function vacSurveyCreate(){
+  if(!_adminOnly('start a vacation survey')) return;
+  const cur=_vacCurrentSurvey();
+  if(cur&&cur.status!=='applied'){ if(typeof _toast==='function') _toast('Close and apply the current survey first.','warn'); return; }
+  if(!Array.isArray(S.vacSurveys)) S.vacSurveys=[];
+  const yr=S.vacPicking?.year||new Date().getFullYear();
+  const sv={id:S.nextId++, year:yr, status:'open', createdAt:new Date().toISOString(), responses:[]};
+  S.vacSurveys.push(sv);
+  if(typeof _audit==='function') _audit('vacSurvey.open',{id:sv.id,year:yr});
+  triggerSave();
+  const pids=(S.physicians||[]).filter(p=>((+p.drFte||0)+(+p.irFte||0))>0).map(p=>p.id);
+  if(typeof _notify==='function') _notify('vacation',{physIds:pids,
+    subject:`Vacation survey ${yr} — keep, sell, or buy weeks`,
+    body:`Before ${yr} vacation picking starts, tell us whether you want to keep your allotted vacation weeks, sell some back, or buy extra.\n\nRespond in RadScheduler → My Schedule → Vacation tab. Your week count for the picking rounds will be adjusted automatically once the survey is applied.`});
+  if(typeof _toast==='function') _toast('Survey opened — radiologists have been notified.','ok');
+  renderVacSetup();
+}
+function vacSurveyClose(){
+  if(!_adminOnly('close the vacation survey')) return;
+  const sv=_vacCurrentSurvey();
+  if(!sv||sv.status!=='open') return;
+  sv.status='closed'; sv.closedAt=new Date().toISOString();
+  if(typeof _audit==='function') _audit('vacSurvey.close',{id:sv.id});
+  triggerSave(); renderVacSetup();
+}
+function vacSurveyReopen(){
+  if(!_adminOnly('reopen the vacation survey')) return;
+  const sv=_vacCurrentSurvey();
+  if(!sv||sv.status!=='closed') return;
+  sv.status='open'; delete sv.closedAt;
+  triggerSave(); renderVacSetup();
+}
+function vacSurveyApply(){
+  if(!_adminOnly('apply the vacation survey')) return;
+  const sv=_vacCurrentSurvey();
+  if(!sv||sv.status!=='closed'){ if(typeof _toast==='function') _toast('Close the survey before applying it.','warn'); return; }
+  const vp=S.vacPicking;
+  if(!vp.physRounds) vp.physRounds={};
+  let adjusted=0;
+  (sv.responses||[]).forEach(r=>{
+    const delta=r.action==='buy'?+r.weeks||0:r.action==='sell'?-(+r.weeks||0):0;
+    if(!delta) return;
+    const base=vp.physRounds[r.physId]??vp.defaultRounds??12;
+    vp.physRounds[r.physId]=Math.max(0,base+delta);
+    adjusted++;
+  });
+  sv.status='applied'; sv.appliedAt=new Date().toISOString();
+  if(typeof _audit==='function') _audit('vacSurvey.apply',{id:sv.id,adjusted});
+  triggerSave();
+  if(typeof _toast==='function') _toast(`Survey applied — ${adjusted} week allotment${adjusted===1?'':'s'} adjusted.`,'ok');
+  renderVacSetup();
+}
+// Radiologist response (non-admin write → DEFINER RPC + authoritative re-pull)
+async function _vacSurveyRespond(action){
+  const sv=_vacCurrentSurvey();
+  if(!sv||sv.status!=='open'){ if(typeof _toast==='function') _toast('No open survey.','warn'); return; }
+  if(!CU?.physId){ if(typeof _toast==='function') _toast('Your login isn\'t linked to a physician.','err'); return; }
+  const weeks=action==='keep'?0:Math.max(1,Math.min(4,+document.getElementById('vacsv-weeks')?.value||1));
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_vac_survey_respond',{p_practice:_rsPracticeId(), p_survey_id:sv.id, p_action:action, p_weeks:weeks}); }
+  catch(e){ if(typeof _toast==='function') _toast('Could not save: '+(e&&e.message||e),'err'); return; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not save: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return; }
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  if(typeof _toast==='function') _toast(action==='keep'?'Answer saved — keeping your weeks.':`Answer saved — ${action} ${weeks} week${weeks===1?'':'s'}.`,'ok');
+  if(typeof renderMyVacPicks==='function') renderMyVacPicks();
+}
+// Self-service picks (non-admin write → DEFINER RPC; fixes the Phase-5 gap
+// where a radiologist's saved picks never actually reached the server)
+async function _vacSubmitMyPicks(picks){
+  const vp=S.vacPicking;
+  const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
+  if(!_sb){ if(typeof _toast==='function') _toast('Not connected — try again.','err'); return false; }
+  let _res;
+  try{ _res=await _sb.rpc('rs_set_vac_picks',{p_practice:_rsPracticeId(), p_round:vp.roundOpen||1, p_picks:picks}); }
+  catch(e){ if(typeof _toast==='function') _toast('Could not save picks: '+(e&&e.message||e),'err'); return false; }
+  if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not save picks: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'err'); return false; }
+  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
+  return true;
 }
 function addVacSection(){
   if(!_adminOnly('change vacation sections')) return;
@@ -21856,20 +22052,24 @@ function renderVacCalendar(){
       weekPhys[wn].push(+pid);
     });
   });
-  const totLim=vp.totalWeekLimit?.default;
-  const secLims=vp.sectionLimits||{};
+  const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
 
   let html=`<div class="scroll-x"><table style="font-size:11px;min-width:400px">
     <thead><tr style="background:var(--navy)">
       <th style="color:#fff;padding:6px 8px;min-width:50px">Wk</th>
       <th style="color:#fff;padding:6px 8px;min-width:140px">Dates (incl. weekends)</th>
       <th style="color:#fff;padding:6px 8px">Physicians Off</th>
-      <th style="color:#fff;padding:6px 8px;min-width:80px">Capacity</th>
+      <th style="color:#fff;padding:6px 8px;min-width:90px">Off / Allowed</th>
+      ${isAdm?`<th style="color:#fff;padding:6px 8px;min-width:70px" title="Extra vacation slots for this week, on top of the staffing-floor capacity">Extra</th>`:''}
     </tr></thead><tbody>`;
 
   weeks.forEach(w=>{
     const onVac=weekPhys[w.week]||[];
-    const isFull=totLim!=null&&onVac.length>=totLim;
+    // Real occupancy (manual time off counts too) + min-staffing capacity
+    const offCount=_vacOffCount(w.week,year,null);
+    const allowed=_vacAllowedOff(w.week);
+    const extra=+(vp.extraSlots?.[w.week])||0;
+    const isFull=allowed!=null&&offCount>=allowed;
     // Vacation dates including flanking weekends
     const s=parseDateLocal(w.start); s.setDate(s.getDate()-1);
     const e=parseDateLocal(w.end);   e.setDate(e.getDate()+1);
@@ -21888,20 +22088,43 @@ function renderVacCalendar(){
           :'<span class="txt3">\u2014</span>'}
       </td>
       <td style="padding:5px 8px;text-align:center">
-        ${totLim!=null
-          ?`<span style="font-weight:700;color:${isFull?'var(--red-t)':'var(--green-t)'}">${onVac.length}/${totLim}</span>`
-          :`<span class="txt3">${onVac.length} off</span>`}
+        ${allowed!=null
+          ?`<span class="fw7" style="color:${isFull?'var(--red-t)':'var(--green-t)'}">${offCount}/${allowed}</span>${extra?`<span class="muted-xs" title="incl. ${extra} extra slot${extra===1?'':'s'}"> (+${extra})</span>`:''}`
+          :`<span class="txt3">${offCount} off</span>`}
       </td>
+      ${isAdm?`<td style="padding:3px 6px;text-align:center">
+        <input type="number" min="0" max="20" value="${extra||''}" placeholder="0"
+          style="width:48px;padding:2px 4px;font-size:10px"
+          onchange="setVacExtraSlots(${w.week},this.value)"
+          title="Extra vacation slots for Wk ${w.week}">
+      </td>`:''}
     </tr>`;
   });
 
   html+=`</tbody></table></div>`;
-  // Summary
+  // Summary + advisory: radiologists still below their FTE-scaled minimum weeks
   const totalAssigned=Object.values(vp.assignments||{}).reduce((s,rds)=>s+Object.values(rds).filter(v=>v!=null).length,0);
+  let belowMin='';
+  if(isFinite(+vp.minWeeksBase)&&+vp.minWeeksBase>0){
+    const short=(S.physicians||[])
+      .filter(p=>((+p.drFte||0)+(+p.irFte||0))>0)
+      .map(p=>{
+        const min=_vacMinWeeks(p.id)||0;
+        const got=Object.values(vp.assignments?.[p.id]||{}).filter(v=>v!=null).length;
+        return {p,min,got};
+      })
+      .filter(x=>x.min>0&&x.got<x.min);
+    if(short.length){
+      belowMin=`<div class="note nw" style="font-size:12px">Below minimum weeks off (base ${vp.minWeeksBase} × FTE): ${
+        short.map(x=>`${escHtml(x.p.last)} ${x.got}/${x.min}`).join(' · ')}</div>`;
+    } else {
+      belowMin=`<div class="note ns" style="font-size:12px">All radiologists meet their minimum weeks off (base ${vp.minWeeksBase} × FTE).</div>`;
+    }
+  }
   html=`<div class="note ni" style="margin-bottom:10px;font-size:12px">
     ${year} · <strong>${totalAssigned}</strong> vacation week(s) assigned across all rounds ·
-    Green = at least 1 physician off · Amber = at capacity
-  </div>`+html;
+    Green = at least 1 physician off · Amber = at staffing-floor capacity${isAdm?' · Extra column grants per-week bonus slots':''}
+  </div>`+belowMin+html;
   document.getElementById('vacp-content').innerHTML=html;
 }
 
@@ -22430,12 +22653,29 @@ function renderMyVacPicks(){
   const senIdx=(vp.seniority||[]).indexOf(physId);
 
   // ── Header cards ─────────────────────────────────────────────────────────
+  const myMinWk=_vacMinWeeks(physId);
   let html=`<div class="g4 mb14" >
     <div class="met"><div class="met-lbl">Year</div><div class="met-val">${year}</div></div>
     <div class="met"><div class="met-lbl">Open Round</div><div class="met-val">${openRound}</div></div>
-    <div class="met"><div class="met-lbl">Your Rounds</div><div class="met-val">${maxRounds}</div></div>
+    <div class="met"><div class="met-lbl">Your Rounds</div><div class="met-val">${maxRounds}</div>${myMinWk!=null?`<div class="met-sub">min ${myMinWk} wk${myMinWk===1?'':'s'} (× FTE)</div>`:''}</div>
     <div class="met"><div class="met-lbl">Seniority Rank</div><div class="met-val">${senIdx>=0?senIdx+1:'—'}</div></div>
   </div>`;
+  // ── Sell/buy survey card (shown while a survey is open) ──────────────────
+  const _sv=(typeof _vacCurrentSurvey==='function')?_vacCurrentSurvey():null;
+  if(_sv&&_sv.status==='open'){
+    const mine=(_sv.responses||[]).find(r=>r.physId===physId);
+    html+=`<div class="card mb14" style="border-left:3px solid var(--blue)">
+      <div class="card-title">📨 Vacation survey — ${_sv.year}</div>
+      ${mine?`<div class="note ns" style="font-size:12px">You answered: <strong>${escHtml(mine.action)}</strong>${mine.action!=='keep'?` ${mine.weeks} week${mine.weeks===1?'':'s'}`:''}. You can change your answer while the survey is open.</div>`
+            :`<div class="note ni" style="font-size:12px">Before picking starts: do you want to keep your ${maxRounds} vacation week${maxRounds===1?'':'s'}, sell some back, or buy extra?</div>`}
+      <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="bp bsm" onclick="_vacSurveyRespond('keep')">Keep my weeks</button>
+        <select id="vacsv-weeks" style="font-size:12px">${[1,2,3,4].map(n=>`<option value="${n}">${n} week${n===1?'':'s'}</option>`).join('')}</select>
+        <button class="bt bsm" onclick="_vacSurveyRespond('sell')">Sell back</button>
+        <button class="bt bsm" onclick="_vacSurveyRespond('buy')">Buy extra</button>
+      </div>
+    </div>`;
+  }
 
   // ── All assigned weeks (across all rounds) ────────────────────────────────
   const allAssigned=Object.entries(vp.assignments?.[physId]||{})
@@ -22581,7 +22821,7 @@ function saveMyVacPick(ci){
   setVacPick(physId,openRound,ci,wn);
 }
 
-function saveAllMyVacPicks(){
+async function saveAllMyVacPicks(){
   const physId=CU?.physId; if(!physId) return;
   const vp=S.vacPicking;
   const openRound=vp.roundOpen||1;
@@ -22593,9 +22833,15 @@ function saveAllMyVacPicks(){
     _toast('You have duplicate week selections. Each choice must be a different week.','warn');
     return;
   }
+  // Optimistic local state, then COMMIT via the rs_set_vac_picks DEFINER RPC \u2014
+  // non-admin blob pushes are dropped post-Phase-5, so without the RPC a
+  // radiologist's saved picks silently never reached the server.
   vals.forEach((wn,ci)=>setVacPick(physId,openRound,ci,wn));
+  const ok=(typeof _isAdminOrSU==='function'&&_isAdminOrSU())
+    ? true   // admins persist via the normal blob push
+    : await _vacSubmitMyPicks(vals);
   const msg=document.getElementById('myvac-save-msg');
-  if(msg){msg.textContent='\u2713 Picks saved!';setTimeout(()=>{msg.textContent='';},3000);}
+  if(msg&&ok){msg.textContent='\u2713 Picks saved!';setTimeout(()=>{msg.textContent='';},3000);}
 }
 
 
