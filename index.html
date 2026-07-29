@@ -11337,7 +11337,10 @@ function _irsaSolveMCF(opts){
             const sub = m ? m[1].trim() : line;
             return p.drSubs.includes(sub) || p.irSubs?.includes(sub);
           });
-          if(fillsUnmet) cost -= 30; // small reward for filling unmet need
+          // 2026-07: subspecialty coverage is a HARD priority — subspecialty
+          // spots always fill before general ones, so the bonus must dominate
+          // every soft preference (site/anchor/burnout are all < 100).
+          if(fillsUnmet) cost -= 300;
         }
       }
       // Tiebreaker: scaled inverse of (quota - existing assigns) — under-utilized
@@ -41059,6 +41062,13 @@ function previewAA(){
   if(typ==='weekday'||typ==='both'){
     cells.filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).forEach(c=>{
       const wk=getWeek(c.date,ym);
+      // TWO-PHASE FILL (2026-07): subspecialty slots fill FIRST across ALL
+      // sites/shifts for the day, then general slots — so a scarce specialist
+      // can't be consumed by one site's general slot while another site's
+      // subspecialty slot goes unfilled. Sub-holders whose specialty slots
+      // are already covered overflow into general slots in phase 2 (the
+      // general pool has no sub restriction).
+      ['sub','any'].forEach(_subPhase=>{
       S.sites.filter(st=>st.name!=='At Home / Remote').forEach(st=>{
         // Hospital sites now process BOTH '1st' (in-person) and 'Home' (read-
         // from-home attributed to this hospital). The same fillList / sub-
@@ -41099,7 +41109,7 @@ function previewAA(){
           const anyLeft = slots - fillList.length;
           for(let i=0; i<anyLeft; i++) fillList.push({targetSub: null, slotIndex:_nextSlotIdx++});
 
-          fillList.forEach(({targetSub, slotIndex}) => {
+          fillList.filter(f=>_subPhase==='sub'?!!f.targetSub:!f.targetSub).forEach(({targetSub, slotIndex}) => {
             // Resolve the admin-set slot label for this position, if any
             const _slotLabel = (S.siteSlotLabels||{})[`${st.name}|${sh}|#${slotIndex}`] || '';
             const pool=drs.filter(p=>{
@@ -41165,6 +41175,7 @@ function previewAA(){
           });
         });
       });
+      });   // end sub→any phase loop
       // Configured home slots
       const hNeed=S.siteSlots[`At Home / Remote|${wk}|Home`]||0;
       const hEx=S.drShifts.filter(s=>s.date===c.date&&s.shift==='Home').length
