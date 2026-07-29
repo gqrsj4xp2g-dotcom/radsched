@@ -3131,6 +3131,7 @@ tbody tr:hover{background:var(--bg3)}
         <label class="chk"><input type="checkbox" id="pe-s3"> 3rd Shift</label>
         <label class="chk"><input type="checkbox" id="pe-home" checked> At Home</label>
         <label class="chk"><input type="checkbox" id="pe-wknd" checked> Weekend Call</label>
+        <label class="chk" title="Eligible for weekend call, but only the Swing shift — never the Day shift (independent of home-address timezone)"><input type="checkbox" id="pe-wknd-swing"> Weekend: Swing only</label>
       </div>
     </div>
     <!-- DEBULKING + wRVU multiplier — both feed the desktop widget. -->
@@ -18632,6 +18633,8 @@ function editPhys(id){
     const el=document.getElementById('pe-'+k);
     if(el) el.checked=!!se[k];
   });
+  const _wsEl=document.getElementById('pe-wknd-swing');
+  if(_wsEl) _wsEl.checked=!!se.wkndSwingOnly;
   // Debulking eligibility (default true if unset on a legacy record)
   const dbe = document.getElementById('p-debulking');
   if(dbe) dbe.checked = (p.debulkingEligible !== false);
@@ -18711,6 +18714,7 @@ function _saveEditPhys(id){
     s3: !!document.getElementById('pe-s3')?.checked,
     home: !!document.getElementById('pe-home')?.checked,
     wknd: !!document.getElementById('pe-wknd')?.checked,
+    wkndSwingOnly: !!document.getElementById('pe-wknd-swing')?.checked,
   };
   // Home / in-person preference. Null = no preference (auto-assigner ignores).
   // Honored only when the "Honor" checkbox is on AND the role uses DR FTE.
@@ -18822,6 +18826,7 @@ function addPhys(){
       s3:!!document.getElementById('pe-s3')?.checked,
       home:!!document.getElementById('pe-home')?.checked,
       wknd:!!document.getElementById('pe-wknd')?.checked,
+      wkndSwingOnly:!!document.getElementById('pe-wknd-swing')?.checked,
     },
     drHomePctPref: _drHomePctPref,
     drSite:anchor||S.sites[0]?.name||'',
@@ -40492,6 +40497,10 @@ function _drDayFte(p){
   if(p.shiftElig&&p.shiftElig.s1===false) return 0;
   return +p.drFte||0;
 }
+// Can this physician take the DAY shift of weekend call? Blocked by either
+// the explicit "Weekend: Swing only" eligibility flag on their profile OR a
+// home address outside Eastern time. (Swing has no such restriction.)
+function _wkndDayOk(p){ return !(p?.shiftElig?.wkndSwingOnly) && _physIsEastern(p); }
 function _wkndIsSummer(d){ if(!d) return false; const y=d.slice(0,4); return d>=`${y}-06-01`&&d<=`${y}-08-31`; }
 function _wkndSummerCap(){ const c=+(S.cfg?.wkndSummerCap); return isFinite(c)&&c>0?c:2; }
 function _wkndYearCap(p){
@@ -40571,7 +40580,7 @@ function _wkndPlanRange(fromIso, toIso){
             if(!p.shiftElig?.wknd)return false;
             if(_drDayFte(p)<=0)return false;
             if(sub&&!(p.drSubs||[]).includes(sub))return false;
-            if(wshift==='day'&&!_physIsEastern(p))return false;
+            if(wshift==='day'&&!_wkndDayOk(p))return false;
             const vd=vacDays(p.id);
             if(vd.has(sat)||vd.has(sunDate))return false;
             if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
@@ -40732,7 +40741,7 @@ function saveEditWkCall(id){
   // EST rule: non-Eastern physicians (by home address) take swing only.
   if(_newWs==='day'){
     const _p=S.physicians.find(x=>x.id===newPid);
-    if(_p&&!_physIsEastern(_p)&&!confirm(`${_p.last} is outside Eastern time (by address) — day shifts aren't allowed, only swing.\n\nAssign the DAY shift anyway (admin override)?`)) return;
+    if(_p&&!_wkndDayOk(_p)&&!confirm(`${_p.last} can't take DAY weekend shifts (swing-only flag or non-Eastern address).\n\nAssign the DAY shift anyway (admin override)?`)) return;
   }
   w.physId  = newPid;
   w.satDate = newSat;
@@ -40785,8 +40794,8 @@ function renderWkBuilder(){
         </td>
       </tr>`;
     }
-    const _est=_physIsEastern(S.physicians.find(p=>p.id===w.physId));
-    return`<tr><td>${pnameHtml(w.physId)}${_est?'':' <span class="tag ta" title="Outside Eastern time (by address) — swing only" style="font-size:9px">non-EST</span>'}</td><td>${sat}</td><td>${sun}</td>
+    const _est=_wkndDayOk(S.physicians.find(p=>p.id===w.physId));
+    return`<tr><td>${pnameHtml(w.physId)}${_est?'':' <span class="tag ta" title="Swing-only (profile flag or non-Eastern address)" style="font-size:9px">swing only</span>'}</td><td>${sat}</td><td>${sun}</td>
       <td><span class="tag ${(w.wshift||'day')==='swing'?'ta':'tb'}">${(w.wshift||'day')==='swing'?'Swing':'Day'}</span></td>
       <td>${w.sub||'—'}</td><td>${w.site||'—'}</td><td><span class="tag tb">${w.ctype||'Primary'}</span></td>
       <td style="white-space:nowrap">
@@ -40829,7 +40838,7 @@ function addWkCall(){
   // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend call.
   if(_drDayFte(p)<=0&&!confirm(`${p.last} has no day-shift DR FTE — diagnostic weekend call doesn't apply to 2nd/3rd-shift-only radiologists.\n\nAssign anyway (admin override)?`))return;
   // EST rule: non-Eastern physicians (by home address) take swing only.
-  if(wshift==='day'&&!_physIsEastern(p)&&!confirm(`${p.last} is outside Eastern time (by address) — day shifts aren't allowed, only swing.\n\nAssign the DAY shift anyway (admin override)?`))return;
+  if(wshift==='day'&&!_wkndDayOk(p)&&!confirm(`${p.last} can't take DAY weekend shifts (swing-only flag or non-Eastern address).\n\nAssign the DAY shift anyway (admin override)?`))return;
   // Summer cap (Jun–Aug, default 2) + yearly cap (base × total FTE)
   const _yr=satDate.slice(0,4);
   if(_wkndIsSummer(satDate)&&_wkndSummerCount(pid,_yr,null)>=_wkndSummerCap()
@@ -41254,7 +41263,7 @@ function previewAA(){
               if(sub&&!p.drSubs.includes(sub))return false;
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
-              if(wshift==='day'&&!_physIsEastern(p))return false;
+              if(wshift==='day'&&!_wkndDayOk(p))return false;
               const vd=vacDays(p.id);
               if(vd.has(c.date)||vd.has(sunDate))return false;
               // Same physician shouldn't hold two shifts the same weekend
