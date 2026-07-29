@@ -40509,7 +40509,12 @@ function _wkndYearCap(p){
   // Scaled by the radiologist's DAY-shift DR FTE: one practice base number,
   // each person's cap follows from their own day FTE — a 0.75-day radiologist
   // carries 0.75 of the max call responsibility; 2nd/3rd-shift-only carry 0.
-  return Math.round(base*_drDayFte(p));
+  // Exception: an explicitly-designated "Weekend: Swing only" radiologist
+  // with no day FTE takes SWING calls capped by their total DR FTE instead
+  // (a 0-scaled cap would silently block the very shifts they're flagged for).
+  const day=_drDayFte(p);
+  const basis=(day<=0&&p?.shiftElig?.wkndSwingOnly)?(+p.drFte||0):day;
+  return Math.round(base*basis);
 }
 function _wkndSummerCount(pid, year, previewArr){
   const s0=`${year}-06-01`, s1=`${year}-08-31`;
@@ -40578,7 +40583,7 @@ function _wkndPlanRange(fromIso, toIso){
         while(have<_wkndNeedCount(need,wshift)){
           const pool=drs.filter(p=>{
             if(!p.shiftElig?.wknd)return false;
-            if(_drDayFte(p)<=0)return false;
+            if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
             if(sub&&!(p.drSubs||[]).includes(sub))return false;
             if(wshift==='day'&&!_wkndDayOk(p))return false;
             const vd=vacDays(p.id);
@@ -40835,8 +40840,11 @@ function addWkCall(){
   const sub=document.getElementById('wk-sub').value;const site=document.getElementById('wk-site').value;
   const wshift=document.getElementById('wk-wshift')?.value||'day';
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
-  // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend call.
-  if(_drDayFte(p)<=0&&!confirm(`${p.last} has no day-shift DR FTE — diagnostic weekend call doesn't apply to 2nd/3rd-shift-only radiologists.\n\nAssign anyway (admin override)?`))return;
+  // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend
+  // call — UNLESS explicitly designated "Weekend: Swing only" and this is a
+  // swing assignment (that designation is precisely for them).
+  if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly)
+    &&!confirm(`${p.last} has no day-shift DR FTE — diagnostic weekend call doesn't apply to 2nd/3rd-shift-only radiologists.\n\nAssign anyway (admin override)?`))return;
   // EST rule: non-Eastern physicians (by home address) take swing only.
   if(wshift==='day'&&!_wkndDayOk(p)&&!confirm(`${p.last} can't take DAY weekend shifts (swing-only flag or non-Eastern address).\n\nAssign the DAY shift anyway (admin override)?`))return;
   // Summer cap (Jun–Aug, default 2) + yearly cap (base × total FTE)
@@ -41259,7 +41267,7 @@ function previewAA(){
               if(!p.shiftElig.wknd)return false;
               // Diagnostic weekend call keys on DAY-shift DR FTE: a 2nd/3rd-
               // shift-only radiologist (day FTE 0) gets no weekend call.
-              if(_drDayFte(p)<=0)return false;
+              if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
               if(sub&&!p.drSubs.includes(sub))return false;
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
