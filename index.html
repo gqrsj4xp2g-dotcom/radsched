@@ -3757,7 +3757,6 @@ tbody tr:hover{background:var(--bg3)}
     </div>
     <div class="g3">
       <div class="fg"><label>Weekend Shift</label><select id="wk-wshift"><option value="day">Day</option><option value="swing">Swing</option></select></div>
-      <div class="fg"><label>Site</label><select id="wk-site" onchange="_refreshWkSubs()"></select></div>
       <div class="fg"><label>Call Type</label><select id="wk-ctype"><option>Primary</option><option>Backup</option></select></div>
     </div>
     <div class="g3">
@@ -3779,7 +3778,7 @@ tbody tr:hover{background:var(--bg3)}
     </div>
   </div>
   <div class="note ni">Bulk assignment lives in the <a href="#" onclick="nav('wk-aa');return false" style="color:var(--blue);font-weight:600">DR Weekend Auto-Assign</a> tab (semiannual / annual runs).</div>
-  <div class="card scroll-x" ><table><thead><tr><th>Physician</th><th>Saturday</th><th>Sunday</th><th>Shift</th><th>Sub</th><th>Site</th><th>Type</th><th></th></tr></thead><tbody id="wk-tbody"></tbody></table></div>
+  <div class="card scroll-x" ><table><thead><tr><th>Physician</th><th>Saturday</th><th>Sunday</th><th>Shift</th><th>Sub</th><th>Type</th><th></th></tr></thead><tbody id="wk-tbody"></tbody></table></div>
 </div>
 
 <!-- DR WEEKEND AUTO-ASSIGN -->
@@ -40595,7 +40594,7 @@ function _wkndPlanRange(fromIso, toIso){
             if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCap())return false;
             const yc=_wkndYearCap(p);
             if(yc!=null&&_wkndYearCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=yc)return false;
-            const ctx={physId:p.id,date:sat,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'};
+            const ctx={physId:p.id,date:sat,site:'',shift:'wknd',sub,kind:'dr-weekend'};   // weekend call is remote — no site
             if(typeof natLangRulesOk==='function'&&!natLangRulesOk(ctx))return false;
             if(typeof tbRulesOk==='function'&&!tbRulesOk(p,ctx))return false;
             return true;
@@ -40612,7 +40611,7 @@ function _wkndPlanRange(fromIso, toIso){
           });
           if(pool.length){
             const p=pool[0];
-            plan.push({physId:p.id,satDate:sat,sunDate,sub,site:p.anchorSite||p.drSite||'',wshift});
+            plan.push({physId:p.id,satDate:sat,sunDate,sub,site:'',wshift});
           } else {
             gaps.push({satDate:sat,sub,wshift});
             break;
@@ -40680,7 +40679,7 @@ function applyWkAA(){
     S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate,sunDate:a.sunDate,sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift,notes:'Auto'});
   });
   gaps.forEach(g=>{
-    S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'TBD',group:'DR',claimedBy:null,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
+    S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'At Home / Remote',group:'DR',claimedBy:null,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
   });
   if(typeof _audit==='function') _audit('weekendCall.autoAssign',{period:label,assigned:plan.length,gaps:gaps.length});
   triggerSave();
@@ -40704,7 +40703,6 @@ function saveEditWkCall(id){
   const physEl = document.getElementById(`wke-phys-${id}`);
   const satEl  = document.getElementById(`wke-sat-${id}`);
   const subEl  = document.getElementById(`wke-sub-${id}`);
-  const siteEl = document.getElementById(`wke-site-${id}`);
   const typeEl = document.getElementById(`wke-type-${id}`);
   if(!satEl?.value){ alert('Saturday date required.'); return; }
   const newPid = +physEl?.value || w.physId;
@@ -40754,7 +40752,7 @@ function saveEditWkCall(id){
   w.date    = newSat; // legacy compat
   w.wshift  = _newWs;
   w.sub     = subEl?.value || '';
-  w.site    = siteEl?.value || w.site;
+  w.site    = '';   // weekend call is remote — no site
   w.ctype   = typeEl?.value || w.ctype || 'Primary';
   _editingWkId = null;
   triggerSave();
@@ -40766,9 +40764,8 @@ function renderWkBuilder(){
   document.getElementById('wk-phys').innerHTML=drs.map(p=>`<option value="${p.id}">${escHtml(p.last)}, ${escHtml(p.first)}</option>`).join('');
   // Weekend subs: filtered by currently-selected site. _refreshWkSubs
   // re-runs the filter on site-change without rebuilding the whole panel.
-  populateSel('wk-site', S.sites.map(s=>s.name), '');
-  const curWkSite = document.getElementById('wk-site')?.value || '';
-  populateSel('wk-sub', siteDRSubsByName(curWkSite), '');
+  // Weekend call is remote — no site dimension; subs come from the global list.
+  populateSel('wk-sub', S.drSubs||[], '');
   // Populate the caps inputs from cfg (static HTML — no template interpolation)
   const _scEl=document.getElementById('wknd-summer-cap');
   if(_scEl&&document.activeElement!==_scEl) _scEl.value=S.cfg?.wkndSummerCap??'';
@@ -40780,8 +40777,7 @@ function renderWkBuilder(){
   document.getElementById('wk-tbody').innerHTML=[...S.weekendCalls].sort((a,b)=>(a.satDate||a.date||'')>(b.satDate||b.date||'')?1:-1).map(w=>{
     const sat=w.satDate||w.date;const sun=w.sunDate||addDays(sat,1);
     if(_editingWkId === w.id){
-      const subs = siteDRSubsByName(w.site);
-      const siteOpts = S.sites.map(st=>`<option value="${st.name}"${st.name===w.site?' selected':''}>${st.name}</option>`).join('');
+      const subs = S.drSubs||[];
       const subOpts = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}"${sub===w.sub?' selected':''}>${sub}</option>`).join('');
       const typeOpts = ['Primary','Backup'].map(t=>`<option value="${t}"${t===w.ctype?' selected':''}>${t}</option>`).join('');
       const wsOpts = [['day','Day'],['swing','Swing']].map(([v,l])=>`<option value="${v}"${(w.wshift||'day')===v?' selected':''}>${l}</option>`).join('');
@@ -40791,7 +40787,6 @@ function renderWkBuilder(){
         <td style="color:var(--txt3);font-size:10px"><em>auto +1</em></td>
         <td><select id="wke-wshift-${w.id}" style="font-size:11px">${wsOpts}</select></td>
         <td><select id="wke-sub-${w.id}" style="font-size:11px">${subOpts}</select></td>
-        <td><select id="wke-site-${w.id}" style="font-size:11px" onchange="_wkeRefreshSub(${w.id})">${siteOpts}</select></td>
         <td><select id="wke-type-${w.id}" style="font-size:11px">${typeOpts}</select></td>
         <td style="white-space:nowrap">
           <button class="bg bxs" onclick="saveEditWkCall(${w.id})">✓</button>
@@ -40802,17 +40797,16 @@ function renderWkBuilder(){
     const _est=_wkndDayOk(S.physicians.find(p=>p.id===w.physId));
     return`<tr><td>${pnameHtml(w.physId)}${_est?'':' <span class="tag ta" title="Swing-only (profile flag or non-Eastern address)" style="font-size:9px">swing only</span>'}</td><td>${sat}</td><td>${sun}</td>
       <td><span class="tag ${(w.wshift||'day')==='swing'?'ta':'tb'}">${(w.wshift||'day')==='swing'?'Swing':'Day'}</span></td>
-      <td>${w.sub||'—'}</td><td>${w.site||'—'}</td><td><span class="tag tb">${w.ctype||'Primary'}</span></td>
+      <td>${w.sub||'—'}</td><td><span class="tag tb">${w.ctype||'Primary'}</span></td>
       <td style="white-space:nowrap">
         <button class="bt bxs" onclick="startEditWkCall(${w.id})" title="Edit">✏</button>
         <button class="br bxs" onclick="deleteWkCall(${w.id})">X</button>
       </td></tr>`;
-  }).join('')||'<tr><td colspan="8" class="tac txt3">None</td></tr>';
+  }).join('')||'<tr><td colspan="7" class="tac txt3">None</td></tr>';
 }
 
 function _wkeRefreshSub(id){
   const w = S.weekendCalls.find(x=>x.id===id); if(!w) return;
-  const siteEl = document.getElementById(`wke-site-${id}`);
   const subEl  = document.getElementById(`wke-sub-${id}`);
   if(!siteEl || !subEl) return;
   const subs = siteDRSubsByName(siteEl.value);
@@ -40837,7 +40831,7 @@ function addWkCall(){
     alert(`${p.last} is on vacation on ${vacDay}. Remove the vacation entry first if this is incorrect.`);
     return;
   }
-  const sub=document.getElementById('wk-sub').value;const site=document.getElementById('wk-site').value;
+  const sub=document.getElementById('wk-sub').value;const site='';   // weekend call is remote — no site
   const wshift=document.getElementById('wk-wshift')?.value||'day';
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
   // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend
@@ -41287,7 +41281,7 @@ function previewAA(){
               const _yc=_wkndYearCap(p);
               if(_yc!=null&&_wkndYearCount(p.id,_yr,preview)>=_yc)return false;
               const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
-              const _wkctx={physId:p.id,date:c.date,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'};
+              const _wkctx={physId:p.id,date:c.date,site:'',shift:'wknd',sub,kind:'dr-weekend'};
               if(!natLangRulesOk(_wkctx))return false;
               if(!tbRulesOk(p,_wkctx))return false;
               return cnt[p.id].wk<_wkCap;
@@ -41298,11 +41292,11 @@ function previewAA(){
             });
             if(pool.length){
               const p=pool[0];
-              preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:p.anchorSite||p.drSite,ctype:'Primary',wshift,notes:'Auto'});
+              preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:'',ctype:'Primary',wshift,notes:'Auto'});
               cnt[p.id].wk++;
             } else {
               gaps.push(`Weekend ${c.date} ${sub||'General'} (${wshift})`);
-              S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:wshift==='swing'?'Swing shift':'Day shift'});
+              S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'At Home / Remote',group:'DR',claimedBy:null,notes:wshift==='swing'?'Swing shift':'Day shift'});
               break;   // no candidates for this sub+shift — don't loop the same empty pool
             }
             ex++;
@@ -42847,7 +42841,7 @@ function renderIRList(){
       <button class="bt bxs" onclick="startEditIRCall(${ic.id})" title="Edit">✏</button>
       <button class="br bxs" onclick="removeIRCall(${ic.id})" aria-label="Remove IR call" title="Remove IR call">X</button>
     </td></tr>`;
-  }).join('')||'<tr><td colspan="8" class="tac txt3">None</td></tr>';
+  }).join('')||'<tr><td colspan="7" class="tac txt3">None</td></tr>';
 }
 
 // autoFillIRHomeShifts removed: IR physicians not assigned call are left unscheduled
