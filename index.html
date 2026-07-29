@@ -2462,6 +2462,7 @@ tbody tr:hover{background:var(--bg3)}
           <div class="snav-item admin-only" onclick="nav('tools',this)" data-pg="tools">🛠 Tools</div>
           <div class="snav-item admin-only" onclick="nav('fte',this)" data-pg="fte">📊 FTE Monitor</div>
           <div class="snav-item admin-only" onclick="nav('anchor-report',this)" data-pg="anchor-report">📈 Anchor Compliance</div>
+          <div class="snav-item admin-only" onclick="nav('shift-tally',this)" data-pg="shift-tally">🧮 Shift Tally</div>
           <div class="snav-item admin-only" onclick="nav('ai-agent',this)" data-pg="ai-agent">🤖 AI Scheduler</div>
           <div class="snav-item admin-only" onclick="nav('publish',this)" data-pg="publish">📤 Publish</div>
           <div class="snav-item admin-only" onclick="nav('broadcast',this)" data-pg="broadcast">📢 Broadcast</div>
@@ -3810,6 +3811,23 @@ tbody tr:hover{background:var(--bg3)}
   </div>
   <div class="note ni mb8">Each weekend gets a <strong>Day</strong> and a <strong>Swing</strong> shift per subspecialty need (weekly needs: Settings → Weekend Call Needs). Subspecialty spots fill before General. Honors the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly caps, vacations, and blocks back-to-back weekends. Unfillable slots become claimable open shifts on Apply.</div>
   <div class="card" id="wkaa-box"><p class="txt3">Configure and click Preview.</p></div>
+</div>
+
+<!-- SHIFT TALLY -->
+<div id="page-shift-tally" class="page admin-only">
+  <div class="pg-title">Shift Tally</div>
+  <div class="pg-sub">Per-physician totals across every assignment type — DR shifts, IR shifts, IR calls, weekend calls, and holiday call.</div>
+  <div class="flex mb14" style="gap:6px;flex-wrap:wrap;align-items:center">
+    <span id="tally-period-btns"></span>
+    <span id="tally-year-nav" style="display:none">
+      <button class="bt bxs" onclick="_tallySetYear(-1)">‹</button>
+      <span id="tally-year-lbl" class="fw6" style="padding:0 6px"></span>
+      <button class="bt bxs" onclick="_tallySetYear(1)">›</button>
+    </span>
+    <span style="flex:1"></span>
+    <button class="bt bsm" onclick="_tallyExportCsv()">⬇ CSV</button>
+  </div>
+  <div class="card scroll-x" id="tally-box"><p class="txt3">Loading…</p></div>
 </div>
 
 <!-- AUTO-ASSIGN DR -->
@@ -16019,7 +16037,7 @@ function _refreshCurrentPage(){
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
-    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,
+    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,'shift-tally':renderShiftTally,
     'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRWeekBuilder,
     'ir-shift-auto':renderIRShiftAutoPage,'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,fte:_renderFTECurrent,
@@ -17288,7 +17306,7 @@ function nav(pg, el, subTab, opts){
   const fns={
     dashboard:renderDash,'my-schedule':renderMySched,profiles:renderProfiles,
     physicians:renderPhysicians,vacations:renderVacations,'vac-pick':renderVacPick,
-    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,
+    'dr-cal':renderDRCal,'dr-builder':renderDRBuilder,'dr-weekends':renderWkBuilder,'wk-aa':renderWkAA,'shift-tally':renderShiftTally,
     'auto-assign':()=>{},'ir-cal':renderIRCal,'ir-shifts':renderIRShiftBuilder,'ir-builder':renderIRBuilder,'ir-shift-auto':renderIRShiftAutoPage,'ir-auto':()=>{},'ir-rebalance':renderIRRebalancePrep,
     'anchor-report':renderAnchorReport,'unfilled':renderUnfilled,fte:_renderFTECurrent,holidays:renderHolidays,chat:renderChat,swaps:renderSwaps,'open-shifts':renderOpenShifts,
     'user-mgmt':renderUserMgmt,settings:renderSettings,'site-slots':renderSiteSlots,'ir-slots':renderIRSlots,'import':renderImportPage,'ir-shift-slots':renderIRShiftSlots,'ir-shift-auto':renderIRShiftAutoPage,'ai-agent':renderAIAgent,'practices':renderPracticesPage,'widget':renderWidgetPage,
@@ -17568,7 +17586,7 @@ function renderDash(){
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
-  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','wk-aa','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
+  const _adminPages=new Set(['physicians','anchor-report','fte','shift-tally','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','wk-aa','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
   // Null guard — see dash-greet comment above.
   const dm=document.getElementById('dash-metrics');
   if(dm) dm.innerHTML=[
@@ -40689,6 +40707,78 @@ function applyWkAA(){
   if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied ${escHtml(label)}: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} posted as open shifts`:''}.</div>`;
   if(typeof _toast==='function') _toast(`Weekend auto-assign applied — ${plan.length} assigned.`,'ok');
   if(typeof _afterMutation==='function') _afterMutation();
+}
+// ── Shift Tally (per-physician totals across every assignment type) ──────
+let _tallyPeriod='ytd';
+let _tallyYear=new Date().getFullYear();
+function _tallySetPeriod(p){ _tallyPeriod=p; renderShiftTally(); }
+function _tallySetYear(d){ _tallyYear+=d; renderShiftTally(); }
+function _tallyRange(){
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth();
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if(_tallyPeriod==='month')   return {from:iso(new Date(y,m,1)), to:iso(new Date(y,m+1,0)), label:now.toLocaleString('default',{month:'long',year:'numeric'})};
+  if(_tallyPeriod==='quarter'){ const q=Math.floor(m/3); return {from:iso(new Date(y,q*3,1)), to:iso(new Date(y,q*3+3,0)), label:`Q${q+1} ${y}`}; }
+  if(_tallyPeriod==='year')    return {from:`${_tallyYear}-01-01`, to:`${_tallyYear}-12-31`, label:String(_tallyYear)};
+  return {from:`${y}-01-01`, to:iso(now), label:`${y} YTD`};
+}
+function _tallyCompute(from,to){
+  const inR=d=>d&&d>=from&&d<=to;
+  const t={};
+  const g=pid=>t[pid]||(t[pid]={dr1:0,dr2:0,dr3:0,drHome:0,ir:0,ircD:0,ircW:0,wkDay:0,wkSwing:0,hol:0});
+  (S.drShifts||[]).forEach(s=>{ if(!inR(s.date)||s.physId==null)return; const r=g(s.physId);
+    if(s.shift==='2nd')r.dr2++; else if(s.shift==='3rd')r.dr3++; else if(s.shift==='Home')r.drHome++; else r.dr1++; });
+  (S.irShifts||[]).forEach(s=>{ if(inR(s.date)&&s.physId!=null) g(s.physId).ir++; });
+  (S.irCalls||[]).forEach(c=>{ if(!inR(c.date)||c.physId==null)return; if(c.callType==='weekend') g(c.physId).ircW++; else g(c.physId).ircD++; });
+  (S.weekendCalls||[]).forEach(w=>{ const d=w.satDate||w.date; if(!inR(d)||w.physId==null)return;
+    if((w.wshift||'day')==='swing') g(w.physId).wkSwing++; else g(w.physId).wkDay++; });
+  (S.holidays||[]).forEach(h=>{ if(inR(h.date)&&h.physId!=null) g(h.physId).hol++; });
+  return t;
+}
+const _TALLY_COLS=[['dr1','DR 1st'],['dr2','DR 2nd'],['dr3','DR 3rd'],['drHome','DR Home'],['ir','IR Shift'],['ircD','IR Call'],['ircW','IR Wknd'],['wkDay','Wknd Day'],['wkSwing','Wknd Swing'],['hol','Holiday']];
+function renderShiftTally(){
+  const box=document.getElementById('tally-box'); if(!box)return;
+  const btns=document.getElementById('tally-period-btns');
+  if(btns) btns.innerHTML=[['month','This month'],['quarter','This quarter'],['ytd','Year to date'],['year','Full year']]
+    .map(([k,l])=>`<button class="bt bxs${_tallyPeriod===k?' bp':''}" onclick="_tallySetPeriod('${k}')">${l}</button>`).join(' ');
+  const yn=document.getElementById('tally-year-nav');
+  if(yn) yn.style.display=_tallyPeriod==='year'?'':'none';
+  const yl=document.getElementById('tally-year-lbl'); if(yl) yl.textContent=_tallyYear;
+  const r=_tallyRange();
+  const t=_tallyCompute(r.from,r.to);
+  const rows=(S.physicians||[]).map(p=>{
+    const c=t[p.id]||{}; const tot=_TALLY_COLS.reduce((s,[k])=>s+(c[k]||0),0);
+    return {p,c,tot};
+  }).sort((a,b)=>b.tot-a.tot||(a.p.last||'').localeCompare(b.p.last||''));
+  const totals={}; _TALLY_COLS.forEach(([k])=>totals[k]=rows.reduce((s,x)=>s+(x.c[k]||0),0));
+  const grand=rows.reduce((s,x)=>s+x.tot,0);
+  box.innerHTML=`<div class="card-title">${escHtml(r.label)} <span class="muted-xs" style="font-weight:400">— ${grand} assignment${grand===1?'':'s'} across ${rows.filter(x=>x.tot>0).length} physicians</span></div>
+    <table style="font-size:12px;border-collapse:collapse;min-width:760px">
+    <thead><tr style="text-align:left;color:var(--txt3);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bdr)">
+      <th style="padding:5px 8px">Physician</th>
+      ${_TALLY_COLS.map(([,l])=>`<th class="td-num">${l}</th>`).join('')}
+      <th class="td-num">Total</th></tr></thead>
+    <tbody>${rows.map(({p,c,tot})=>`<tr style="border-bottom:1px solid var(--bdr);${tot===0?'opacity:.5':''}">
+      <td style="padding:4px 8px">${pnameHtml(p.id)}</td>
+      ${_TALLY_COLS.map(([k])=>`<td class="td-num">${c[k]||'—'}</td>`).join('')}
+      <td class="td-num fw7">${tot||'—'}</td></tr>`).join('')}
+    </tbody>
+    <tfoot><tr style="border-top:2px solid var(--bdr)">
+      <td style="padding:5px 8px" class="fw7">Practice total</td>
+      ${_TALLY_COLS.map(([k])=>`<td class="td-num fw7">${totals[k]||'—'}</td>`).join('')}
+      <td class="td-num fw7">${grand}</td></tr></tfoot></table>`;
+}
+function _tallyExportCsv(){
+  const r=_tallyRange(); const t=_tallyCompute(r.from,r.to);
+  const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+  let csv='Physician,'+_TALLY_COLS.map(([,l])=>l).join(',')+',Total\n';
+  (S.physicians||[]).slice().sort((a,b)=>(a.last||'').localeCompare(b.last||'')).forEach(p=>{
+    const c=t[p.id]||{}; const tot=_TALLY_COLS.reduce((s,[k])=>s+(c[k]||0),0);
+    csv+=esc(`${p.last}, ${p.first}`)+','+_TALLY_COLS.map(([k])=>c[k]||0).join(',')+','+tot+'\n';
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`shift-tally-${r.label.replace(/\s+/g,'-')}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
 }
 let _editingWkId = null;
 function startEditWkCall(id){
