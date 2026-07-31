@@ -3555,7 +3555,8 @@ tbody tr:hover{background:var(--bg3)}
       <button class="bsm" data-drcview="week"  onclick="drcSetView('week')">📆 Week</button>
       <button class="bsm" data-drcview="month" onclick="drcSetView('month')">📅 Month</button>
       <button class="bsm" data-drcview="list"  onclick="drcSetView('list')">📊 List</button>
-      <button class="bsm admin-only" onclick="_diagnoseDRImports()" title="Show diagnostic info about imported shifts" style="margin-left:6px">🔍 Diagnose</button>
+      <button class="bsm" onclick="exportDRSchedXls()" title="Download this month's DR schedule as an Excel file" style="margin-left:6px">⬇ Excel</button>
+      <button class="bsm admin-only" onclick="_diagnoseDRImports()" title="Show diagnostic info about imported shifts">🔍 Diagnose</button>
     </div>
   </div>
   <div class="flex" style="flex-wrap:wrap;gap:4px;margin-bottom:8px">
@@ -3747,6 +3748,7 @@ tbody tr:hover{background:var(--bg3)}
   <div class="pg-title">DR Weekend Call</div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
     <button class="br bsm" onclick="clearWkCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
+    <button class="bt bsm" onclick="exportWkCallXls()" title="Download the weekend call schedule as an Excel file">⬇ Excel</button>
   </div>
 
   <div class="note ni">DR weekend call is <strong>two shifts per weekend — Day and Swing</strong> — each covering both Saturday and Sunday by the same physician. Enter the Saturday date. Physicians outside Eastern time (by home address) can only take Swing.</div>
@@ -3807,9 +3809,11 @@ tbody tr:hover{background:var(--bg3)}
     <div class="flexe" style="gap:8px;margin-top:8px">
       <button class="ba" onclick="previewWkAA()">▶ Preview</button>
       <button class="bp" id="wkaa-apply-btn" style="display:none" onclick="applyWkAA()">✓ Apply All</button>
+      <span style="flex:1"></span>
+      <button class="br bsm" onclick="clearWkAA()" title="Remove every auto-assigned weekend call in the selected period (manual assignments are kept), plus its unclaimed weekend open shifts">🗑 Clear period</button>
     </div>
   </div>
-  <div class="note ni mb8">Each weekend gets a <strong>Day</strong> and a <strong>Swing</strong> shift per subspecialty need (weekly needs: Settings → Weekend Call Needs). Subspecialty spots fill before General. Honors the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly caps, vacations, and blocks back-to-back weekends. Unfillable slots become claimable open shifts on Apply.</div>
+  <div class="note ni mb8">Each weekend gets a <strong>Day</strong> and a <strong>Swing</strong> shift per subspecialty need (weekly needs: Settings → Weekend Call Needs). Subspecialty spots fill before General. Honors the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly caps, vacations, and blocks back-to-back weekends. <strong>Holiday weekends (Sat or Sun a holiday) are skipped</strong> — holiday call covers them. Unfillable slots become claimable open shifts on Apply.</div>
   <div class="card" id="wkaa-box"><p class="txt3">Configure and click Preview.</p></div>
 </div>
 
@@ -3825,7 +3829,7 @@ tbody tr:hover{background:var(--bg3)}
       <button class="bt bxs" onclick="_tallySetYear(1)">›</button>
     </span>
     <span style="flex:1"></span>
-    <button class="bt bsm" onclick="_tallyExportCsv()">⬇ CSV</button>
+    <button class="bt bsm" onclick="_tallyExportCsv()" title="Download this tally as an Excel file">⬇ Excel</button>
   </div>
   <div class="card scroll-x" id="tally-box"><p class="txt3">Loading…</p></div>
 </div>
@@ -3862,6 +3866,7 @@ tbody tr:hover{background:var(--bg3)}
 <div id="page-ir-cal" class="page">
   <div class="pg-title">IR Schedule</div>
   <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
+    <button class="bt bsm" onclick="exportIRSchedXls()" title="Download this month's IR shifts and calls as an Excel file" style="align-self:flex-end;order:99">⬇ Excel</button>
     <div class="fg m0" ><label>Month</label><input id="irc-mo" type="month" oninput="renderIRCal()"></div>
     <div class="fg m0" ><label>Group</label>
       <select id="irc-grp" onchange="renderIRCal()">
@@ -4426,6 +4431,8 @@ tbody tr:hover{background:var(--bg3)}
     <div class="tab" onclick="holTab('autoassign',this)">🎲 Auto-Assign</div>
     <div class="tab" onclick="holTab('counter',this)">📊 Counter</div>
     <div class="tab" onclick="holTab('schedule',this)">📅 Schedule</div>
+    <span style="flex:1"></span>
+    <button class="bt bsm" onclick="exportHolidayXls()" title="Download all holiday call assignments as an Excel file" style="align-self:center">⬇ Excel</button>
   </div>
 
   <!-- DEFINE HOLIDAYS TAB -->
@@ -40745,9 +40752,11 @@ function _wkndPlanRange(fromIso, toIso){
     plan.push({physId:pool[0].id,satDate:sat,sunDate,sub,site:'',wshift});
     return true;
   };
-  // Weekend worklist (weekends fully covered by holiday call are skipped)
+  // Weekend worklist. HOLIDAY WEEKENDS are excluded up front — if either the
+  // Saturday or the Sunday falls on a holiday, holiday call covers that
+  // weekend and the auto-builder must not assign (or post gaps for) it.
   const wknds=sats.map(sat=>({sat,sunDate:addDays(sat,1)}))
-    .filter(w=>!(isHolidayBlackout(w.sat)&&isHolidayBlackout(w.sunDate)))
+    .filter(w=>!(isHolidayBlackout(w.sat)||isHolidayBlackout(w.sunDate)))
     .map(w=>({...w,entries:Object.entries(_wkndNeedsFor(w.sat))
       .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
       .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0))}));
@@ -40874,6 +40883,81 @@ function applyWkAA(){
   if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied ${escHtml(label)}: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} → ${_posted} new open shift${_posted===1?'':'s'} on the market`:''}.</div>`;
   if(typeof _toast==='function') _toast(`Weekend auto-assign applied — ${plan.length} assigned.`,'ok');
   if(typeof _afterMutation==='function') _afterMutation();
+}
+// Clear the selected period's AUTO weekend assignments (notes='Auto') plus
+// its unclaimed, unpartially-claimed weekend open shifts, so the period can
+// be re-run fresh. Manual assignments and anything a physician has already
+// claimed (even partially) are kept.
+async function clearWkAA(){
+  if(!_adminOnly('clear weekend auto-assign')) return;
+  const r=_wkaaRange();
+  const inR=d=>d&&d>=r.from&&d<=r.to;
+  const targets=(S.weekendCalls||[]).filter(w=>w.notes==='Auto'&&inR(w.satDate||w.date));
+  const osTargets=(S.openShifts||[]).filter(o=>o.shiftType==='Weekend Call'&&!o.claimedBy&&!(o.claims||[]).length&&inR(o.date));
+  if(!targets.length&&!osTargets.length){ if(typeof _toast==='function') _toast(`Nothing to clear in ${r.label}.`,'info'); return; }
+  const ok=(typeof _rsConfirm==='function')
+    ? await _rsConfirm({
+        title:`Clear auto-assigned weekend call — ${r.label}?`,
+        bodyHtml:`<div style="font-size:12px;line-height:1.5">
+          Removes <strong>${targets.length}</strong> auto-assigned weekend shift${targets.length===1?'':'s'} (notes = "Auto") and <strong>${osTargets.length}</strong> unclaimed weekend open shift${osTargets.length===1?'':'s'} in ${escHtml(r.label)}.<br><br>
+          <span style="color:var(--rs-ink-3)">Manual assignments and claimed (even partially claimed) open shifts are kept. Cannot be undone except via Settings → Backups.</span>
+        </div>`,
+        confirmLabel:'Clear', destructive:true,
+      })
+    : confirm(`Delete ${targets.length} auto-assigned weekend shifts + ${osTargets.length} open shifts for ${r.label}?`);
+  if(!ok) return;
+  if(typeof _snapshotBeforeBulk==='function'){ try{ await _snapshotBeforeBulk('clear-wk-auto'); }catch(_){} }
+  const tset=new Set(targets.map(w=>w.id)), oset=new Set(osTargets.map(o=>o.id));
+  S.weekendCalls=S.weekendCalls.filter(w=>!tset.has(w.id));
+  S.openShifts=S.openShifts.filter(o=>!oset.has(o.id));
+  _wkAAPlan=null;
+  const btn=document.getElementById('wkaa-apply-btn'); if(btn) btn.style.display='none';
+  const host=document.getElementById('wkaa-box'); if(host) host.innerHTML='<p class="txt3">Cleared. Configure and click Preview.</p>';
+  if(typeof _audit==='function') _audit('weekendCall.clearAuto',{period:r.label,removed:targets.length,openRemoved:osTargets.length});
+  triggerSave();
+  if(typeof _afterMutation==='function') _afterMutation();
+  if(typeof _toast==='function') _toast(`✓ Cleared ${targets.length} auto weekend shift${targets.length===1?'':'s'} (${r.label}).`,'ok');
+}
+// ── Excel downloads for the schedule views ───────────────────────────────
+// CSV with a UTF-8 BOM — opens directly in Excel with correct characters.
+function _xlsDownload(name, header, rows){
+  const esc=v=>{ const s=String(v==null?'':v); return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
+  const csv='﻿'+header.map(esc).join(',')+'\n'+rows.map(r=>r.map(esc).join(',')).join('\n')+'\n';
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=name+'.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function _pnameCsv(pid){ const p=typeof _physById==='function'?_physById(pid):null; return p?`${p.last}, ${p.first}`:(pid==null?'':String(pid)); }
+function exportDRSchedXls(){
+  const ym=document.getElementById('drc-mo')?.value||_todayLocalYM();
+  const rows=(S.drShifts||[]).filter(s=>(s.date||'').startsWith(ym))
+    .sort((a,b)=>((a.date||'')+(a.shift||''))<((b.date||'')+(b.shift||''))?-1:1)
+    .map(s=>[s.date, s.shift||'1st', s.site||'', s.sub||'', _pnameCsv(s.physId), s.notes||'']);
+  if(!rows.length){ if(typeof _toast==='function') _toast(`No DR shifts in ${ym}.`,'info'); return; }
+  _xlsDownload(`dr-schedule-${ym}`, ['Date','Shift','Site','Subspecialty','Physician','Notes'], rows);
+}
+function exportWkCallXls(){
+  const rows=(S.weekendCalls||[]).slice()
+    .sort((a,b)=>((a.satDate||a.date||'')+(a.wshift||''))<((b.satDate||b.date||'')+(b.wshift||''))?-1:1)
+    .map(w=>[w.satDate||w.date||'', w.sunDate||'', (w.wshift||'day')==='swing'?'Swing':'Day', w.sub||'General', _pnameCsv(w.physId), w.ctype||'Primary', w.notes||'']);
+  if(!rows.length){ if(typeof _toast==='function') _toast('No weekend calls to export.','info'); return; }
+  _xlsDownload('dr-weekend-call', ['Saturday','Sunday','Shift','Subspecialty','Physician','Type','Notes'], rows);
+}
+function exportIRSchedXls(){
+  const ym=document.getElementById('irc-mo')?.value||_todayLocalYM();
+  const rows=[];
+  (S.irShifts||[]).filter(s=>(s.date||'').startsWith(ym)).forEach(s=>rows.push([s.date,'IR Shift',s.shift||'1st',s.site||'',s.irGroup||'',_pnameCsv(s.physId),s.notes||'']));
+  (S.irCalls||[]).filter(c=>(c.date||'').startsWith(ym)).forEach(c=>rows.push([c.date,'IR Call',c.callType||'daily',c.site||'',c.irGroup||'',_pnameCsv(c.physId),c.notes||'']));
+  rows.sort((a,b)=>a[0]<b[0]?-1:1);
+  if(!rows.length){ if(typeof _toast==='function') _toast(`No IR shifts or calls in ${ym}.`,'info'); return; }
+  _xlsDownload(`ir-schedule-${ym}`, ['Date','Kind','Shift / Call type','Site','Group','Physician','Notes'], rows);
+}
+function exportHolidayXls(){
+  const rows=(S.holidays||[]).slice().sort((a,b)=>(a.date||'')<(b.date||'')?-1:1)
+    .map(h=>[h.date||'', h.name||'', h.group||'', _pnameCsv(h.physId), h.notes||'']);
+  if(!rows.length){ if(typeof _toast==='function') _toast('No holiday assignments to export.','info'); return; }
+  _xlsDownload('holiday-call', ['Date','Holiday','Pool','Physician','Notes'], rows);
 }
 // ── Shift Tally (per-physician totals across every assignment type) ──────
 let _tallyPeriod='ytd';
@@ -41486,18 +41570,19 @@ function previewAA(){
   if(typ==='weekend'||typ==='both'){
     const excludedWeekends = []; // {satDate, matchedDate, reason} for diagnostic output
     cells.filter(c=>c.day&&c.dow===6).forEach(c=>{
-      // Skip a weekend ONLY when BOTH Saturday and Sunday are defined holidays.
-      // A single-day holiday (only Sat or only Sun) still needs the OTHER day
-      // covered by regular weekend call — holiday call handles the holiday day
-      // and weekend call handles the non-holiday day. A Friday-before or
-      // Monday-after holiday does NOT affect the Sat-Sun weekend assignment.
-      // The Holiday Definitions tab is authoritative for what's a holiday.
+      // HOLIDAY WEEKENDS are excluded from the auto-builder up front: if
+      // EITHER Saturday or Sunday is a defined holiday, holiday call covers
+      // that whole weekend — regular weekend call must not be assigned (or
+      // gaps posted) for it. A Friday-before or Monday-after holiday does
+      // NOT affect the Sat–Sun weekend by itself unless the holiday block's
+      // dates include a weekend day. The Holiday Definitions tab (with the
+      // federal-holiday fallback) is authoritative for what's a holiday.
       const sunDate = addDays(c.date, 1);
       const satIsHoliday = isHolidayBlackout(c.date);
       const sunIsHoliday = isHolidayBlackout(sunDate);
-      if(satIsHoliday && sunIsHoliday){
-        const reason = _holidayReasonFor(c.date);
-        excludedWeekends.push({satDate: c.date, matchedDate: c.date, reason, allHoliday: true});
+      if(satIsHoliday || sunIsHoliday){
+        const reason = _holidayReasonFor(satIsHoliday ? c.date : sunDate);
+        excludedWeekends.push({satDate: c.date, matchedDate: satIsHoliday ? c.date : sunDate, reason, allHoliday: satIsHoliday && sunIsHoliday});
         return;
       }
       // 2026-07 redesign: each needed slot is TWO shifts (day + swing);
@@ -41584,7 +41669,7 @@ function previewAA(){
   const excluded = S._lastAAExcludedHolidayWknds || [];
   if(excluded.length){
     html += `<div class="note ni" style="margin-bottom:10px;font-size:11px">
-      <strong>🏖 ${excluded.length} weekend${excluded.length>1?'s':''} skipped (both Sat + Sun are defined holidays)</strong> — fully covered by Holiday Auto-Assign:
+      <strong>🏖 ${excluded.length} holiday weekend${excluded.length>1?'s':''} skipped (Sat or Sun is a defined holiday)</strong> — covered by Holiday Auto-Assign:
       <div style="margin-top:6px;font-family:monospace;line-height:1.6;max-height:120px;overflow-y:auto">
         ${excluded.map(x=>{
           const name = x.reason?.name || '—';
@@ -45282,7 +45367,9 @@ function _scanUnfilled(opts){
   if(wantWknd){
     cells.forEach(c => {
       if(c.dow !== 6) return; // Sat
-      if(isHolidayBlackout(c.date)) return;
+      // Holiday weekends (either day a holiday) are excluded from weekend
+      // call entirely — holiday call covers them, so they are never unfilled.
+      if(isHolidayBlackout(c.date) || isHolidayBlackout(addDays(c.date,1))) return;
       // Same demand source as the auto-assign planners: _wkndNeedsFor drops
       // stale (renamed/removed) sub keys, _wkndNeedCount resolves legacy
       // plain numbers vs the {day,swing} object shape — the old `+n||0`
