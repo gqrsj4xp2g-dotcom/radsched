@@ -3132,7 +3132,7 @@ tbody tr:hover{background:var(--bg3)}
         <label class="chk"><input type="checkbox" id="pe-s3"> 3rd Shift</label>
         <label class="chk"><input type="checkbox" id="pe-home" checked> At Home</label>
         <label class="chk"><input type="checkbox" id="pe-wknd" checked> Weekend Call</label>
-        <label class="chk" title="Eligible for weekend call, but only the Swing shift — never the Day shift (independent of home-address timezone)"><input type="checkbox" id="pe-wknd-swing"> Weekend: Swing only</label>
+        <label class="chk" title="Restricts this physician to the Swing shift of weekend/holiday call — never the Day shift (independent of home-address timezone). A daytime DR FTE is still required to be in the call pool at all."><input type="checkbox" id="pe-wknd-swing"> Weekend: Swing only</label>
       </div>
     </div>
     <!-- DEBULKING + wRVU multiplier — both feed the desktop widget. -->
@@ -29397,6 +29397,10 @@ function addHoliday(){
   if(grp==='DR'&&sub&&!(p.drSubs||[]).includes(sub)){
     if(!confirm(`${p.last} doesn't hold the ${sub} subspecialty. Assign anyway?`)) return;
   }
+  // Only physicians with a daytime DR FTE are in the holiday-call pool.
+  if(grp==='DR'&&typeof _drDayFte==='function'&&_drDayFte(p)<=0){
+    if(!confirm(`${p.last} has no day-shift DR FTE — only physicians with daytime DR FTE take holiday call.\n\nAssign anyway (admin override)?`)) return;
+  }
   if(grp==='DR'&&wshift==='day'&&typeof _wkndDayOk==='function'&&!_wkndDayOk(p)){
     if(!confirm(`${p.last} is swing-only (non-Eastern or flagged "Weekend: Swing only"). Assign a DAY holiday slot anyway?`)) return;
   }
@@ -40747,13 +40751,10 @@ function _wkndYearCap(p){
   if(!isFinite(base)||base<=0) return null;
   // Scaled by the radiologist's DAY-shift DR FTE: one practice base number,
   // each person's cap follows from their own day FTE — a 0.75-day radiologist
-  // carries 0.75 of the max call responsibility; 2nd/3rd-shift-only carry 0.
-  // Exception: an explicitly-designated "Weekend: Swing only" radiologist
-  // with no day FTE takes SWING calls capped by their total DR FTE instead
-  // (a 0-scaled cap would silently block the very shifts they're flagged for).
-  const day=_drDayFte(p);
-  const basis=(day<=0&&p?.shiftElig?.wkndSwingOnly)?(+p.drFte||0):day;
-  return Math.round(base*basis);
+  // carries 0.75 of the max call responsibility. A daytime DR FTE is REQUIRED
+  // for weekend and holiday call (2026-07-31 policy): 2nd/3rd-shift-only
+  // radiologists carry no call at all, so no alternate cap basis exists.
+  return Math.round(base*_drDayFte(p));
 }
 function _wkndSummerCount(pid, year, previewArr){
   const s0=`${year}-06-01`, s1=`${year}-08-31`;
@@ -40834,7 +40835,7 @@ function _wkndPlanRange(fromIso, toIso){
   const fillOne=(sat,sunDate,sub,wshift)=>{
     const pool=drs.filter(p=>{
       if(!p.shiftElig?.wknd)return false;
-      if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
+      if(_drDayFte(p)<=0)return false;   // daytime DR FTE required for ALL weekend call (2026-07-31: no swing exception)
       if(sub&&!(p.drSubs||[]).includes(sub))return false;
       if(wshift==='day'&&!_wkndDayOk(p))return false;
       const vd=vacDays(p.id);
@@ -41308,11 +41309,10 @@ function addWkCall(){
   const sub=document.getElementById('wk-sub').value;const site='';   // weekend call is remote — no site
   const wshift=document.getElementById('wk-wshift')?.value||'day';
   if(sub&&!p.drSubs.includes(sub)&&!confirm(`${p.last} not qualified in ${sub}. Continue?`))return;
-  // Day-FTE rule: 2nd/3rd-shift-only radiologists carry no diagnostic weekend
-  // call — UNLESS explicitly designated "Weekend: Swing only" and this is a
-  // swing assignment (that designation is precisely for them).
-  if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly)
-    &&!confirm(`${p.last} has no day-shift DR FTE — diagnostic weekend call doesn't apply to 2nd/3rd-shift-only radiologists.\n\nAssign anyway (admin override)?`))return;
+  // Day-FTE rule: only physicians with a DAYTIME DR FTE take diagnostic
+  // weekend call (any shift, including swing) — 2026-07-31 policy.
+  if(_drDayFte(p)<=0
+    &&!confirm(`${p.last} has no day-shift DR FTE — only physicians with daytime DR FTE take weekend call.\n\nAssign anyway (admin override)?`))return;
   // EST rule: non-Eastern physicians (by home address) take swing only.
   if(wshift==='day'&&!_wkndDayOk(p)&&!confirm(`${p.last} can't take DAY weekend shifts (swing-only flag or non-Eastern address).\n\nAssign the DAY shift anyway (admin override)?`))return;
   // Summer cap (Jun–Aug, default 2) + yearly cap (base × total FTE)
@@ -41736,7 +41736,7 @@ function previewAA(){
               if(!p.shiftElig.wknd)return false;
               // Diagnostic weekend call keys on DAY-shift DR FTE: a 2nd/3rd-
               // shift-only radiologist (day FTE 0) gets no weekend call.
-              if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
+              if(_drDayFte(p)<=0)return false;   // daytime DR FTE required for ALL weekend call (2026-07-31: no swing exception)
               if(sub&&!p.drSubs.includes(sub))return false;
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
@@ -46813,7 +46813,7 @@ function previewHolRandom(){
                 const p=d.p;
                 if(takenPhys.has(p.id)) return false;                       // one person per block
                 if(sub&&!(p.drSubs||[]).includes(sub)) return false;
-                if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly)) return false;
+                if(_drDayFte(p)<=0) return false;   // daytime DR FTE required for holiday call too
                 if(wshift==='day'&&!_wkndDayOk(p)) return false;
                 const vd=vacDays(p.id);
                 if((def.dates||[]).some(dt=>vd.has(dt))) return false;
