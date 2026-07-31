@@ -4437,6 +4437,17 @@ tbody tr:hover{background:var(--bg3)}
 
   <!-- DEFINE HOLIDAYS TAB -->
   <div id="holt-define" style="display:none">
+    <div class="ibox mb10">
+      <div class="card-title m0 mb8">Official US holidays</div>
+      <div class="flex" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg m0"><label>Year</label>
+          <input id="holoff-year" type="number" min="2024" max="2035" style="width:90px"></div>
+        <button class="bp bsm" onclick="importOfficialHolidays()" title="Create editable holiday definitions for all 11 federal holidays, using observed dates (a Saturday holiday is observed the preceding Friday, a Sunday holiday the following Monday)">📥 Import official holidays</button>
+        <button class="bt bsm" onclick="previewOfficialHolidays()" title="Show the official list with actual and observed dates without creating anything">👁 Preview list</button>
+      </div>
+      <div id="holoff-preview" class="fs-xs mt8" style="color:var(--txt2)"></div>
+      <div class="muted-xs mt8">Computed from the federal observance rules (no internet needed) — e.g. July 4, 2026 falls on a Saturday, so the observed holiday is Friday July 3. The scheduler's built-in blackout already honors observed dates; importing makes them visible and editable here and staffs holiday call slots.</div>
+    </div>
     <div class="ibox mb10" >
       <div class="card-title" id="holdef-form-title">Create New Holiday</div>
       <div class="g2">
@@ -9564,7 +9575,7 @@ create table pacs_inbound (
         builder, bulk, burnout, call-day-site, click-empty-cell, command,
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
-        min-staffing, sell/buy, standalone, partial,
+        min-staffing, sell/buy, standalone, partial, official,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -46025,6 +46036,8 @@ function holTab(t,el){
     const e=document.getElementById('holt-'+x);
     if(e) e.style.display=x===t?'block':'none';
   });
+  const _hy=document.getElementById('holoff-year');
+  if(_hy&&!_hy.value) _hy.value=new Date().getFullYear();
   document.querySelectorAll('#hol-tabs .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
   else {
@@ -46121,6 +46134,77 @@ function renderHolDefList(){
   }).join('');
 }
 
+// ── Official US (federal) holidays ───────────────────────────────────────
+// Computed locally from the OPM rules — no external feed. A holiday that
+// falls on Saturday is observed the preceding Friday; on Sunday, the
+// following Monday (so July 4 2026, a Saturday, is observed Fri July 3).
+const _FED_HOLIDAYS=[
+  {name:"New Year's Day",  kind:'fixed', mm:1,  dd:1},
+  {name:'MLK Jr. Day',     kind:'nth',   mm:1,  nth:3,  dow:1},
+  {name:"Presidents' Day", kind:'nth',   mm:2,  nth:3,  dow:1},
+  {name:'Memorial Day',    kind:'nth',   mm:5,  nth:-1, dow:1},
+  {name:'Juneteenth',      kind:'fixed', mm:6,  dd:19},
+  {name:'Independence Day',kind:'fixed', mm:7,  dd:4},
+  {name:'Labor Day',       kind:'nth',   mm:9,  nth:1,  dow:1},
+  {name:'Columbus Day',    kind:'nth',   mm:10, nth:2,  dow:1},
+  {name:'Veterans Day',    kind:'fixed', mm:11, dd:11},
+  {name:'Thanksgiving',    kind:'nth',   mm:11, nth:4,  dow:4},
+  {name:'Christmas Day',   kind:'fixed', mm:12, dd:25},
+];
+function officialUSHolidays(year){
+  const iso=(y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  return _FED_HOLIDAYS.map(h=>{
+    let actual;
+    if(h.kind==='fixed') actual=iso(year,h.mm,h.dd);
+    else if(h.nth===-1){
+      const last=new Date(year,h.mm,0);
+      actual=iso(year,h.mm,last.getDate()-((last.getDay()-h.dow+7)%7));
+    } else {
+      const first=new Date(year,h.mm-1,1);
+      actual=iso(year,h.mm,1+((h.dow-first.getDay()+7)%7)+(h.nth-1)*7);
+    }
+    const dow=parseDateLocal(actual).getDay();
+    const observed=dow===6?addDays(actual,-1):(dow===0?addDays(actual,1):actual);
+    return {name:h.name, actual, observed};
+  });
+}
+function _holoffYear(){
+  const v=+document.getElementById('holoff-year')?.value;
+  return (isFinite(v)&&v>=2000&&v<=2100)?v:new Date().getFullYear();
+}
+function previewOfficialHolidays(){
+  const year=_holoffYear();
+  const host=document.getElementById('holoff-preview'); if(!host) return;
+  const defined=new Set((S.holidayDefs||[]).filter(d=>d.year===year).map(d=>String(d.name||'').toLowerCase()));
+  host.innerHTML=`<strong>${year}:</strong> `+officialUSHolidays(year).map(h=>
+    `${escHtml(h.name)} — ${escHtml(h.actual)}${h.observed!==h.actual?` <span class="fw6">(observed ${escHtml(h.observed)})</span>`:''}${defined.has(h.name.toLowerCase())?' <span class="tag tg" style="font-size:10px">defined</span>':''}`
+  ).join(' · ');
+}
+function importOfficialHolidays(){
+  if(!_adminOnly('manage holiday definitions')) return;
+  const year=_holoffYear();
+  const list=officialUSHolidays(year);
+  const existing=new Set((S.holidayDefs||[]).filter(d=>d.year===year).map(d=>String(d.name||'').toLowerCase()));
+  const fresh=list.filter(h=>!existing.has(h.name.toLowerCase()));
+  if(!fresh.length){ if(typeof _toast==='function') _toast(`All ${list.length} official ${year} holidays are already defined.`,'info'); return; }
+  const lines=fresh.map(h=>`• ${h.name}: ${h.actual}${h.observed!==h.actual?` (observed ${h.observed})`:''}`).join('\n');
+  if(!confirm(`Create ${fresh.length} official US holiday definition${fresh.length===1?'':'s'} for ${year}?\n\n${lines}\n\nEach gets 1 DR slot + 1 slot per IR group by default — edit or delete any of them below afterwards.`)) return;
+  if(!S.holidayDefs) S.holidayDefs=[];
+  const irDefaults={};
+  getIRGroups().forEach(g=>{ irDefaults[g]=1; });
+  fresh.forEach(h=>{
+    const dates=[...new Set([h.observed,h.actual])].sort();
+    S.holidayDefs.push({id:S.nextId++, name:h.name, year, dates,
+      drSlots:1, irSlotsByGroup:{...irDefaults},
+      irNorthSlots:irDefaults['North']||0, irSouthSlots:irDefaults['South']||0,
+      notes:h.observed!==h.actual?`Official (falls ${h.actual}, observed ${h.observed})`:'Official'});
+  });
+  if(typeof _audit==='function') _audit('holidayDef.importOfficial',{year,added:fresh.length});
+  triggerSave();
+  renderHolDefList();
+  previewOfficialHolidays();
+  if(typeof _toast==='function') _toast(`✓ Added ${fresh.length} official ${year} holiday${fresh.length===1?'':'s'}.`,'ok');
+}
 function holdefAddDate(){
   const dt = document.getElementById('holdef-add-date')?.value;
   if(!dt){ _toast('Select a date first.', 'err'); return; }
