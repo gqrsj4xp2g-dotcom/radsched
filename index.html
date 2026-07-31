@@ -26372,6 +26372,20 @@ function renameSub(kind, idx){
     if(Array.isArray(st.drSubs)) st.drSubs = st.drSubs.map(s => s===oldName ? newName : s);
     if(Array.isArray(st.irSubs)) st.irSubs = st.irSubs.map(s => s===oldName ? newName : s);
   });
+  // Weekend call needs are keyed by sub name — without rekeying, the demand
+  // would sit under the old key, which _wkndNeedsFor drops as stale, and the
+  // planner would silently stop staffing the renamed subspecialty.
+  if(S.wkndNeeds && Object.prototype.hasOwnProperty.call(S.wkndNeeds, oldName)){
+    if(!Object.prototype.hasOwnProperty.call(S.wkndNeeds, newName)) S.wkndNeeds[newName] = S.wkndNeeds[oldName];
+    delete S.wkndNeeds[oldName];
+  }
+  // Per-site sub-slot config nests the sub name as an object key
+  Object.values(S.siteSlotsSubs||{}).forEach(m => {
+    if(m && Object.prototype.hasOwnProperty.call(m, oldName)){
+      if(!Object.prototype.hasOwnProperty.call(m, newName)) m[newName] = m[oldName];
+      delete m[oldName];
+    }
+  });
   triggerSave();
   if(kind==='dr') renderDRSList(); else renderIRSList();
   _afterMutation();
@@ -40547,9 +40561,16 @@ function _wkndYearCount(pid, year, previewArr){
   return n;
 }
 // Needs for one weekend = the global WEEKLY per-sub needs (Settings →
-// Weekend Call Needs). '' key = general (no subspecialty).
+// Weekend Call Needs). '' key = general (no subspecialty). Only keys still
+// on the master S.drSubs list (+ General) generate demand — a stale key
+// left behind by a renamed/removed subspecialty would otherwise create
+// permanently unfillable slots that flood the shift market as open shifts.
 function _wkndNeedsFor(satDate){
-  return {...(S.wkndNeeds||{})};
+  const out={};
+  Object.entries(S.wkndNeeds||{}).forEach(([sub,need])=>{
+    if(sub===''||(S.drSubs||[]).includes(sub)) out[sub]=need;
+  });
+  return out;
 }
 // A need value is either a legacy NUMBER (applies to both shifts) or an
 // object {day:n, swing:m} (separate per-shift counts, 2026-07 columns).
@@ -40571,12 +40592,22 @@ function _setWkndYearCapBase(v){
   triggerSave();
 }
 // ── Standalone DR weekend call auto-assign (DR Weekends tab) ─────────────
-// Pure planner: for every Saturday of the month, fill Day + Swing per the
-// WEEKLY subspecialty needs — subspecialty slots before General — honoring
-// the EST rule (non-Eastern → swing only), day-FTE rule, summer + yearly
-// caps, vacations, adjacent-weekend and same-weekend double-booking guards.
-// Preview is side-effect-free; Apply materializes weekendCalls + open shifts
-// for unfillable slots.
+// Pure planner. Two-phase fill so scarce yearly-cap capacity lands where it
+// matters most:
+//   1. SUMMER weekends (Jun 1 – Aug 31) fill completely FIRST — they're the
+//      hardest to staff (vacation season + the per-person summer cap), so
+//      they get first claim on everyone's yearly caps.
+//   2. The remaining weekends fill LAYER BY LAYER: every weekend gets its
+//      1st slot of a need before any weekend gets its 2nd, visiting
+//      least-filled weekends first in bit-reversed calendar order — so when
+//      yearly caps run out, the shortfall spreads thinly across the whole
+//      year instead of piling up at one point (e.g. the winter tail of a
+//      chronological fill).
+// Within each phase subspecialty slots fill before General; every slot
+// honors the EST rule (non-Eastern → swing only), day-FTE rule, summer +
+// yearly caps, vacations, adjacent-weekend and same-weekend guards.
+// Preview is side-effect-free; Apply materializes weekendCalls and posts
+// EVERY unfilled slot to the shift market as a claimable open shift.
 let _wkAAPlan=null;
 function _wkndPlanRange(fromIso, toIso){
   const plan=[], gaps=[];
@@ -40586,56 +40617,89 @@ function _wkndPlanRange(fromIso, toIso){
     if(d.getDay()===6) sats.push(fmtDate(d));
   }
   const drs=(S.physicians||[]).filter(p=>p.drFte>0);
-  const adjacentInPlan=(pid,sat)=>plan.some(a=>a.physId===pid&&Math.abs((parseDateLocal(a.satDate)-parseDateLocal(sat))/86400000)===7);
-  sats.forEach(sat=>{
-    const sunDate=addDays(sat,1);
-    if(isHolidayBlackout(sat)&&isHolidayBlackout(sunDate)) return;   // holiday call covers it
-    const entries=Object.entries(_wkndNeedsFor(sat))
+  // _daysBetween is DST-safe; raw ms/86400000 measures the Mar/Nov DST weeks
+  // as 6.96/7.04 days and lets back-to-back weekends slip through ===7.
+  const adjacentInPlan=(pid,sat)=>plan.some(a=>a.physId===pid&&_daysBetween(a.satDate,sat)===7);
+  const haveCount=(sat,sub,wshift)=>
+    S.weekendCalls.filter(w=>(w.satDate||w.date)===sat&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
+    +plan.filter(a=>a.satDate===sat&&(a.sub||'')===sub&&a.wshift===wshift).length;
+  const fillOne=(sat,sunDate,sub,wshift)=>{
+    const pool=drs.filter(p=>{
+      if(!p.shiftElig?.wknd)return false;
+      if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
+      if(sub&&!(p.drSubs||[]).includes(sub))return false;
+      if(wshift==='day'&&!_wkndDayOk(p))return false;
+      const vd=vacDays(p.id);
+      if(vd.has(sat)||vd.has(sunDate))return false;
+      if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
+      if(S.weekendCalls.some(w=>(w.satDate||w.date)===sat&&w.physId===p.id))return false;
+      if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,sat))return false;
+      if(adjacentInPlan(p.id,sat))return false;
+      if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCap())return false;
+      const yc=_wkndYearCap(p);
+      if(yc!=null&&_wkndYearCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=yc)return false;
+      const ctx={physId:p.id,date:sat,site:'',shift:'wknd',sub,kind:'dr-weekend'};   // weekend call is remote — no site
+      if(typeof natLangRulesOk==='function'&&!natLangRulesOk(ctx))return false;
+      if(typeof tbRulesOk==='function'&&!tbRulesOk(p,ctx))return false;
+      return true;
+    }).sort((a,b)=>{
+      // Fairness: fewest weekends this year first (ratio to cap when set),
+      // then fewer summer weekends, then id for stability.
+      const pv=plan.map(x=>({type:'wk',...x}));
+      const ra=_wkndYearCount(a.id,yr,pv)/(_wkndYearCap(a)||99);
+      const rb=_wkndYearCount(b.id,yr,pv)/(_wkndYearCap(b)||99);
+      if(Math.abs(ra-rb)>0.001) return ra-rb;
+      const sa=_wkndSummerCount(a.id,yr,pv), sb=_wkndSummerCount(b.id,yr,pv);
+      if(sa!==sb) return sa-sb;
+      return a.id-b.id;
+    });
+    if(!pool.length) return false;
+    plan.push({physId:pool[0].id,satDate:sat,sunDate,sub,site:'',wshift});
+    return true;
+  };
+  // Weekend worklist (weekends fully covered by holiday call are skipped)
+  const wknds=sats.map(sat=>({sat,sunDate:addDays(sat,1)}))
+    .filter(w=>!(isHolidayBlackout(w.sat)&&isHolidayBlackout(w.sunDate)))
+    .map(w=>({...w,entries:Object.entries(_wkndNeedsFor(w.sat))
       .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
-      .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));
-    entries.forEach(([sub,need])=>{
-      ['day','swing'].forEach(wshift=>{
-        let have=S.weekendCalls.filter(w=>(w.satDate||w.date)===sat&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
-                +plan.filter(a=>a.satDate===sat&&(a.sub||'')===sub&&a.wshift===wshift).length;
-        while(have<_wkndNeedCount(need,wshift)){
-          const pool=drs.filter(p=>{
-            if(!p.shiftElig?.wknd)return false;
-            if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly))return false;   // swing-only designees may take SWING despite 0 day FTE
-            if(sub&&!(p.drSubs||[]).includes(sub))return false;
-            if(wshift==='day'&&!_wkndDayOk(p))return false;
-            const vd=vacDays(p.id);
-            if(vd.has(sat)||vd.has(sunDate))return false;
-            if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
-            if(S.weekendCalls.some(w=>(w.satDate||w.date)===sat&&w.physId===p.id))return false;
-            if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,sat))return false;
-            if(adjacentInPlan(p.id,sat))return false;
-            if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCap())return false;
-            const yc=_wkndYearCap(p);
-            if(yc!=null&&_wkndYearCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=yc)return false;
-            const ctx={physId:p.id,date:sat,site:'',shift:'wknd',sub,kind:'dr-weekend'};   // weekend call is remote — no site
-            if(typeof natLangRulesOk==='function'&&!natLangRulesOk(ctx))return false;
-            if(typeof tbRulesOk==='function'&&!tbRulesOk(p,ctx))return false;
-            return true;
-          }).sort((a,b)=>{
-            // Fairness: fewest weekends this year first (ratio to cap when set),
-            // then fewer summer weekends, then id for stability.
-            const pv=plan.map(x=>({type:'wk',...x}));
-            const ra=_wkndYearCount(a.id,yr,pv)/(_wkndYearCap(a)||99);
-            const rb=_wkndYearCount(b.id,yr,pv)/(_wkndYearCap(b)||99);
-            if(Math.abs(ra-rb)>0.001) return ra-rb;
-            const sa=_wkndSummerCount(a.id,yr,pv), sb=_wkndSummerCount(b.id,yr,pv);
-            if(sa!==sb) return sa-sb;
-            return a.id-b.id;
+      .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0))}));
+  const phases=[wknds.filter(w=>_wkndIsSummer(w.sat)), wknds.filter(w=>!_wkndIsSummer(w.sat))];
+  phases.forEach(ph=>{
+    [true,false].forEach(subGroup=>{               // subspecialty slots before General
+      const grp=w=>w.entries.filter(([sub])=>(!!sub)===subGroup);
+      const maxDepth=Math.max(0,...ph.flatMap(w=>grp(w).flatMap(([,need])=>[_wkndNeedCount(need,'day'),_wkndNeedCount(need,'swing')])));
+      // Visiting order within a layer: least-filled weekends first (so a
+      // weekend whose earlier slot found no candidate gets the next crack),
+      // ties broken by BIT-REVERSED calendar index — if capacity dies
+      // mid-layer the unreached weekends are spread uniformly across the
+      // year instead of clustering at whichever end a linear sweep left for
+      // last (the exact starvation this rewrite removes). Order is fixed at
+      // the start of each layer.
+      const bits=Math.max(1,Math.ceil(Math.log2(ph.length||1)));
+      const rev=i=>{let r=0;for(let b=0;b<bits;b++) r=(r<<1)|((i>>b)&1);return r;};
+      for(let depth=1;depth<=maxDepth;depth++){
+        const fillOf=w=>grp(w).reduce((n,[sub])=>n+haveCount(w.sat,sub,'day')+haveCount(w.sat,sub,'swing'),0);
+        const sweep=ph.map((w,i)=>({w,i,f:fillOf(w)}))
+          .sort((a,b)=>a.f-b.f||rev(a.i)-rev(b.i)).map(x=>x.w);
+        sweep.forEach(w=>{
+          grp(w).forEach(([sub,need])=>{
+            ['day','swing'].forEach(wshift=>{
+              if(depth>_wkndNeedCount(need,wshift))return;
+              if(haveCount(w.sat,sub,wshift)>=depth)return;
+              fillOne(w.sat,w.sunDate,sub,wshift);
+            });
           });
-          if(pool.length){
-            const p=pool[0];
-            plan.push({physId:p.id,satDate:sat,sunDate,sub,site:'',wshift});
-          } else {
-            gaps.push({satDate:sat,sub,wshift});
-            break;
-          }
-          have++;
-        }
+        });
+      }
+    });
+  });
+  // Every still-unfilled slot becomes a gap — one entry PER missing slot,
+  // so Apply posts each one to the shift market individually.
+  wknds.forEach(w=>{
+    w.entries.forEach(([sub,need])=>{
+      ['day','swing'].forEach(wshift=>{
+        const target=_wkndNeedCount(need,wshift);
+        for(let i=haveCount(w.sat,sub,wshift);i<target;i++) gaps.push({satDate:w.sat,sub,wshift});
       });
     });
   });
@@ -40696,15 +40760,30 @@ function applyWkAA(){
   plan.forEach(a=>{
     S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate,sunDate:a.sunDate,sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift,notes:'Auto'});
   });
-  gaps.forEach(g=>{
-    S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'At Home / Remote',group:'DR',claimedBy:null,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
+  // One open shift per missing slot, deduped against unclaimed posts already
+  // on the market for the same date+sub+shift — re-running a period must not
+  // double-post the same shortfall. wshift is a structured field (legacy rows
+  // carried it only in notes); the claim RPC uses it to materialize the
+  // correct day/swing assignment.
+  const _osHave={};
+  (S.openShifts||[]).forEach(o=>{
+    if(o.shiftType!=='Weekend Call'||o.claimedBy) return;
+    const k=o.date+'|'+(o.sub||'')+'|'+(o.wshift||(o.notes==='Swing shift'?'swing':'day'));
+    _osHave[k]=(_osHave[k]||0)+1;
   });
-  if(typeof _audit==='function') _audit('weekendCall.autoAssign',{period:label,assigned:plan.length,gaps:gaps.length});
+  let _posted=0;
+  gaps.forEach(g=>{
+    const k=g.satDate+'|'+(g.sub||'')+'|'+g.wshift;
+    if(_osHave[k]>0){ _osHave[k]--; return; }
+    S.openShifts.push({id:S.nextId++,date:g.satDate,shiftType:'Weekend Call',sub:g.sub,site:'At Home / Remote',group:'DR',claimedBy:null,wshift:g.wshift,notes:g.wshift==='swing'?'Swing shift':'Day shift'});
+    _posted++;
+  });
+  if(typeof _audit==='function') _audit('weekendCall.autoAssign',{period:label,assigned:plan.length,gaps:gaps.length,posted:_posted});
   triggerSave();
   _wkAAPlan=null;
   const btn=document.getElementById('wkaa-apply-btn'); if(btn) btn.style.display='none';
   const host=document.getElementById('wkaa-box');
-  if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied ${escHtml(label)}: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} posted as open shifts`:''}.</div>`;
+  if(host) host.innerHTML=`<div class="note ns" style="font-size:12px">Applied ${escHtml(label)}: ${plan.length} weekend shift${plan.length===1?'':'s'} assigned${gaps.length?`, ${gaps.length} gap${gaps.length===1?'':'s'} → ${_posted} new open shift${_posted===1?'':'s'} on the market`:''}.</div>`;
   if(typeof _toast==='function') _toast(`Weekend auto-assign applied — ${plan.length} assigned.`,'ok');
   if(typeof _afterMutation==='function') _afterMutation();
 }
@@ -41364,7 +41443,7 @@ function previewAA(){
               // No back-to-back weekend call — inherent to ALL weekend
               // assignment (matches the IR rule + the manual-add block).
               if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,c.date))return false;
-              if(preview.some(a=>a.type==='wk'&&a.physId===p.id&&Math.abs((parseDateLocal(a.satDate||a.date)-parseDateLocal(c.date))/86400000)===7))return false;
+              if(preview.some(a=>a.type==='wk'&&a.physId===p.id&&_daysBetween(a.satDate||a.date,c.date)===7))return false;
               // Summer cap: ≤ N weekends Jun 1 – Aug 31 (default 2)
               if(_wkndIsSummer(c.date)&&_wkndSummerCount(p.id,_yr,preview)>=_wkndSummerCap())return false;
               // Yearly cap × DR FTE (unset = no cap)
@@ -41385,9 +41464,17 @@ function previewAA(){
               preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:'',ctype:'Primary',wshift,notes:'Auto'});
               cnt[p.id].wk++;
             } else {
-              gaps.push(`Weekend ${c.date} ${sub||'General'} (${wshift})`);
-              S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'At Home / Remote',group:'DR',claimedBy:null,notes:wshift==='swing'?'Swing shift':'Day shift'});
-              break;   // no candidates for this sub+shift — don't loop the same empty pool
+              // No candidates — post EVERY remaining unfilled slot of this
+              // sub+shift to the shift market (not just the first), deduped
+              // against unclaimed posts already there so re-previewing never
+              // double-posts, then stop looping the same empty pool.
+              let _osDup=(S.openShifts||[]).filter(o=>o.shiftType==='Weekend Call'&&!o.claimedBy&&o.date===c.date&&(o.sub||'')===sub&&(o.wshift||(o.notes==='Swing shift'?'swing':'day'))===wshift).length;
+              for(let miss=ex;miss<_wkndNeedCount(need,wshift);miss++){
+                gaps.push(`Weekend ${c.date} ${sub||'General'} (${wshift})`);
+                if(_osDup>0){ _osDup--; continue; }
+                S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'At Home / Remote',group:'DR',claimedBy:null,wshift,notes:wshift==='swing'?'Swing shift':'Day shift'});
+              }
+              break;
             }
             ex++;
           }
@@ -45105,28 +45192,29 @@ function _scanUnfilled(opts){
   }
   // ── DR weekend call gaps ─────────────────────────────────────────
   if(wantWknd){
-    const wkndNeeds = S.wkndNeeds || {};
     cells.forEach(c => {
       if(c.dow !== 6) return; // Sat
       if(isHolidayBlackout(c.date)) return;
-      // wkndNeeds is keyed by sub-specialty (or 'general'). Each entry
-      // specifies a count. Match by sub for the weekend that starts on
-      // this Sat.
-      Object.entries(wkndNeeds).forEach(([sub, n]) => {
-        const need = +n || 0;
-        if(!need) return;
-        // Count assigned for this Sat+sub
-        const have = (S.weekendCalls||[]).filter(w =>
-          (w.satDate||w.date) === c.date && (w.sub||'') === sub
-        ).length;
-        const missing = need - have;
-        for(let i = 0; i < missing; i++){
-          out.push({
-            cat: 'wknd', date: c.date, site: '—', dow: 6,
-            shift: 'weekend call', detail: sub || '—',
-            group: 'DR', slotIndex: have + i,
-          });
-        }
+      // Same demand source as the auto-assign planners: _wkndNeedsFor drops
+      // stale (renamed/removed) sub keys, _wkndNeedCount resolves legacy
+      // plain numbers vs the {day,swing} object shape — the old `+n||0`
+      // here silently zeroed every object-shaped need.
+      Object.entries(_wkndNeedsFor(c.date)).forEach(([sub, n]) => {
+        ['day','swing'].forEach(wshift => {
+          const need = _wkndNeedCount(n, wshift);
+          if(!need) return;
+          const have = (S.weekendCalls||[]).filter(w =>
+            (w.satDate||w.date) === c.date && (w.sub||'') === sub && ((w.wshift||'day') === wshift)
+          ).length;
+          const missing = need - have;
+          for(let i = 0; i < missing; i++){
+            out.push({
+              cat: 'wknd', date: c.date, site: '—', dow: 6,
+              shift: `weekend call (${wshift})`, detail: sub || '—',
+              group: 'DR', slotIndex: have + i,
+            });
+          }
+        });
       });
     });
   }
