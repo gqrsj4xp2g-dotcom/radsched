@@ -37367,9 +37367,14 @@ function _predictiveSuggestions(){
     if(_isHolidaySyncedCall(c)) return;
     const s = ensure(c.physId); s.irCall++; s.total++;
   });
+  // Holiday call counts as ONE unit per block (a multi-day block like
+  // Christmas Dec 25–27 is a single call, not three).
+  const _holBlockSeen = new Set();
   (S.holidays || []).forEach(h => {
     if(!h.date || h.date < cutoffISO) return;
-    const s = ensure(h.physId); s.hol++; s.total++;
+    const s = ensure(h.physId);
+    const k = h.physId + '|' + (h.name||'') + '|' + (h.year||String(h.date).slice(0,4));
+    if(!_holBlockSeen.has(k)){ _holBlockSeen.add(k); s.hol++; s.total++; }
     if(h.date > s.lastHol) s.lastHol = h.date;
   });
   (S.drShifts || []).forEach(d => {
@@ -37784,7 +37789,18 @@ function renderAnnualReport(){
   const drWknd  = byMonth(S.weekendCalls, w => w.satDate || w.date, w => w.physId === physId);
   const irShift = byMonth(S.irShifts,    s => s.date,         s => s.physId === physId && s.shift !== 'Home');
   const irCall  = byMonth(S.irCalls,     c => c.date,         c => c.physId === physId);
-  const hols    = byMonth(S.holidays,    h => h.date,         h => h.physId === physId);
+  // One row per holiday BLOCK (keyed to its first date) so a multi-day
+  // block counts as a single call in that month, not one per date.
+  const _holBlocks = (() => {
+    const best = {};
+    (S.holidays || []).forEach(h => {
+      if(h.physId !== physId || !h.date) return;
+      const k = (h.name||'') + '|' + (h.year||String(h.date).slice(0,4));
+      if(!best[k] || h.date < best[k].date) best[k] = h;
+    });
+    return Object.values(best);
+  })();
+  const hols    = byMonth(_holBlocks,    h => h.date,         () => true);
   // Vacations span days; count number of days per month.
   const vacDaysPerMonth = new Array(13).fill(0);
   (S.vacations || []).filter(v => v.physId === physId).forEach(v => {
@@ -41051,10 +41067,21 @@ function exportIRSchedXls(){
   _xlsDownload(`ir-schedule-${ym}`, ['Date','Kind','Shift / Call type','Site','Group','Physician','Notes'], rows);
 }
 function exportHolidayXls(){
-  const rows=(S.holidays||[]).slice().sort((a,b)=>(a.date||'')<(b.date||'')?-1:1)
-    .map(h=>[h.date||'', h.name||'', h.group||'', h.group==='DR'&&h.wshift?(h.wshift==='swing'?'Swing':'Day'):'', h.sub||'', _pnameCsv(h.physId), h.notes||'']);
+  // One row per BLOCK (physician × holiday), spanning all its dates — a
+  // holiday call is one unit regardless of how many days the block covers.
+  const blocks={};
+  (S.holidays||[]).forEach(h=>{
+    if(!h.date||h.physId==null) return;
+    const k=h.physId+'|'+(h.name||'')+'|'+(h.year||String(h.date).slice(0,4))+'|'+(h.group||'');
+    (blocks[k]=blocks[k]||{h,dates:[]}).dates.push(h.date);
+  });
+  const rows=Object.values(blocks)
+    .map(({h,dates})=>{ dates.sort(); return {h,from:dates[0],to:dates[dates.length-1]}; })
+    .sort((a,b)=>a.from<b.from?-1:1)
+    .map(({h,from,to})=>[from===to?from:`${from} – ${to}`, h.name||'', h.group||'',
+      h.group==='DR'&&h.wshift?(h.wshift==='swing'?'Swing':'Day'):'', h.sub||'', _pnameCsv(h.physId), h.notes||'']);
   if(!rows.length){ if(typeof _toast==='function') _toast('No holiday assignments to export.','info'); return; }
-  _xlsDownload('holiday-call', ['Date','Holiday','Pool','Shift','Subspecialty','Physician','Notes'], rows);
+  _xlsDownload('holiday-call', ['Dates','Holiday','Pool','Shift','Subspecialty','Physician','Notes'], rows);
 }
 // ── Shift Tally (per-physician totals across every assignment type) ──────
 let _tallyPeriod='ytd';
@@ -41079,7 +41106,16 @@ function _tallyCompute(from,to){
   (S.irCalls||[]).forEach(c=>{ if(!inR(c.date)||c.physId==null)return; if(c.callType==='weekend') g(c.physId).ircW++; else g(c.physId).ircD++; });
   (S.weekendCalls||[]).forEach(w=>{ const d=w.satDate||w.date; if(!inR(d)||w.physId==null)return;
     if((w.wshift||'day')==='swing') g(w.physId).wkSwing++; else g(w.physId).wkDay++; });
-  (S.holidays||[]).forEach(h=>{ if(inR(h.date)&&h.physId!=null) g(h.physId).hol++; });
+  // A holiday call is ONE unit no matter how many dates its block spans
+  // (Christmas Dec 25–27 = 1 call, not 3) — dedup per (physician, block).
+  const _holSeen=new Set();
+  (S.holidays||[]).forEach(h=>{
+    if(!inR(h.date)||h.physId==null)return;
+    const k=h.physId+'|'+(h.name||'')+'|'+(h.year||String(h.date||'').slice(0,4));
+    if(_holSeen.has(k))return;
+    _holSeen.add(k);
+    g(h.physId).hol++;
+  });
   return t;
 }
 const _TALLY_COLS=[['dr1','DR 1st'],['dr2','DR 2nd'],['dr3','DR 3rd'],['drHome','DR Home'],['ir','IR Shift'],['ircD','IR Call'],['ircW','IR Wknd'],['wkDay','Wknd Day'],['wkSwing','Wknd Swing'],['hol','Holiday']];
