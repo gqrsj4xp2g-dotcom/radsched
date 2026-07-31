@@ -9557,7 +9557,7 @@ create table pacs_inbound (
         builder, bulk, burnout, call-day-site, click-empty-cell, command,
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
-        min-staffing, sell/buy, standalone,
+        min-staffing, sell/buy, standalone, partial,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -18235,6 +18235,7 @@ document.addEventListener('keydown', (e) => {
     ['chat-group-modal',     () => { if(typeof closeChatGroupEditor === 'function') closeChatGroupEditor(); _restoreModalFocusFor('chat-group-modal'); }],
     ['dtd-modal',            () => { if(typeof closeDriveTimeDetails === 'function') closeDriveTimeDetails(); _restoreModalFocusFor('dtd-modal'); }],
     ['ssm-modal',            () => { const el = document.getElementById('ssm-modal'); if(el) el.remove(); _restoreModalFocusFor('ssm-modal'); }],
+    ['os-claim-modal',       () => { const el = document.getElementById('os-claim-modal'); if(el) el.remove(); _restoreModalFocusFor('os-claim-modal'); }],
     ['rationale-modal',      () => { const el = document.getElementById('rationale-modal'); if(el) el.remove(); _restoreModalFocusFor('rationale-modal'); }],
   ];
   for(const [id, close] of modals){
@@ -25377,6 +25378,86 @@ function doReassignHoliday(id){
 
 
 /* ─── OPEN SHIFTS ─── */
+// ── Partial claiming of market shifts ────────────────────────────────────
+// Every open shift is offered as DAYS (Weekend Call = Sat+Sun; everything
+// else its single date), and each day can be claimed whole or as an hour
+// range. Claims accumulate in o.claims [{cid, physId, date, from, to, at,
+// rows}] — a whole-day claim CLOSES its day; hour claims leave the remainder
+// claimable (a later blank-hours claim takes whatever is left). o.claimedBy
+// is only set once every offered day is closed, so all the legacy
+// `!o.claimedBy` filters keep treating partially-claimed shifts as open.
+function _osOfferedDays(o){
+  return /Weekend/.test(o.shiftType||'') ? [o.date, addDays(o.date,1)] : [o.date];
+}
+function _osDayClosed(o, d){
+  if(o.claimedBy && !(o.claims||[]).length) return true;   // legacy full claim
+  return (o.claims||[]).some(c=>c.date===d && !c.from);
+}
+function _osRemainingDays(o){ return _osOfferedDays(o).filter(d=>!_osDayClosed(o,d)); }
+function _osDayLabel(o, d){
+  if(_osOfferedDays(o).length<2) return d;
+  return (d===o.date?'Sat ':'Sun ')+d;
+}
+function _osClaimsHtml(o){
+  const cs=o.claims||[];
+  if(!cs.length) return '';
+  return `<div class="fs-xs mt8" style="color:var(--txt2)">`+cs.map(c=>
+    `${escHtml(_osDayLabel(o,c.date))}: ${pnameHtml(c.physId)}${c.from?` <span class="muted-xs">(${escHtml(c.from)}–${escHtml(c.to)})</span>`:''}`
+  ).join(' · ')+`</div>`;
+}
+function _osOpenClaimDialog(oid, pid){
+  const o=(S.openShifts||[]).find(x=>x.id===oid); if(!o) return;
+  const days=_osOfferedDays(o), remaining=_osRemainingDays(o);
+  if(!remaining.length){ _toast?.('Nothing left to claim on this shift.','warn'); renderOpenShifts(); return; }
+  _saveModalFocusFor('os-claim-modal');
+  const wrap=document.createElement('div');
+  wrap.className='modal-wrap'; wrap.id='os-claim-modal'; wrap.style.display='flex';
+  wrap.onclick=(e)=>{ if(e.target===wrap){ wrap.remove(); _restoreModalFocusFor('os-claim-modal'); } };
+  const rows=days.map((d,i)=>{
+    const closed=_osDayClosed(o,d);
+    const hourClaims=(o.claims||[]).filter(c=>c.date===d&&c.from);
+    return `<div class="row flex-wrap" style="align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bdr)">
+      <label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer${closed?';opacity:.45':''}">
+        <input type="checkbox" id="oscd-${i}" data-day="${escHtml(d)}" ${closed?'disabled':'checked'}>
+        <span class="fw6" style="font-size:12px">${escHtml(_osDayLabel(o,d))}</span>
+      </label>
+      ${closed?`<span class="muted-xs">fully claimed</span>`
+        :`<span class="muted-xs">from</span><input type="time" id="oscf-${i}" style="width:96px">
+          <span class="muted-xs">to</span><input type="time" id="osct-${i}" style="width:96px">
+          <span class="muted-xs">blank = whole ${hourClaims.length?'remainder':'day'}</span>`}
+      ${hourClaims.length?`<div class="muted-xs" style="flex-basis:100%">already claimed: ${hourClaims.map(c=>`${escHtml(c.from)}–${escHtml(c.to)} ${pnameHtml(c.physId)}`).join(', ')}</div>`:''}
+    </div>`;
+  }).join('');
+  wrap.innerHTML=`<div class="modal" style="max-width:540px">
+    <button class="modal-close" onclick="document.getElementById('os-claim-modal').remove();_restoreModalFocusFor('os-claim-modal')">✕</button>
+    <div class="modal-title">Claim: ${escHtml(o.date)} — ${escHtml(o.shiftType||'')}${o.sub?` · ${escHtml(o.sub)}`:''}</div>
+    <div class="muted-xs mb8">Pick the day(s) — and optionally an hour range per day — that you want to take. Leave the times blank to claim the whole day (or whatever part of it is still unclaimed).</div>
+    ${rows}
+    <div class="row mt14" style="justify-content:flex-end;gap:8px">
+      <button class="bt bxs" onclick="document.getElementById('os-claim-modal').remove();_restoreModalFocusFor('os-claim-modal')">Cancel</button>
+      <button class="bg bsm" onclick="_osSubmitClaim(${o.id},${pid})">Claim selected</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+function _osSubmitClaim(oid, pid){
+  const o=(S.openShifts||[]).find(x=>x.id===oid); if(!o) return;
+  const days=_osOfferedDays(o);
+  const parts=[];
+  for(let i=0;i<days.length;i++){
+    const cb=document.getElementById(`oscd-${i}`);
+    if(!cb||!cb.checked||cb.disabled) continue;
+    const f=document.getElementById(`oscf-${i}`)?.value||'', t=document.getElementById(`osct-${i}`)?.value||'';
+    if((f&&!t)||(!f&&t)){ _toast?.('Set both "from" and "to" times, or leave both blank.','warn'); return; }
+    if(f&&t&&f>=t){ _toast?.('"From" must be before "to".','warn'); return; }
+    const part={date:cb.dataset.day};
+    if(f&&t){ part.from=f; part.to=t; }
+    parts.push(part);
+  }
+  if(!parts.length){ _toast?.('Select at least one day.','warn'); return; }
+  document.getElementById('os-claim-modal')?.remove(); _restoreModalFocusFor('os-claim-modal');
+  claimShift(oid, pid, parts);
+}
 function renderOpenShifts(){
   const pSel=document.getElementById('os-phys');
   if(pSel&&pSel.options.length<2) S.physicians.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.text=p.last+', '+p.first;pSel.appendChild(o);});
@@ -25430,11 +25511,12 @@ function renderOpenShifts(){
           ${isMyAnch?'<span class="tag tg" style="margin-left:4px">⚓ Your anchor site</span>':''}
           ${selP&&!subMatch&&o.sub?'<span class="tag ta" style="margin-left:4px">Outside subspecialty</span>':''}
         </div>
-        <div style="font-size:11px;color:var(--txt2);margin-top:2px">${o.sub||'—'} | ${o.site||'TBD'}</div>
+        <div style="font-size:11px;color:var(--txt2);margin-top:2px">${o.sub||'—'} | ${o.site||'TBD'}${_osOfferedDays(o).length>1?` | Sat + Sun${(o.claims||[]).length||!isClaimed?` (${_osRemainingDays(o).length} day${_osRemainingDays(o).length===1?'':'s'} open)`:''}`:''}</div>
         ${isClaimed?`<div style="font-size:11px;color:var(--green-t);margin-top:2px">Claimed by ${pnameHtml(o.claimedBy)}${o.claimedAt?` · <span style="color:var(--rs-ink-3)">${escHtml(_timeAgo(o.claimedAt))}</span>`:''}</div>`:''}
+        ${_osClaimsHtml(o)}
       </div>
-      ${selP&&!isClaimed?`<button class="bg bsm" onclick="claimShift(${o.id},${selP.id})">Claim</button>`:''}
-      ${selP&&isClaimed&&o.claimedBy===selP.id?`<button class="br bsm" onclick="unclaimShift(${o.id})">Unclaim</button>`:''}
+      ${selP&&!isClaimed?`<button class="bg bsm" onclick="_osOpenClaimDialog(${o.id},${selP.id})">Claim…</button>`:''}
+      ${selP&&(o.claimedBy===selP.id||(o.claims||[]).some(c=>c.physId===selP.id))?`<button class="br bsm" onclick="unclaimShift(${o.id})" title="Remove your claim(s) on this shift">Unclaim</button>`:''}
     </div>`;
   });
   el.innerHTML=html;
@@ -25448,7 +25530,7 @@ function renderManageShifts(){
     <td>${o.date}</td><td><span class="tag ta">${o.shiftType}</span></td>
     <td><span class="tag ${o.group==='IR'?'tt':'tb'}">${o.group}</span></td>
     <td>${o.sub||'—'}</td><td>${o.site||'—'}</td>
-    <td>${o.claimedBy?`<span class="tag tg">${pnameHtml(o.claimedBy)}</span>`:'<span class="tag tgr">Unclaimed</span>'}</td>
+    <td>${o.claimedBy?`<span class="tag tg">${pnameHtml(o.claimedBy)}</span>`:(o.claims&&o.claims.length?`<span class="tag ta" title="${o.claims.map(c=>`${c.date}${c.from?` ${c.from}–${c.to}`:''} ${pname(c.physId)}`).map(escHtml).join(', ')}">Partial (${o.claims.length})</span>`:'<span class="tag tgr">Unclaimed</span>')}</td>
     <td>${o.notes?String(o.notes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'—'}</td>
     <td style="white-space:nowrap">
       <!-- rs-v101: editOpenShift existed (pull-into-form pattern) but no
@@ -25458,7 +25540,7 @@ function renderManageShifts(){
     </td>
   </tr>`).join('')||'<tr><td colspan="8" class="tac txt3">No open shifts</td></tr>';
 }
-async function claimShift(oid,pid){
+async function claimShift(oid,pid,parts){
   // Re-fetch helper: returns the CURRENT entry in S.openShifts. Realtime poll
   // can swap the underlying array (via _applyRemoteData), leaving any local
   // reference dangling against an old array. Always re-look-up before
@@ -25479,9 +25561,14 @@ async function claimShift(oid,pid){
   if(!p){alert('Physician not found.');return;}
   if(o.group==='DR'&&p.role==='IR'){_toast('IR-only physicians cannot claim DR shifts.','warn');return;}
   if(o.group==='IR'&&!(p.irFte>0)){_toast('This is an IR shift — only IR physicians can claim it.','warn');return;}
-  // Vacation conflict warning (not a hard block — admin may override after confirming)
-  if(vacDays(p.id).has(o.date)){
-    if(!confirm(`${pname(p.id)} has a vacation on ${o.date}. Claim anyway?`))return;
+  // Vacation conflict warning (not a hard block — admin may override after
+  // confirming). Checked per claimed day, not just the posting date — a
+  // partial claim may cover only the Sunday of a weekend shift.
+  const _claimDates=(Array.isArray(parts)&&parts.length)?parts.map(x=>x.date):_osRemainingDays(o);
+  for(const _cd of _claimDates){
+    if(vacDays(p.id).has(_cd)){
+      if(!confirm(`${pname(p.id)} has a vacation on ${_cd}. Claim anyway?`))return;
+    }
   }
   // Physician-rule check for the claimant. Same warn-and-confirm pattern as
   // addDRShift/addIRShift — the claim path is effectively a manual
@@ -25530,8 +25617,9 @@ async function claimShift(oid,pid){
   const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
   if(!_sb){ if(typeof _toast==='function') _toast('Not connected — cannot claim right now.','err'); return; }
   const _g=o.group, _d=o.date, _st=o.site;
+  const _parts=(Array.isArray(parts)&&parts.length)?parts:null;   // null = claim everything remaining
   let _res;
-  try{ _res=await _sb.rpc('rs_claim_open_shift',{p_practice:_rsPracticeId(), p_oid:oid, p_pid:pid}); }
+  try{ _res=await _sb.rpc('rs_claim_open_shift',{p_practice:_rsPracticeId(), p_oid:oid, p_pid:pid, p_parts:_parts}); }
   catch(e){ if(typeof _toast==='function') _toast('Claim failed: '+(e&&e.message||e),'err'); renderOpenShifts(); return; }
   if(_res.error || !_res.data || _res.data.ok!==true){
     const _m=(_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'claim failed';
@@ -25539,10 +25627,10 @@ async function claimShift(oid,pid){
     try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
     renderOpenShifts(); return;
   }
-  if(typeof _audit==='function') _audit('openShift.claim', {oid, pid, group:_g, date:_d, site:_st});
+  if(typeof _audit==='function') _audit('openShift.claim', {oid, pid, group:_g, date:_d, site:_st, parts:_parts?_parts.length:null});
   try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
   renderOpenShifts();
-  if(typeof _toast==='function') _toast('Shift claimed.','ok');
+  if(typeof _toast==='function') _toast(_res.data&&_res.data.fully===false?'Claimed your part — the rest stays on the market.':'Shift claimed.','ok');
 }
 async function unclaimShift(oid){
   const o=(S.openShifts||[]).find(x=>x.id===oid);if(!o)return;
