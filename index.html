@@ -46268,6 +46268,22 @@ const _FED_HOLIDAYS=[
   {name:'Thanksgiving',    kind:'nth',   mm:11, nth:4,  dow:4},
   {name:'Christmas Day',   kind:'fixed', mm:12, dd:25},
 ];
+// A holiday that falls around a weekend absorbs it into the call block:
+// Friday → the Sat+Sun after; Monday → the Sat+Sun before; a weekend-day
+// holiday completes its own weekend. Holiday call then covers the whole
+// stretch, and the weekend auto-builder skips those weekends automatically
+// (its holiday-weekend exclusion keys on any block date landing on Sat/Sun).
+function _extendBlockAroundWeekend(dates){
+  const set=new Set(dates);
+  dates.forEach(d=>{
+    const dow=parseDateLocal(d).getDay();
+    if(dow===5){ set.add(addDays(d,1)); set.add(addDays(d,2)); }   // Fri → weekend after
+    if(dow===1){ set.add(addDays(d,-2)); set.add(addDays(d,-1)); } // Mon → weekend before
+    if(dow===6){ set.add(addDays(d,1)); }                          // Sat → its Sunday
+    if(dow===0){ set.add(addDays(d,-1)); }                         // Sun → its Saturday
+  });
+  return [...set].sort();
+}
 function officialUSHolidays(year){
   const iso=(y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   return _FED_HOLIDAYS.map(h=>{
@@ -46282,7 +46298,8 @@ function officialUSHolidays(year){
     }
     const dow=parseDateLocal(actual).getDay();
     const observed=dow===6?addDays(actual,-1):(dow===0?addDays(actual,1):actual);
-    return {name:h.name, actual, observed};
+    const dates=_extendBlockAroundWeekend([...new Set([observed,actual])]);
+    return {name:h.name, actual, observed, dates};
   });
 }
 function _holoffYear(){
@@ -46294,7 +46311,7 @@ function previewOfficialHolidays(){
   const host=document.getElementById('holoff-preview'); if(!host) return;
   const defined=new Set((S.holidayDefs||[]).filter(d=>d.year===year).map(d=>String(d.name||'').toLowerCase()));
   host.innerHTML=`<strong>${year}:</strong> `+officialUSHolidays(year).map(h=>
-    `${escHtml(h.name)} — ${escHtml(h.actual)}${h.observed!==h.actual?` <span class="fw6">(observed ${escHtml(h.observed)})</span>`:''}${defined.has(h.name.toLowerCase())?' <span class="tag tg" style="font-size:10px">defined</span>':''}`
+    `${escHtml(h.name)} — ${escHtml(h.dates.length>1?h.dates[0]+' → '+h.dates[h.dates.length-1]:h.actual)}${h.observed!==h.actual?` <span class="fw6">(observed ${escHtml(h.observed)})</span>`:''}${defined.has(h.name.toLowerCase())?' <span class="tag tg" style="font-size:10px">defined</span>':''}`
   ).join(' · ');
 }
 function importOfficialHolidays(){
@@ -46304,14 +46321,15 @@ function importOfficialHolidays(){
   const existing=new Set((S.holidayDefs||[]).filter(d=>d.year===year).map(d=>String(d.name||'').toLowerCase()));
   const fresh=list.filter(h=>!existing.has(h.name.toLowerCase()));
   if(!fresh.length){ if(typeof _toast==='function') _toast(`All ${list.length} official ${year} holidays are already defined.`,'info'); return; }
-  const lines=fresh.map(h=>`• ${h.name}: ${h.actual}${h.observed!==h.actual?` (observed ${h.observed})`:''}`).join('\n');
-  if(!confirm(`Create ${fresh.length} official US holiday definition${fresh.length===1?'':'s'} for ${year}?\n\n${lines}\n\nEach gets 1 DR slot + 1 slot per IR group by default — edit or delete any of them below afterwards.`)) return;
+  const lines=fresh.map(h=>`• ${h.name}: ${h.dates.join(', ')}${h.observed!==h.actual?` (falls ${h.actual}, observed ${h.observed})`:''}`).join('\n');
+  if(!confirm(`Create ${fresh.length} official US holiday definition${fresh.length===1?'':'s'} for ${year}?\n\nBlocks absorb adjacent weekends (a Fri/Mon holiday includes its weekend; weekend call skips those weekends):\n\n${lines}\n\nEach gets 1 slot per staffed IR group; DR staffing follows Settings → Holiday Call Needs. Edit or delete any of them below afterwards.`)) return;
   if(!S.holidayDefs) S.holidayDefs=[];
+  // Only IR groups that actually have members get a slot — a memberless
+  // group would create a permanently unfillable "stale" slot on every holiday.
   const irDefaults={};
-  getIRGroups().forEach(g=>{ irDefaults[g]=1; });
+  getIRGroups().forEach(g=>{ if(_holPoolPhysicians('IR-'+g).length) irDefaults[g]=1; });
   fresh.forEach(h=>{
-    const dates=[...new Set([h.observed,h.actual])].sort();
-    S.holidayDefs.push({id:S.nextId++, name:h.name, year, dates,
+    S.holidayDefs.push({id:S.nextId++, name:h.name, year, dates:[...h.dates],
       drSlots:1, irSlotsByGroup:{...irDefaults},
       irNorthSlots:irDefaults['North']||0, irSouthSlots:irDefaults['South']||0,
       notes:h.observed!==h.actual?`Official (falls ${h.actual}, observed ${h.observed})`:'Official'});
