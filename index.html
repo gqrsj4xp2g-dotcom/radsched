@@ -4461,7 +4461,7 @@ tbody tr:hover{background:var(--bg3)}
         Leave <strong>0</strong> to skip that pool. IR groups below reflect the groups you've configured in IR Slots &amp; Groups.
       </div>
       <div class="g3">
-        <div class="fg"><label>DR Call Slots</label>
+        <div class="fg"><label>DR Call Slots <span class="muted-xs">(legacy — ignored when Settings → Holiday Call Needs are set)</span></label>
           <input id="holdef-dr" type="number" min="0" max="10" value="1" style="width:70px"></div>
       </div>
       <div id="holdef-ir-slots" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:6px"></div>
@@ -4509,6 +4509,12 @@ tbody tr:hover{background:var(--bg3)}
             <option value="IR-North">IR North Call</option>
             <option value="IR-South">IR South Call</option>
           </select></div>
+        <div class="fg"><label>Shift <span class="muted-xs">(DR only)</span></label>
+          <select id="hol-wshift"><option value="day">☀️ Day</option><option value="swing">🌙 Swing</option></select></div>
+      </div>
+      <div class="g3">
+        <div class="fg"><label>Subspecialty <span class="muted-xs">(DR only)</span></label>
+          <select id="hol-sub"><option value="">General</option></select></div>
         <div class="fg"><label>Notes</label>
           <input id="hol-notes" placeholder="Optional"></div>
       </div>
@@ -4564,7 +4570,10 @@ tbody tr:hover{background:var(--bg3)}
   <div id="holt-autoassign" style="display:none">
     <div class="note ni mb10" >
       FTE-weighted random lottery using the holiday definitions above.
-      One physician per group covers the entire holiday block.
+      Each physician drawn covers the entire holiday block. <strong>DR staffing follows
+      Settings → Holiday Call Needs</strong> (per-subspecialty ☀️ Day + 🌙 Swing slots, subspecialty
+      spots filled first, same eligibility gates as weekend call); when no needs are set, the
+      per-definition "DR Call Slots" number applies. IR pools always use the per-definition slots.
       Assignments sync to DR and IR calendars and clear any conflicting call already scheduled.
     </div>
     <div class="ibox mb10" >
@@ -6271,6 +6280,10 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
       <div class="card">
         <div class="card-title">Weekend Call Needs by Subspecialty (per weekend, weekly)</div>
         <div id="wknd-needs"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Holiday Call Needs by Subspecialty (per holiday block)</div>
+        <div id="hol-needs"></div>
       </div>
       <div class="card" style="border:1px dashed var(--bdr2)">
         <div class="card-title">📬 Admin Alert Inbox</div>
@@ -10369,6 +10382,7 @@ const _PERSISTED_KEYS = [
   {key:'irShiftSlotLabels', type:'object'},
   {key:'siteSlotLabels',    type:'object'},
   {key:'wkndNeeds',         type:'object'},
+  {key:'holNeeds',          type:'object'},
   // Config + misc
   {key:'cfg',               type:'object'},
   {key:'driveTimes',        type:'object'},
@@ -12513,7 +12527,7 @@ function _undoSnapshot(label){
     const SNAP_KEYS = ['physicians','sites','drSubs','irSubs','irGroups','vacations',
       'drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts',
       'siteSlots','siteSlotsSubs','irSlots','irShiftSlots','irShiftSlotLabels',
-      'siteSlotLabels','wkndNeeds','cfg','holidayBlackouts','holidayNeeds',
+      'siteSlotLabels','wkndNeeds','holNeeds','cfg','holidayBlackouts','holidayNeeds',
       'holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups',
       'tumorBoards','clinics','vacPicking','nextId'];
     const snap = {};
@@ -13919,7 +13933,7 @@ function clearAllData(){
     swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
     holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
     siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,nextId:S.nextId,
+    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,holNeeds:S.holNeeds||{},nextId:S.nextId,
     shiftPickGroups:S.shiftPickGroups||[],
     tumorBoards:S.tumorBoards||[],
     clinics:S.clinics||[],
@@ -15013,7 +15027,7 @@ function _validateRemotePayload(d){
   // corrupt save or a payload from a much-older / much-newer client. Patch
   // the local field after warning so the app stays functional.
   const arrayKeys = ['physicians','drSubs','irSubs','sites','irGroups','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups','tumorBoards','clinics','publishLog','vacSurveys'];
-  const objectKeys = ['siteSlots','siteSlotsSubs','irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','wkndNeeds','cfg','driveTimes','vacPicking'];
+  const objectKeys = ['siteSlots','siteSlotsSubs','irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','wkndNeeds','holNeeds','cfg','driveTimes','vacPicking'];
   arrayKeys.forEach(k => {
     if(k in d && !Array.isArray(d[k])){
       problems.push(`${k}: expected array, got ${typeof d[k]} — substituting []`);
@@ -15106,7 +15120,7 @@ function _applyRemoteData(d){
   // loaded empty on every fresh boot and the next save persisted the empties,
   // wiping the data for the whole practice. Save and load MUST share the manifest.
   const _APPLY_SPECIAL = new Set(['siteSlots','siteSlotsSubs','irGroups','irSlots',
-    'irShiftSlots','irShiftSlotLabels','siteSlotLabels','shiftPickGroups','wkndNeeds',
+    'irShiftSlots','irShiftSlotLabels','siteSlotLabels','shiftPickGroups','wkndNeeds','holNeeds',
     'cfg','vacPicking','driveTimes','tumorBoards','clinics','publishLog','nextId']);
   for(const entry of _PERSISTED_KEYS){
     const k = entry.key;
@@ -15168,6 +15182,7 @@ function _applyRemoteData(d){
   }
   if(Array.isArray(d.shiftPickGroups)) S.shiftPickGroups = d.shiftPickGroups.slice();
   if(d.wkndNeeds)Object.assign(S.wkndNeeds,d.wkndNeeds);
+  if(d.holNeeds){S.holNeeds=S.holNeeds||{};Object.assign(S.holNeeds,d.holNeeds);}
   if(d.cfg)Object.assign(S.cfg,d.cfg);
   // Widget signing material is server-only as of v2 issuance. Drop any stale
   // client copy so an old tab cannot reintroduce it on its next save.
@@ -15382,7 +15397,7 @@ function _applyRemoteData(d){
   }
   // Same idea for keyed-object fields:
   const _coreObjects = ['siteSlots','siteSlotsSubs','irSlots','irShiftSlots',
-    'irShiftSlotLabels','siteSlotLabels','wkndNeeds','vacPicking','driveTimes','cfg'];
+    'irShiftSlotLabels','siteSlotLabels','wkndNeeds','holNeeds','vacPicking','driveTimes','cfg'];
   for(const k of _coreObjects){
     if(!S[k] || typeof S[k] !== 'object' || Array.isArray(S[k])) S[k] = {};
   }
@@ -16232,6 +16247,7 @@ let S=/*S_START*/{
   timeLogEntries:[],
   irGroups:['North','South'],
   wkndNeeds:{},
+  holNeeds:{},
   cfg:{wdMax:20,wkMax:4,irMax:20,irDailyMax:20,irWkndMax:4,rest:1,anchorPct:70,shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
     // wRVU defaults per shift type. Overridden per-shift by s.wRVUGoal,
     // per-physician by p.wRVUMultiplier (1.0 = standard expectation).
@@ -16694,7 +16710,7 @@ async function createPractice(){
       {name:"At Home / Remote", irGroup:null, irAnchors:[], irFillins:[]}
     ],
     drSubs:[], irSubs:[],
-    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, irShiftSlotLabels:{}, siteSlotLabels:{}, shiftPickGroups:[], timeLogOptions:[], timeLogEntries:[], wkndNeeds:{},
+    siteSlots:{}, siteSlotsSubs:{}, irSlots:{}, irShiftSlots:{}, irShiftSlotLabels:{}, siteSlotLabels:{}, shiftPickGroups:[], timeLogOptions:[], timeLogEntries:[], wkndNeeds:{}, holNeeds:{},
     irGroups:['North','South'],
     cfg:{anchorPct:70}, vacPicking:{}, driveTimes:{},
     nextId:1, users:[],
@@ -16747,7 +16763,7 @@ async function switchPractice(id,name){
     // Drop any table load already in flight for the OLD practice — its rows
     // must not land in the new practice's caches when the await resolves.
     if(typeof _migTableGen !== 'undefined') _migTableGen++;
-    ['siteSlots','irSlots','irShiftSlots','wkndNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
+    ['siteSlots','irSlots','irShiftSlots','wkndNeeds','holNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
       if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
     });
     S.nextId=1;
@@ -25094,8 +25110,12 @@ function renderHolSchedule(){
             `<td>${escHtml(def.name)}</td>`;
     pools.forEach(pool => {
       const list = (assignsByKey[`${def.name}|${date}|${pool}`] || [])
-        .map(h => escHtml(physName(h.physId)));
-      html += `<td>${list.length ? list.map(n=>`<span class="tag tb" style="font-size:10px;margin:1px">${n}</span>`).join('') : '<span class="txt3">—</span>'}</td>`;
+        .map(h => {
+          const slot = (pool==='DR'&&h.wshift)
+            ? ` <span class="muted-xs">(${h.sub?escHtml(h.sub)+' ':''}${h.wshift==='swing'?'🌙':'☀️'})</span>` : '';
+          return `<span class="tag tb" style="font-size:10px;margin:1px">${escHtml(physName(h.physId))}${slot}</span>`;
+        });
+      html += `<td>${list.length ? list.join('') : '<span class="txt3">—</span>'}</td>`;
     });
     html += '</tr>';
   });
@@ -26214,7 +26234,7 @@ function renderSettings(){
   if(inboxEl) inboxEl.value = S.cfg?.adminAlertEmail || '';
   const inboxStatus=document.getElementById('cfg-admin-inbox-status');
   if(inboxStatus) inboxStatus.textContent='';
-  renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();
+  renderDRSList();renderIRSList();renderSitesList();renderWkndNeeds();renderHolNeeds();
   renderNatLangRules();
   if(typeof _loadShiftTimesUI==='function') _loadShiftTimesUI();
   if(typeof populateDtqSelects==='function') populateDtqSelects();
@@ -26484,6 +26504,12 @@ function renameSub(kind, idx){
   if(S.wkndNeeds && Object.prototype.hasOwnProperty.call(S.wkndNeeds, oldName)){
     if(!Object.prototype.hasOwnProperty.call(S.wkndNeeds, newName)) S.wkndNeeds[newName] = S.wkndNeeds[oldName];
     delete S.wkndNeeds[oldName];
+  }
+  // Holiday call needs follow the same sub-keyed model (_holNeedsFor drops
+  // stale keys the same way).
+  if(S.holNeeds && Object.prototype.hasOwnProperty.call(S.holNeeds, oldName)){
+    if(!Object.prototype.hasOwnProperty.call(S.holNeeds, newName)) S.holNeeds[newName] = S.holNeeds[oldName];
+    delete S.holNeeds[oldName];
   }
   // Per-site sub-slot config nests the sub name as an object key
   Object.values(S.siteSlotsSubs||{}).forEach(m => {
@@ -27022,6 +27048,57 @@ function _setWkndNeed(sub, wshift, val){
     :{day:_wkndNeedCount(cur,'day'), swing:_wkndNeedCount(cur,'swing')};
   obj[wshift]=Math.max(0,parseInt(val)||0);
   S.wkndNeeds[sub]=obj;
+  triggerSave();
+}
+// ── Holiday Call Needs (weekend-call parity, 2026-07) ────────────────────
+// Same model as the weekend needs above: per-subspecialty {day, swing}
+// counts, '' = General, stale keys (subs no longer on the master list)
+// generate no demand. When ANY need is > 0 the holiday auto-assign staffs
+// each holiday block from these needs (subspecialty slots before General,
+// same day/swing eligibility gates as weekend call) instead of the legacy
+// flat per-definition "DR Call Slots" number.
+function _holNeedsFor(){
+  const out={};
+  Object.entries(S.holNeeds||{}).forEach(([sub,need])=>{
+    if(sub===''||(S.drSubs||[]).includes(sub)) out[sub]=need;
+  });
+  return out;
+}
+function _holNeedsActive(){
+  return Object.values(_holNeedsFor()).some(n=>(_wkndNeedCount(n,'day')+_wkndNeedCount(n,'swing'))>0);
+}
+function renderHolNeeds(){
+  const el=document.getElementById('hol-needs');
+  if(!el)return;
+  const escHtml=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const rowFor=(s,label)=>{
+    const jsLit = escHtml(JSON.stringify(String(s)));
+    const d=_wkndNeedCount(S.holNeeds?.[s],'day'), sw=_wkndNeedCount(S.holNeeds?.[s],'swing');
+    return `<div class="row">
+      <span style="font-size:12px;min-width:140px">${label}</span>
+      <input type="number" min="0" max="10" value="${d}" style="width:55px" title="Day-shift need"
+        onchange="_setHolNeed(${jsLit}, 'day', this.value)">
+      <input type="number" min="0" max="10" value="${sw}" style="width:55px" title="Swing-shift need"
+        onchange="_setHolNeed(${jsLit}, 'swing', this.value)">
+    </div>`;
+  };
+  el.innerHTML=`<div class="row" style="border-bottom:1px solid var(--bdr)">
+      <span style="font-size:10px;min-width:140px;text-transform:uppercase;color:var(--txt3)">Subspecialty</span>
+      <span class="fs-xs fw6" style="width:55px;text-align:center">☀️ Day</span>
+      <span class="fs-xs fw6" style="width:55px;text-align:center">🌙 Swing</span>
+    </div>`
+    +(S.drSubs||[]).map(s=>rowFor(s,escHtml(s))).join('')
+    +rowFor('','<em>General (no sub)</em>')
+    +`<div class="muted-xs mt8">Per holiday block — each slot covers the block's full date range. Subspecialty rows are staffed before General; non-Eastern and "Weekend: Swing only" radiologists can only fill Swing. All zeros = legacy mode (the per-definition "DR Call Slots" number applies instead).</div>`;
+}
+function _setHolNeed(sub, wshift, val){
+  if(!_adminOnly('change holiday needs')) return;
+  if(!S.holNeeds) S.holNeeds = {};
+  const cur=S.holNeeds[sub];
+  const obj=(cur&&typeof cur==='object')?{...cur}
+    :{day:_wkndNeedCount(cur,'day'), swing:_wkndNeedCount(cur,'swing')};
+  obj[wshift]=Math.max(0,parseInt(val)||0);
+  S.holNeeds[sub]=obj;
   triggerSave();
 }
 function addDRSub(){
@@ -29314,8 +29391,17 @@ function addHoliday(){
   if(S.holidays.find(h=>h.physId===pid&&h.date===date&&h.group===grp)){
     if(!confirm(`${p.last} already has a ${grp} holiday assignment on ${date}. Add anyway?`)) return;
   }
+  // DR slots carry the weekend-parity shift + subspecialty identity.
+  const wshift = grp==='DR' ? (document.getElementById('hol-wshift')?.value==='swing'?'swing':'day') : undefined;
+  const sub    = grp==='DR' ? (document.getElementById('hol-sub')?.value||'') : '';
+  if(grp==='DR'&&sub&&!(p.drSubs||[]).includes(sub)){
+    if(!confirm(`${p.last} doesn't hold the ${sub} subspecialty. Assign anyway?`)) return;
+  }
+  if(grp==='DR'&&wshift==='day'&&typeof _wkndDayOk==='function'&&!_wkndDayOk(p)){
+    if(!confirm(`${p.last} is swing-only (non-Eastern or flagged "Weekend: Swing only"). Assign a DAY holiday slot anyway?`)) return;
+  }
   const _newHolId = S.nextId++;
-  S.holidays.push({id:_newHolId, name, date, year:yr, physId:pid, group:grp, notes});
+  S.holidays.push({id:_newHolId, name, date, year:yr, physId:pid, group:grp, sub, wshift, notes});
   // Audit-trail: holiday assignment was an undocumented mutation —
   // the holiday-call dispute path ("who picked Thanksgiving?") had
   // no record of who assigned what when. Logged here.
@@ -40966,9 +41052,9 @@ function exportIRSchedXls(){
 }
 function exportHolidayXls(){
   const rows=(S.holidays||[]).slice().sort((a,b)=>(a.date||'')<(b.date||'')?-1:1)
-    .map(h=>[h.date||'', h.name||'', h.group||'', _pnameCsv(h.physId), h.notes||'']);
+    .map(h=>[h.date||'', h.name||'', h.group||'', h.group==='DR'&&h.wshift?(h.wshift==='swing'?'Swing':'Day'):'', h.sub||'', _pnameCsv(h.physId), h.notes||'']);
   if(!rows.length){ if(typeof _toast==='function') _toast('No holiday assignments to export.','info'); return; }
-  _xlsDownload('holiday-call', ['Date','Holiday','Pool','Physician','Notes'], rows);
+  _xlsDownload('holiday-call', ['Date','Holiday','Pool','Shift','Subspecialty','Physician','Notes'], rows);
 }
 // ── Shift Tally (per-physician totals across every assignment type) ──────
 let _tallyPeriod='ytd';
@@ -45416,6 +45502,29 @@ function _scanUnfilled(opts){
         // assigned for its group (DR or IR-N or IR-S).
         const targetGroup = h.group || 'DR';
         if(grp && grp !== targetGroup && grp !== 'DR') return;
+        // Weekend-parity mode: DR demand comes from the per-sub Day/Swing
+        // Holiday Call Needs, counted per slot (distinct assignees).
+        if(targetGroup === 'DR' && typeof _holNeedsActive === 'function' && _holNeedsActive()){
+          Object.entries(_holNeedsFor()).forEach(([sub, n]) => {
+            ['day','swing'].forEach(wshift => {
+              const need = _wkndNeedCount(n, wshift);
+              if(!need) return;
+              const have = new Set((S.holidays||[]).filter(a =>
+                a.date === date && a.name === h.name && (a.group||'') === 'DR'
+                && (a.sub||'') === sub && ((a.wshift||'day') === wshift)
+              ).map(a => a.physId)).size;
+              for(let i = have; i < need; i++){
+                out.push({
+                  cat: 'holiday', date, site: '',
+                  dow: parseDateLocal(date).getDay(),
+                  shift: `holiday: ${h.name||'?'} (${wshift})`,
+                  detail: (sub||'General') + ' · DR', group: 'DR', slotIndex: i,
+                });
+              }
+            });
+          });
+          return;
+        }
         const have = (S.holidays||[]).some(a =>
           a.date === date && a.name === h.name && (a.group||'') === targetGroup
         );
@@ -46057,6 +46166,14 @@ function holTab(t,el){
 // Entry from nav
 function renderHolidays(){
   _populateHolPhysSel();
+  // Subspecialty options for the manual DR assignment form (weekend parity)
+  const _hsub=document.getElementById('hol-sub');
+  if(_hsub&&_hsub.options.length<2){
+    _hsub.innerHTML='<option value="">General</option>'+(S.drSubs||[]).map(s=>{
+      const e=String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return `<option value="${e}">${e}</option>`;
+    }).join('');
+  }
   // Populate the per-IR-group slot inputs on the Define Holidays form. Must
   // run on every render so new IR groups appear as inputs when the admin adds
   // them from the IR Slots & Groups tab.
@@ -46412,7 +46529,7 @@ function renderHolTable(){
     }
     return`<tr>
       <td>${escHtml(h.name)}</td><td>${h.date}</td><td>${h.year}</td><td>${pnameHtml(h.physId)}</td>
-      <td><span class="tag ${tagOf(h.group)}">${labelOf(h.group)}</span></td>
+      <td><span class="tag ${tagOf(h.group)}">${labelOf(h.group)}</span>${h.group==='DR'&&h.wshift?` <span class="tag ${h.wshift==='swing'?'ta':'tb'}" style="font-size:10px">${h.sub?escHtml(h.sub)+' · ':''}${h.wshift==='swing'?'🌙 Swing':'☀️ Day'}</span>`:''}</td>
       <td>${escHtml(h.notes||'—')}</td>
       <td style="white-space:nowrap">
         <button class="bsm" onclick="startEditHoliday(${h.id})" aria-label="Edit holiday" title="Edit holiday">✏</button>
@@ -46590,22 +46707,13 @@ function previewHolRandom(){
     const careerData=_holCareerDataBeforeYear(grp, year);
 
     defs.forEach(def=>{
-      const slotsNeeded=slotsFor(def, grp);
-      if(!slotsNeeded) return;
-
-      const alreadyPhys=new Set(S.holidays.filter(h=>
-        h.name===def.name&&h.year===def.year&&h.group===grp).map(h=>h.physId));
-      const previewPhys=preview.filter(a=>a.defId===def.id&&a.group===grp).map(a=>a.physId);
-      const physSlotsToFill = slotsNeeded - alreadyPhys.size - previewPhys.length;
-      if(physSlotsToFill<=0) return;
-
-      // Adjacent-block protection: if this def's dates fall within ±N days
-      // of another holiday block already assigned to the same physician
-      // (current year), they're a poor candidate. cfg.holidayBlockGap
-      // controls the window (default 3 days — covers Christmas-Eve/Day,
-      // New-Year's-Eve/Day, Thanksgiving-week patterns). The adjacency
-      // is applied as a hard exclusion at the SAME group; cross-group
-      // is allowed because IR-North vs IR-South aren't sharing a person.
+      // Adjacent-block protection (shared by both staffing modes): if this
+      // def's dates fall within ±N days of another holiday block already
+      // assigned to the same physician (current year), they're a poor
+      // candidate. cfg.holidayBlockGap controls the window (default 3 days —
+      // covers Christmas-Eve/Day, New-Year's-Eve/Day, Thanksgiving-week
+      // patterns). Hard exclusion at the SAME group; cross-group is allowed
+      // because IR-North vs IR-South aren't sharing a person.
       const blockGap = (S.cfg && typeof S.cfg.holidayBlockGap === 'number')
         ? S.cfg.holidayBlockGap : 3;
       const _isAdjacentToExistingBlock = (physId) => {
@@ -46627,6 +46735,67 @@ function previewHolRandom(){
         }
         return false;
       };
+      // ── Weekend-parity DR staffing (2026-07): when Holiday Call Needs are
+      // configured, each holiday block is staffed per-subspecialty × Day/Swing
+      // — subspecialty slots before General, with the SAME eligibility gates
+      // as weekend call (day-FTE rule, EST rule, swing-only designees). The
+      // legacy flat "DR Call Slots" number on the definition is ignored.
+      if(grp==='DR' && _holNeedsActive()){
+        const entries=Object.entries(_holNeedsFor())
+          .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
+          .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));
+        entries.forEach(([sub,need])=>{
+          ['day','swing'].forEach(wshift=>{
+            const target=_wkndNeedCount(need,wshift);
+            if(!target) return;
+            const haveNow=new Set(S.holidays.filter(h=>h.name===def.name&&h.year===def.year&&h.group==='DR'
+              &&(h.sub||'')===sub&&((h.wshift||'day')===wshift)).map(h=>h.physId)).size
+              +preview.filter(a=>a.defId===def.id&&a.group==='DR'&&(a.sub||'')===sub&&a.wshift===wshift).length;
+            for(let slot=haveNow;slot<target;slot++){
+              const takenPhys=new Set([
+                ...S.holidays.filter(h=>h.name===def.name&&h.year===def.year&&h.group==='DR').map(h=>h.physId),
+                ...preview.filter(a=>a.defId===def.id&&a.group==='DR').map(a=>a.physId)]);
+              const eligible=careerData.filter(d=>{
+                const p=d.p;
+                if(takenPhys.has(p.id)) return false;                       // one person per block
+                if(sub&&!(p.drSubs||[]).includes(sub)) return false;
+                if(_drDayFte(p)<=0&&!(wshift==='swing'&&p.shiftElig?.wkndSwingOnly)) return false;
+                if(wshift==='day'&&!_wkndDayOk(p)) return false;
+                const vd=vacDays(p.id);
+                if((def.dates||[]).some(dt=>vd.has(dt))) return false;
+                if(_isAdjacentToExistingBlock(p.id)) return false;
+                return true;
+              });
+              if(!eligible.length){ gaps.push(`${def.name} [DR ${sub||'General'} ${wshift}]`); continue; }
+              const wList=eligible.map(d=>{
+                const base=_holLotteryWeight(d,grp,mode);
+                const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
+                return{d,w:Math.max(0.01,base-extra)};
+              });
+              const totW=wList.reduce((s,x)=>s+x.w,0);
+              let rand=Math.random()*totW, chosen=wList[wList.length-1].d;
+              for(const{d,w}of wList){rand-=w;if(rand<=0){chosen=d;break;}}
+              const myW=wList.find(x=>x.d===chosen)?.w||0;
+              preview.push({
+                defId:def.id, defName:def.name, dates:def.dates||[], year:def.year,
+                group:'DR', physId:chosen.p.id, sub, wshift,
+                weight:(myW/totW*100).toFixed(0)+'%',
+                balance:chosen.balance.toFixed(1),
+                notes:`Auto-lottery (${mode})`
+              });
+            }
+          });
+        });
+        return;
+      }
+      const slotsNeeded=slotsFor(def, grp);
+      if(!slotsNeeded) return;
+
+      const alreadyPhys=new Set(S.holidays.filter(h=>
+        h.name===def.name&&h.year===def.year&&h.group===grp).map(h=>h.physId));
+      const previewPhys=preview.filter(a=>a.defId===def.id&&a.group===grp).map(a=>a.physId);
+      const physSlotsToFill = slotsNeeded - alreadyPhys.size - previewPhys.length;
+      if(physSlotsToFill<=0) return;
       for(let slot=0;slot<physSlotsToFill;slot++){
         const eligible=careerData.filter(d=>{
           const p=d.p;
@@ -46671,16 +46840,18 @@ function previewHolRandom(){
   let html=`<div style="font-weight:700;margin-bottom:8px">${preview.length} assignment(s) — ${gaps.length} gap(s)</div>`;
   if(preview.length){
     html+=`<div class="scroll-x"><table><thead><tr>
-      <th>Holiday</th><th>Pool</th><th>Physician</th><th>Dates Covered</th>
+      <th>Holiday</th><th>Pool</th><th>Slot</th><th>Physician</th><th>Dates Covered</th>
       <th title="Career balance before this lottery">Balance</th>
       <th title="Draw weight">Weight</th>
     </tr></thead><tbody>`;
     preview.forEach(a=>{
       const balCls=+a.balance<-0.5?'color:var(--green-t)':+a.balance>0.5?'color:var(--amber,#d97706)':'color:var(--txt3)';
       const tagCls = (a.group==='DR'?'tb':irGroupColorClass((/^IR-(.+)$/.exec(a.group||'')||[,''])[1]));
+      const slotLbl = a.wshift ? `${a.sub||'General'} · ${a.wshift==='swing'?'🌙 Swing':'☀️ Day'}` : '—';
       html+=`<tr>
         <td class="fw6">${a.defName}</td>
         <td><span class="tag ${tagCls}">${labelOf(a.group)}</span></td>
+        <td class="fs-xs">${slotLbl}</td>
         <td class="fw6">${pnameHtml(a.physId)}</td>
         <td class="fs-xs">${a.dates.sort().join(', ')}</td>
         <td style="${balCls};font-weight:700">${+a.balance>0?'+':''}${a.balance}</td>
@@ -46716,12 +46887,15 @@ async function applyHolRandom(){
     (a.dates||[]).forEach(date=>{
       // Skip if same physician already assigned this exact slot
       if(S.holidays.find(h=>h.name===a.defName&&h.date===date&&h.group===a.group&&h.physId===a.physId)) return;
-      // Remove any existing assignment for this holiday+date+group by another physician
+      // Remove any existing assignment for this holiday+date+group by another
+      // physician — scoped to the SAME sub+shift slot for DR so multi-slot
+      // holidays (needs mode) don't clobber the other slots' assignees.
       S.holidays=S.holidays.filter(h=>
-        !(h.name===a.defName&&h.date===date&&h.group===a.group));
+        !(h.name===a.defName&&h.date===date&&h.group===a.group
+          &&(a.group!=='DR'||((h.sub||'')===(a.sub||'')&&(h.wshift||'day')===(a.wshift||'day')))));
       S.holidays.push({
         id:S.nextId++, name:a.defName, date, year:a.year,
-        physId:a.physId, group:a.group, notes:a.notes
+        physId:a.physId, group:a.group, sub:a.sub||'', wshift:a.wshift||'day', notes:a.notes
       });
     });
     // Sync to calendars — IR-North and IR-South both use IR sync path
