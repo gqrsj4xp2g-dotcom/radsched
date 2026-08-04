@@ -15523,7 +15523,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v119';
+const _SW_VERSION = 'rs-v120';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16984,7 +16984,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v119';
+const _RS_HTML_BUILD = 'rs-v120';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -41216,23 +41216,23 @@ function exportDRCallWorkbook(){
     const k=h.physId+'|'+(h.name||'');
     if(holSeen.has(k))return; holSeen.add(k); g(h.physId).hol++;
   });
-  // TWO SEPARATE COUNTERS (2026-08 policy): weekend call is measured against
-  // the DAYTIME DR FTE; holiday call is its own uncapped pool balanced across
-  // years against the TOTAL DR FTE. They are never summed into one total.
-  const talRows=[['Physician','Day DR FTE','Wknd Day','Wknd Swing','Wknd Total','Wknd per Day-FTE','Total DR FTE','Holiday blocks','Holiday per Total-FTE']];
-  let fSum=0,tfSum=0,dSum=0,sSum=0,hSum=0;
+  // TWO SEPARATE COUNTERS (2026-08 policy): weekend call and holiday call
+  // are both spread among DAYTIME DR FTE holders and measured against the
+  // day FTE — but they stay separate counters, never summed into one total.
+  const talRows=[['Physician','Day DR FTE','Wknd Day','Wknd Swing','Wknd Total','Wknd per Day-FTE','Holiday blocks','Holiday per Day-FTE']];
+  let fSum=0,dSum=0,sSum=0,hSum=0;
   Object.keys(tal).map(Number).sort((a,b)=>nm(a).localeCompare(nm(b))).forEach(pid=>{
-    const t=tal[pid], p=_physById(pid), f=_drDayFte(p), tf=+(p&&p.drFte)||0, wkTot=t.wd+t.ws;
-    fSum+=f; tfSum+=tf; dSum+=t.wd; sSum+=t.ws; hSum+=t.hol;
+    const t=tal[pid], f=_drDayFte(_physById(pid)), wkTot=t.wd+t.ws;
+    fSum+=f; dSum+=t.wd; sSum+=t.ws; hSum+=t.hol;
     talRows.push([nm(pid), Math.round(f*100)/100, t.wd, t.ws, wkTot,
       f>0?Math.round(wkTot/f*10)/10:'',
-      Math.round(tf*100)/100, t.hol,
-      tf>0?Math.round(t.hol/tf*100)/100:'']);
+      t.hol,
+      f>0?Math.round(t.hol/f*100)/100:'']);
   });
   talRows.push(['Practice total', Math.round(fSum*100)/100, dSum, sSum, dSum+sSum,
     fSum>0?Math.round((dSum+sSum)/fSum*10)/10:'',
-    Math.round(tfSum*100)/100, hSum,
-    tfSum>0?Math.round(hSum/tfSum*100)/100:'']);
+    hSum,
+    fSum>0?Math.round(hSum/fSum*100)/100:'']);
 
   if(wknd.length===0&&opens.length===0&&holRows.length===1){
     if(typeof _toast==='function') _toast(`No DR call data for ${yr}.`,'info'); return;
@@ -46200,17 +46200,22 @@ function _removeHolidayIRCall(physId, date){
 // Helper: pool of physicians that participate in a given pool
 // pool = 'DR' | 'IR-<groupName>'  (e.g. 'IR-North', 'IR-South', 'IR-East')
 function _holPoolPhysicians(pool){
-  if(pool==='DR') return S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
+  // 2026-08 policy: DR holiday call is spread among DAYTIME DR FTE holders
+  // only — 2nd/3rd-shift-only radiologists are outside the pool entirely
+  // (they neither take holiday call nor dilute anyone's fair share).
+  if(pool==='DR') return S.physicians.filter(p=>p.drFte>0&&p.role!=='IR'&&_drDayFte(p)>0);
   // Generic IR-<groupName> match — works for every admin-added group.
   const m = /^IR-(.+)$/.exec(pool||'');
   if(m) return S.physicians.filter(p=>p.irFte>0 && p.irGroup===m[1]);
   return [];
 }
 
-// Helper: FTE-weighted proportion of this physician within their pool
+// Helper: FTE-weighted proportion of this physician within their pool.
+// DR fair share keys on the DAYTIME DR FTE (same basis as the pool gate);
+// IR pools key on irFte.
 function _holPoolFteProp(p, pool){
   const pool_phys=_holPoolPhysicians(pool);
-  const fteOf = x => pool==='DR' ? (x.drFte||0) : (x.irFte||0);
+  const fteOf = x => pool==='DR' ? _drDayFte(x) : (x.irFte||0);
   const tot = pool_phys.reduce((s,x)=>s+fteOf(x),0)||1;
   return fteOf(p)/tot;
 }
