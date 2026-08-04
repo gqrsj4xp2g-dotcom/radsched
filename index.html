@@ -15523,7 +15523,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v118';
+const _SW_VERSION = 'rs-v119';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16984,7 +16984,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v118';
+const _RS_HTML_BUILD = 'rs-v119';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -46938,6 +46938,26 @@ function previewHolRandom(){
     // here; an "owed" physician has a higher weight. Run fresh lottery each year
     // and long-run totals converge toward each physician's FTE proportion.
     const careerData=_holCareerDataBeforeYear(grp, year);
+    // Equal spread within the year (2026-08 policy): nobody gets a SECOND
+    // holiday block while an eligible colleague in the same pool has none.
+    // Candidates are tiered by their current-year block count (existing
+    // assignments + this preview) and only the lowest tier enters the
+    // weighted draw; the FTE/career weighting decides within the tier.
+    const _holYearBlockCount=(pid)=>{
+      const set=new Set();
+      (S.holidays||[]).forEach(h=>{
+        if(h.physId===pid&&h.group===grp
+           &&String(h.year||String(h.date||'').slice(0,4))===String(year)) set.add(h.name);
+      });
+      preview.forEach(a=>{ if(a.physId===pid&&a.group===grp&&String(a.year)===String(year)) set.add(a.defName); });
+      return set.size;
+    };
+    const _lowestBlockTier=(cands)=>{
+      if(cands.length<2) return cands;
+      const withN=cands.map(d=>({d,n:_holYearBlockCount(d.p.id)}));
+      const minN=Math.min(...withN.map(x=>x.n));
+      return withN.filter(x=>x.n===minN).map(x=>x.d);
+    };
 
     defs.forEach(def=>{
       // Adjacent-block protection (shared by both staffing modes): if this
@@ -47000,7 +47020,8 @@ function previewHolRandom(){
                 return true;
               });
               if(!eligible.length){ gaps.push(`${def.name} [DR ${sub||'General'} ${wshift}]`); continue; }
-              const wList=eligible.map(d=>{
+              const _tier=_lowestBlockTier(eligible);
+              const wList=_tier.map(d=>{
                 const base=_holLotteryWeight(d,grp,mode);
                 const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
                 return{d,w:Math.max(0.01,base-extra)};
@@ -47046,8 +47067,10 @@ function previewHolRandom(){
           continue;
         }
 
-        // Weighted draw — penalize physicians already picked in THIS run across any pool
-        const wList=eligible.map(d=>{
+        // Weighted draw within the lowest current-year block tier —
+        // penalize physicians already picked in THIS run across any pool
+        const _tier=_lowestBlockTier(eligible);
+        const wList=_tier.map(d=>{
           const base=_holLotteryWeight(d,grp,mode);
           const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
           return{d,w:Math.max(0.01,base-extra)};
