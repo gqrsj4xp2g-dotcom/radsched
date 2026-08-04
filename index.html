@@ -15527,7 +15527,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v116';
+const _SW_VERSION = 'rs-v117';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16988,7 +16988,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v116';
+const _RS_HTML_BUILD = 'rs-v117';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -47117,17 +47117,25 @@ async function applyHolRandom(){
   // Capture assignments for notification AFTER the loop runs (to group dates per physician+holiday)
   const notifByPhys = {}; // physId → [{name, group, dates:[]}]
 
+  // Needs-mode DR slots hold SEVERAL physicians per (sub, shift) — e.g.
+  // General Day 4. The preview already respects remaining capacity
+  // (haveNow), so applying is purely ADDITIVE there: the old "replace the
+  // previous holder" cleanup would stomp every same-slot colleague, leaving
+  // one survivor per slot pair no matter how many the preview proposed.
+  // Legacy pools (IR groups / flat drSlots) keep the replace semantics —
+  // re-rolling a 1-person slot should swap the holder, not stack a second.
+  const _drNeedsMode = (typeof _holNeedsActive==='function') && _holNeedsActive();
   _holRandomPreview.forEach(a=>{
     // Create one S.holidays entry per date
     (a.dates||[]).forEach(date=>{
       // Skip if same physician already assigned this exact slot
       if(S.holidays.find(h=>h.name===a.defName&&h.date===date&&h.group===a.group&&h.physId===a.physId)) return;
-      // Remove any existing assignment for this holiday+date+group by another
-      // physician — scoped to the SAME sub+shift slot for DR so multi-slot
-      // holidays (needs mode) don't clobber the other slots' assignees.
-      S.holidays=S.holidays.filter(h=>
-        !(h.name===a.defName&&h.date===date&&h.group===a.group
-          &&(a.group!=='DR'||((h.sub||'')===(a.sub||'')&&(h.wshift||'day')===(a.wshift||'day')))));
+      if(!(a.group==='DR' && _drNeedsMode)){
+        // Replace any existing assignment for this holiday+date+group by
+        // another physician (1-person slots only).
+        S.holidays=S.holidays.filter(h=>
+          !(h.name===a.defName&&h.date===date&&h.group===a.group));
+      }
       S.holidays.push({
         id:S.nextId++, name:a.defName, date, year:a.year,
         physId:a.physId, group:a.group, sub:a.sub||'', wshift:a.wshift||'day', notes:a.notes
