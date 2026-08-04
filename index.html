@@ -5048,10 +5048,6 @@ WHERE email = 'your-admin@example.com';</pre>
         <label>Weekends per quarter</label>
         <input id="cs-bo-wknd" type="number" min="0" max="13">
       </div>
-      <div class="fg m0" >
-        <label>Holidays per year</label>
-        <input id="cs-bo-hol" type="number" min="0" max="12">
-      </div>
     </div>
     <button class="bp" onclick="saveConstraintSettings()">Save</button>
   </div>
@@ -15527,7 +15523,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v117';
+const _SW_VERSION = 'rs-v118';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16988,7 +16984,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v117';
+const _RS_HTML_BUILD = 'rs-v118';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -38079,7 +38075,6 @@ function renderTools(){
   const bo = cfg.burnout || {};
   setVal('cs-bo-days',  bo.consecMaxDays, 5);
   setVal('cs-bo-wknd',  bo.weekendsPerQ,  3);
-  setVal('cs-bo-hol',   bo.holidaysPerY,  2);
   // Render lists
   _renderPairConflictList();
   _renderSiteCapList();
@@ -39483,8 +39478,10 @@ function saveConstraintSettings(){
   if(!S.cfg.burnout) S.cfg.burnout = {};
   const consec = numIn('cs-bo-days',  1, 60);  if(consec != null) S.cfg.burnout.consecMaxDays = consec;
   const wkndQ  = numIn('cs-bo-wknd',  0, 13);  if(wkndQ != null)  S.cfg.burnout.weekendsPerQ = wkndQ;
-  const holsY  = numIn('cs-bo-hol',   0, 20);  if(holsY != null)  S.cfg.burnout.holidaysPerY = holsY;
-  if(typeof _audit === 'function') _audit('cfg.constraints.save', {recovery, gap, hardAnc, consec, wkndQ, holsY});
+  // 2026-08 policy: no holiday burnout threshold — holiday call is uncapped
+  // and balanced across years by its own career counter.
+  delete S.cfg.burnout.holidaysPerY;
+  if(typeof _audit === 'function') _audit('cfg.constraints.save', {recovery, gap, hardAnc, consec, wkndQ});
   triggerSave();
   if(typeof _toast === 'function') _toast('Constraint settings saved.', 'ok');
 }
@@ -40096,7 +40093,10 @@ function _violatesPostCallRecovery(physId, dateISO, kind){
 const _BURNOUT_DEFAULTS = {
   consecMaxDays: 5,    // ≥ N days in a row triggers
   weekendsPerQ: 3,     // ≥ N weekend calls in a rolling quarter
-  holidaysPerY: 2,     // ≥ N holiday assignments in 12 months
+  // 2026-08 policy: holiday call carries NO caps and no burnout signal —
+  // it is its own pool, balanced across YEARS by the career-weighted
+  // lottery (total-FTE fair share). Flagging holiday takers here made the
+  // weekday auto-assign penalize them, an indirect cap. Removed.
 };
 function _physicianBurnoutFlags(physId, ym){
   const cfg = (S && S.cfg && S.cfg.burnout) ? S.cfg.burnout : _BURNOUT_DEFAULTS;
@@ -40128,19 +40128,10 @@ function _physicianBurnoutFlags(physId, ym){
   if(wknds >= cfg.weekendsPerQ){
     out.push(`${wknds} weekend calls in last 3 months`);
   }
-  // Holidays in trailing 12 months.
-  const yStart = new Date(y, m - 12, 1);
-  const yEnd = new Date(y, m, 0);
-  const hols = new Set();  // unique holiday-block IDs
-  (S.holidays||[]).forEach(h => {
-    const d = parseDateLocal(h.date || '');
-    if(d >= yStart && d <= yEnd && h.physId === physId){
-      hols.add(`${h.name}|${h.year || (h.date||'').slice(0,4)}`);
-    }
-  });
-  if(hols.size >= cfg.holidaysPerY){
-    out.push(`${hols.size} holidays in last 12 months`);
-  }
+  // NOTE (2026-08 policy): holiday call is deliberately NOT a burnout
+  // signal. It has no caps, lives in its own career counter, and is
+  // balanced across years by the FTE-weighted lottery — flagging holiday
+  // takers here made other auto-assigns penalize them for it.
   return out;
 }
 
@@ -41225,16 +41216,23 @@ function exportDRCallWorkbook(){
     const k=h.physId+'|'+(h.name||'');
     if(holSeen.has(k))return; holSeen.add(k); g(h.physId).hol++;
   });
-  const talRows=[['Physician','Day DR FTE','Wknd Day','Wknd Swing','Holiday blocks','Total','Calls per FTE']];
-  let fSum=0,tSum=0,dSum=0,sSum=0,hSum=0;
+  // TWO SEPARATE COUNTERS (2026-08 policy): weekend call is measured against
+  // the DAYTIME DR FTE; holiday call is its own uncapped pool balanced across
+  // years against the TOTAL DR FTE. They are never summed into one total.
+  const talRows=[['Physician','Day DR FTE','Wknd Day','Wknd Swing','Wknd Total','Wknd per Day-FTE','Total DR FTE','Holiday blocks','Holiday per Total-FTE']];
+  let fSum=0,tfSum=0,dSum=0,sSum=0,hSum=0;
   Object.keys(tal).map(Number).sort((a,b)=>nm(a).localeCompare(nm(b))).forEach(pid=>{
-    const t=tal[pid], f=_drDayFte(_physById(pid)), tot=t.wd+t.ws+t.hol;
-    fSum+=f; tSum+=tot; dSum+=t.wd; sSum+=t.ws; hSum+=t.hol;
-    talRows.push([nm(pid), Math.round(f*100)/100, t.wd, t.ws, t.hol, tot,
-      f>0?Math.round(tot/f*10)/10:'']);
+    const t=tal[pid], p=_physById(pid), f=_drDayFte(p), tf=+(p&&p.drFte)||0, wkTot=t.wd+t.ws;
+    fSum+=f; tfSum+=tf; dSum+=t.wd; sSum+=t.ws; hSum+=t.hol;
+    talRows.push([nm(pid), Math.round(f*100)/100, t.wd, t.ws, wkTot,
+      f>0?Math.round(wkTot/f*10)/10:'',
+      Math.round(tf*100)/100, t.hol,
+      tf>0?Math.round(t.hol/tf*100)/100:'']);
   });
-  talRows.push(['Practice total', Math.round(fSum*100)/100, dSum, sSum, hSum, tSum,
-    fSum>0?Math.round(tSum/fSum*10)/10:'']);
+  talRows.push(['Practice total', Math.round(fSum*100)/100, dSum, sSum, dSum+sSum,
+    fSum>0?Math.round((dSum+sSum)/fSum*10)/10:'',
+    Math.round(tfSum*100)/100, hSum,
+    tfSum>0?Math.round(hSum/tfSum*100)/100:'']);
 
   if(wknd.length===0&&opens.length===0&&holRows.length===1){
     if(typeof _toast==='function') _toast(`No DR call data for ${yr}.`,'info'); return;
