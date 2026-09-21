@@ -15523,7 +15523,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v120';
+const _SW_VERSION = 'rs-v121';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -15692,9 +15692,23 @@ function _registerServiceWorker(){
   // point a refresh will be served by the NEW SW with the NEW shell.
   // Guard with a one-shot flag so a SW that posts multiple updates
   // doesn't trigger a reload loop.
+  //
+  // FIRST-INSTALL EXCEPTION (2026-08 halt-loop fix): if this page loaded
+  // with NO controlling service worker — a fresh browser, or right after
+  // any cache-clear/heal/halt-button recovery unregistered the old one —
+  // the new SW's clients.claim() also fires 'controllerchange'. Reloading
+  // then is pointless (this page came straight from the network and IS
+  // current) and it fed the reload circuit-breaker: every recovery click
+  // cost an extra auto-reload, so a couple of attempts re-tripped the
+  // "Update loop detected" halt the recovery was trying to escape.
+  const _hadControllerAtLoad = !!navigator.serviceWorker.controller;
   let _reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if(_reloaded) return;
+    if(!_hadControllerAtLoad){
+      console.info('[RS] SW took control of a fresh page — no reload needed.');
+      return;
+    }
     _reloaded = true;
     // Tiny delay so any in-flight save the user just triggered
     // (Cmd+S, debounced edit) has a chance to flush via beforeunload.
@@ -16984,7 +16998,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v120';
+const _RS_HTML_BUILD = 'rs-v121';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
