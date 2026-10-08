@@ -4571,8 +4571,10 @@ tbody tr:hover{background:var(--bg3)}
   <div id="holt-autoassign" style="display:none">
     <div class="note ni mb10" >
       FTE-weighted random lottery using the holiday definitions above.
-      Each physician drawn covers the entire holiday block. <strong>DR staffing follows
-      Settings → Holiday Call Needs</strong> (per-subspecialty ☀️ Day + 🌙 Swing slots, subspecialty
+      Each physician drawn covers the entire holiday block. <strong>Each holiday rotates
+      through its whole pool before anyone repeats it</strong> (prior years and imported
+      history count), and nobody takes a second holiday in a year while a colleague has
+      none. <strong>DR staffing follows Settings → Holiday Call Needs</strong> (per-subspecialty ☀️ Day + 🌙 Swing slots, subspecialty
       spots filled first, same eligibility gates as weekend call); when no needs are set, the
       per-definition "DR Call Slots" number applies. IR pools always use the per-definition slots.
       Assignments sync to DR and IR calendars and clear any conflicting call already scheduled.
@@ -15542,7 +15544,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v123';
+const _SW_VERSION = 'rs-v124';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17017,7 +17019,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v123';
+const _RS_HTML_BUILD = 'rs-v124';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -47277,6 +47279,35 @@ function previewHolRandom(){
       const minN=Math.min(...withN.map(x=>x.n));
       return withN.filter(x=>x.n===minN).map(x=>x.d);
     };
+    // Per-holiday ROTATION (2026-10 policy): each specific holiday rotates
+    // through the whole pool before anyone repeats it — everybody does
+    // Christmas once before Christmas comes around again. Candidates are
+    // tiered by how many DISTINCT YEARS they have ever covered THIS holiday
+    // (canonicalized name, so legacy "Christmas"/"TG" rows and imported
+    // history count; same pool only); only the least-exposed tier enters
+    // the weighted draw. Once everyone in a tier has done it once, the
+    // minimum rises to 1 and the second round begins — the cycle is
+    // self-resetting over the years.
+    const _canonHol=(nm)=>(typeof _holHistCanonHoliday==='function'?(_holHistCanonHoliday(nm)||String(nm||'')):String(nm||''));
+    const _holNameCount=(pid, holName)=>{
+      const want=_canonHol(holName);
+      const years=new Set();
+      (S.holidays||[]).forEach(h=>{
+        if(h.physId!==pid||h.group!==grp) return;
+        if(_canonHol(h.name)===want) years.add(String(h.year||String(h.date||'').slice(0,4)));
+      });
+      preview.forEach(a=>{
+        if(a.physId!==pid||a.group!==grp) return;
+        if(_canonHol(a.defName)===want) years.add(String(a.year));
+      });
+      return years.size;
+    };
+    const _rotationTier=(cands, holName)=>{
+      if(cands.length<2) return cands;
+      const withN=cands.map(d=>({d,n:_holNameCount(d.p.id,holName)}));
+      const minN=Math.min(...withN.map(x=>x.n));
+      return withN.filter(x=>x.n===minN).map(x=>x.d);
+    };
 
     defs.forEach(def=>{
       // Adjacent-block protection (shared by both staffing modes): if this
@@ -47339,7 +47370,7 @@ function previewHolRandom(){
                 return true;
               });
               if(!eligible.length){ gaps.push(`${def.name} [DR ${sub||'General'} ${wshift}]`); continue; }
-              const _tier=_lowestBlockTier(eligible);
+              const _tier=_rotationTier(_lowestBlockTier(eligible), def.name);
               const wList=_tier.map(d=>{
                 const base=_holLotteryWeight(d,grp,mode);
                 const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
@@ -47388,7 +47419,7 @@ function previewHolRandom(){
 
         // Weighted draw within the lowest current-year block tier —
         // penalize physicians already picked in THIS run across any pool
-        const _tier=_lowestBlockTier(eligible);
+        const _tier=_rotationTier(_lowestBlockTier(eligible), def.name);
         const wList=_tier.map(d=>{
           const base=_holLotteryWeight(d,grp,mode);
           const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
