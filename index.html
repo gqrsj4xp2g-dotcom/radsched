@@ -4617,6 +4617,25 @@ tbody tr:hover{background:var(--bg3)}
 
   <!-- COUNTER TAB -->
   <div id="holt-counter" style="display:none">
+    <div class="ibox mb10">
+      <div class="card-title m0 mb8">📥 Import holiday call history</div>
+      <div class="note ni" style="font-size:11px;margin-bottom:8px">
+        Load <strong>past holiday call</strong> (e.g. the years before RadScheduler) into the career
+        counter, so future lotteries balance against the full history. One row per physician per
+        holiday block. Columns: <strong>Physician</strong> (last name), <strong>Holiday</strong>,
+        <strong>Year</strong> — optional: <strong>Shift</strong> (Day/Swing), <strong>Subspecialty</strong>,
+        <strong>Group</strong> (DR, IR-North, …), <strong>Dates</strong> (semicolon-separated; left blank,
+        the official dates for that holiday are filled in automatically). Rows that match an existing
+        block are skipped, so re-uploading is safe. History feeds the counter only — it never touches
+        the DR/IR calendars.
+      </div>
+      <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="bt bsm" onclick="document.getElementById('xl-holhist-file').click()">📂 Choose .xlsx / .csv</button>
+        <input type="file" id="xl-holhist-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="previewHolHistImport(this)">
+        <button class="bt bsm" onclick="downloadHolHistTemplate()">⬇ Template</button>
+      </div>
+      <div id="holhist-preview" class="mt8"></div>
+    </div>
     <div class="flexe" style="margin-bottom:8px;gap:6px">
       <div class="fg m0" ><label>Group</label>
         <select id="hcg" onchange="renderHolCounter()">
@@ -15523,7 +15542,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v121';
+const _SW_VERSION = 'rs-v122';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16998,7 +17017,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v121';
+const _RS_HTML_BUILD = 'rs-v122';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -46872,6 +46891,11 @@ function _resyncAllHolidaysCore(){
   const drBatches = {};
   S.holidays.forEach(h => {
     if(!h.physId || !h.date || !h.group) return;
+    // Imported HISTORY rows exist only to feed the career counter. They
+    // must never reach the calendar sync: the DR path would delete other
+    // physicians' real shifts on those past dates, and the IR path would
+    // mint calls in historical months.
+    if(h.notes === 'Imported history') return;
     const key = `${h.physId}|${h.group}|${h.name||''}`;
     const bucket = (h.group==='DR') ? drBatches : irBatches;
     if(!bucket[key]) bucket[key] = {physId:h.physId, group:h.group, name:h.name||'Holiday', dates:[]};
@@ -46915,6 +46939,177 @@ function resyncAllHolidaysToCalendars(){
 // ── Auto-assign (FTE-weighted lottery per holidayDef) ───────────────────────
 let _holRandomPreview = [];
 
+// ── Holiday history import (feeds the career counter) ───────────────────
+// Past holiday call — typically the years before RadScheduler — uploaded as
+// .xlsx/.csv so _holCareerDataBeforeYear sees the full multi-year record and
+// future lotteries tilt toward physicians who are genuinely owed. Rows become
+// S.holidays entries tagged notes='Imported history': counted by every
+// counter, invisible to the calendar sync (see _resyncAllHolidaysCore).
+let _holHistParsed = null;
+function downloadHolHistTemplate(){
+  _xlsDownload('holiday-history-template',
+    ['Physician','Holiday','Year','Shift','Subspecialty','Group','Dates'],
+    [['Aasar','Christmas Day','2024','Day','','DR','2024-12-25;2024-12-26'],
+     ['Golchini','Thanksgiving','2025','Swing','Neuroradiology','DR',''],
+     ['Greene','Memorial Day','2025','','','IR-North','']]);
+}
+function _holHistNormDate(v, fallbackYear){
+  const t = String(v==null?'':v).trim();
+  if(!t) return null;
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if(m) return `${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`;
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(t);          // M/D/YYYY or M/D/YY
+  if(m){
+    let y = +m[3]; if(y < 100) y += 2000;
+    return `${y}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  }
+  m = /^(\d{1,2})[-\/](\d{1,2})$/.exec(t);                   // M/D with year from the Year column
+  if(m && fallbackYear) return `${fallbackYear}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;
+  return null;
+}
+function _holHistOfficialDates(holName, year){
+  if(typeof officialUSHolidays !== 'function') return null;
+  const clean = s => String(s||'').toLowerCase().replace(/[^a-z]/g,'');
+  const want = clean(holName);
+  if(!want) return null;
+  const hit = officialUSHolidays(year).find(h => {
+    const have = clean(h.name);
+    return have === want || have.includes(want) || want.includes(have);
+  });
+  return hit ? hit.dates.slice() : null;
+}
+function previewHolHistImport(input){
+  if(!_adminOnly('import holiday history')) return;
+  const file = input.files && input.files[0]; if(!file) return;
+  input.value = '';                                          // same file re-selectable
+  const prev = document.getElementById('holhist-preview');
+  if(!prev) return;
+  prev.innerHTML = `<div class="note ni" style="font-size:12px">Reading <strong>${escHtml(file.name)}</strong>…</div>`;
+  if(!window.XLSX){ prev.innerHTML = '<div class="note ne">SheetJS library failed to load.</div>'; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
+      if(!rows.length){ prev.innerHTML = '<div class="note nw">Sheet is empty.</div>'; return; }
+      const norm = (x) => String(x||'').trim().toLowerCase().replace(/[\s_-]+/g,'');
+      const knownGroups = ['DR', ...getIRGroups().map(g=>'IR-'+g)];
+      // existing + intra-file block keys for dedup
+      const existing = new Set((S.holidays||[]).map(h =>
+        `${h.physId}|${norm(h.name)}|${h.year||String(h.date||'').slice(0,4)}|${h.group||'DR'}`));
+      const seen = new Set();
+      const out = [];
+      rows.forEach((r, i) => {
+        const get = (key) => {
+          const target = norm(key);
+          for(const k of Object.keys(r)){ if(norm(k) === target) return r[k]; }
+          return '';
+        };
+        const rowNo = i + 2;
+        const rawName = String(get('Physician')||get('Last')||get('Name')||'').trim();
+        const holName = String(get('Holiday')||get('Holiday Name')||'').trim();
+        if(!rawName && !holName) return;                     // blank line
+        const entry = { rowNo, rawName, holName, status:'ok', problems:[] };
+        out.push(entry);
+        if(!rawName){ entry.status='error'; entry.problems.push('missing Physician'); return; }
+        if(!holName){ entry.status='error'; entry.problems.push('missing Holiday'); return; }
+        // dates first so a missing Year can be derived from them
+        const rawDates = String(get('Dates')||get('Date')||'').split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+        let year = parseInt(get('Year'), 10);
+        let dates = [];
+        rawDates.forEach(dv => {
+          const d = _holHistNormDate(dv, isFinite(year)?year:null);
+          if(d) dates.push(d); else entry.problems.push(`unreadable date "${dv}"`);
+        });
+        if(!isFinite(year) && dates.length) year = +dates[0].slice(0,4);
+        if(!isFinite(year) || year < 2000 || year > 2100){
+          entry.status='error'; entry.problems.push('missing/invalid Year'); return;
+        }
+        entry.year = year;
+        if(!dates.length){
+          dates = _holHistOfficialDates(holName, year) || [`${year}-01-01`];
+          if(dates[0] === `${year}-01-01` && !/newyear/.test(norm(holName)))
+            entry.problems.push('no dates given and holiday name not recognized — using Jan 1 placeholder');
+        }
+        entry.dates = [...new Set(dates)].sort();
+        // group
+        const rawGrp = String(get('Group')||'DR').trim();
+        const grp = knownGroups.find(g => norm(g) === norm(rawGrp) || norm(g) === norm('IR'+rawGrp)) || null;
+        if(!grp){ entry.status='error'; entry.problems.push(`unknown group "${rawGrp}" (use ${knownGroups.join(', ')})`); return; }
+        entry.group = grp;
+        entry.wshift = /swing/i.test(String(get('Shift')||'')) ? 'swing' : 'day';
+        entry.sub = String(get('Subspecialty')||get('Sub')||'').trim();
+        // physician
+        const match = _matchPhysicianFuzzy(rawName);
+        if(!match || match.score < 0.7){
+          entry.status='error'; entry.problems.push('no physician match'); return;
+        }
+        entry.phys = match.phys; entry.score = match.score;
+        // dedup
+        const key = `${match.phys.id}|${norm(holName)}|${year}|${grp}`;
+        if(existing.has(key) || seen.has(key)){ entry.status='exists'; return; }
+        seen.add(key);
+      });
+      if(!out.length){ prev.innerHTML = '<div class="note nw">No usable rows found.</div>'; return; }
+      _holHistParsed = out;
+      const ok = out.filter(x=>x.status==='ok'), dup = out.filter(x=>x.status==='exists'), bad = out.filter(x=>x.status==='error');
+      let html = `<div class="muted-xs mb8"><strong>${ok.length}</strong> block${ok.length===1?'':'s'} ready · ${dup.length} already recorded (skipped) · ${bad.length} error${bad.length===1?'':'s'}</div>`;
+      html += `<div class="scroll-x" style="max-height:300px;overflow-y:auto"><table><thead><tr>
+        <th></th><th>Row</th><th>Physician</th><th>Holiday</th><th>Year</th><th>Pool</th><th>Shift</th><th>Sub</th><th>Dates</th><th>Notes</th>
+      </tr></thead><tbody>`;
+      out.forEach(x => {
+        const icon = x.status==='ok' ? '✅' : x.status==='exists' ? '⏭' : '⛔';
+        const who = x.phys
+          ? `${escHtml(x.phys.last)}, ${escHtml(x.phys.first)}${x.score<1?` <span class="muted-xs">(matched "${escHtml(x.rawName)}")</span>`:''}`
+          : escHtml(x.rawName||'—');
+        html += `<tr${x.status==='error'?' style="background:var(--red-bg)"':''}>
+          <td>${icon}</td><td class="fs-xs">${x.rowNo}</td><td>${who}</td>
+          <td>${escHtml(x.holName||'—')}</td><td>${x.year||'—'}</td>
+          <td>${escHtml(x.group||'—')}</td><td>${x.wshift||'—'}</td><td>${escHtml(x.sub||'')||'—'}</td>
+          <td class="fs-xs">${(x.dates||[]).join('; ')}</td>
+          <td class="fs-xs" style="color:var(--${x.status==='error'?'red':'amber'}-t)">${escHtml(x.problems.join('; '))||(x.status==='exists'?'already recorded':'')}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+      if(ok.length){
+        html += `<div class="flex mt8" style="gap:8px">
+          <button class="bp bsm" onclick="applyHolHistImport()">✓ Import ${ok.length} block${ok.length===1?'':'s'} into the counter</button>
+          <button class="bt bsm" onclick="_holHistParsed=null;document.getElementById('holhist-preview').innerHTML=''">Cancel</button>
+        </div>`;
+      }
+      prev.innerHTML = html;
+    }catch(err){
+      prev.innerHTML = `<div class="note ne">Could not read file: ${escHtml(err && err.message || String(err))}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function applyHolHistImport(){
+  if(!_adminOnly('import holiday history')) return;
+  const ok = (_holHistParsed||[]).filter(x=>x.status==='ok');
+  if(!ok.length){ _toast?.('Nothing to import — run a preview first.','warn'); return; }
+  if(typeof _snapshotBeforeBulk === 'function'){
+    try{ await _snapshotBeforeBulk('holiday-history-import'); }catch(_){}
+  }
+  let rows = 0;
+  ok.forEach(x => {
+    x.dates.forEach(date => {
+      S.holidays.push({ id:S.nextId++, name:x.holName, date, year:x.year,
+        physId:x.phys.id, group:x.group, sub:x.sub||'', wshift:x.wshift,
+        notes:'Imported history' });
+      rows++;
+    });
+  });
+  if(typeof _audit === 'function') _audit('holiday.importHistory', { blocks: ok.length, rows });
+  _holHistParsed = null;
+  triggerSave();
+  const prev = document.getElementById('holhist-preview');
+  if(prev) prev.innerHTML = `<div class="note ns" style="font-size:12px">✓ Imported ${ok.length} holiday block${ok.length===1?'':'s'} (${rows} date row${rows===1?'':'s'}) into the career counter.</div>`;
+  renderHolCounter();
+  if(typeof renderHolCareerTally === 'function'){ try{ renderHolCareerTally(); }catch(_){} }
+  _toast?.(`✓ ${ok.length} historical holiday block${ok.length===1?'':'s'} imported.`,'ok');
+}
 function previewHolRandom(){
   if(!_adminOnly('preview holiday auto-assign')) return;
   const year  = +document.getElementById('haa-year')?.value||new Date().getFullYear();
