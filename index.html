@@ -15542,7 +15542,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v122';
+const _SW_VERSION = 'rs-v123';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17017,7 +17017,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v122';
+const _RS_HTML_BUILD = 'rs-v123';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -46895,7 +46895,7 @@ function _resyncAllHolidaysCore(){
     // must never reach the calendar sync: the DR path would delete other
     // physicians' real shifts on those past dates, and the IR path would
     // mint calls in historical months.
-    if(h.notes === 'Imported history') return;
+    if(String(h.notes||'').startsWith('Imported history')) return;
     const key = `${h.physId}|${h.group}|${h.name||''}`;
     const bucket = (h.group==='DR') ? drBatches : irBatches;
     if(!bucket[key]) bucket[key] = {physId:h.physId, group:h.group, name:h.name||'Holiday', dates:[]};
@@ -46953,6 +46953,45 @@ function downloadHolHistTemplate(){
      ['Golchini','Thanksgiving','2025','Swing','Neuroradiology','DR',''],
      ['Greene','Memorial Day','2025','','','IR-North','']]);
 }
+// Canonical holiday naming so sheet variants ("July 4th", "Xmas", "TG")
+// line up with the app's definitions and with each other for dedup.
+const _HOL_ALIASES = [
+  [/newyear.?seve|nye$/,            "New Year's Eve"],
+  [/newyear/,                       "New Year's Day"],
+  [/july4|4thofjuly|fourthofjuly|independence/, 'Independence Day'],
+  [/memorial/,                      'Memorial Day'],
+  [/labor/,                         'Labor Day'],
+  [/thanksgiving|^tg$/,             'Thanksgiving'],
+  [/christmaseve/,                  'Christmas Eve'],
+  [/christmas|xmas/,                'Christmas Day'],
+  [/mlk|martinluther/,              'MLK Jr. Day'],
+  [/president/,                     "Presidents' Day"],
+  [/juneteenth/,                    'Juneteenth'],
+  [/columbus|indigenous/,           'Columbus Day'],
+  [/veteran/,                       'Veterans Day'],
+];
+function _holHistCanonHoliday(raw){
+  const clean = String(raw||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  if(!clean) return null;
+  for(const [re, name] of _HOL_ALIASES){ if(re.test(clean)) return name; }
+  return String(raw).trim() || null;   // unknown holidays keep their own name
+}
+// Matrix cell: "Churchill\n(long weekend)" / "*Jo (1/1/23)" →
+// { name, date (if a parenthetical date), annot (other parentheticals, * flag) }
+function _holHistParseCell(raw){
+  let t = String(raw==null?'':raw).replace(/\s+/g,' ').trim();
+  if(!t) return null;
+  const out = { name:'', date:null, annot:[] };
+  if(t.startsWith('*')){ out.annot.push('*'); t = t.slice(1).trim(); }
+  t = t.replace(/\(([^)]*)\)/g, (_, inner) => {
+    const d = _holHistNormDate(inner, null);
+    if(d && !out.date) out.date = d;
+    else if(inner.trim()) out.annot.push(inner.trim());
+    return ' ';
+  });
+  out.name = t.replace(/\s+/g,' ').trim();
+  return out.name ? out : null;
+}
 function _holHistNormDate(v, fallbackYear){
   const t = String(v==null?'':v).trim();
   if(!t) return null;
@@ -46991,35 +47030,79 @@ function previewHolHistImport(input){
     try{
       const wb = XLSX.read(e.target.result, { type:'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
-      if(!rows.length){ prev.innerHTML = '<div class="note nw">Sheet is empty.</div>'; return; }
+      const aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:false })
+        .filter(r => r.some(c => String(c).trim() !== ''));
+      if(!aoa.length){ prev.innerHTML = '<div class="note nw">Sheet is empty.</div>'; return; }
       const norm = (x) => String(x||'').trim().toLowerCase().replace(/[\s_-]+/g,'');
       const knownGroups = ['DR', ...getIRGroups().map(g=>'IR-'+g)];
-      // existing + intra-file block keys for dedup
+
+      // ── Layout detection ──────────────────────────────────────────
+      // MATRIX: holiday names across the header (first cell blank/"Year"),
+      // one row per YEAR, one physician per cell — the practice's legacy
+      // one-person-per-holiday grid, annotations in parentheses, the New
+      // Year's cell often carrying its real date ("1/1/23" = the next
+      // calendar year). Anything else: the row-per-block template layout.
+      const hdr = aoa[0];
+      const hdrHols = hdr.slice(1).map(h => String(h).trim() ? _holHistCanonHoliday(h) : null);
+      const isMatrix = hdrHols.filter(Boolean).length >= 2
+        && (norm(hdr[0]) === '' || norm(hdr[0]) === 'year')
+        && aoa.slice(1).some(r => /^\d{4}(\.0+)?$/.test(String(r[0]).trim()));
+
+      // Normalize both layouts into one intermediate shape.
+      const mid = [];
+      if(isMatrix){
+        aoa.slice(1).forEach((r, ri) => {
+          const yr = parseInt(String(r[0]).trim(), 10);
+          if(!isFinite(yr) || yr < 2000 || yr > 2100) return;
+          hdr.slice(1).forEach((h, ci) => {
+            if(!hdrHols[ci]) return;
+            const cell = _holHistParseCell(r[ci+1]);
+            if(!cell) return;
+            mid.push({ rowNo: `${ri+2}·${String(h).trim()}`, rawName: cell.name, holName: hdrHols[ci],
+              yearIn: cell.date ? +cell.date.slice(0,4) : yr,
+              shiftIn: '', subIn: '', grpIn: '',
+              datesIn: cell.date ? [cell.date] : [], annot: cell.annot.filter(a=>a!=='*') });
+          });
+        });
+      } else {
+        const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
+        rows.forEach((r, i) => {
+          const get = (key) => {
+            const target = norm(key);
+            for(const k of Object.keys(r)){ if(norm(k) === target) return r[k]; }
+            return '';
+          };
+          const rawName = String(get('Physician')||get('Last')||get('Name')||'').trim();
+          const holRaw  = String(get('Holiday')||get('Holiday Name')||'').trim();
+          if(!rawName && !holRaw) return;                    // blank line
+          mid.push({ rowNo: i+2, rawName, holName: _holHistCanonHoliday(holRaw),
+            yearIn: parseInt(get('Year'), 10),
+            shiftIn: String(get('Shift')||''), subIn: String(get('Subspecialty')||get('Sub')||'').trim(),
+            grpIn: String(get('Group')||'').trim(),
+            datesIn: String(get('Dates')||get('Date')||'').split(/[;,]/).map(x=>x.trim()).filter(Boolean),
+            annot: [] });
+        });
+      }
+      if(!mid.length){ prev.innerHTML = '<div class="note nw">No usable rows found.</div>'; return; }
+
+      // ── Shared validation pass ────────────────────────────────────
+      // Existing-block keys use the SAME canonical holiday names so a sheet
+      // "Christmas" row dedups against an app "Christmas Day" assignment.
       const existing = new Set((S.holidays||[]).map(h =>
-        `${h.physId}|${norm(h.name)}|${h.year||String(h.date||'').slice(0,4)}|${h.group||'DR'}`));
+        `${h.physId}|${norm(_holHistCanonHoliday(h.name)||h.name)}|${h.year||String(h.date||'').slice(0,4)}|${h.group||'DR'}`));
       const seen = new Set();
       const out = [];
-      rows.forEach((r, i) => {
-        const get = (key) => {
-          const target = norm(key);
-          for(const k of Object.keys(r)){ if(norm(k) === target) return r[k]; }
-          return '';
-        };
-        const rowNo = i + 2;
-        const rawName = String(get('Physician')||get('Last')||get('Name')||'').trim();
-        const holName = String(get('Holiday')||get('Holiday Name')||'').trim();
-        if(!rawName && !holName) return;                     // blank line
-        const entry = { rowNo, rawName, holName, status:'ok', problems:[] };
+      mid.forEach(m => {
+        const entry = { rowNo: m.rowNo, rawName: m.rawName, holName: m.holName, annot: m.annot||[],
+          status:'ok', problems: [] };
         out.push(entry);
-        if(!rawName){ entry.status='error'; entry.problems.push('missing Physician'); return; }
-        if(!holName){ entry.status='error'; entry.problems.push('missing Holiday'); return; }
-        // dates first so a missing Year can be derived from them
-        const rawDates = String(get('Dates')||get('Date')||'').split(/[;,]/).map(x=>x.trim()).filter(Boolean);
-        let year = parseInt(get('Year'), 10);
+        if(!m.rawName){ entry.status='error'; entry.problems.push('missing physician'); return; }
+        if(!m.holName){ entry.status='error'; entry.problems.push('missing/unrecognized holiday'); return; }
+        // dates (template path still carries raw strings)
+        let year = m.yearIn;
         let dates = [];
-        rawDates.forEach(dv => {
-          const d = _holHistNormDate(dv, isFinite(year)?year:null);
+        m.datesIn.forEach(dv => {
+          const d = /^\d{4}-\d{2}-\d{2}$/.test(dv) ? dv : _holHistNormDate(dv, isFinite(year)?year:null);
           if(d) dates.push(d); else entry.problems.push(`unreadable date "${dv}"`);
         });
         if(!isFinite(year) && dates.length) year = +dates[0].slice(0,4);
@@ -47028,33 +47111,54 @@ function previewHolHistImport(input){
         }
         entry.year = year;
         if(!dates.length){
-          dates = _holHistOfficialDates(holName, year) || [`${year}-01-01`];
-          if(dates[0] === `${year}-01-01` && !/newyear/.test(norm(holName)))
-            entry.problems.push('no dates given and holiday name not recognized — using Jan 1 placeholder');
+          dates = _holHistOfficialDates(m.holName, year) || [`${year}-01-01`];
+          if(dates[0] === `${year}-01-01` && !/newyear/.test(norm(m.holName)))
+            entry.problems.push('dates unknown — using Jan 1 placeholder');
         }
         entry.dates = [...new Set(dates)].sort();
-        // group
-        const rawGrp = String(get('Group')||'DR').trim();
-        const grp = knownGroups.find(g => norm(g) === norm(rawGrp) || norm(g) === norm('IR'+rawGrp)) || null;
-        if(!grp){ entry.status='error'; entry.problems.push(`unknown group "${rawGrp}" (use ${knownGroups.join(', ')})`); return; }
-        entry.group = grp;
-        entry.wshift = /swing/i.test(String(get('Shift')||'')) ? 'swing' : 'day';
-        entry.sub = String(get('Subspecialty')||get('Sub')||'').trim();
-        // physician
-        const match = _matchPhysicianFuzzy(rawName);
-        if(!match || match.score < 0.7){
-          entry.status='error'; entry.problems.push('no physician match'); return;
+        // physician — history often names people who have since left; a
+        // weak fuzzy hit must NOT silently credit someone else (Martinez
+        // is not Martin), so the bar is higher than the roster importers'.
+        const match = _matchPhysicianFuzzy(m.rawName);
+        // A sheet surname that EXTENDS past the roster surname ("Martinez"
+        // vs roster "Martin") is a different person — almost always someone
+        // who has since left. Containment the other way ("Mossa" for
+        // Mossa-Basha) stays fine.
+        const _clean = (x) => String(x||'').toLowerCase().replace(/[-\s'.]/g,'');
+        const _extendsPast = match && _clean(m.rawName).length > _clean(match.phys.last).length
+          && _clean(m.rawName).startsWith(_clean(match.phys.last));
+        if(!match || match.score < 0.8 || (match.score < 0.95 && _extendsPast)){
+          entry.status='error';
+          entry.problems.push('no physician match' + (match ? ` (closest: ${match.phys.last} — looks like a different/departed physician)` : ' (likely no longer on the roster)'));
+          return;
         }
         entry.phys = match.phys; entry.score = match.score;
-        // dedup
-        const key = `${match.phys.id}|${norm(holName)}|${year}|${grp}`;
+        // group: explicit column wins; otherwise infer from the physician —
+        // IR people credit their IR-group pool, everyone else credits DR.
+        if(m.grpIn){
+          const grp = knownGroups.find(g => norm(g) === norm(m.grpIn) || norm(g) === norm('IR'+m.grpIn)) || null;
+          if(!grp){ entry.status='error'; entry.problems.push(`unknown group "${m.grpIn}" (use ${knownGroups.join(', ')})`); return; }
+          entry.group = grp;
+        } else if((+match.phys.irFte||0) > 0){
+          if(!match.phys.irGroup){
+            entry.status='error';
+            entry.problems.push(`${match.phys.last} has IR FTE but no IR group on the roster — assign their group first, or add a Group column`);
+            return;
+          }
+          entry.group = 'IR-' + match.phys.irGroup;
+        } else {
+          entry.group = 'DR';
+        }
+        entry.wshift = /swing/i.test(m.shiftIn) ? 'swing' : 'day';
+        entry.sub = m.subIn || '';
+        const key = `${match.phys.id}|${norm(m.holName)}|${year}|${entry.group}`;
         if(existing.has(key) || seen.has(key)){ entry.status='exists'; return; }
         seen.add(key);
       });
-      if(!out.length){ prev.innerHTML = '<div class="note nw">No usable rows found.</div>'; return; }
+
       _holHistParsed = out;
       const ok = out.filter(x=>x.status==='ok'), dup = out.filter(x=>x.status==='exists'), bad = out.filter(x=>x.status==='error');
-      let html = `<div class="muted-xs mb8"><strong>${ok.length}</strong> block${ok.length===1?'':'s'} ready · ${dup.length} already recorded (skipped) · ${bad.length} error${bad.length===1?'':'s'}</div>`;
+      let html = `<div class="muted-xs mb8">${isMatrix?'Detected the year × holiday grid layout. ':''}<strong>${ok.length}</strong> block${ok.length===1?'':'s'} ready · ${dup.length} already recorded (skipped) · ${bad.length} error${bad.length===1?'':'s'}</div>`;
       html += `<div class="scroll-x" style="max-height:300px;overflow-y:auto"><table><thead><tr>
         <th></th><th>Row</th><th>Physician</th><th>Holiday</th><th>Year</th><th>Pool</th><th>Shift</th><th>Sub</th><th>Dates</th><th>Notes</th>
       </tr></thead><tbody>`;
@@ -47063,12 +47167,13 @@ function previewHolHistImport(input){
         const who = x.phys
           ? `${escHtml(x.phys.last)}, ${escHtml(x.phys.first)}${x.score<1?` <span class="muted-xs">(matched "${escHtml(x.rawName)}")</span>`:''}`
           : escHtml(x.rawName||'—');
+        const note = [...(x.problems||[]), ...(x.annot||[])].join('; ');
         html += `<tr${x.status==='error'?' style="background:var(--red-bg)"':''}>
-          <td>${icon}</td><td class="fs-xs">${x.rowNo}</td><td>${who}</td>
+          <td>${icon}</td><td class="fs-xs">${escHtml(String(x.rowNo))}</td><td>${who}</td>
           <td>${escHtml(x.holName||'—')}</td><td>${x.year||'—'}</td>
           <td>${escHtml(x.group||'—')}</td><td>${x.wshift||'—'}</td><td>${escHtml(x.sub||'')||'—'}</td>
           <td class="fs-xs">${(x.dates||[]).join('; ')}</td>
-          <td class="fs-xs" style="color:var(--${x.status==='error'?'red':'amber'}-t)">${escHtml(x.problems.join('; '))||(x.status==='exists'?'already recorded':'')}</td>
+          <td class="fs-xs" style="color:var(--${x.status==='error'?'red':'amber'}-t)">${escHtml(note)||(x.status==='exists'?'already recorded':'')}</td>
         </tr>`;
       });
       html += '</tbody></table></div>';
@@ -47097,7 +47202,7 @@ async function applyHolHistImport(){
     x.dates.forEach(date => {
       S.holidays.push({ id:S.nextId++, name:x.holName, date, year:x.year,
         physId:x.phys.id, group:x.group, sub:x.sub||'', wshift:x.wshift,
-        notes:'Imported history' });
+        notes:'Imported history' + ((x.annot&&x.annot.length)?' — '+x.annot.join(', '):'') });
       rows++;
     });
   });
