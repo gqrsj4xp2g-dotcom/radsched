@@ -9607,6 +9607,7 @@ create table pacs_inbound (
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
         min-staffing, sell/buy, standalone, partial, official, real, full,
+        save-conflict, sync,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -9877,6 +9878,25 @@ const _TUNE = Object.freeze({
 let _isRestoring=true;
 let _dataRestored=false;
 let _hasUnsavedChanges=false;
+// ── Sync bookkeeping for save-conflict handling (rs-v125) ──
+// Declared up here (not beside _pushToSupabase) because triggerSave() reads
+// them and can run long before that part of the file is evaluated.
+let _dirtySeq = 0;              // bumped by every triggerSave(): tells "a new edit landed" from "this push failed"
+let _followUpRequested = false; // someone asked to save while a push was already in flight
+let _saveConflict = null;       // {remote, at, auto} while a save conflict awaits resolution
+let _conflictResolving = false; // a "load latest" is in flight
+let _casStampRetried = false;   // one-shot retry for a precision-only saved_at mismatch
+let _userEditPending = false;   // unsent changes include something a person did (never auto-discarded)
+let _lastTrustedInputAt = 0;    // last real pointer/keyboard event in this tab
+let _autoResolveTimes = [];     // recent automatic take-server-copy resolutions (budget: 3 per 2 min)
+const _myPushStamps = [];       // savedAt stamps this tab has pushed — identifies our own realtime echo
+const _syncLog = [];            // small ring of sync events for diagnostics (see rsSyncLog())
+const _USER_EDIT_WINDOW_MS = 30 * 60 * 1000;
+try{
+  ['pointerdown','keydown','input','change','paste','drop'].forEach(function(t){
+    document.addEventListener(t, function(e){ if(e && e.isTrusted) _lastTrustedInputAt = Date.now(); }, { capture:true, passive:true });
+  });
+}catch(_){}
 let _SRC=''; // kept for offline/export fallback
 let _supabase=null;
 // Hoisted: declared here (NOT at the bottom of the script) so the early
@@ -12327,6 +12347,12 @@ async function restoreFromBackup(backupId){
     if(!result?.payload || typeof result.payload !== 'object') {
       throw new Error('Restore service returned no committed payload. Reload and verify before making edits.');
     }
+    // rs-v125: the server row IS the backup now — this tab must take it. End any
+    // pending save conflict and stand the stale-remote guard down so the apply
+    // cannot be skipped in favour of pre-restore edits.
+    _clearSaveConflict('restore-backup');
+    S._lastLocalChange = 0;
+    _hasUnsavedChanges = false;
     _applyRemoteData(result.payload);
     if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
     if(Array.isArray(result?.warnings) && result.warnings.length){
@@ -12481,8 +12507,16 @@ function _audit(action, detail){
       action: String(action || 'unknown'),
       detail: detail == null ? null : (typeof detail === 'string' ? detail : (() => { try{ return JSON.parse(JSON.stringify(detail)); }catch(_){ return String(detail); } })()),
     };
-    S.auditLog.push(entry);
-    while(S.auditLog.length > _AUDIT_LOG_MAX) S.auditLog.shift();
+    // rs-v125: append WITHOUT marking the practice blob dirty. After a remote
+    // apply S.auditLog is a reactive array, so a plain .push() called
+    // triggerSave() — every audited event, including render-time ones
+    // ('coverage.gap.detected' from the dashboard, the daily 'snapshot.prune'),
+    // forced a full-blob save. Two tabs opening together therefore BOTH saved
+    // within the same second on boot; one lost the compare-and-swap and sat in
+    // a save-conflict loop. The entry is still dual-written to
+    // radscheduler_audit below and rides along in the blob on the next real save.
+    Array.prototype.push.call(S.auditLog, entry);
+    while(S.auditLog.length > _AUDIT_LOG_MAX) Array.prototype.shift.call(S.auditLog);
   }catch(e){
     if(typeof _logError === 'function') _logError('audit', 'Audit write failed', e);
   }
@@ -13155,6 +13189,10 @@ window.addEventListener('unhandledrejection', e => {
 
 function triggerSave(){
   if(_isRestoring)return;
+  // rs-v125 sync bookkeeping — see "Save-conflict handling" above _pushToSupabase.
+  _dirtySeq++;
+  if(_lastTrustedInputAt && (Date.now() - _lastTrustedInputAt) < _USER_EDIT_WINDOW_MS) _userEditPending = true;
+  if(!_hasUnsavedChanges) _syncNoteDirty();
   _hasUnsavedChanges=true;
   S._lastLocalChange = Date.now(); // used by _applyRemoteData's stale-remote guard
   // Invalidate the date-keyed shift index so the next render rebuilds it
@@ -14583,6 +14621,7 @@ async function doLogout(){
     clearTimeout(_ghDeployTimer); _ghDeployTimer=null;
   }
   _isSaving=false; _hasUnsavedChanges=false;
+  _clearSaveConflict('logout');   // rs-v125: no banner / gate carried into the next sign-in
   // A1 fix (security audit): leader-election heartbeats and the
   // BroadcastChannel survive logout otherwise. Stale heartbeats on
   // a per-practice channel name would race with a NEW session if the
@@ -15118,6 +15157,15 @@ function _applyRemoteData(d){
   // because it would clobber fresh local changes. _lastLocalChange is updated on every
   // triggerSave(); _lastSaved is updated on successful push. If there are local changes
   // newer than both the remote data AND the last successful push, bail.
+  // rs-v125: while a save conflict is waiting on the banner, the unsent edits
+  // stay exactly as the user left them. The time-based guard below would let a
+  // NEWER remote copy replace them silently, contradicting what the banner
+  // says. Explicit flows (Load latest, restore, practice switch) clear the
+  // conflict first.
+  if(_saveConflict && !_saveConflict.auto && !_conflictResolving){
+    console.log('[RS] Skipping remote apply — a save conflict is waiting on the user; unsent edits stay on screen');
+    return;
+  }
   const remoteSaved = (d._dbSavedAt||d.savedAt) ? new Date(d._dbSavedAt||d.savedAt).getTime() : 0;
   const localSaved  = S._lastSaved ? S._lastSaved.getTime() : 0;
   const localChange = S._lastLocalChange || 0;
@@ -15544,7 +15592,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v124';
+const _SW_VERSION = 'rs-v125';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -15942,15 +15990,35 @@ function _doSubscribeRealtimeSocket(){
         // Guard 2: current active practice must still match what we subscribed to
         if(_subscribedRowId!==_ROW_ID) return;
         const newData=payload.new?.data||payload.record?.data;
-        if(!newData)return;
+        if(!newData){
+          // rs-v125: Supabase Realtime caps a Postgres-change payload at
+          // 1,024 KB; past that it strips every field larger than 64 bytes.
+          // The practice row is ~92% of the cap (2026-11), so one day soon
+          // these events will arrive with id + saved_at but NO data — and this
+          // line used to drop them, silently ending live sync. The event still
+          // says "the row changed", so fetch it.
+          const _st = payload.new?.saved_at || payload.record?.saved_at;
+          if(_st && !_sameInstant(_st, S._remoteSavedAt) && !_isOwnPushStamp(_st)) _pullAndApplyRemote('realtime-oversize');
+          return;
+        }
         try{
           const d=JSON.parse(newData);
+          // rs-v125: carry the row's saved_at COLUMN so S._remoteSavedAt holds the
+          // same canonical stamp a pull returns (the JSON savedAt is the same
+          // instant in a different text format).
+          const _rowStamp = payload.new?.saved_at || payload.record?.saved_at;
+          if(_rowStamp) d._dbSavedAt = _rowStamp;
           // Guard 3 (audit fix 2026-07): suppress our OWN echo by tab identity,
           // not by a 2.5s wall-clock window. The old time window also dropped a
           // second admin's genuine concurrent save that happened to land within
           // 2.5s of ours. Fall back to the time heuristic only for legacy
           // payloads that predate _originTab.
-          if(d._originTab){ if(d._originTab === _TAB_ID) return; }
+          // rs-v125: …and by STAMP. Server-side RPCs (shift claims, swaps, chat,
+          // time log…) rewrite the row but leave the previous writer's _originTab
+          // in place, so "origin is me" alone also swallowed every RPC change made
+          // on top of this tab's last save. It is only our echo when the savedAt
+          // is one this tab actually pushed.
+          if(d._originTab){ if(d._originTab === _TAB_ID && _isOwnPushStamp(d.savedAt)) return; }
           else if(S._lastSaved && (new Date()-S._lastSaved)<2500) return;
           _applyRemoteData(d);
           _refreshCurrentPage();
@@ -16034,10 +16102,14 @@ function _startPollFallback(){
       }
     }
     if(S._lastSaved&&(new Date()-S._lastSaved)<5000) return; // skip if we just saved
+    if(_isSaving) return; // rs-v125: our own write is in the air — its stamp is not "someone else's change"
     // Skip when the tab isn't visible — saves a Supabase round-trip
     // every 10-20s on every background tab. The visibilitychange
     // handler will fire a manual refresh when the user returns.
     if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    // rs-v125: a save conflict is waiting on the banner (or resolving itself) —
+    // nothing pulled now would be applied over the pending edits.
+    if(_saveConflict) return;
     _pollInFlight = true;
     _pollStartedAt = Date.now();
     try{
@@ -16049,12 +16121,27 @@ function _startPollFallback(){
       // isn't available yet (older DB). The finally still clears the in-flight flag.
       const cheap = await _pullSavedAt();
       if(cheap !== null){
+        // rs-v125: "changed" means the server's stamp is not the one this tab
+        // holds — not "is later than my clock". savedAt comes from each writer's
+        // own clock, so a save from a device running slightly behind (or a
+        // restore of an older backup) carries an EARLIER stamp; the old `>`
+        // test never noticed those and the tab stayed stale until its own next
+        // save hit a conflict.
+        if(_sameInstant(cheap, S._remoteSavedAt)) return;   // unchanged — no full download
         const remoteMs = new Date(cheap).getTime();
-        if(!(remoteMs > baseline + 500)) return;   // unchanged — no full download
+        // rs-v125: local edits newer than the remote copy are still waiting to
+        // upload; _applyRemoteData would refuse this payload, so don't download
+        // the multi-MB blob every tick just to drop it.
+        const _lc = S._lastLocalChange || 0;
+        if(_lc > remoteMs && _lc > localSaved) return;
       }
       const d=await _pullFromSupabase();
-      const remoteSaved=d?.savedAt?new Date(d.savedAt).getTime():0;
-      if(d&&remoteSaved>baseline+500){
+      const _dStamp = d ? (d._dbSavedAt || d.savedAt || null) : null;
+      const remoteSaved=_dStamp?new Date(_dStamp).getTime():0;
+      // With the cheap gate available, apply whenever the pulled copy is not the
+      // version we hold; fall back to the clock comparison only on older DBs.
+      const _changed = (cheap !== null) ? !_sameInstant(_dStamp, S._remoteSavedAt) : (remoteSaved>baseline+500);
+      if(d&&_changed){
         _applyRemoteData(d);
         _refreshCurrentPage();
         // Forward to follower tabs.
@@ -16774,6 +16861,10 @@ async function switchPractice(id,name){
   //    in-flight payload has time to drop before we rebind to a different _ROW_ID.
   if(_realtimeSub){ try{ await _realtimeSub.unsubscribe(); }catch(e){} _realtimeSub=null; }
   if(_pollInterval){ clearInterval(_pollInterval); _pollInterval=null; }
+  // rs-v125: a save conflict belongs to the practice being left; end it so the
+  // new practice's data is allowed to load and saves are not gated.
+  _clearSaveConflict('switch-practice');
+  S._lastLocalChange = 0;
   // 3. Freeze reactivity for the whole switch — no saves or renders fire against half-state.
   _isRestoring=true;
   try{
@@ -17019,7 +17110,7 @@ function _toggleMobileNav(force){
 // unregistering the SW + reloading. Without this, users could sit
 // indefinitely on a stale shell whenever an old SW served them
 // the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v124';
+const _RS_HTML_BUILD = 'rs-v125';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -53433,12 +53524,17 @@ function _toast(msg, type){
     host.style.cssText = 'position:fixed;top:60px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:360px;max-height:calc(100vh - 80px);overflow-y:auto;scroll-behavior:smooth';
     document.body.appendChild(host);
   }
+  // rs-v125: one copy of a message at a time. A stuck retry loop once stacked
+  // the same warning three times a second; an identical toast that is still on
+  // screen already says it.
+  for(const _el of host.children){ if(_el && _el.dataset && _el.dataset.msg === String(msg)) return; }
   // Hard cap: never more than 8 toasts at once. Older ones get
   // dropped so the visible queue stays scannable.
   while(host.children.length >= 8){
     try{ host.removeChild(host.firstElementChild); }catch(_){ break; }
   }
   const t = document.createElement('div');
+  t.dataset.msg = String(msg);
   const bg = type==='warn' ? 'var(--amber,#d97706)'
           : type==='err'  ? 'var(--red,#dc2626)'
           : type==='info' ? 'var(--blue-t,#2563eb)'
@@ -53685,7 +53781,7 @@ if(typeof document !== 'undefined' && !window._rsVisibilityWired){
     // fresh data without waiting 10-20s for the next polling tick.
     // Guard with the same in-flight checks the polling loop uses.
     try{
-      if(_supabase && !_isRestoring && (!S._lastSaved || (Date.now() - S._lastSaved.getTime()) > 5000)){
+      if(_supabase && !_isRestoring && !_saveConflict && (!S._lastSaved || (Date.now() - S._lastSaved.getTime()) > 5000)){
         (async () => {
           const d = await _pullFromSupabase();
           const remoteSaved = d?.savedAt ? new Date(d.savedAt).getTime() : 0;
@@ -53848,6 +53944,218 @@ async function _pullFromSupabase(){
   }
 }
 
+// ── Save-conflict handling (rs-v125) ──────────────────────────────────
+// The practice lives in ONE row; every save is a compare-and-swap against the
+// row's saved_at (rs_save_practice_cas). When the swap fails, another tab or
+// device saved first and this tab's copy is based on stale data.
+//
+// What went wrong before (2026-11-21, "stuck" tab firing ~3 requests/second):
+//   1. A conflict set _hasUnsavedChanges=true and returned; the push's
+//      `finally` read that flag as "a new edit landed mid-flight" and re-fired
+//      the push every 250 ms. The baseline never changed, so it conflicted
+//      again — forever, with a warning toast each time.
+//   2. The advisory probe compared timestamps as STRINGS. The saved_at column
+//      reads back as "2026-11-21T15:00:35.42+00:00" while a realtime or
+//      BroadcastChannel payload carries the JSON savedAt
+//      "2026-11-21T15:00:35.420Z" — the same instant, never string-equal. So a
+//      tab that had merely RECEIVED another tab's save "conflicted" on its own
+//      next save and fell into loop (1).
+//   3. Audit entries marked the blob dirty (see _audit), so two tabs opening
+//      together both saved on boot and raced.
+//
+// Now: timestamps compare as instants; a conflict never retries by itself; a
+// tab with nothing of the user's pending quietly takes the server copy; a tab
+// holding real unsent edits shows ONE banner with a way out and keeps the
+// edits on screen until the user decides.
+function _tsMs(v){
+  if(v == null || v === '') return 0;
+  const t = (v instanceof Date) ? v.getTime() : new Date(v).getTime();
+  return isNaN(t) ? 0 : t;
+}
+function _sameInstant(a, b){
+  if(a == null || b == null || a === '' || b === '') return a == b;
+  if(a === b) return true;
+  const x = _tsMs(a), y = _tsMs(b);
+  return x !== 0 && x === y;
+}
+function _isOwnPushStamp(stamp){
+  if(!stamp) return false;
+  for(let i = 0; i < _myPushStamps.length; i++){ if(_sameInstant(_myPushStamps[i], stamp)) return true; }
+  return false;
+}
+function _syncNote(kind, detail){
+  try{
+    _syncLog.push({ t: new Date().toISOString(), k: kind, d: detail == null ? null : detail });
+    if(_syncLog.length > 40) _syncLog.splice(0, _syncLog.length - 40);
+  }catch(_){}
+}
+// What turned a clean tab dirty? One short stack per clean→dirty transition —
+// this is the question that took log archaeology to answer for the boot race.
+function _syncNoteDirty(){
+  try{
+    const st = String(new Error().stack || '').split('\n').slice(2, 7)
+      .map(function(l){ const m = /at\s+([^\s(]+)/.exec(l) || /^([^@]*)@/.exec(l); return m ? m[1] : ''; })
+      .filter(Boolean).join(' < ');
+    _syncNote('dirty', { by: st.slice(0, 200), user: _userEditPending });
+  }catch(_){}
+}
+function rsSyncLog(){ return _syncLog.slice(); }
+// "Something changed on the server and we were not handed the data" — fetch the
+// row and apply it like a realtime update. Coalesces bursts: a call that lands
+// while a fetch is in flight triggers exactly one more fetch afterwards.
+let _pullApplyInFlight = false, _pullApplyAgain = false;
+async function _pullAndApplyRemote(why){
+  if(_pullApplyInFlight){ _pullApplyAgain = true; return false; }
+  _pullApplyInFlight = true;
+  let applied = false;
+  try{
+    do{
+      _pullApplyAgain = false;
+      if(_isRestoring || _saveConflict) break;
+      const d = await _pullFromSupabase();
+      const st = d ? (d._dbSavedAt || d.savedAt || null) : null;
+      if(!d || !st || _sameInstant(st, S._remoteSavedAt)) continue;
+      if(d._originTab === _TAB_ID && _isOwnPushStamp(d.savedAt)) continue;   // our own write
+      _applyRemoteData(d);
+      if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+      if(typeof _bcSend === 'function') _bcSend({type:'remote-update', tabId:_TAB_ID, payload:d, ts:Date.now()});
+      _syncNote('remote.pulled', { why: why || '' });
+      applied = true;
+    }while(_pullApplyAgain);
+  }catch(e){
+    console.warn('[RS] Pull-and-apply failed:', e);
+  }finally{
+    _pullApplyInFlight = false;
+  }
+  return applied;
+}
+try{ window.rsSyncLog = rsSyncLog; }catch(_){}
+
+function _showConflictBanner(extra){
+  try{
+    let b = document.getElementById('rs-conflict-banner');
+    if(!b){
+      b = document.createElement('div');
+      b.id = 'rs-conflict-banner';
+      b.setAttribute('role', 'alert');
+      b.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:10001;width:max-content;max-width:min(700px,calc(100vw - 24px));background:#7c2d12;color:#fff;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.35);padding:12px 14px;font-size:13px;line-height:1.45;display:flex;gap:12px;align-items:center;flex-wrap:wrap';
+      const txt = document.createElement('div');
+      txt.style.cssText = 'flex:1;min-width:230px';
+      const h = document.createElement('strong');
+      h.style.cssText = 'display:block;font-size:14px;margin-bottom:2px';
+      h.textContent = 'This tab is behind — your last edits were not uploaded';
+      const m = document.createElement('span');
+      m.id = 'rs-conflict-msg';
+      txt.appendChild(h); txt.appendChild(m);
+      const btn = document.createElement('button');
+      btn.id = 'rs-conflict-load';
+      btn.type = 'button';
+      btn.textContent = 'Load latest version';
+      btn.style.cssText = 'background:#fff;color:#7c2d12;border:0;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap';
+      btn.addEventListener('click', function(){ _resolveConflictLoadLatest({ silent:false }); });
+      b.appendChild(txt); b.appendChild(btn);
+      (document.body || document.documentElement).appendChild(b);
+    }
+    const msg = document.getElementById('rs-conflict-msg');
+    if(msg) msg.textContent = (extra ? extra + ' ' : '')
+      + 'Another tab or device saved the schedule first. The edits you made here since then are still on screen but are not saved. '
+      + 'Loading the latest version replaces them with the saved copy — use 💾 in the toolbar first if you want to keep a copy of this tab.';
+    b.style.display = 'flex';
+  }catch(_){}
+}
+function _hideConflictBanner(){
+  try{ const b = document.getElementById('rs-conflict-banner'); if(b) b.remove(); }catch(_){}
+}
+// Flows that replace this tab's whole state on purpose (practice switch,
+// restore-from-backup, sign-out) end any pending conflict first.
+function _clearSaveConflict(why){
+  if(_saveConflict) _syncNote('conflict.cleared', { why: why || '' });
+  _saveConflict = null;
+  _casStampRetried = false;
+  _userEditPending = false;
+  _hideConflictBanner();
+}
+// A save was attempted while a conflict is unresolved: make sure the banner is
+// actually visible (it is the only way forward) instead of failing silently.
+function _conflictNudge(){
+  if(_saveConflict && !_saveConflict.auto) _showConflictBanner();
+}
+// Single entry point for every "the server moved under us" outcome (advisory
+// probe or the authoritative CAS). Never schedules a retry.
+function _onSaveConflict(remoteStamp, where){
+  _casStampRetried = false;
+  _hasUnsavedChanges = true;                    // this tab still holds state the server lacks
+  const now = Date.now();
+  const userDirty = _userEditPending;
+  _autoResolveTimes = _autoResolveTimes.filter(function(t){ return now - t < 120000; });
+  _syncNote('conflict', { where: where, userDirty: userDirty, server: remoteStamp || null, base: S._remoteSavedAt || null });
+  console.warn('[RS] Save conflict ('+where+'): server is at', remoteStamp, '— this tab was based on', S._remoteSavedAt,
+    userDirty ? '(user edits pending — asking)' : '(nothing of the user\'s pending — taking the server copy)');
+  if(!userDirty && _autoResolveTimes.length < 3){
+    // Only automatic changes are pending (boot-time normalisation, background
+    // refresh). They are recomputed from whatever is loaded, so the server copy
+    // simply wins. Budgeted so two tabs can never ping-pong indefinitely.
+    _autoResolveTimes.push(now);
+    _saveConflict = { remote: remoteStamp || null, at: now, auto: true };
+    _updateSaveUI('↻ Syncing to latest…','var(--blue-t)');
+    _resolveConflictLoadLatest({ silent:true });
+    return false;
+  }
+  _saveConflict = { remote: remoteStamp || null, at: now, auto: false };
+  _updateSaveUI('⚠ Save conflict — not uploaded','var(--red-t)');
+  _showConflictBanner();
+  return false;
+}
+// Take the server copy, in place (no page reload). silent=true is the automatic
+// path; silent=false is the banner button.
+async function _resolveConflictLoadLatest(opts){
+  const silent = !!(opts && opts.silent);
+  if(_conflictResolving) return false;
+  _conflictResolving = true;
+  const btn = document.getElementById('rs-conflict-load');
+  if(btn){ btn.disabled = true; btn.textContent = 'Loading…'; }
+  const _fail = function(why){
+    _syncNote('conflict.resolve.failed', { silent: silent, why: why });
+    if(_saveConflict) _saveConflict.auto = false;
+    _updateSaveUI('⚠ Save conflict — not uploaded','var(--red-t)');
+    _showConflictBanner(why);
+    return false;
+  };
+  try{
+    clearTimeout(_saveTimeout);
+    const d = await _pullFromSupabase();
+    if(!d) return _fail('Could not reach the server just now — check the connection and try again.');
+    // The automatic path is only valid while nothing of the user's is pending.
+    // If they edited something during the round-trip, hand the decision to them.
+    if(silent && _userEditPending) return _fail('');
+    // _applyRemoteData's stale-remote guard exists to protect unsent edits.
+    // Here the decision is already made (by the user, or because nothing of
+    // theirs is pending) that the server copy wins, so stand the guard down.
+    S._lastLocalChange = 0;
+    _applyRemoteData(d);
+    if(!_sameInstant(S._remoteSavedAt, d._dbSavedAt || d.savedAt)){
+      return _fail('The saved copy could not be loaded into this tab — reload the page to continue.');
+    }
+    _hasUnsavedChanges = false;
+    _userEditPending = false;
+    _saveConflict = null;
+    _hideConflictBanner();
+    try{ if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage(); }catch(_){}
+    _updateSaveUI('✓ Synced','var(--green-t)');
+    if(typeof _updateStaleSaveBadge === 'function'){ try{ _updateStaleSaveBadge(); }catch(_){} }
+    if(!silent && typeof _toast === 'function') _toast('Loaded the latest saved version.', 'ok');
+    _syncNote('conflict.resolved', { silent: silent, at: S._remoteSavedAt || null });
+    return true;
+  }catch(e){
+    console.warn('[RS] Conflict resolution failed:', e);
+    return _fail('Loading the latest version failed (' + String((e && e.message) || e).slice(0, 80) + ').');
+  }finally{
+    _conflictResolving = false;
+    const b2 = document.getElementById('rs-conflict-load');
+    if(b2){ b2.disabled = false; b2.textContent = 'Load latest version'; }
+  }
+}
+
 let _isSaving=false;
 let _saveWatchdog=null;     // Timer that force-clears _isSaving if a push hangs.
 let _consecutiveSaveFails=0; // Backoff state for the retry loop below.
@@ -53872,12 +54180,21 @@ async function _pushToSupabase(){
     _hasUnsavedChanges=false;
     return false;
   }
+  // rs-v125: a save conflict is waiting on a decision (banner showing, or the
+  // automatic take-server-copy is in flight). The baseline is still stale, so
+  // another push cannot succeed — don't touch the network; keep the edits.
+  if(_saveConflict){
+    _hasUnsavedChanges=true;
+    _conflictNudge();
+    return false;
+  }
   if(_isSaving){
     // Re-entrant call while previous save is in-flight. Mark that we need another push
     // when the current one finishes, so nothing is lost. _hasUnsavedChanges=true signals this.
     // Return false so callers awaiting the result (e.g. hardSave) don't mistake the deferral
     // for success and skip their "✓ Synced" UI update — the follow-up push in `finally` will run.
     _hasUnsavedChanges=true;
+    _followUpRequested=true;   // rs-v125: the in-flight push's `finally` honours this
     return false;
   }
   _isSaving=true;
@@ -53890,6 +54207,9 @@ async function _pushToSupabase(){
   // We re-check before the actual upsert and bail with a clear
   // error if the practice has changed.
   const _pushRowId = _ROW_ID;
+  // rs-v125: edits are numbered; `finally` compares against this to tell "a new
+  // edit landed while we were saving" from "this push did not go through".
+  const _seqAtStart = _dirtySeq;
   // Watchdog: if the underlying Supabase fetch hangs (mobile carrier captive
   // portal, dead TCP socket, etc.), `await` never resolves and the .finally
   // never runs — so `_isSaving` would be stuck `true` forever and every
@@ -53920,7 +54240,7 @@ async function _pushToSupabase(){
   // refuse to clobber blindly — instead we re-pull, surface a conflict
   // toast, and let the user decide. Without this, simultaneous edits from
   // two admin devices silently last-write-wins.
-  const _baseRemoteSavedAt = S._remoteSavedAt || null;
+  let _baseRemoteSavedAt = S._remoteSavedAt || null;
   try{
     if(!_initSupabase())return false;
     _updateSaveUI('⏳ Saving…','var(--txt3)');
@@ -53958,34 +54278,21 @@ async function _pushToSupabase(){
         // multi-MB blob. The full blob is pulled below ONLY if the remote is
         // actually newer and we need to merge it.
         const remoteNow = await _pullSavedAt(_pushRowId);
-        {
-          if(remoteNow && remoteNow !== _baseRemoteSavedAt){
-            // Another device beat us. Two cases:
-            const remoteMs   = new Date(remoteNow).getTime();
-            const localChange= S._lastLocalChange || 0;
-            const localSavedMs = S._lastSaved ? S._lastSaved.getTime() : 0;
-            const localIsNewer = localChange > remoteMs && localChange > localSavedMs;
-            if(localIsNewer){
-              console.warn('[RS] Push conflict: local changes are newer, but automatic whole-blob overwrite is blocked');
-              if(typeof _toast === 'function'){
-                _toast('Another device saved first. Your newer edits remain in this tab but were not uploaded; reconcile before retrying.', 'warn');
-              }
-              _updateSaveUI('⚠ Save conflict — not uploaded','var(--red-t)');
-              _hasUnsavedChanges = true;
-              return false;
-            } else {
-              // Remote is newer. Preserve the user's in-memory work and stop;
-              // automatically pulling and retrying a whole-blob save can erase
-              // either editor's changes. The database CAS below is the final
-              // authority even when this advisory probe is skipped.
-              console.warn('[RS] Push conflict: remote moved from',_baseRemoteSavedAt,'→',remoteNow);
-              if(typeof _toast === 'function'){
-                _toast('Another device saved first. Your edits remain in this tab but were not uploaded. Reload to take the server copy, or export before reconciling.', 'warn');
-              }
-              _updateSaveUI('⚠ Save conflict — not uploaded','var(--red-t)');
-              _hasUnsavedChanges = true;
-              return false;
-            }
+        if(remoteNow){
+          // rs-v125: compare INSTANTS, not strings. The column reads back as
+          // "…35.42+00:00"; a baseline that arrived over realtime/BroadcastChannel
+          // is the JSON "…35.420Z" — the same moment, never string-equal, which
+          // made a tab "conflict" with a save it had already received.
+          if(_sameInstant(remoteNow, _baseRemoteSavedAt)){
+            // Same version. Use the column's exact text (full precision) as the
+            // CAS expectation from here on.
+            _baseRemoteSavedAt = remoteNow;
+          } else {
+            // Somebody else really did save since our last sync. Stop here —
+            // never auto-overwrite, never auto-retry. _onSaveConflict either
+            // takes the server copy (nothing of the user's pending) or shows
+            // the banner and leaves the edits on screen.
+            return _onSaveConflict(remoteNow, 'probe');
           }
         }
       }catch(probeErr){
@@ -54093,6 +54400,9 @@ async function _pushToSupabase(){
       console.warn('[RS] Push aborted at upsert: _ROW_ID changed during build');
       return false;
     }
+    // rs-v125: remember this stamp BEFORE the round-trip — the realtime echo of
+    // our own write can arrive before the RPC response does.
+    _myPushStamps.push(_stamp); if(_myPushStamps.length > 8) _myPushStamps.shift();
     const {data:_cas,error}=await _supabase.rpc('rs_save_practice_cas',{
       p_practice:_pushRowId,
       p_data:payload.data,
@@ -54100,14 +54410,29 @@ async function _pushToSupabase(){
     });
     if(error)throw error;
     if(!_cas?.ok){
-      _hasUnsavedChanges=true;
-      _updateSaveUI('⚠ Save conflict — not uploaded','var(--red-t)');
-      if(typeof _toast==='function') _toast('Another device saved first. Your edits are still in this tab and were not overwritten.', 'warn');
-      return false;
+      const _cur = _cas?.current_saved_at || null;
+      // Precision-only mismatch: the server's stamp is the same millisecond as
+      // our baseline but spelled differently (sub-ms digits / text format).
+      // Nobody else saved — adopt the exact server stamp and retry ONCE.
+      if(_cur && _baseRemoteSavedAt && _cur !== _baseRemoteSavedAt && _sameInstant(_cur, _baseRemoteSavedAt) && !_casStampRetried){
+        _casStampRetried = true;
+        S._remoteSavedAt = _cur;
+        _hasUnsavedChanges = true;
+        _followUpRequested = true;
+        return false;
+      }
+      return _onSaveConflict(_cur, 'cas');
     }
+    _casStampRetried = false;
     S._lastSaved=new Date();
     S._remoteSavedAt = _cas.saved_at || _stamp;
-    S._lastLocalChange=0; // successful push — stale-remote guard may resume blocking again only when NEW local mutations happen
+    // rs-v125: only stand the stale-remote guard down (and call the tab clean) if
+    // no newer edit landed while this push was in the air — that edit is still
+    // unsent and still needs the guard.
+    if(_dirtySeq === _seqAtStart){
+      S._lastLocalChange=0; // successful push — stale-remote guard may resume blocking again only when NEW local mutations happen
+      _userEditPending = false;
+    }
     _consecutiveSaveFails = 0;
     _updateSaveUI('✓ Synced','var(--green-t)');
     if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge();
@@ -54124,7 +54449,9 @@ async function _pushToSupabase(){
       if(typeof _bcSend === 'function' && payload?.data){
         let parsed = null;
         try{ parsed = JSON.parse(payload.data); }catch(_){}
-        if(parsed) _bcSend({type:'remote-update', tabId:_TAB_ID, payload:parsed, ts:Date.now()});
+        // rs-v125: hand followers the row's canonical saved_at too, so their
+        // baseline matches what the server will report back to them.
+        if(parsed){ parsed._dbSavedAt = S._remoteSavedAt; _bcSend({type:'remote-update', tabId:_TAB_ID, payload:parsed, ts:Date.now()}); }
       }
     }catch(_){}
     // Side-table dual-write (off by default). When enabled (via
@@ -54221,7 +54548,15 @@ async function _pushToSupabase(){
     clearTimeout(_saveWatchdog); _saveWatchdog = null;
     // If a mutation landed while this save was in-flight, schedule a follow-up push
     // so no data is lost.
-    if(_hasUnsavedChanges){
+    // rs-v125: ONLY when there is new work — an edit that landed mid-flight
+    // (_dirtySeq moved) or a caller that asked to save while this push ran. A
+    // push that merely FAILED leaves _hasUnsavedChanges=true as well, and this
+    // block used to re-fire it every 250 ms regardless: a save conflict looped
+    // forever, and a network failure never got the exponential backoff the
+    // catch above schedules, because this timer replaced it.
+    const _newWork = (_dirtySeq !== _seqAtStart) || _followUpRequested;
+    _followUpRequested = false;
+    if(_hasUnsavedChanges && _newWork && !_saveConflict){
       clearTimeout(_saveTimeout);
       _saveTimeout=setTimeout(()=>{ _pushToSupabase(); },250);
     }
