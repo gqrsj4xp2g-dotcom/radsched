@@ -3112,6 +3112,14 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <div class="fg" id="p-irfte-w" style="display:none"><label>IR FTE</label><input id="p-irfte" type="number" min="0" max="1" step=".05" value="0" style="width:75px"></div>
     </div>
+    <div class="fg">
+      <label>📅 Start date <span style="font-size:10px;font-weight:400;color:var(--txt3)">(optional — leave blank for existing physicians)</span></label>
+      <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="p-start" type="date" style="width:160px">
+        <button type="button" class="bsm" onclick="document.getElementById('p-start').value=''" title="Remove the start date">Clear</button>
+      </div>
+      <div class="muted-xs mt8">The auto-builders assign nothing before this date. For the year they start, call is sized by <strong>FTE × the part of the year remaining</strong> — starting half-way through the year at 1.0 FTE carries 0.5 of a year's call. Later years use the full FTE.</div>
+    </div>
     <div class="g2" id="p-ir-w" style="display:none">
       <div class="fg"><label>IR Group</label><select id="p-irgrp"><option>North</option><option>South</option></select></div>
       <div class="fg"><label>Primary IR Site</label><select id="p-irsiteprim"></select></div>
@@ -4135,6 +4143,7 @@ tbody tr:hover{background:var(--bg3)}
         <select id="ira-period" style="width:175px" onchange="_iraTogglePeriodInputs()">
           <option value="H1">H1 — Jan through Jun</option>
           <option value="H2">H2 — Jul through Dec</option>
+          <option value="year">Annual — Jan through Dec</option>
           <option value="month">Single month</option>
           <option value="semi-1">1st half of month (1–15)</option>
           <option value="semi-2">2nd half of month (16–end)</option>
@@ -10841,6 +10850,7 @@ function _diagnoseSlotUnfillable(slot, opts){
       reasons.push('already placed today (' + pr.site + (pr.slotLabel ? ' · ' + pr.slotLabel : '') + ') by this preview run');
     }
     // Vacation
+    try{ if(typeof _physStartedBy === 'function' && !_physStartedBy(p, slot.date)) reasons.push('not started yet (starts ' + _physStartDate(p) + ')'); }catch(_){}
     try{ if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)) reasons.push('on vacation'); }catch(_){}
     // Sold-back date (CME / personal)
     try{ if(typeof isSoldBackDate === 'function' && isSoldBackDate(p.id, slot.date)) reasons.push('sold-back date'); }catch(_){}
@@ -10920,6 +10930,7 @@ function _assignOverQuotaNow(payload){
     return;
   }
   const p = (S.physicians||[]).find(x => x.id === physId);
+  if(p && typeof _confirmBeforeStart === 'function' && !_confirmBeforeStart(p,[date])) return;
   if(!p){
     if(typeof _toast === 'function') _toast('Physician not found.', 'err');
     return;
@@ -15021,6 +15032,11 @@ function _validatePhysician(p){
   if(newDr !== p.drFte){ issues.push(`drFte ${p.drFte} clamped → ${newDr}`); p.drFte = newDr; }
   const newIr = clampFte(p.irFte);
   if(newIr !== p.irFte){ issues.push(`irFte ${p.irFte} clamped → ${newIr}`); p.irFte = newIr; }
+  // startDate is optional; anything that is not a real 'YYYY-MM-DD' is dropped.
+  if(p.startDate != null && p.startDate !== '' && !_physStartDate(p)){
+    issues.push(`startDate ${JSON.stringify(p.startDate)} is not a valid date — removed`);
+    delete p.startDate;
+  }
   // role must be one of the known values.
   const validRoles = ['DR','IR','MIXED','superuser','admin','user'];
   if(p.role && !validRoles.includes(p.role)){
@@ -15592,7 +15608,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v126';
+const _SW_VERSION = 'rs-v127';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16508,6 +16524,91 @@ function vacDays(pid){
   S.vacations.filter(v=>v.physId===pid).forEach(v=>{let c=parseDateLocal(v.start),e=parseDateLocal(v.end);while(c<=e){d.add(fmtDate(c));c.setDate(c.getDate()+1);}});
   return d;
 }
+// ── Physician start date (rs-v127) ──────────────────────────────────────
+// Optional p.startDate ('YYYY-MM-DD'). Two rules hang off it, and both apply
+// ONLY to a physician who has one — everyone else behaves exactly as before:
+//   1. No auto-builder places the physician on a date before they start.
+//      (Manual placement asks for confirmation instead of blocking, like the
+//      other policy overrides.)
+//   2. In the calendar year they start, everything that sizes CALL by FTE —
+//      the yearly weekend-call cap, holiday fair share and draw weight, the
+//      per-FTE columns of the call workbook — uses FTE × the fraction of that
+//      year they are on staff (start Jul 1 at 1.0 FTE → about 0.50). Years
+//      before the start year count as 0, later years as the full FTE.
+// Builders that size a target from the days a physician is AVAILABLE in the
+// planning period (IR call, DR and IR daily shifts) get rule 2 through
+// _awayDays(): days before the start date count as unavailable, exactly like
+// vacation days, so the target shrinks to the share of the period they are
+// actually here for.
+function _physStartDate(p){
+  const v = p && p.startDate;
+  if(typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return '';
+  const y = +v.slice(0,4), m = +v.slice(5,7), d = +v.slice(8,10);
+  const t = new Date(Date.UTC(y, m-1, d));
+  // Round-trip so an impossible date (Feb 30) is treated as "no start date".
+  return (t.getUTCFullYear() === y && t.getUTCMonth() === m-1 && t.getUTCDate() === d) ? v : '';
+}
+// On staff on this date? (true when no start date is set)
+function _physStartedBy(p, iso){
+  const st = _physStartDate(p);
+  return !st || !iso || st <= String(iso).slice(0,10);
+}
+function _yearDays(y){ return ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0) ? 366 : 365; }
+// Fraction (0..1) of calendar year `year` the physician is on staff.
+function _physYearFraction(p, year){
+  const st = _physStartDate(p);
+  const y = parseInt(year, 10);
+  if(!st || !isFinite(y)) return 1;
+  const sy = +st.slice(0,4);
+  if(sy < y) return 1;
+  if(sy > y) return 0;
+  const total = _yearDays(y);
+  const dayIndex = Math.round((Date.UTC(y, +st.slice(5,7)-1, +st.slice(8,10)) - Date.UTC(y, 0, 1)) / 86400000);   // Jan 1 → 0
+  return Math.max(0, Math.min(1, (total - dayIndex) / total));
+}
+// "(started 2027-07-01 — 50% of 2027)" for tooltips/labels; '' when the year is unaffected.
+function _physStartNote(p, year){
+  const st = _physStartDate(p);
+  if(!st) return '';
+  const f = _physYearFraction(p, year);
+  if(f >= 1) return '';
+  return f <= 0 ? `starts ${st}` : `start ${st} — ${Math.round(f*100)}% of ${year}`;
+}
+// Vacation days PLUS every date before the start date. Same Set as vacDays()
+// (so size/iteration still mean vacation days); only membership is widened.
+function _awayDays(pid){
+  const set = vacDays(pid);
+  const ph = (typeof _physById === 'function') ? _physById(pid) : (S.physicians||[]).find(x => x.id === pid);
+  const st = _physStartDate(ph);
+  if(st){
+    const has0 = Set.prototype.has;
+    set.has = function(d){ return (typeof d === 'string' && d.slice(0,10) < st) || has0.call(this, d); };
+    set.notStartedBefore = st;
+  }
+  return set;
+}
+// Manual placement on a date before the start date: ask, don't block.
+function _confirmBeforeStart(p, dates){
+  const st = _physStartDate(p);
+  if(!st) return true;
+  const early = [].concat(dates || []).filter(d => d && String(d).slice(0,10) < st);
+  if(!early.length) return true;
+  return confirm(`${p.last} does not start until ${st} — ${early[0]} is before their start date.\n\nContinue anyway?`);
+}
+// How many existing assignments sit before a physician's start date (shown once
+// when the date is entered, so the admin can clean them up).
+function _physAssignmentsBeforeStart(p){
+  const st = _physStartDate(p);
+  if(!st) return 0;
+  const early = d => !!d && String(d).slice(0,10) < st;
+  let n = 0;
+  (S.weekendCalls||[]).forEach(w => { if(w.physId === p.id && early(w.satDate||w.date)) n++; });
+  (S.holidays||[]).forEach(h => { if(h.physId === p.id && early(h.date) && !String(h.notes||'').startsWith('Imported history')) n++; });
+  (S.irCalls||[]).forEach(c => { if(c.physId === p.id && early(c.date)) n++; });
+  (S.drShifts||[]).forEach(x => { if(x.physId === p.id && early(x.date)) n++; });
+  (S.irShifts||[]).forEach(x => { if(x.physId === p.id && early(x.date)) n++; });
+  return n;
+}
 // Per practice policy, 2nd and 3rd DR shifts are read-from-home only — they
 // have no commute and aren't assignable to a hospital site. The shift-add
 // paths use this to auto-redirect site=At Home / Remote, the traffic pipeline
@@ -16670,20 +16771,42 @@ function irGroupTotalFte(group){
     .reduce((sum,p)=>sum+p.irFte, 0);
 }
 
+// Group FTE actually ON STAFF across a run of months (rs-v127). When someone in
+// the group has a start date, the shares must be taken out of the FTE that is
+// present, not the FTE on paper: with three radiologists covering January to
+// June and a fourth joining on July 1, the year is carried by 3.5 FTE, so each
+// full-year member's share is 1/3.5 and the newcomer's is 0.5/3.5 — exactly
+// "FTE × the part of the period on staff". With no start dates in the group
+// this returns irGroupTotalFte() unchanged.
+function _irGroupFteOnStaff(group, months){
+  const mem=S.physicians.filter(p=>p.irFte>0&&p.irGroup===group);
+  if(!months||!months.length||!mem.some(p=>_physStartDate(p))) return irGroupTotalFte(group);
+  const first=months[0]+'-01';
+  const lastYM=months[months.length-1], [ly,lm]=lastYM.split('-').map(Number);
+  const last=`${lastYM}-${String(new Date(ly,lm,0).getDate()).padStart(2,'0')}`;
+  const total=_daysBetween(first,last)+1;
+  return mem.reduce((sum,p)=>{
+    const st=_physStartDate(p);
+    const f=!st||st<=first ? 1 : st>last ? 0 : (_daysBetween(st,last)+1)/total;
+    return sum+p.irFte*f;
+  },0);
+}
+
 // Physician's fair-share target for IR DAILY calls in a given month.
 // = (Mon–Thu workdays in month, excl. holiday blackouts) × (p.irFte / group total irFte)
 function irDailyTargetMonth(p, ym){
   if(!p.irGroup||p.irFte<=0) return 0;
-  const days=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)).length;
-  const gFte=irGroupTotalFte(p.irGroup);
+  // Days before the physician's start date are not theirs to cover (rs-v127).
+  const days=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date)&&_physStartedBy(p,c.date)).length;
+  const gFte=_irGroupFteOnStaff(p.irGroup,[ym]);
   return gFte>0 ? (days*p.irFte/gFte) : 0;
 }
 
 // Vacation-adjusted IR daily target: reduces target by physician's vacation days in period
 function irDailyTargetAdjusted(p, months){
   if(!p.irGroup||p.irFte<=0) return 0;
-  const vd=vacDays(p.id);
-  const gFte=irGroupTotalFte(p.irGroup);
+  const vd=_awayDays(p.id);   // vacation, or not started yet
+  const gFte=_irGroupFteOnStaff(p.irGroup,months);
   if(gFte<=0) return 0;
   // Count available Mon-Thu days (not on holiday blackout, not on physician vacation)
   const availDays=months.reduce((s,ym)=>
@@ -16694,8 +16817,8 @@ function irDailyTargetAdjusted(p, months){
 
 function irWkndTargetAdjusted(p, months){
   if(!p.irGroup||p.irFte<=0) return 0;
-  const vd=vacDays(p.id);
-  const gFte=irGroupTotalFte(p.irGroup);
+  const vd=_awayDays(p.id);   // vacation, or not started yet
+  const gFte=_irGroupFteOnStaff(p.irGroup,months);
   if(gFte<=0) return 0;
   const availFris=months.reduce((s,ym)=>
     s+buildCal(ym).filter(c=>c.day&&c.dow===5&&!vd.has(c.date)&&!vd.has(addDays(c.date,3))).length
@@ -16706,8 +16829,8 @@ function irWkndTargetAdjusted(p, months){
 // = (Fridays in month) × (p.irFte / group total irFte)
 function irWkndTargetMonth(p, ym){
   if(!p.irGroup||p.irFte<=0) return 0;
-  const fris=buildCal(ym).filter(c=>c.day&&c.dow===5).length;
-  const gFte=irGroupTotalFte(p.irGroup);
+  const fris=buildCal(ym).filter(c=>c.day&&c.dow===5&&_physStartedBy(p,c.date)).length;
+  const gFte=_irGroupFteOnStaff(p.irGroup,[ym]);
   return gFte>0 ? (fris*p.irFte/gFte) : 0;
 }
 
@@ -16735,8 +16858,12 @@ function irShiftTargetMonth(p, ym){
     if(!isNative && !ownsMixed) return;
     cells.forEach(c=>{ slots+=(S.irShiftSlots||{})[`${st.name}|${c.dow}|1st`]||0; });
   });
-  const gFte=S.physicians.filter(q=>q.irFte>0&&q.irGroup===p.irGroup).reduce((s,q)=>s+q.irFte,0);
-  return gFte>0 ? slots*p.irFte/gFte : 0;
+  // Start month (rs-v127): only the share of the month's workdays on staff, out
+  // of the group FTE actually present. Both factors are exactly the old values
+  // when nobody in the group has a start date.
+  const gFte=_irGroupFteOnStaff(p.irGroup,[ym]);
+  const on=cells.filter(c=>_physStartedBy(p,c.date)).length;
+  return gFte>0 ? slots*p.irFte/gFte*(cells.length?on/cells.length:1) : 0;
 }
 
 // 6-month target — sum of monthly targets
@@ -17076,7 +17203,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v126';
+const _RS_HTML_BUILD = 'rs-v127';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -18881,7 +19008,8 @@ function renderPhysicians(){
       const burnoutChip = _bf.length
         ? `<span class="tag tr" style="cursor:help" title="${escHtml(_bf.join(' · '))}">⚠ ${_bf.length} burnout signal${_bf.length>1?'s':''}</span>`
         : '';
-      const ftags=[p.drFte>0?`<span class="tag tb">DR ${p.drFte}</span>`:'',...[p.irFte>0?`<span class="tag tt">IR ${p.irFte}</span>`:''],...[p.irGroup?`<span class="tag tg">${escHtml(p.irGroup)}</span>`:''],burnoutChip].filter(Boolean).join(' ');
+      const _stChip=(()=>{ const st=_physStartDate(p); if(!st) return ''; const yNow=new Date().getFullYear(); const note=(st>fmtDate(new Date())&&_physYearFraction(p,+st.slice(0,4))>=1)?`starts ${st}`:_physStartNote(p, Math.max(yNow, +st.slice(0,4))); return note?`<span class="tag ta" title="Call for ${escHtml(st.slice(0,4))} is sized by FTE × the part of the year remaining at the start date; nothing is auto-assigned before it.">${escHtml(note)}</span>`:''; })();
+      const ftags=[p.drFte>0?`<span class="tag tb">DR ${p.drFte}</span>`:'',...[p.irFte>0?`<span class="tag tt">IR ${p.irFte}</span>`:''],...[p.irGroup?`<span class="tag tg">${escHtml(p.irGroup)}</span>`:''],_stChip,burnoutChip].filter(Boolean).join(' ');
       html+=`<div class="row"><div class="av" style="${avc}">${ini(p)}</div>
         <div style="flex:1">
           <div style="font-weight:700;font-size:13px">${escHtml(p.last)}, ${escHtml(p.first)} ${escHtml(p.degree||'')} ${ftags}</div>
@@ -18943,6 +19071,7 @@ function editPhys(id){
   document.getElementById('p-drfte-s3').value  = p.drFteS3 ?? '';
   const irfteEl=document.getElementById('p-irfte');
   if(irfteEl) irfteEl.value=p.irFte??0;
+  { const _stEl=document.getElementById('p-start'); if(_stEl) _stEl.value=_physStartDate(p); }
   // IR fields
   const irgrpEl=document.getElementById('p-irgrp');
   if(irgrpEl&&p.irGroup) irgrpEl.value=p.irGroup;
@@ -19040,6 +19169,10 @@ function _saveEditPhys(id){
   p.irFte=role!=='DR'?(parseFloat(document.getElementById('p-irfte')?.value)||0):0;
   p.irGroup=role!=='DR'?(document.getElementById('p-irgrp')?.value||null):null;
   p.irSitePrim=role!=='DR'?(document.getElementById('p-irsiteprim')?.value||null):null;
+  // Start date (optional). Stored as 'YYYY-MM-DD' or removed entirely.
+  const _stPrev=_physStartDate(p);
+  const _stNew=_physStartDate({startDate:document.getElementById('p-start')?.value||''});
+  if(_stNew) p.startDate=_stNew; else delete p.startDate;
   p.anchorSite=anchor;
   p.allowedSites=allowed.length?allowed:S.sites.map(s=>s.name);
   p.drSubs=[...document.querySelectorAll('[name="drs"]:checked')].map(c=>c.value);
@@ -19078,6 +19211,11 @@ function _saveEditPhys(id){
   if(!Array.isArray(p.siteRules)) p.siteRules=[];
   if(!Array.isArray(p.irCallBlackouts)) p.irCallBlackouts=[];
   triggerSave();
+  if(_stNew!==_stPrev && typeof _audit==='function') _audit('phys.startDate',{id:p.id,from:_stPrev||null,to:_stNew||null});
+  if(_stNew && _stNew!==_stPrev){
+    const _early=_physAssignmentsBeforeStart(p);
+    if(_early && typeof _toast==='function') _toast(`${p.last} has ${_early} existing assignment${_early===1?'':'s'} dated before ${_stNew}. They were left in place — remove them from the calendars if they should not stand.`,'warn');
+  }
   cancelEditPhys();
   renderPhysicians();
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
@@ -19090,7 +19228,7 @@ function cancelEditPhys(){
   document.getElementById('phys-submit-btn').className='bp';
   document.getElementById('phys-cancel-btn').style.display='none';
   // Reset all fields
-  ['p-first','p-last','p-address','p-pacsnames','p-drfte-day','p-drfte-s2','p-drfte-s3'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['p-first','p-last','p-address','p-pacsnames','p-drfte-day','p-drfte-s2','p-drfte-s3','p-start'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('p-deg').value='MD';
   document.getElementById('p-role').value='DR';
   roleUI();
@@ -19165,6 +19303,7 @@ function addPhys(){
       wkndSwingOnly:!!document.getElementById('pe-wknd-swing')?.checked,
     },
     drHomePctPref: _drHomePctPref,
+    ...(_physStartDate({startDate:document.getElementById('p-start')?.value||''}) ? {startDate:document.getElementById('p-start').value} : {}),
     drSite:anchor||S.sites[0]?.name||'',
     address:document.getElementById('p-address')?.value.trim()||'',
     siteRules:[],
@@ -19183,6 +19322,7 @@ function addPhys(){
   });
   document.getElementById('p-first').value='';document.getElementById('p-last').value='';
   { const _pn=document.getElementById('p-pacsnames'); if(_pn) _pn.value=''; }
+  { const _ps=document.getElementById('p-start'); if(_ps) _ps.value=''; }
   renderPhysicians();
   // Refresh user mgmt so physician link dropdowns reflect the new physician
   if(document.getElementById('page-user-mgmt')?.classList.contains('on')) renderUserMgmt();
@@ -19555,6 +19695,7 @@ function bulkAssignMultiWeek(shift){
   if(!p){_toast('Select a physician.', 'err');return;}
   const dates=_dateRangeFiltered(start,end,`.drb-${shift}-dow`);
   if(!dates.length){alert('No days match the selected day-of-week filters in that date range.');return;}
+  if(!_confirmBeforeStart(p,dates)) return;
 
   // Collect rule violations across the whole date range so admins see the
   // full picture before committing. Without this the bulk path was a silent
@@ -23450,8 +23591,13 @@ function _irsaRollingDelta(p, ymOrMonths){
   var groupPhys = (S.physicians||[]).filter(x => x.irFte>0 && (x.irGroup||'ungrouped') === grp);
   if(groupPhys.length < 2){ _irsaRollingDeltaCache._cache[ck] = 0; return 0; }
   var totals = {}; groupPhys.forEach(x => { totals[x.id] = 0; });
+  // A physician with a start date is only compared over the time they have been
+  // on staff (rs-v127) — otherwise a newcomer is "behind" the group's whole
+  // history and is handed catch-up shifts for years they were not here.
+  var _since = (typeof _physStartDate === 'function') ? _physStartDate(p) : '';
   (S.irShifts||[]).forEach(s => {
     if(!s.date || s.date.slice(0,7) >= firstYM) return; // strictly prior
+    if(_since && s.date < _since) return;
     if(s.shift === 'Home') return; // Home doesn't count toward IR procedure share
     if(totals[s.physId] != null) totals[s.physId] += 1;
   });
@@ -23474,7 +23620,7 @@ function _irsaRollingDelta(p, ymOrMonths){
 }
 function _irsaRollingDeltaCache(){} // function-as-namespace (just need a static cache)
 function _irsaBlocked(p,date,assigned){
-  var vd=vacDays(p.id),k;
+  var vd=_awayDays(p.id),k;
   if(vd.has(date))return true;
   if(_has2ndOr3rdShift(p.id,date))return true;
   if(isSoldBackDate(p.id,date))return true;
@@ -23675,6 +23821,8 @@ function _irsaCountsForQuota(p,slot){
 }
 
 function _irsaEligibleForSlot(p,slot){
+  // Not on staff yet (rs-v127) — applies to the greedy passes and the solver alike.
+  if(slot && slot.date && !_physStartedBy(p, slot.date)) return false;
   /* At a mixed-role site, only anchors and fill-ins can be assigned.
      At a normal site, any IR physician in the group is eligible —
      UNLESS the physician has an admin-set `allowedSites` allowlist
@@ -24704,6 +24852,7 @@ function addIRShift(){
   // Physician-rule check — see addDRShift for rationale. Vacation gets its
   // own hard check below because treating vacation as a warn-only would be
   // reliably confusing. Other rule violations warn-and-confirm.
+  if(!_confirmBeforeStart(p,[date])) return;
   if(vacDays(physId).has(date)){
     alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);
     return;
@@ -24752,7 +24901,7 @@ function fillIRHomeShifts(){
   let added = 0;
   const cells = buildCal(ym).filter(c => c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date));
   S.physicians.filter(p => p.irFte > 0 && p.irGroup).forEach(p => {
-    const vd = vacDays(p.id);
+    const vd = _awayDays(p.id);
     cells.forEach(c => {
       if(vd.has(c.date)) return;
       if((S.irShifts||[]).find(s => s.physId === p.id && s.date === c.date)) return; // already has a shift
@@ -24795,6 +24944,7 @@ function saveEditIRShift(id){
     const reason = _holidayReasonFor(newDate);
     if(!confirm(`${newDate} is part of "${reason?.name||'defined holiday'}". Save anyway?`)) return;
   }
+  { const _np=_physById(newPid); if(_np && !_confirmBeforeStart(_np,[newDate])) return; }
   if(vacDays(newPid).has(newDate)){
     if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
   }
@@ -24953,6 +25103,7 @@ function reassignIRShift(id, newPhysId){
   // path does — previously reassign blindly swapped physId, letting a
   // double-booked or rule-violating assignment through (one-shift-per-
   // day, allowedSites, vacation). Warn-and-confirm, admin can override.
+  if(!_confirmBeforeStart(p,[s.date])) return;
   if(vacDays(newPhysId).has(s.date)){
     alert(`${p.last} is on vacation on ${s.date}. Remove the vacation first if this is wrong.`);
     return;
@@ -25195,8 +25346,13 @@ function renderHolCounter(){
         ).size;
         if(!slotsThisYear) return;
         poolPhys.forEach(p=>{
-          const myFte = g==='DR' ? p.drFte : p.irFte;
-          const fairShare = slotsThisYear * (myFte / gFteTot);
+          // rs-v127: the share comes out of the FTE on staff THAT year, so a new
+          // hire does not appear to owe holidays from before they arrived. With
+          // no start dates both factors are exactly the plain FTE figures.
+          const _fy = q => (g==='DR' ? q.drFte : q.irFte) * _physYearFraction(q, year);
+          const _gTotY = poolPhys.some(q=>_physStartDate(q)) ? (poolPhys.reduce((sum,q)=>sum+_fy(q),0) || 1) : gFteTot;
+          const myFte = _fy(p);
+          const fairShare = slotsThisYear * (myFte / _gTotY);
           const actual = (new Set(
             S.holidays.filter(h=>h.group===g && h.year===year && h.physId===p.id).map(h=>h.name)
           )).size;
@@ -25682,6 +25838,7 @@ function doReassignHoliday(id){
   if(!newPhysId){ _toast('Select a physician.', 'err'); return; }
   const h = S.holidays.find(x => x.id === id);
   if(!h) return;
+  { const _np=_physById(newPhysId); if(_np && !_confirmBeforeStart(_np,[h.date])) return; }
   const isIR = h.group === 'IR' || /^IR-/.test(h.group||'');
   if(isIR) _removeHolidayIRCall(h.physId, h.date);
   h.physId = newPhysId;
@@ -25887,6 +26044,7 @@ async function claimShift(oid,pid,parts){
   // confirming). Checked per claimed day, not just the posting date — a
   // partial claim may cover only the Sunday of a weekend shift.
   const _claimDates=(Array.isArray(parts)&&parts.length)?parts.map(x=>x.date):_osRemainingDays(o);
+  if(!_confirmBeforeStart(p,_claimDates)) return;
   for(const _cd of _claimDates){
     if(vacDays(p.id).has(_cd)){
       if(!confirm(`${pname(p.id)} has a vacation on ${_cd}. Claim anyway?`))return;
@@ -29681,6 +29839,7 @@ function addHoliday(){
   if(grp==='DR'&&sub&&!(p.drSubs||[]).includes(sub)){
     if(!confirm(`${p.last} doesn't hold the ${sub} subspecialty. Assign anyway?`)) return;
   }
+  if(!_confirmBeforeStart(p,[date])) return;
   // Only physicians with a daytime DR FTE are in the holiday-call pool.
   if(grp==='DR'&&typeof _drDayFte==='function'&&_drDayFte(p)<=0){
     if(!confirm(`${p.last} has no day-shift DR FTE — only physicians with daytime DR FTE take holiday call.\n\nAssign anyway (admin override)?`)) return;
@@ -30179,6 +30338,7 @@ function _aiExecuteTool(name, input) {
     if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = _physById(physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(typeof _physStartedBy === 'function' && !_physStartedBy(p, date)) return { ok:false, error:`${p.last} does not start until ${_physStartDate(p)}.` };
     const vd = vacDays(physId);
     if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
     const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
@@ -30297,6 +30457,7 @@ function _aiExecuteTool(name, input) {
     if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(typeof _physStartedBy === 'function' && !_physStartedBy(p, date)) return { ok:false, error:`${p.last} does not start until ${_physStartDate(p)}.` };
     if((shift||'1st') !== 'Home' && typeof isHolidayBlackout === 'function' && isHolidayBlackout(date)){
       return { ok:false, error:`${date} is a defined holiday blackout — regular IR shifts are not allowed. Use holiday-call assignment instead.` };
     }
@@ -35085,6 +35246,7 @@ function _assignRotation(item, occurrences, opts){
           const ph = (S.physicians||[]).find(x => x.id === c.id);
           if(!_rotationSlotEligible(ph, slot, allowedPhysIds)) return false;
           if(_isPhysOnVacation(c.id, iso)) return false;
+          if(ph && !_physStartedBy(ph, iso)) return false;   // not on staff yet (rs-v127)
           return true;
         })
         .sort((a,b) => a.count - b.count || a.idx - b.idx);
@@ -37133,6 +37295,7 @@ function saveEditDRShift(id){
     const reason = _holidayReasonFor(newDate);
     if(!confirm(`${newDate} is part of "${reason?.name||'defined holiday'}". Regular shifts on defined holidays are normally blocked. Save anyway?`)) return;
   }
+  { const _np=_physById(newPid); if(_np && !_confirmBeforeStart(_np,[newDate])) return; }
   if(vacDays(newPid).has(newDate)){
     if(!confirm(`${pname(newPid)} is on vacation on ${newDate}. Save anyway?`)) return;
   }
@@ -40097,7 +40260,7 @@ function whatIfSimulate(scenario){
             if(slot.kind === 'dr' && p.role === 'IR') return false;
             if(slot.kind === 'ir-call' && !(p.irFte > 0)) return false;
             try{
-              if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)) return false;
+              if(typeof vacDays === 'function' && _awayDays(p.id).has(slot.date)) return false;
             }catch(_){}
             return true;
           })
@@ -40214,7 +40377,7 @@ function _crossGroupSuggestions(slot, opts){
     if(drive > 45) reasons.push(`${drive}-min commute to ${slot.site}`);
     // Already on vacation / has shifts that day = exclude
     try{
-      if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)){
+      if(typeof vacDays === 'function' && _awayDays(p.id).has(slot.date)){
         return null;
       }
     }catch(_){}
@@ -40769,6 +40932,7 @@ function explainPhysicianState(){
     const ctx = {physId:p.id, date, site:st.name, shift:'1st', kind:'ir-shift', shiftKey:'s1', ym, sub:'', irGroup:p.irGroup||''};
     const reasons = [];
     const vd = vacDays(p.id); if(vd.has(date)) reasons.push('vacation');
+    if(!_physStartedBy(p, date)) reasons.push('not started yet (starts ' + _physStartDate(p) + ')');
     if(_has2ndOr3rdShift(p.id,date)) reasons.push('2nd/3rd DR shift');
     if(isSoldBackDate(p.id,date)) reasons.push('sold-back');
     // Existing IR/DR shift
@@ -40800,6 +40964,7 @@ function explainPhysicianState(){
     const ctx = {physId:p.id, date, site:st.name, shift:'1st', kind:'ir-shift', shiftKey:'s1', ym, sub:'', irGroup:p.irGroup||''};
     const reasons = [];
     const vd = vacDays(p.id); if(vd.has(date)) reasons.push('vacation');
+    if(!_physStartedBy(p, date)) reasons.push('not started yet (starts ' + _physStartDate(p) + ')');
     if(_has2ndOr3rdShift(p.id,date)) reasons.push('2nd/3rd DR shift');
     if(isSoldBackDate(p.id,date)) reasons.push('sold-back');
     if(!irSiteRuleOk(p,st.name,date)) reasons.push('siteRule blocks this site');
@@ -40871,6 +41036,7 @@ function addDRShift(){
   // decide. (MIXED role already allowed.)
   if(p.role==='IR' && !confirm(`${p.last} is an IR-only physician (no DR FTE allocation). DR shifts for IR physicians are unusual — they typically cover only IR work. Continue assigning this DR shift anyway?`)) return;
   // Hard block: physician is on vacation this date
+  if(!_confirmBeforeStart(p,[date]))return;
   if(vacDays(pid).has(date)){alert(`${p.last} is on vacation on ${date}. Remove the vacation entry first if this is incorrect.`);return;}
   // Universal one-shift-per-day check. Per practice rule: a physician
   // on ANY existing shift / call / weekend assignment on this date is
@@ -40939,6 +41105,7 @@ function fillDRHomeShifts(){
   if(_fdow===0||_fdow===6){alert('Cannot fill home shifts on weekends. Use the Weekend Calls builder for Saturday/Sunday assignments.');return;}
   S.physicians.filter(p=>p.drFte>0&&p.role!=='IR').forEach(p=>{
     if(vacOnDate.has(p.id))return;
+    if(!_physStartedBy(p,date))return;   // not on staff yet (rs-v127)
     // Universal one-shift-per-day check — _physBookingsOnDate covers
     // DR + IR shifts, IR daily/weekend calls, and weekend calls in
     // one call. Earlier audit found this site checked only DR shifts
@@ -41025,7 +41192,23 @@ function _drDayFte(p){
 function _wkndDayOk(p){ return !(p?.shiftElig?.wkndSwingOnly) && _physIsEastern(p); }
 function _wkndIsSummer(d){ if(!d) return false; const y=d.slice(0,4); return d>=`${y}-06-01`&&d<=`${y}-08-31`; }
 function _wkndSummerCap(){ const c=+(S.cfg?.wkndSummerCap); return isFinite(c)&&c>0?c:2; }
-function _wkndYearCap(p){
+// Summer cap for one physician: the practice cap, scaled down only for someone
+// who STARTS inside that summer (Jun 1 – Aug 31) to the share of the summer
+// they are on staff — a physician starting Aug 1 should not be handed two of
+// the five August weekends in their first month. At least 1 while any summer
+// remains. Everyone else gets the practice cap unchanged.
+function _wkndSummerCapFor(p, year){
+  const cap=_wkndSummerCap();
+  const st=_physStartDate(p);
+  if(!st) return cap;
+  const s0=`${year}-06-01`, s1=`${year}-08-31`;
+  if(st<=s0) return cap;
+  if(st>s1) return st.slice(0,4)===String(year)?0:cap;
+  return Math.max(1, Math.round(cap*(_daysBetween(st,s1)+1)/92));
+}
+// `year` (optional) makes the cap start-date aware: FTE × the fraction of that
+// year the physician is on staff. Omitted = the plain FTE cap.
+function _wkndYearCap(p, year){
   const base=+(S.cfg?.wkndYearCapBase);
   if(!isFinite(base)||base<=0) return null;
   // Scaled by the radiologist's DAY-shift DR FTE: one practice base number,
@@ -41033,7 +41216,7 @@ function _wkndYearCap(p){
   // carries 0.75 of the max call responsibility. A daytime DR FTE is REQUIRED
   // for weekend and holiday call (2026-07-31 policy): 2nd/3rd-shift-only
   // radiologists carry no call at all, so no alternate cap basis exists.
-  return Math.round(base*_drDayFte(p));
+  return Math.round(base*_drDayFte(p)*(year==null?1:_physYearFraction(p,year)));
 }
 function _wkndSummerCount(pid, year, previewArr){
   const s0=`${year}-06-01`, s1=`${year}-08-31`;
@@ -41117,14 +41300,14 @@ function _wkndPlanRange(fromIso, toIso){
       if(_drDayFte(p)<=0)return false;   // daytime DR FTE required for ALL weekend call (2026-07-31: no swing exception)
       if(sub&&!(p.drSubs||[]).includes(sub))return false;
       if(wshift==='day'&&!_wkndDayOk(p))return false;
-      const vd=vacDays(p.id);
+      const vd=_awayDays(p.id);   // vacation, or not started yet
       if(vd.has(sat)||vd.has(sunDate))return false;
       if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
       if(S.weekendCalls.some(w=>(w.satDate||w.date)===sat&&w.physId===p.id))return false;
       if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,sat))return false;
       if(adjacentInPlan(p.id,sat))return false;
-      if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCap())return false;
-      const yc=_wkndYearCap(p);
+      if(_wkndIsSummer(sat)&&_wkndSummerCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=_wkndSummerCapFor(p,yr))return false;
+      const yc=_wkndYearCap(p,yr);
       if(yc!=null&&_wkndYearCount(p.id,yr,plan.map(a=>({type:'wk',...a})))>=yc)return false;
       const ctx={physId:p.id,date:sat,site:'',shift:'wknd',sub,kind:'dr-weekend'};   // weekend call is remote — no site
       if(typeof natLangRulesOk==='function'&&!natLangRulesOk(ctx))return false;
@@ -41134,8 +41317,11 @@ function _wkndPlanRange(fromIso, toIso){
       // Fairness: fewest weekends this year first (ratio to cap when set),
       // then fewer summer weekends, then id for stability.
       const pv=plan.map(x=>({type:'wk',...x}));
-      const ra=_wkndYearCount(a.id,yr,pv)/(_wkndYearCap(a)||99);
-      const rb=_wkndYearCount(b.id,yr,pv)/(_wkndYearCap(b)||99);
+      // With no yearly cap configured the divisor is a constant 99 — scaled by
+      // the start-year fraction so a mid-year starter is not "behind" everyone
+      // by the weekends that happened before they arrived.
+      const ra=_wkndYearCount(a.id,yr,pv)/(_wkndYearCap(a,yr)||(99*_physYearFraction(a,yr))||99);
+      const rb=_wkndYearCount(b.id,yr,pv)/(_wkndYearCap(b,yr)||(99*_physYearFraction(b,yr))||99);
       if(Math.abs(ra-rb)>0.001) return ra-rb;
       const sa=_wkndSummerCount(a.id,yr,pv), sb=_wkndSummerCount(b.id,yr,pv);
       if(sa!==sb) return sa-sb;
@@ -41507,19 +41693,28 @@ function exportDRCallWorkbook(){
   // are both spread among DAYTIME DR FTE holders and measured against the
   // day FTE — but they stay separate counters, never summed into one total.
   const talRows=[['Physician','Day DR FTE','Wknd Day','Wknd Swing','Wknd Total','Wknd per Day-FTE','Holiday blocks','Holiday per Day-FTE']];
+  // Start dates (rs-v127): the FTE column is the Day FTE × the part of THIS year
+  // the physician is on staff, so the per-FTE ratios stay comparable for a
+  // mid-year starter. The extra column appears only when someone has one.
+  const _anyStart=Object.keys(tal).some(pid=>_physYearFraction(_physById(+pid),yr)<1);
+  if(_anyStart){ talRows[0][1]=`Day DR FTE (${yr}, prorated from start date)`; talRows[0].push('Start date'); }
   let fSum=0,dSum=0,sSum=0,hSum=0;
   Object.keys(tal).map(Number).sort((a,b)=>nm(a).localeCompare(nm(b))).forEach(pid=>{
-    const t=tal[pid], f=_drDayFte(_physById(pid)), wkTot=t.wd+t.ws;
+    const t=tal[pid], _ph=_physById(pid), f=_drDayFte(_ph)*_physYearFraction(_ph,yr), wkTot=t.wd+t.ws;
     fSum+=f; dSum+=t.wd; sSum+=t.ws; hSum+=t.hol;
-    talRows.push([nm(pid), Math.round(f*100)/100, t.wd, t.ws, wkTot,
+    const _row=[nm(pid), Math.round(f*100)/100, t.wd, t.ws, wkTot,
       f>0?Math.round(wkTot/f*10)/10:'',
       t.hol,
-      f>0?Math.round(t.hol/f*100)/100:'']);
+      f>0?Math.round(t.hol/f*100)/100:''];
+    if(_anyStart) _row.push(_physYearFraction(_ph,yr)<1?_physStartDate(_ph):'');
+    talRows.push(_row);
   });
-  talRows.push(['Practice total', Math.round(fSum*100)/100, dSum, sSum, dSum+sSum,
+  { const _tot=['Practice total', Math.round(fSum*100)/100, dSum, sSum, dSum+sSum,
     fSum>0?Math.round((dSum+sSum)/fSum*10)/10:'',
     hSum,
-    fSum>0?Math.round(hSum/fSum*100)/100:'']);
+    fSum>0?Math.round(hSum/fSum*100)/100:''];
+    if(_anyStart) _tot.push('');
+    talRows.push(_tot); }
 
   if(wknd.length===0&&opens.length===0&&holRows.length===1){
     if(typeof _toast==='function') _toast(`No DR call data for ${yr}.`,'info'); return;
@@ -41651,6 +41846,7 @@ function saveEditWkCall(id){
   if(parseDateLocal(newSat).getDay()!==6 && !confirm('Not a Saturday. Continue?')) return;
   const vd = vacDays(newPid);
   const newSun = addDays(newSat, 1);
+  { const _np=_physById(newPid); if(_np && !_confirmBeforeStart(_np,[newSat,newSun])) return; }
   if(vd.has(newSat) || vd.has(newSun)){
     if(!confirm(`${pname(newPid)} is on vacation during this weekend. Save anyway?`)) return;
   }
@@ -41783,11 +41979,12 @@ function addWkCall(){
   if(wshift==='day'&&!_wkndDayOk(p)&&!confirm(`${p.last} can't take DAY weekend shifts (swing-only flag or non-Eastern address).\n\nAssign the DAY shift anyway (admin override)?`))return;
   // Summer cap (Jun–Aug, default 2) + yearly cap (base × total FTE)
   const _yr=satDate.slice(0,4);
-  if(_wkndIsSummer(satDate)&&_wkndSummerCount(pid,_yr,null)>=_wkndSummerCap()
-    &&!confirm(`${p.last} already has ${_wkndSummerCount(pid,_yr,null)} summer weekend(s) (cap ${_wkndSummerCap()}). Add anyway?`))return;
-  const _yc=_wkndYearCap(p);
+  if(!_confirmBeforeStart(p,[satDate,sunDate]))return;
+  if(_wkndIsSummer(satDate)&&_wkndSummerCount(pid,_yr,null)>=_wkndSummerCapFor(p,_yr)
+    &&!confirm(`${p.last} already has ${_wkndSummerCount(pid,_yr,null)} summer weekend(s) (cap ${_wkndSummerCapFor(p,_yr)}). Add anyway?`))return;
+  const _yc=_wkndYearCap(p,_yr);
   if(_yc!=null&&_wkndYearCount(pid,_yr,null)>=_yc
-    &&!confirm(`${p.last} already has ${_wkndYearCount(pid,_yr,null)} weekend(s) in ${_yr} (cap ${_yc} = base × FTE). Add anyway?`))return;
+    &&!confirm(`${p.last} already has ${_wkndYearCount(pid,_yr,null)} weekend(s) in ${_yr} (cap ${_yc} = base × FTE${_physYearFraction(p,_yr)<1?' × part of year on staff':''}). Add anyway?`))return;
   if(wkCnt(pid,satDate.slice(0,7))>=maxDR(p,'wk')&&!confirm('At weekend cap. Add anyway?'))return;
   if(_hasAdjacentWeekend(pid,satDate)){alert('Back-to-back weekend call not allowed: '+p.last+' already covers an adjacent weekend.');return;}
   // Universal one-shift-per-day check on EITHER weekend day. Same
@@ -41815,11 +42012,18 @@ function addWkCall(){
 // drEffectiveTarget: FTE-proportional target adjusted for actual available days
 // (excludes vacation, holiday blackouts). Used for equitable auto-assign sorting.
 function drEffectiveTarget(p, ym){
-  const vd = vacDays(p.id);
-  const available = buildCal(ym).filter(c =>
-    c.day && !c.isWknd && !isHolidayBlackout(c.date) && !vd.has(c.date)
-  ).length;
-  return Math.min(maxDR(p,'wd'), available);
+  const vd = _awayDays(p.id);   // vacation, or not started yet
+  const workdays = buildCal(ym).filter(c => c.day && !c.isWknd && !isHolidayBlackout(c.date));
+  const available = workdays.filter(c => !vd.has(c.date)).length;
+  let cap = maxDR(p,'wd');
+  // Start month (rs-v127): scale the monthly maximum to the share of the
+  // month's workdays the physician is on staff, so a part-timer who starts
+  // on the 20th is not handed every remaining weekday.
+  const st = _physStartDate(p);
+  if(st && st.slice(0,7) === ym && workdays.length){
+    cap = Math.round(cap * workdays.filter(c => c.date >= st).length / workdays.length);
+  }
+  return Math.min(cap, available);
 }
 
 
@@ -41832,6 +42036,7 @@ function drEffectiveTarget(p, ym){
      'semi-2' → days 16..end of the month
      'H1'     → Jan..Jun of year (IR-only — full half-year sweep)
      'H2'     → Jul..Dec of year
+     'year'   → Jan..Dec of year (IR call auto-assign, rs-v127)
    The helpers below convert a period selection into either:
      • a list of ISO month strings ('YYYY-MM') for multi-month builders, or
      • a day-filter that auto-assign call sites apply to the buildCal output.
@@ -41851,7 +42056,7 @@ function _isSemiMonthPeriod(p){ return p === 'semi-1' || p === 'semi-2'; }
 //   we just narrow on day-of-month. For 'H1'/'H2' we accept any cells and
 //   return them unchanged (the multi-month builder feeds them in already).
 function _filterCellsByPeriod(cells, period){
-  if(!period || period === 'month' || period === 'H1' || period === 'H2'){
+  if(!period || period === 'month' || period === 'H1' || period === 'H2' || period === 'year'){
     return (cells||[]).filter(c => c.day);
   }
   if(period === 'semi-1') return (cells||[]).filter(c => c.day && c.day <= 15);
@@ -41864,6 +42069,9 @@ function _filterCellsByPeriod(cells, period){
 //   • month/semi-* → just the picked month
 //   • H1/H2 → six months from the picked year
 function _periodToMonths(period, year, monthYM){
+  if(period === 'year'){
+    return Array.from({length:12},(_,i)=>`${year}-${String(i+1).padStart(2,'0')}`);
+  }
   if(period === 'H1' || period === 'H2'){
     const startM = period === 'H1' ? 1 : 7;
     return Array.from({length:6},(_,i)=>`${year}-${String(startM+i).padStart(2,'0')}`);
@@ -41877,6 +42085,9 @@ function _periodToMonths(period, year, monthYM){
 
 // Human-readable label for a period selection, used in preview headers.
 function _periodLabel(period, months){
+  if(period === 'year'){
+    return `${months[0].slice(0,4)} (annual, Jan–Dec)`;
+  }
   if(period === 'H1' || period === 'H2'){
     const [y,m0]=months[0].split('-').map(Number);
     const [,m1]=months[5].split('-').map(Number);
@@ -42072,7 +42283,7 @@ function previewAA(){
               if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
               if(!sequenceOk(p,c.date,ym,st.name,_slotLabel))return false;
               if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false;
-              const vd=vacDays(p.id);if(vd.has(c.date))return false;
+              const vd=_awayDays(p.id);if(vd.has(c.date))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
               if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
               // Pre-existing manually-assigned shifts on this date. Previously
@@ -42134,7 +42345,7 @@ function previewAA(){
       if(hNeed-hEx>0){
         const hpool=sortByDeficit(drs.filter(p=>{
           if(!p.shiftElig.home)return false;
-          const vd=vacDays(p.id);if(vd.has(c.date))return false;
+          const vd=_awayDays(p.id);if(vd.has(c.date))return false;
           if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
           const _hctx={physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'};
           if(!natLangRulesOk(_hctx))return false;
@@ -42153,7 +42364,7 @@ function previewAA(){
       }
       // Auto-home: fill ALL remaining physicians up to their effective FTE target
       sortByDeficit(drs,'At Home / Remote',c.date,'Home','dr-shift').forEach(p=>{
-        const vd=vacDays(p.id);if(vd.has(c.date))return;
+        const vd=_awayDays(p.id);if(vd.has(c.date))return;
         if(!p.shiftElig.home)return;
         const alreadyDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date);
         const alreadyWk=S.weekendCalls.find(w=>w.physId===p.id&&((w.satDate||w.date)===c.date||(w.sunDate)===c.date));
@@ -42207,7 +42418,7 @@ function previewAA(){
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
               if(wshift==='day'&&!_wkndDayOk(p))return false;
-              const vd=vacDays(p.id);
+              const vd=_awayDays(p.id);
               if(vd.has(c.date)||vd.has(sunDate))return false;
               // Same physician shouldn't hold two shifts the same weekend
               if(preview.some(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&a.physId===p.id))return false;
@@ -42217,9 +42428,9 @@ function previewAA(){
               if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,c.date))return false;
               if(preview.some(a=>a.type==='wk'&&a.physId===p.id&&_daysBetween(a.satDate||a.date,c.date)===7))return false;
               // Summer cap: ≤ N weekends Jun 1 – Aug 31 (default 2)
-              if(_wkndIsSummer(c.date)&&_wkndSummerCount(p.id,_yr,preview)>=_wkndSummerCap())return false;
-              // Yearly cap × DR FTE (unset = no cap)
-              const _yc=_wkndYearCap(p);
+              if(_wkndIsSummer(c.date)&&_wkndSummerCount(p.id,_yr,preview)>=_wkndSummerCapFor(p,_yr))return false;
+              // Yearly cap × DR FTE × part of the start year on staff (unset = no cap)
+              const _yc=_wkndYearCap(p,_yr);
               if(_yc!=null&&_wkndYearCount(p.id,_yr,preview)>=_yc)return false;
               const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
               const _wkctx={physId:p.id,date:c.date,site:'',shift:'wknd',sub,kind:'dr-weekend'};
@@ -42295,7 +42506,7 @@ function previewAA(){
     const tgt=effTarget[p.id];
     const pct=tgt>0?Math.round(total/tgt*100):100;
     const pctColor=pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
-    const vdCount=vacDays(p.id);
+    const vdCount=_awayDays(p.id);
     const availDays=buildCal(ym).filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)&&!vdCount.has(c.date)).length;
     const wkExist=wkCnt(p.id,ym);
     const wkNew=preview.filter(a=>a.physId===p.id&&a.type==='wk').length;
@@ -43364,10 +43575,10 @@ function fillDRHomeForIR(modeOrOpts){
   const crossBySite = {};
 
   irPhys.forEach(p => {
-    const vd = vacDays(p.id);
+    const vd = _awayDays(p.id);
     cells.forEach(c => {
       const date = c.date;
-      if(vd.has(date)){ skippedVac++; return; }
+      if(vd.has(date)){ if(!(vd.notStartedBefore && date < vd.notStartedBefore)) skippedVac++; return; }   // pre-start days are skipped but are not "vacation"
       if((S.irShifts||[]).find(s => s.physId === p.id && s.date === date)){
         skippedShift++; return;
       }
@@ -43472,6 +43683,7 @@ function addIRCallFromGrid(sel,date,callType,group){
   const physId=+sel.value;if(!physId){return;}
   if(typeof _canEditDate==='function' && !_canEditDate(date)){sel.value='';return;}
   const p=S.physicians.find(x=>x.id===physId);
+  if(p&&!_confirmBeforeStart(p,[date])){sel.value='';return;}
   if(callType==='daily'&&S.irCalls.find(ic=>ic.date===date&&ic.irGroup===group&&ic.callType==='daily')){
     _toast('Only 1 daily IR call per group per day. Remove existing first.','warn');sel.value='';return;}
   if(callType==='daily'&&_hasAdjacentIRCall(physId,date)){
@@ -43530,6 +43742,7 @@ function addIRWeekend(group,fridayDate){
     }
   }
   const p=S.physicians.find(x=>x.id===physId);
+  if(p&&!_confirmBeforeStart(p,[fridayDate]))return;
   if(S.irCalls.find(ic=>ic.callType==='weekend'&&ic.irGroup===group&&ic.date===fridayDate)){alert('Weekend call already assigned for this group/week.');return;}
   if(isIRCallBlackout(physId,fridayDate)){alert(pname(physId)+' has an IR call blackout covering this weekend.');return;}
   if(_hasAdjacentIRCall(physId,fridayDate)||_hasIRCallNearWeekend(physId,fridayDate)){alert('Back-to-back call not allowed: '+pname(physId)+' has daily call adjacent to this weekend.');return;}
@@ -43578,6 +43791,7 @@ function addIRCallManual(){
   // the date. For weekend call, check the Fri→Mon span. Warn-and-
   // confirm (admin override is by design) so the admin sees if
   // they're stacking call on top of an existing shift.
+  { const _np=_physById(physId); if(_np && !_confirmBeforeStart(_np,[date])) return; }
   if(typeof _physBookingsOnDate === 'function'){
     const datesToCheck = callType === 'weekend'
       ? [date, addDays(date,1), addDays(date,2), addDays(date,3)]
@@ -43724,6 +43938,8 @@ function saveEditIRCall(id){
       console.warn('[RS] saveEditIRCall: weekend date '+_old+' snapped to Friday '+newDate);
     }
   }
+  // Start date — checked against the date actually saved (after the Friday snap).
+  if(!_confirmBeforeStart(p,[newDate])) return;
   // Physician-rule check — see saveEditIRShift for rationale.
   {
     const kind = newType === 'weekend' ? 'ir-weekend' : 'ir-call';
@@ -43983,8 +44199,8 @@ function previewIRAA(){
     const ym    = date.slice(0,7);
 
     // Vacation — any day of span
-    const vd = vacDays(p.id);
-    for(const d of span) if(vd.has(d)) return 'vacation';
+    const vd = _awayDays(p.id);
+    for(const d of span) if(vd.has(d)) return (vd.notStartedBefore && d < vd.notStartedBefore) ? 'not started yet' : 'vacation';
     // Sold-back
     for(const d of span) if(isSoldBackDate(p.id, d)) return 'sold-back';
     // IR call blackout (admin-configured per-physician)
@@ -44313,8 +44529,8 @@ function previewIRAA(){
       <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Targets = finite slots \u00f7 group FTE \u00d7 physician FTE</span>
     </div>
       <table class="fs-xs"><thead><tr><th>Physician</th><th>FTE</th>
-        <th>Daily +new</th><th>Daily total</th><th>6-mo target</th><th>Daily %</th>
-        <th>Wknd +new</th><th>Wknd total</th><th>6-mo target</th><th>Wknd %</th>
+        <th>Daily +new</th><th>Daily total</th><th>${months.length===1?'Month':months.length+'-mo'} target</th><th>Daily %</th>
+        <th>Wknd +new</th><th>Wknd total</th><th>${months.length===1?'Month':months.length+'-mo'} target</th><th>Wknd %</th>
       </tr></thead><tbody>`;
     tally.forEach(({p,newD,newW,totD,totW,tgtD,tgtW,pctD,pctW})=>{
       const dCls=pctD>110?'color:var(--red-t)':pctD>=80?'color:var(--green-t)':'color:var(--txt2)';
@@ -44346,7 +44562,7 @@ function previewIRAA(){
         ${gaps.map(g=>escHtml(g)).join('<br>')}
       </div>
       <div style="margin-top:6px;font-size:11px;color:var(--txt3)">
-        Reason codes per physician: <strong>vacation</strong>, <strong>sold-back</strong>, <strong>blackout</strong> (IR call blackout), <strong>2nd/3rd DR shift</strong>, <strong>already on IR this date</strong>, <strong>nearby weekend call</strong>, <strong>adjacent call</strong>, <strong>day condition</strong>, <strong>sequence rule</strong>, <strong>natural-language rule</strong>.
+        Reason codes per physician: <strong>vacation</strong>, <strong>not started yet</strong> (before their start date), <strong>sold-back</strong>, <strong>blackout</strong> (IR call blackout), <strong>2nd/3rd DR shift</strong>, <strong>already on IR this date</strong>, <strong>nearby weekend call</strong>, <strong>adjacent call</strong>, <strong>day condition</strong>, <strong>sequence rule</strong>, <strong>natural-language rule</strong>.
       </div>
     </div>`;
   }
@@ -44785,7 +45001,7 @@ function previewIRRebalance(){
           const callP=S.physicians.find(x=>x.id===callPhysId);
           const alreadyAssigned=gSAsgn.some(a=>a.physId===callPhysId&&a.date===entry.date);
           if(callP&&!alreadyAssigned&&
-             !vacDays(callP.id).has(entry.date)&&
+             !_awayDays(callP.id).has(entry.date)&&
              !_has2ndOr3rdShift(callPhysId,entry.date)&&
              !isSoldBackDate(callPhysId,entry.date)&&
              _irsaEligibleForSlot(callP,entry)){
@@ -44805,7 +45021,7 @@ function previewIRRebalance(){
         }
 
         const eligible=gPhys.filter(p=>{
-          if(vacDays(p.id).has(entry.date)) return false;
+          if(_awayDays(p.id).has(entry.date)) return false;
           if(_has2ndOr3rdShift(p.id,entry.date)) return false;
           if(p.allowedSites?.length&&!p.allowedSites.includes(entry.site)) return false;
           if(gSAsgn.some(a=>a.physId===p.id&&a.date===entry.date)) return false;
@@ -45024,7 +45240,7 @@ function previewIRRebalance(){
       const cnt={};
       gPhys.forEach(p=>{cnt[p.id]=0;});
       const vacCache={};
-      const vd=(pid)=>{ if(!vacCache[pid]) vacCache[pid]=vacDays(pid); return vacCache[pid]; };
+      const vd=(pid)=>{ if(!vacCache[pid]) vacCache[pid]=_awayDays(pid); return vacCache[pid]; };
 
       // Track proc-assignments per date (no doubles on same date)
       const assignedOnDate={};
@@ -45290,7 +45506,7 @@ function previewIRRebalance(){
         const orig=S.irCalls.find(c=>c.date===date&&c.irGroup===g&&c.callType==='daily');
 
         const eligible=gPhys.filter(p=>{
-          if(vacDays(p.id).has(date)) return false;
+          if(_awayDays(p.id).has(date)) return false;
           if(isIRCallBlackout(p.id,date)) return false;
           if(_has2ndOr3rdShift(p.id,date)) return false;
           // Note: _hasIRShiftOnDate is a SOFT check for rebalancer — we still allow
@@ -45406,7 +45622,7 @@ function previewIRRebalance(){
         const mon=addDays(fridayDate,3);
 
         const eligible=gPhys.filter(p=>{
-          const vd=vacDays(p.id);
+          const vd=_awayDays(p.id);
           if(vd.has(fridayDate)||vd.has(mon)) return false;
           if(isIRCallBlackout(p.id,fridayDate)) return false;
           // ── Adjacency checks ──
@@ -46500,9 +46716,15 @@ function _holPoolPhysicians(pool){
 // Helper: FTE-weighted proportion of this physician within their pool.
 // DR fair share keys on the DAYTIME DR FTE (same basis as the pool gate);
 // IR pools key on irFte.
-function _holPoolFteProp(p, pool){
+// `year` (optional) makes the share start-date aware: each member's FTE is
+// multiplied by the fraction of that year they are on staff, so a mid-year
+// starter carries a prorated share in their start year and NONE for the years
+// before they arrived (their career balance no longer shows them "owing"
+// holidays from before they were hired).
+function _holPoolFteProp(p, pool, year){
   const pool_phys=_holPoolPhysicians(pool);
-  const fteOf = x => pool==='DR' ? _drDayFte(x) : (x.irFte||0);
+  const frac = x => year==null ? 1 : _physYearFraction(x, year);
+  const fteOf = x => (pool==='DR' ? _drDayFte(x) : (x.irFte||0)) * frac(x);
   const tot = pool_phys.reduce((s,x)=>s+fteOf(x),0)||1;
   return fteOf(p)/tot;
 }
@@ -46519,7 +46741,7 @@ function _holCareerData(group){
     const byYear=allYears.map(yr=>{
       const act=_holBlockCount(p.id,group,+yr);
       const totalSlots=_holBlockTotal(group,+yr);
-      const fs=_holPoolFteProp(p,group)*totalSlots;
+      const fs=_holPoolFteProp(p,group,+yr)*totalSlots;
       const bal=act-fs;
       cumBalance+=bal;
       return{yr,act,fairShare:fs,balance:bal,snapBalance:cumBalance};
@@ -46541,7 +46763,7 @@ function _holCareerDataBeforeYear(group,beforeYear){
     const byYear=allYears.map(yr=>{
       const act=_holBlockCount(p.id,group,+yr);
       const totalSlots=_holBlockTotal(group,+yr);
-      const fs=_holPoolFteProp(p,group)*totalSlots;
+      const fs=_holPoolFteProp(p,group,+yr)*totalSlots;
       cumBalance+=act-fs;
       return{yr,act,fairShare:fs,balance:act-fs};
     });
@@ -46551,8 +46773,8 @@ function _holCareerDataBeforeYear(group,beforeYear){
 
 // Lottery weight for one physician.
 // Weighted mode: adjusts FTE proportion by career balance so owed physicians draw higher.
-function _holLotteryWeight(careerDatum,grp,mode){
-  const fteProp=_holPoolFteProp(careerDatum.p, grp);
+function _holLotteryWeight(careerDatum,grp,mode,year){
+  const fteProp=_holPoolFteProp(careerDatum.p, grp, year);
   if(mode==='pure') return fteProp;
   const scale=Math.max(5,Math.abs(careerDatum.balance)*2+1);
   const adj=careerDatum.balance/scale;
@@ -46593,9 +46815,9 @@ function renderHolCareerTally(){
         const fte=grp==='DR'?(d.p.drFte||0):(d.p.irFte||0);
         const balCls=d.balance>2?'color:var(--amber,#d97706)':d.balance<-2?'color:var(--green-t)':'color:var(--txt2)';
         const rowBg=d.balance>3?'background:var(--amber-bg,#fffbeb)':d.balance<-3?'background:var(--green-bg,#f0fdf4)':'';
-        const allW=data.map(x=>_holLotteryWeight(x,grp,mode));
+        const allW=data.map(x=>_holLotteryWeight(x,grp,mode,year));
         const totW=allW.reduce((s,w)=>s+w,0)||1;
-        const myW=_holLotteryWeight(d,grp,mode);
+        const myW=_holLotteryWeight(d,grp,mode,year);
         const wPct=(myW/totW*100).toFixed(0)+'%';
         html+=`<tr style="${rowBg}">
           <td class="fw6">${pnameHtml(d.p.id)}</td>
@@ -47080,6 +47302,7 @@ function saveEditHoliday(id){
   const notEl =document.getElementById(`hol-edit-notes-${id}`);
   if(!dateEl?.value){alert('Date required.');return;}
   if(typeof _canEditDate==='function' && !_canEditDate(dateEl.value)) return;
+  { const _np=_physById(+physEl?.value||h.physId); if(_np && !_confirmBeforeStart(_np,[dateEl.value])) return; }
   const wasIR = (h.group==='IR' || /^IR-/.test(h.group||''));
   if(wasIR) _removeHolidayIRCall(h.physId, h.date);
   h.name  =nameEl?.value||h.name;
@@ -47525,9 +47748,34 @@ function previewHolRandom(){
       preview.forEach(a=>{ if(a.physId===pid&&a.group===grp&&String(a.year)===String(year)) set.add(a.defName); });
       return set.size;
     };
+    // Start-year credit (rs-v127). The equal-spread tier counts blocks, so a
+    // physician who joins mid-year (0 blocks) would be pushed up to the same
+    // count as colleagues who were here all year. Credit them with the blocks
+    // a full-year colleague is expected to carry for the part of the year
+    // BEFORE their start date: per-person expectation × (1 − fraction on
+    // staff). The credit stays FRACTIONAL on purpose: colleagues' counts are
+    // whole numbers, so the newcomer is drawn exactly when every eligible
+    // colleague has passed their pro-rata position — starting half-way at ~2
+    // blocks per person (credit ~1) they take one block after everyone else
+    // has one; starting in mid-November (credit ~1.3) they wait until
+    // everyone has two, i.e. normally not at all that year. (Rounding it put
+    // a November starter level with one-block colleagues and made them the
+    // favourite for Thanksgiving or Christmas.) Under a quarter of a block it
+    // is ignored, so a January starter is not queued behind everybody.
+    // 0 for everyone without a start date in this year: tiering unchanged.
+    const _holSlotsThisYear=(()=>{
+      if(grp==='DR'&&_holNeedsActive()){
+        const per=Object.values(_holNeedsFor()).reduce((n,need)=>n+_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'),0);
+        return defs.length*per;
+      }
+      return defs.reduce((n,def)=>n+(slotsFor(def,grp)||0),0);
+    })();
+    const _holHeadcount=_holPoolPhysicians(grp).reduce((n,x)=>n+_physYearFraction(x,year),0);
+    const _holPerPerson=_holHeadcount>0?_holSlotsThisYear/_holHeadcount:0;
+    const _holStartCredit=(ph)=>{ const f=_physYearFraction(ph,year); if(f>=1) return 0; const c=_holPerPerson*(1-f); return c<0.25?0:c; };
     const _lowestBlockTier=(cands)=>{
       if(cands.length<2) return cands;
-      const withN=cands.map(d=>({d,n:_holYearBlockCount(d.p.id)}));
+      const withN=cands.map(d=>({d,n:_holYearBlockCount(d.p.id)+_holStartCredit(d.p)}));
       const minN=Math.min(...withN.map(x=>x.n));
       return withN.filter(x=>x.n===minN).map(x=>x.d);
     };
@@ -47616,7 +47864,8 @@ function previewHolRandom(){
                 if(sub&&!(p.drSubs||[]).includes(sub)) return false;
                 if(_drDayFte(p)<=0) return false;   // daytime DR FTE required for holiday call too
                 if(wshift==='day'&&!_wkndDayOk(p)) return false;
-                const vd=vacDays(p.id);
+                if(_physYearFraction(p,year)<=0) return false;             // starts in a later year
+                const vd=_awayDays(p.id);                                   // vacation, or block begins before they start
                 if((def.dates||[]).some(dt=>vd.has(dt))) return false;
                 if(_isAdjacentToExistingBlock(p.id)) return false;
                 return true;
@@ -47624,7 +47873,7 @@ function previewHolRandom(){
               if(!eligible.length){ gaps.push(`${def.name} [DR ${sub||'General'} ${wshift}]`); continue; }
               const _tier=_rotationTier(_lowestBlockTier(eligible), def.name);
               const wList=_tier.map(d=>{
-                const base=_holLotteryWeight(d,grp,mode);
+                const base=_holLotteryWeight(d,grp,mode,year);
                 const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
                 return{d,w:Math.max(0.01,base-extra)};
               });
@@ -47657,7 +47906,8 @@ function previewHolRandom(){
           const p=d.p;
           if(alreadyPhys.has(p.id)) return false;
           if(preview.find(a=>a.defId===def.id&&a.group===grp&&a.physId===p.id)) return false;
-          const vd=vacDays(p.id);
+          if(_physYearFraction(p,year)<=0) return false;                   // starts in a later year
+          const vd=_awayDays(p.id);                                         // vacation, or block begins before they start
           if((def.dates||[]).some(dt=>vd.has(dt))) return false;
           // Adjacent-block check
           if(_isAdjacentToExistingBlock(p.id)) return false;
@@ -47673,7 +47923,7 @@ function previewHolRandom(){
         // penalize physicians already picked in THIS run across any pool
         const _tier=_rotationTier(_lowestBlockTier(eligible), def.name);
         const wList=_tier.map(d=>{
-          const base=_holLotteryWeight(d,grp,mode);
+          const base=_holLotteryWeight(d,grp,mode,year);
           const extra=(preview.filter(a=>a.physId===d.p.id).length)*0.3;
           return{d,w:Math.max(0.01,base-extra)};
         });
@@ -48593,6 +48843,7 @@ function _doQuickAssign(date){
   if(!physId){ _toast('Pick a physician.', 'err'); return; }
   const phys = _physById(physId);
   if(!phys){ alert('Physician not found.'); return; }
+  if(!_confirmBeforeStart(phys,[date])) return;
   const newId = S.nextId++;
   if(kind === 'ir'){
     S.irShifts.push({ id:newId, physId, date, shift, site, sub:'', notes:'Quick assign', irGroup: phys.irGroup||'' });
@@ -50951,6 +51202,7 @@ function _suggestSickCover(physId, rowIdx, shiftInfo){
   // Eligible candidates: same site / not on vacation / not already busy that shift / different person.
   const cands = (S.physicians || []).filter(p => p.id !== physId)
     .filter(p => !(S.vacations || []).some(v => v.physId === p.id && v.start <= a.date && v.end >= a.date))
+    .filter(p => _physStartedBy(p, a.date))
     .filter(p => !(S.drShifts || []).some(s => s.physId === p.id && s.date === a.date && s.shift === a.shift && s.shift !== 'Home'))
     .filter(p => !(S.irShifts || []).some(s => s.physId === p.id && s.date === a.date && s.shift === a.shift && s.shift !== 'Home'))
     .slice(0, 8);
