@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v125';
+const CACHE_VERSION = 'rs-v126';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
@@ -125,6 +125,15 @@ self.addEventListener('fetch', (e) => {
     return; // let the browser handle it directly (no SW intercept)
   }
 
+  // ── NEVER touch the reset page (rs-v126) ──
+  // /reset is the escape hatch for a device whose cached state is broken —
+  // possibly including this very worker. It must come straight from the
+  // network, and its Clear-Site-Data response header must reach the browser
+  // untouched.
+  if (/\/reset(\.html)?$/.test(url.pathname)) {
+    return;
+  }
+
   // ── Navigation / HTML shell: NETWORK-FIRST ──
   // The HTML shell (index.html, / ) used to be stale-while-revalidate,
   // which meant a force-reload kept showing the OLD page from cache
@@ -138,8 +147,21 @@ self.addEventListener('fetch', (e) => {
     || url.pathname === '/'
     || url.pathname.endsWith('/index.html');
   if (isNavigation) {
+    // rs-v126: for real page navigations ask the network for the document with
+    // cache:'no-store'. Passing the navigation request through unchanged lets
+    // the browser answer back/forward and session-restore navigations straight
+    // from its HTTP cache WITHOUT revalidating (must-revalidate does not apply
+    // to history navigations) — the classic way a tab comes back running an
+    // old build after a deploy. A navigation request cannot be re-issued with
+    // a different cache mode, so fetch its URL instead; a navigation may not
+    // be answered with a followed-redirect response, so hand any redirect back
+    // to the browser to follow itself.
+    const fromNetwork = (e.request.mode === 'navigate')
+      ? fetch(url.href, { cache: 'no-store', credentials: 'same-origin' })
+          .then((resp) => (resp && resp.redirected) ? Response.redirect(resp.url, 302) : resp)
+      : fetch(e.request);
     e.respondWith(
-      fetch(e.request)
+      fromNetwork
         .then((resp) => {
           if (resp && resp.status === 200 && resp.type === 'basic') {
             const copy = resp.clone();

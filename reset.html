@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>RadScheduler — Reset this device</title>
+<!--
+  Escape hatch (rs-v126). A plain static page with no dependency on the app,
+  its service worker, or anything cached: it must work when the app does not.
+
+  /reset           clears the service worker, the cached app files and this
+                   tab's reload/update guards. You stay signed in.
+  /reset?full=1    additionally clears everything the site stored on this
+                   device (sign-in, preferences). On Vercel the response also
+                   carries `Clear-Site-Data: "storage"`, so the browser does the
+                   wipe itself before this script even runs.
+
+  The service worker never intercepts this URL (see sw.js).
+-->
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --ink:#0f1b2d; --muted:#5b6778; --line:#dfe4ea;
+    --accent:#1e3a8a; --accent-ink:#ffffff; --ok:#0f7a4d; --warn:#a15c07; --bad:#b42318; --code:#f1f4f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b1220; --card:#131c2e; --ink:#e8edf5; --muted:#9aa7ba; --line:#263349;
+      --accent:#8fb1ff; --accent-ink:#0b1220; --ok:#4cc38a; --warn:#f0b35a; --bad:#ff8a7a; --code:#0f1727;
+    }
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh; display:flex; align-items:flex-start; justify-content:center; padding:32px 16px;
+  }
+  main{width:100%; max-width:560px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:26px 26px 22px}
+  h1{font-size:20px; line-height:1.3; margin:0 0 6px; letter-spacing:-.01em; text-wrap:balance}
+  p{margin:0 0 14px}
+  .lede{color:var(--muted)}
+  ol{list-style:none; margin:18px 0 20px; padding:0; border-top:1px solid var(--line)}
+  li{display:flex; gap:12px; align-items:baseline; padding:11px 0; border-bottom:1px solid var(--line)}
+  li .mark{flex:none; width:18px; text-align:center; font-weight:700; color:var(--muted)}
+  li.ok .mark{color:var(--ok)} li.warn .mark{color:var(--warn)} li.bad .mark{color:var(--bad)}
+  li .what{flex:1; min-width:0}
+  li .note{display:block; color:var(--muted); font-size:13px; overflow-wrap:anywhere}
+  .actions{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 6px}
+  a.btn,button.btn{
+    appearance:none; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink);
+    font:inherit; font-weight:600; padding:10px 16px; border-radius:9px; text-decoration:none; cursor:pointer;
+  }
+  a.btn.quiet,button.btn.quiet{background:transparent; color:var(--accent)}
+  a.btn:focus-visible,button.btn:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  #auto{color:var(--muted); font-size:13px; min-height:20px; margin:8px 0 0}
+  #auto button{appearance:none; border:0; background:none; color:var(--accent); font:inherit; text-decoration:underline; cursor:pointer; padding:0}
+  hr{border:0; border-top:1px solid var(--line); margin:20px 0 14px}
+  .small{font-size:13px; color:var(--muted)}
+  .small a{color:var(--accent)}
+  details{margin-top:14px}
+  summary{cursor:pointer; font-size:13px; color:var(--muted)}
+  pre{background:var(--code); border:1px solid var(--line); border-radius:9px; padding:12px; margin:10px 0 8px;
+      font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto}
+  @media (max-width:480px){ main{padding:20px 18px 18px} }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Resetting RadScheduler on this device</h1>
+  <p class="lede" id="lede">Clearing the stored copy of the app so the next load comes straight from the server. Your schedule lives on the server and is not touched.</p>
+
+  <ol id="steps" aria-live="polite">
+    <li id="s-server"><span class="mark">·</span><span class="what">Check what the server is serving<span class="note">waiting…</span></span></li>
+    <li id="s-sw"><span class="mark">·</span><span class="what">Stop the background worker<span class="note">waiting…</span></span></li>
+    <li id="s-cache"><span class="mark">·</span><span class="what">Delete cached app files<span class="note">waiting…</span></span></li>
+    <li id="s-guard"><span class="mark">·</span><span class="what">Clear this tab's reload guards<span class="note">waiting…</span></span></li>
+    <li id="s-store" hidden><span class="mark">·</span><span class="what">Sign out and forget this device's saved settings<span class="note">waiting…</span></span></li>
+  </ol>
+
+  <div class="actions">
+    <a class="btn" id="open" href="./">Open RadScheduler</a>
+    <button class="btn quiet" id="copy" type="button">Copy diagnostics</button>
+  </div>
+  <p id="auto"></p>
+
+  <hr>
+  <p class="small" id="more">Still stuck after this? <a id="full" href="reset?full=1">Do a full reset</a> — it also signs you out and forgets this device's saved settings, then you sign in again.</p>
+
+  <details>
+    <summary>Diagnostics</summary>
+    <pre id="diag">collecting…</pre>
+  </details>
+</main>
+
+<script>
+(function(){
+  'use strict';
+  var FULL = /[?&]full=1(&|$)/.test(location.search);
+  var STAY = /[?&]stay=1(&|$)/.test(location.search);
+  var FORCE = /[?&]force=1(&|$)/.test(location.search);
+  var diag = { time: new Date().toISOString(), mode: FULL ? 'full' : 'standard', userAgent: navigator.userAgent, page: location.pathname + location.search };
+  var cancelled = false;
+
+  function $(id){ return document.getElementById(id); }
+  function step(id, state, note){
+    var li = $(id); if(!li) return;
+    li.className = state;
+    li.querySelector('.mark').textContent = state === 'ok' ? '✓' : state === 'warn' ? '!' : state === 'bad' ? '×' : '·';
+    li.querySelector('.note').textContent = note;
+  }
+  function showDiag(){ $('diag').textContent = JSON.stringify(diag, null, 2); }
+  function withTimeout(p, ms, label){
+    return Promise.race([p, new Promise(function(_, rej){ setTimeout(function(){ rej(new Error(label + ' timed out')); }, ms); })]);
+  }
+
+  if(FULL){
+    $('s-store').hidden = false;
+    $('title').textContent = 'Full reset of RadScheduler on this device';
+    $('lede').textContent = 'Clearing everything this site stored here — the cached app, your sign-in and saved preferences. Your schedule lives on the server and is not touched.';
+    $('more').textContent = 'You will be asked to sign in again.';
+  }
+
+  async function stopWorker(){
+    if(!('serviceWorker' in navigator)){ step('s-sw', 'ok', 'This browser has no background worker.'); diag.serviceWorker = 'unsupported'; return; }
+    try{
+      var regs = await withTimeout(navigator.serviceWorker.getRegistrations(), 8000, 'listing workers');
+      diag.serviceWorker = { controlledBy: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+        found: regs.map(function(r){ return { scope: r.scope, active: r.active ? r.active.state : null, waiting: !!r.waiting, installing: !!r.installing }; }) };
+      var done = 0;
+      for(var i = 0; i < regs.length; i++){ try{ if(await regs[i].unregister()) done++; }catch(_){} }
+      diag.serviceWorker.removed = done;
+      step('s-sw', 'ok', regs.length ? ('Removed ' + done + ' of ' + regs.length + '.') : 'None was installed.');
+    }catch(e){
+      diag.serviceWorker = 'error: ' + (e && e.message || e);
+      step('s-sw', 'warn', 'Could not check (' + (e && e.message || e) + ').');
+    }
+  }
+  async function deleteCaches(){
+    if(!('caches' in window)){ step('s-cache', 'ok', 'This browser keeps no app cache.'); diag.caches = 'unsupported'; return; }
+    try{
+      var keys = await withTimeout(caches.keys(), 8000, 'listing caches');
+      diag.caches = { found: keys.slice() };
+      var done = 0;
+      for(var i = 0; i < keys.length; i++){ try{ if(await caches.delete(keys[i])) done++; }catch(_){} }
+      diag.caches.removed = done;
+      step('s-cache', 'ok', keys.length ? ('Deleted ' + done + ' of ' + keys.length + ' (' + keys.join(', ') + ').') : 'Nothing was cached.');
+    }catch(e){
+      diag.caches = 'error: ' + (e && e.message || e);
+      step('s-cache', 'warn', 'Could not check (' + (e && e.message || e) + ').');
+    }
+  }
+  function clearGuards(){
+    var removed = [];
+    try{
+      for(var i = sessionStorage.length - 1; i >= 0; i--){
+        var k = sessionStorage.key(i);
+        if(k && /^rs\.(reloadTimes|autoHeal|upd)/.test(k)){ removed.push(k + '=' + sessionStorage.getItem(k)); sessionStorage.removeItem(k); }
+      }
+      try{ localStorage.removeItem('rs.reloadTimes'); }catch(_){}
+      diag.guards = removed;
+      step('s-guard', 'ok', removed.length ? ('Cleared ' + removed.length + '.') : 'None were set.');
+    }catch(e){
+      diag.guards = 'error: ' + (e && e.message || e);
+      step('s-guard', 'warn', 'Browser storage is unavailable (private window?).');
+    }
+  }
+  async function clearStorage(){
+    var n = { local: 0, session: 0, databases: 0 };
+    try{ n.local = localStorage.length; localStorage.clear(); }catch(_){}
+    try{ n.session = sessionStorage.length; sessionStorage.clear(); }catch(_){}
+    try{
+      if(window.indexedDB && indexedDB.databases){
+        var dbs = await withTimeout(indexedDB.databases(), 5000, 'listing databases');
+        for(var i = 0; i < dbs.length; i++){ if(dbs[i] && dbs[i].name){ try{ indexedDB.deleteDatabase(dbs[i].name); n.databases++; }catch(_){} } }
+      }
+    }catch(_){}
+    diag.storageCleared = n;
+    step('s-store', 'ok', 'Signed out. Cleared ' + n.local + ' saved setting' + (n.local === 1 ? '' : 's') + (n.databases ? ' and ' + n.databases + ' database' + (n.databases === 1 ? '' : 's') : '') + '.');
+  }
+  async function checkServer(){
+    var bust = Date.now().toString(36);
+    var out = {};
+    try{
+      var r1 = await withTimeout(fetch('sw.js?_=' + bust, { cache: 'no-store' }), 10000, 'sw.js');
+      var m1 = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(await r1.text());
+      out.worker = m1 ? m1[1] : ('unreadable (HTTP ' + r1.status + ')');
+    }catch(e){ out.worker = 'unreachable: ' + (e && e.message || e); }
+    try{
+      var r2 = await withTimeout(fetch('./?_=' + bust, { cache: 'no-store' }), 15000, 'app page');
+      var m2 = /_RS_HTML_BUILD\s*=\s*['"]([^'"]+)['"]/.exec(await r2.text());
+      out.app = m2 ? m2[1] : ('unreadable (HTTP ' + r2.status + ')');
+    }catch(e){ out.app = 'unreachable: ' + (e && e.message || e); }
+    diag.server = out;
+    var reach = !/^unreachable/.test(out.worker) && !/^unreachable/.test(out.app);
+    if(!reach){ step('s-server', 'bad', 'The server could not be reached. Check the connection (or VPN), then reload this page.'); return false; }
+    if(out.worker === out.app){ step('s-server', 'ok', 'Serving ' + out.app + '.'); return true; }
+    step('s-server', 'warn', 'App page is ' + out.app + ', worker is ' + out.worker + ' — an update is still rolling out. Wait a minute before opening.');
+    return true;
+  }
+
+  $('copy').addEventListener('click', function(){
+    var text = JSON.stringify(diag, null, 2), b = $('copy');
+    function ok(){ b.textContent = 'Copied'; setTimeout(function(){ b.textContent = 'Copy diagnostics'; }, 1800); }
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(ok, function(){ window.prompt('Copy these diagnostics:', text); }); }
+    else { window.prompt('Copy these diagnostics:', text); }
+  });
+
+  function skip(id){ step(id, '', 'Not done — the server is unreachable.'); }
+  (async function run(){
+    showDiag();
+    // Server first. The cached copy is the only thing that lets the app open
+    // offline, so it is only thrown away once we know a fresh one can be
+    // fetched. (Asking first also keeps this page's own requests from
+    // re-creating a cache through the worker we are about to remove.)
+    var reachable = await checkServer(); showDiag();
+    if(!reachable && !FORCE){
+      skip('s-sw'); skip('s-cache'); skip('s-guard'); if(FULL) skip('s-store');
+      $('title').textContent = 'Cannot reach the server — nothing was changed';
+      $('lede').textContent = 'The cached copy of the app is what lets it open without a connection, so it was left in place. Check the network or VPN and try again.';
+      $('open').textContent = 'Try again'; $('open').href = location.pathname + location.search;
+      var f = document.createElement('a'); f.className = 'btn quiet'; f.textContent = 'Reset anyway';
+      f.href = location.pathname + (location.search ? location.search + '&' : '?') + 'force=1';
+      $('open').parentNode.insertBefore(f, $('copy'));
+      return;
+    }
+    await stopWorker(); showDiag();
+    await deleteCaches(); showDiag();
+    clearGuards(); showDiag();
+    if(FULL){ await clearStorage(); showDiag(); }
+
+    // A fresh, never-cached URL for the way back in.
+    var target = './?_v=reset.' + Date.now().toString(36);
+    $('open').href = target;
+    $('open').textContent = FULL ? 'Sign in to RadScheduler' : 'Open RadScheduler';
+    $('title').textContent = reachable ? 'Reset complete' : 'Reset done — the server is still unreachable';
+    $('lede').textContent = FULL
+      ? 'Everything this site stored on this device was cleared. Your schedule lives on the server and was not touched.'
+      : 'The stored copy of the app was cleared, so the next load comes straight from the server. Your schedule lives on the server and was not touched.';
+    if(!reachable || STAY) return;
+    var left = 4, auto = $('auto');
+    var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Stay on this page';
+    cancel.addEventListener('click', function(){ cancelled = true; auto.textContent = ''; });
+    (function tick(){
+      if(cancelled) return;
+      if(left <= 0){ location.replace(target); return; }
+      auto.textContent = 'Opening RadScheduler in ' + left + ' s… ';
+      auto.appendChild(cancel);
+      left--; setTimeout(tick, 1000);
+    })();
+  })();
+})();
+</script>
+</body>
+</html>

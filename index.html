@@ -9607,7 +9607,7 @@ create table pacs_inbound (
         coding, conference-rules, configuration, conflict-highlight, conversation,
         coverage, credit-target, cross-group, cross-page, data-integrity, expected,
         min-staffing, sell/buy, standalone, partial, official, real, full,
-        save-conflict, sync,
+        save-conflict, sync, update,
         debulking, desktop, display, enterprise, equity, generate, group, html,
         go-live, hold-to-confirm, leave-type, list-view, long-lived, look-ahead,
         manually, memoization, monthly, my-schedule, my-shifts, named,
@@ -14713,9 +14713,9 @@ async function doLogout(){
   // contain practice-specific rule text + data values — clear them
   // too so a different login can't pull a cached Practice-A answer.
   try{ if(typeof _aiExplainCache !== 'undefined' && _aiExplainCache.clear) _aiExplainCache.clear(); }catch(_){}
-  // Re-arm the SW update banner so a deploy that lands during the
-  // NEXT session still notifies (the flag was sticky across logout).
-  try{ _swUpdateBannerShown = false; }catch(_){}
+  // rs-v126: the update notice is no longer a one-shot flag that needs
+  // re-arming; if an update is still pending, keep its banner up across sign-out.
+  try{ if(_rsPendingUpdate && _rsBannerDismissedFor !== _rsPendingUpdate) _rsShowUpdateBanner(_rsPendingUpdate); }catch(_){}
   // Reset UI
   document.getElementById('app').style.display='none';
   document.getElementById('auth').style.display='flex';
@@ -15592,7 +15592,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v125';
+const _SW_VERSION = 'rs-v126';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -15746,63 +15746,32 @@ function _registerServiceWorker(){
         console.warn('[RS] Service worker registration failed:', err);
       });
   }).catch(() => { /* probe failed — likely network error or no sw.js, silent */ });
-  // When the SW posts an update notification, surface a non-blocking
-  // banner offering to reload. Without this, users sit on the OLD HTML
-  // even though the new SW is installed (the cached shell is served
-  // until the page refreshes).
+  // ── What the page does when the service worker changes (rs-v126) ──
+  // The SW is only a messenger now. It says "a new version may be live"; the
+  // page compares the SERVER's build with the build it is running and decides
+  // in ONE place — _rsNoteUpdate() — whether and when to move.
+  //
+  // History, so nobody re-adds it: this handler used to call location.reload()
+  // on every 'controllerchange'. That (a) reloaded returning visitors a second
+  // time for nothing (their HTML had just come fresh from the network),
+  // (b) fed the reload circuit-breaker into the 2026-08 "Update loop detected"
+  // halt, and (c) after the first-install exception that fixed (b), left any
+  // tab loaded without a controlling worker (a hard reload) deaf to new
+  // versions: on 2026-11-21 a tab kept running rs-v124 for many minutes after
+  // rs-v125 shipped, while its build pill read "rs-v125".
   navigator.serviceWorker.addEventListener('message', (ev) => {
     const m = ev.data || {};
-    if(m && m.type === 'rs:sw-updated'){
-      _showSwUpdateBanner(m.version || 'new');
+    if(m && m.type === 'rs:sw-updated' && m.version && m.version !== _RS_HTML_BUILD){
+      _rsNoteUpdate(String(m.version), 'sw-message');
     }
   });
-  // 'controllerchange' fires when the new SW activates and takes over
-  // control of this page. That's the safe moment to reload — at this
-  // point a refresh will be served by the NEW SW with the NEW shell.
-  // Guard with a one-shot flag so a SW that posts multiple updates
-  // doesn't trigger a reload loop.
-  //
-  // FIRST-INSTALL EXCEPTION (2026-08 halt-loop fix): if this page loaded
-  // with NO controlling service worker — a fresh browser, or right after
-  // any cache-clear/heal/halt-button recovery unregistered the old one —
-  // the new SW's clients.claim() also fires 'controllerchange'. Reloading
-  // then is pointless (this page came straight from the network and IS
-  // current) and it fed the reload circuit-breaker: every recovery click
-  // cost an extra auto-reload, so a couple of attempts re-tripped the
-  // "Update loop detected" halt the recovery was trying to escape.
-  const _hadControllerAtLoad = !!navigator.serviceWorker.controller;
-  let _reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if(_reloaded) return;
-    if(!_hadControllerAtLoad){
-      console.info('[RS] SW took control of a fresh page — no reload needed.');
-      return;
-    }
-    _reloaded = true;
-    // Tiny delay so any in-flight save the user just triggered
-    // (Cmd+S, debounced edit) has a chance to flush via beforeunload.
-    setTimeout(() => { try{ if(_rsReloadAllowed()) location.reload(); }catch(_){} }, 150);
+    _rsUpdateCheck('controllerchange');
   });
 }
-let _swUpdateBannerShown = false;
+// Old name, kept for anything that still calls it.
 function _showSwUpdateBanner(version){
-  if(_swUpdateBannerShown) return;
-  _swUpdateBannerShown = true;
-  // Skip on the auth screen — we don't want to nag a user who hasn't
-  // even logged in yet. The banner re-arms after they sign in.
-  if(document.body && document.body.classList.contains('pre-auth')){
-    _swUpdateBannerShown = false;
-    return;
-  }
-  const banner = document.createElement('div');
-  banner.id = 'rs-sw-update';
-  banner.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1e3a8a;color:#fff;padding:10px 16px;border-radius:var(--rl);box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:9999;display:flex;align-items:center;gap:12px;font-size:13px;font-family:inherit;max-width:90vw';
-  banner.innerHTML = `
-    <span>🔄 New version available (${escHtml(version)}).</span>
-    <button style="background:#fff;color:#1e3a8a;border:0;border-radius:6px;padding:5px 10px;font-weight:700;cursor:pointer;font-size:12px" onclick="location.reload()">Reload</button>
-    <button style="background:transparent;color:#cbd5e1;border:0;cursor:pointer;font-size:18px;line-height:1" onclick="this.parentElement.remove()" title="Dismiss">×</button>
-  `;
-  document.body.appendChild(banner);
+  if(version && version !== _RS_HTML_BUILD) _rsNoteUpdate(String(version), 'legacy');
 }
 
 // ── Keyboard accessibility for click-only nav (rs-v108) ───────────────
@@ -17104,13 +17073,10 @@ function _toggleMobileNav(force){
 // place if the pill has already mounted.
 // ── HTML build tag baked at deploy time ──
 // This MUST match the CACHE_VERSION in sw.js at the time index.html
-// is built. The boot probe below compares this constant against the
-// deployed sw.js's CACHE_VERSION; a mismatch means the HTML the
-// user is looking at is stale, and we auto-heal by nuking caches +
-// unregistering the SW + reloading. Without this, users could sit
-// indefinitely on a stale shell whenever an old SW served them
-// the OLD index.html that pinned them to an OLD pill-click handler.
-const _RS_HTML_BUILD = 'rs-v125';
+// is built. The update lifecycle below compares this constant against
+// the deployed sw.js's CACHE_VERSION; a difference means the server has
+// a newer build than this tab is running (see "Update lifecycle").
+const _RS_HTML_BUILD = 'rs-v126';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -17142,7 +17108,8 @@ function _rsShowReloadHalt(){
     d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0a1f3a;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,system-ui,sans-serif;padding:24px;text-align:center';
     d.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:10px">Update loop detected — paused</div>'
       + '<div style="font-size:13px;opacity:.85;max-width:420px;line-height:1.5;margin-bottom:20px">This device had a stale cached version that kept reloading. Auto-reload is paused. Tap below to clear the cache and load the latest version.</div>'
-      + '<button id="rs-reload-halt-btn" style="background:#fff;color:#0a1f3a;border:0;border-radius:10px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer">Clear cache &amp; reload</button>';
+      + '<button id="rs-reload-halt-btn" style="background:#fff;color:#0a1f3a;border:0;border-radius:10px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer">Clear cache &amp; reload</button>'
+      + '<div style="font-size:12px;opacity:.75;margin-top:18px">Still here afterwards? Open <a href="reset" style="color:#fff;text-decoration:underline">the reset page</a> — it works even when the app will not load.</div>';
     (document.body || document.documentElement).appendChild(d);
     var btn = document.getElementById('rs-reload-halt-btn');
     if(btn) btn.addEventListener('click', async function(){
@@ -17150,72 +17117,265 @@ function _rsShowReloadHalt(){
       try{ if('serviceWorker' in navigator){ var rg = await navigator.serviceWorker.getRegistrations(); await Promise.all(rg.map(function(r){ return r.unregister(); })); } }catch(_){}
       try{ sessionStorage.removeItem('rs.reloadTimes'); }catch(_){}
       try{ localStorage.removeItem('rs.reloadTimes'); }catch(_){} // legacy key
-      try{ for(var i=sessionStorage.length-1;i>=0;i--){ var k=sessionStorage.key(i); if(k && k.indexOf('rs.autoHeal')===0) sessionStorage.removeItem(k); } }catch(_){}
+      try{ for(var i=sessionStorage.length-1;i>=0;i--){ var k=sessionStorage.key(i); if(k && (k.indexOf('rs.autoHeal')===0 || k.indexOf('rs.upd.')===0)) sessionStorage.removeItem(k); } }catch(_){}
       try{ var u = new URL(location.href); u.searchParams.set('_rsfix', Date.now().toString(36)); location.replace(u.toString()); }catch(_){ location.reload(); }
     });
   }catch(_){}
 }
-let _RS_BUILD_TAG = '…';
-(async () => {
+// ── Update lifecycle (rs-v126) ────────────────────────────────────────
+// Two facts decide everything:
+//   • _RS_HTML_BUILD — the build THIS tab is running (baked in above)
+//   • the server's build — CACHE_VERSION inside the deployed sw.js
+// When they differ the tab should move to the new build: at once if nobody is
+// using it, otherwise it says so and waits for a pause. Every automatic move
+// is a plain cache-busting navigation (the service worker is network-first
+// for HTML, so nothing needs unregistering or deleting) and is rationed per
+// version, per tab: at most 3, at least a minute apart. A reload loop would
+// need an endless supply of new version numbers.
+let _RS_BUILD_TAG = '…';          // the SERVER's build; '…' until the first probe answers
+let _rsPendingUpdate = null;      // a newer server build this tab has not moved to yet
+let _rsUpdateTicker = null;
+let _rsLastBuildCheckAt = 0;
+let _rsBuildCheckInFlight = false;
+let _rsBannerDismissedFor = null;
+const _RS_LOADED_AT = Date.now();
+// One-shot cache-bust markers have done their job once the page is up; keep
+// them out of the address bar, bookmarks and shared links.
+try{
+  const _u0 = new URL(location.href); let _ch0 = false;
+  ['_v','_rsheal','_rsfix','_rsbust','_fresh'].forEach(function(k){ if(_u0.searchParams.has(k)){ _u0.searchParams.delete(k); _ch0 = true; } });
+  if(_ch0) history.replaceState(history.state, '', _u0.pathname + _u0.search + _u0.hash);
+}catch(_){}
+function _rsBuildNum(tag){ const m = /(\d+)\s*$/.exec(String(tag || '')); return m ? parseInt(m[1], 10) : NaN; }
+async function _rsFetchServerBuild(){
   try{
-    // Cache-bust the URL with a unique query string AND use
-    // cache:'no-store' so neither HTTP cache nor SW cache can serve
-    // a stale sw.js. The SW also explicitly bypasses sw.js fetches
-    // now (see sw.js fetch handler) so this hits the origin every
-    // time. Without both layers, the pill showed last-deployed
-    // version even after a fresh deploy.
-    const swProbeUrl = (typeof _serviceWorkerScriptUrlWithBust === 'function')
-      ? _serviceWorkerScriptUrlWithBust()
-      : new URL('sw.js', location.href).toString();
-    const r = await fetch(swProbeUrl, { cache: 'no-store' });
-    if(!r.ok) return;
-    const t = await r.text();
-    const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(t);
-    if(m){
-      _RS_BUILD_TAG = m[1];
-      const pill = document.getElementById('rs-build-pill');
-      if(pill) pill.textContent = _RS_BUILD_TAG;
-      // ── Auto-heal stuck users ──
-      // If the live sw.js's version differs from THIS html's baked
-      // build, the user is on a stale shell. Nuke every cache,
-      // unregister every SW, and reload with a cache-bust query.
-      // Guard against reload loops with sessionStorage so a one-
-      // shot heal doesn't trap the tab refreshing forever.
-      try{
-        if(_RS_BUILD_TAG && _RS_BUILD_TAG !== '…' && _RS_BUILD_TAG !== _RS_HTML_BUILD){
-          const HEAL_KEY = 'rs.autoHeal.' + _RS_BUILD_TAG;
-          if(sessionStorage.getItem(HEAL_KEY)){
-            console.warn('[RS] Auto-heal already attempted this session ('+_RS_HTML_BUILD+' → '+_RS_BUILD_TAG+'); not retrying.');
-          } else {
-            sessionStorage.setItem(HEAL_KEY, '1');
-            console.warn('[RS] Stale HTML detected ('+_RS_HTML_BUILD+' on a server serving '+_RS_BUILD_TAG+'). Auto-healing…');
-            // AUDIT FIX (2026-07 deep dive): consult the reload circuit-breaker
-            // BEFORE the destructive work. The old order nuked every cache and
-            // unregistered the SW, then asked permission to reload — a breaker
-            // halt left the tab sitting on a destroyed cache/SW state.
-            if(_rsReloadAllowed()){
-              try{
-                if('caches' in self){
-                  const keys = await caches.keys();
-                  await Promise.all(keys.map(k => caches.delete(k)));
-                }
-              }catch(_){}
-              try{
-                if('serviceWorker' in navigator){
-                  const regs = await navigator.serviceWorker.getRegistrations();
-                  await Promise.all(regs.map(reg => reg.unregister()));
-                }
-              }catch(_){}
-              const url = new URL(location.href);
-              url.searchParams.set('_rsheal', Date.now().toString(36));
-              location.replace(url.toString());
-            }
-          }
-        }
-      }catch(_){}
+    // Unique query + no-store: neither the HTTP cache nor a proxy can answer
+    // this, and the service worker never intercepts sw.js.
+    const u = (typeof _serviceWorkerScriptUrlWithBust === 'function')
+      ? _serviceWorkerScriptUrlWithBust() : new URL('sw.js', location.href).toString();
+    const r = await fetch(u, { cache: 'no-store' });
+    if(!r.ok) return null;
+    const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(await r.text());
+    return m ? m[1] : null;
+  }catch(_){ return null; }   // offline / blocked: unknown, which is not "changed"
+}
+// The pill shows what this tab RUNS. (It used to show the server's version,
+// so a stale tab looked current.)
+function _rsPillText(){
+  return _rsPendingUpdate ? (_RS_HTML_BUILD + ' → ' + _rsPendingUpdate) : _RS_HTML_BUILD;
+}
+function _rsRenderPill(){
+  try{
+    const pill = document.getElementById('rs-build-pill');
+    if(!pill) return;
+    pill.textContent = _rsPillText();
+    pill.style.background = _rsPendingUpdate ? 'rgba(180,83,9,.92)' : 'rgba(0,0,0,.5)';
+    pill.title = (_rsPendingUpdate
+        ? 'This tab runs ' + _RS_HTML_BUILD + '; ' + _rsPendingUpdate + ' is live. '
+        : 'This tab runs ' + _RS_HTML_BUILD + '. ')
+      + 'Click to clear caches + service worker and reload.';
+  }catch(_){}
+}
+// Is somebody in the middle of something a reload would destroy?
+function _rsUiBusy(){
+  try{
+    // Unsent work only exists for a signed-in user (before sign-in nothing can
+    // be saved, though housekeeping may still flip the dirty flag).
+    const _in = (typeof CU !== 'undefined' && !!CU);
+    if(_in && _hasUnsavedChanges) return 'unsaved changes';
+    if(_saveConflict) return 'save conflict';
+    if(_in && typeof _isSaving !== 'undefined' && _isSaving) return 'saving';
+    const ae = document.activeElement;
+    if(ae && (ae.tagName === 'TEXTAREA' || ae.isContentEditable
+        || (ae.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|range|color)$/i.test(ae.type || '')))){
+      const v = ('value' in ae) ? ae.value : ae.textContent;
+      if(v && String(v).trim()) return 'typing';
     }
-  }catch(_){ /* offline / no SW — pill stays as '…' */ }
-})();
+    // A dialog that is actually on screen. (The static modal containers sit in
+    // the DOM permanently with role="dialog" — only a rendered one counts.)
+    const dl = document.querySelectorAll('.modal-wrap.open, dialog[open], [role="dialog"], [role="alertdialog"]');
+    for(let i = 0; i < dl.length; i++){
+      if(dl[i].getClientRects().length && getComputedStyle(dl[i]).visibility !== 'hidden') return 'dialog open';
+    }
+  }catch(_){}
+  return '';
+}
+function _rsSafeToReload(){
+  if(_rsUiBusy()) return false;
+  if(document.visibilityState === 'hidden') return true;            // nobody is looking
+  const now = Date.now();
+  const lastInput = _lastTrustedInputAt || 0;
+  if(lastInput < _RS_LOADED_AT && (now - _RS_LOADED_AT) < 20000) return true;   // just opened, not yet touched
+  return (now - Math.max(lastInput, _RS_LOADED_AT)) > 180000;       // nobody at the keyboard for 3 minutes
+}
+// Move this tab to `tag`. manual=true is the banner button (always allowed).
+function _rsApplyUpdate(tag, manual){
+  if(!tag) return false;
+  if(!manual){
+    try{
+      const KEY = 'rs.upd.' + tag;
+      const rec = JSON.parse(sessionStorage.getItem(KEY) || 'null') || { n: 0, t: 0 };
+      if(rec.n >= 3 || (Date.now() - rec.t) < 60000) return false;   // rationed
+      if(!_rsReloadAllowed()) return false;                           // global backstop (halt screen)
+      sessionStorage.setItem(KEY, JSON.stringify({ n: rec.n + 1, t: Date.now() }));
+      if(!sessionStorage.getItem(KEY)) return false;                  // write silently refused → cannot ration → stay put
+    }catch(_){ return false; }                                        // no storage → cannot ration → banner only
+  }
+  try{
+    const u = new URL(location.href);
+    ['_rsheal','_rsfix','_rsbust','_fresh'].forEach(function(k){ u.searchParams.delete(k); });
+    u.searchParams.set('_v', String(tag) + '.' + Date.now().toString(36));
+    location.replace(u.toString());
+  }catch(_){ try{ location.reload(); }catch(__){} }
+  return true;
+}
+function _rsHideUpdateBanner(){
+  try{ const b = document.getElementById('rs-sw-update'); if(b) b.remove(); }catch(_){}
+}
+function _rsShowUpdateBanner(tag){
+  try{
+    let b = document.getElementById('rs-sw-update');
+    if(b && b.dataset.tag === tag) return;
+    if(b) b.remove();
+    b = document.createElement('div');
+    b.id = 'rs-sw-update';
+    b.dataset.tag = tag;
+    b.setAttribute('role', 'status');
+    b.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1e3a8a;color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:9999;display:flex;align-items:center;gap:10px;font-size:13px;max-width:calc(100vw - 24px)';
+    const t = document.createElement('span');
+    t.textContent = '🔄 Update ready — ' + tag + ' (this tab is on ' + _RS_HTML_BUILD + ').';
+    const r = document.createElement('button');
+    r.id = 'rs-sw-update-reload';
+    r.type = 'button';
+    r.textContent = 'Reload now';
+    r.style.cssText = 'background:#fff;color:#1e3a8a;border:0;border-radius:6px;padding:5px 10px;font-weight:700;cursor:pointer;font-size:12px;white-space:nowrap';
+    r.addEventListener('click', function(){ _rsApplyUpdate(tag, true); });
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.title = 'Hide — the update applies by itself the next time this tab is idle';
+    x.setAttribute('aria-label', 'Hide update notice');
+    x.style.cssText = 'background:transparent;color:#cbd5e1;border:0;cursor:pointer;font-size:18px;line-height:1';
+    x.addEventListener('click', function(){ _rsBannerDismissedFor = tag; b.remove(); });
+    b.appendChild(t); b.appendChild(r); b.appendChild(x);
+    (document.body || document.documentElement).appendChild(b);
+  }catch(_){}
+}
+// THE decision point. Everything that learns "the server has build X" ends here.
+function _rsNoteUpdate(tag, reason){
+  if(!tag || tag === _RS_HTML_BUILD) return;
+  // A server build OLDER than the one running is deploy propagation (HTML and
+  // sw.js do not switch at the same instant) or a rollback — not something to
+  // chase automatically.
+  const a = _rsBuildNum(tag), b = _rsBuildNum(_RS_HTML_BUILD);
+  if(!isNaN(a) && !isNaN(b) && a < b){
+    console.info('[RS] Server reports ' + tag + ' while this tab runs ' + _RS_HTML_BUILD + ' — waiting for the deploy to settle.');
+    return;
+  }
+  if(_rsPendingUpdate !== tag) console.info('[RS] Update available: ' + _RS_HTML_BUILD + ' → ' + tag + ' (' + reason + ').');
+  _rsPendingUpdate = tag;
+  _rsRenderPill();
+  if(_rsSafeToReload() && _rsApplyUpdate(tag, false)) return;
+  if(_rsBannerDismissedFor !== tag) _rsShowUpdateBanner(tag);
+  if(!_rsUpdateTicker){
+    _rsUpdateTicker = setInterval(function(){
+      if(!_rsPendingUpdate){ clearInterval(_rsUpdateTicker); _rsUpdateTicker = null; return; }
+      if(_rsSafeToReload()) _rsApplyUpdate(_rsPendingUpdate, false);
+    }, 15000);
+  }
+}
+async function _rsUpdateCheck(reason){
+  if(_rsBuildCheckInFlight) return;
+  _rsBuildCheckInFlight = true;
+  try{
+    _rsLastBuildCheckAt = Date.now();
+    let tag = await _rsFetchServerBuild();
+    if(!tag) return;
+    if(tag !== _RS_HTML_BUILD){
+      // During a deploy the HTML and sw.js do not flip at exactly the same
+      // moment. Look twice, a few seconds apart, before believing a difference.
+      await new Promise(function(res){ setTimeout(res, 4000); });
+      const again = await _rsFetchServerBuild();
+      if(!again) return;
+      tag = again;
+    }
+    _RS_BUILD_TAG = tag;
+    if(tag === _RS_HTML_BUILD){
+      if(_rsPendingUpdate){ _rsPendingUpdate = null; _rsHideUpdateBanner(); }
+      _rsRenderPill();
+      return;
+    }
+    _rsNoteUpdate(tag, reason);
+  }catch(_){
+  }finally{
+    _rsBuildCheckInFlight = false;
+  }
+}
+// Everything support needs to know about this tab, in one object.
+async function rsDiagnostics(){
+  const out = {
+    time: new Date().toISOString(),
+    runningBuild: _RS_HTML_BUILD,
+    serverBuild: _RS_BUILD_TAG,
+    pendingUpdate: _rsPendingUpdate,
+    busy: _rsUiBusy() || 'no',
+    page: location.pathname + location.hash,
+    visibility: document.visibilityState,
+    online: navigator.onLine,
+    userAgent: navigator.userAgent,
+  };
+  try{ out.installedApp = !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches); }catch(_){}
+  try{
+    out.swController = navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    out.swRegistrations = regs.map(function(r){ return { scope: r.scope, active: r.active ? r.active.state : null, waiting: !!r.waiting, installing: !!r.installing }; });
+  }catch(e){ out.sw = 'unavailable: ' + String((e && e.message) || e); }
+  try{ out.caches = await caches.keys(); }catch(_){}
+  try{
+    out.session = {};
+    for(let i = 0; i < sessionStorage.length; i++){
+      const k = sessionStorage.key(i);
+      if(k && /^rs\.(reloadTimes|autoHeal|upd)/.test(k)) out.session[k] = sessionStorage.getItem(k);
+    }
+  }catch(_){}
+  try{
+    out.sync = {
+      signedIn: !!CU, unsaved: !!_hasUnsavedChanges, saving: !!_isSaving,
+      conflict: _saveConflict, serverStamp: (S && S._remoteSavedAt) || null,
+      lastSaved: (S && S._lastSaved) ? S._lastSaved.toISOString() : null,
+      leaderTab: _isLeader, events: rsSyncLog().slice(-20),
+    };
+  }catch(_){}
+  return out;
+}
+async function rsCopyDiagnostics(){
+  let text = '';
+  try{ text = JSON.stringify(await rsDiagnostics(), null, 2); }catch(e){ text = 'diagnostics failed: ' + String(e); }
+  try{
+    await navigator.clipboard.writeText(text);
+    if(typeof _toast === 'function') _toast('Diagnostics copied — paste them into a message.', 'ok');
+  }catch(_){
+    try{ window.prompt('Copy these diagnostics:', text); }catch(__){}
+  }
+  return text;
+}
+try{ window.rsDiagnostics = rsDiagnostics; window.rsCopyDiagnostics = rsCopyDiagnostics; }catch(_){}
+// Look at boot, every 5 minutes, whenever the tab returns to the foreground
+// (at most once a minute), and when the browser restores the page from its
+// back/forward cache — no network request happens on that path at all.
+_rsUpdateCheck('boot');
+setInterval(function(){ _rsUpdateCheck('interval'); }, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    if(Date.now() - _rsLastBuildCheckAt > 60000) _rsUpdateCheck('visible');
+  } else if(_rsPendingUpdate){
+    // The tab was just put away with an update waiting: the ideal moment.
+    setTimeout(function(){
+      if(document.visibilityState === 'hidden' && _rsPendingUpdate && _rsSafeToReload()) _rsApplyUpdate(_rsPendingUpdate, false);
+    }, 8000);
+  }
+});
+window.addEventListener('pageshow', function(e){ if(e && e.persisted) _rsUpdateCheck('bfcache'); });
 // ── Boot-time page hide guard ──────────────────────────────────────────
 // Force every .page that doesn't have .on class to inline display:none.
 // The CSS rule `.page { display:none }` SHOULD do this, but a screenshot
@@ -17333,9 +17493,10 @@ function _pageGuardSweep(){
       if(_pillAllowed && !document.getElementById('rs-build-pill')){
         const pill = document.createElement('div');
         pill.id = 'rs-build-pill';
-        pill.title = 'Click to nuke caches + service worker, then reload.';
+        pill.title = 'This tab runs ' + _RS_HTML_BUILD + '. Click to clear caches + service worker and reload.';
         pill.style.cssText = 'position:fixed;bottom:8px;right:8px;background:rgba(0,0,0,.5);color:#fff;font-size:9.5px;padding:2px 7px;border-radius:11px;cursor:pointer;z-index:9990;font-family:ui-monospace,monospace;letter-spacing:.5px;opacity:.55;transition:opacity .2s';
-        pill.textContent = _RS_BUILD_TAG;
+        pill.textContent = _rsPillText();
+        if(_rsPendingUpdate) pill.style.background = 'rgba(180,83,9,.92)';
         pill.addEventListener('mouseenter', () => pill.style.opacity = '1');
         pill.addEventListener('mouseleave', () => pill.style.opacity = '.55');
         pill.addEventListener('click', async () => {
@@ -47792,6 +47953,7 @@ function openCommandPalette(){
     { admin:true,  name:'Performance monitor',        icon:'📈', sub:'Live render+payload',  run:() => { nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'ops'); setTimeout(() => { if(typeof openPerfMon==='function') openPerfMon(); }, 80); } },
     { admin:true,  name:'Year-end rollover wizard',   icon:'🎆', sub:'Roll holidays forward', run:() => { nav('tools', document.querySelector('.snav-item[data-pg="tools"]'), 'reports'); setTimeout(() => document.getElementById('yr-target')?.scrollIntoView({behavior:'smooth', block:'center'}), 150); } },
     { admin:true,  name:'Generate widget pairing',    icon:'🔑', sub:'Pair desktop widget',  run:() => nav('widget', document.querySelector('.snav-item[data-pg="widget"]')) },
+    { admin:false, name:'Copy troubleshooting diagnostics', icon:'🩺', sub:'Version, service worker and sync state', run:() => { if(typeof rsCopyDiagnostics === 'function') rsCopyDiagnostics(); } },
     { admin:true,  name:'Force save now',             icon:'💾', sub:'Push to Supabase',     run:() => { if(typeof _pushToSupabase === 'function') _pushToSupabase(); if(typeof _toast==='function') _toast('Save triggered','ok'); } },
     { admin:false, name:'Subscribe to calendar',      icon:'📅', sub:'iCal / Google Cal',    run:() => { nav('my-schedule', document.querySelector('.snav-item[data-pg="my-schedule"]')); setTimeout(() => { const el=document.querySelector('[onclick*="mySchedTab(\'sync\'"]'); if(el) el.click(); }, 120); } },
     { admin:false, name:'My Schedule — Day view',     icon:'🗓', sub:'Today',                run:() => { nav('my-schedule', document.querySelector('.snav-item[data-pg="my-schedule"]')); setTimeout(() => mySchedSetView?.('day'), 80); } },
@@ -57046,11 +57208,16 @@ function pruneOldSnapshots(retainDays){
   // 2) S.snapshots in-memory — drop entries older than cutoff
   if(Array.isArray(S.snapshots)){
     const before = S.snapshots.length;
-    S.snapshots = S.snapshots.filter(s => {
+    const kept = S.snapshots.filter(s => {
       const t = s?.ts || s?.createdAt || 0;
       return new Date(t).getTime() >= cutoff;
     });
-    removed += (before - S.snapshots.length);
+    // rs-v126: only write when something was actually dropped. Assigning S.* is
+    // what marks the practice dirty, and this ran 5 s after every first load of
+    // the day — a full-blob save (and a save race between two fresh tabs) to
+    // record that nothing had changed.
+    if(kept.length !== before) S.snapshots = kept;
+    removed += (before - kept.length);
   }
   try{ localStorage.setItem(_SNAP_PRUNE_KEY, String(Date.now())); }catch(_){}
   if(typeof _audit === 'function') _audit('snapshot.prune', { retainDays, removed });
