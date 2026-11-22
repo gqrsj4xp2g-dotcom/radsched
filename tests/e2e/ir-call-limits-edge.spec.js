@@ -418,3 +418,41 @@ test('someone back from a long leave is not handed every date until they catch u
   expect(r.perMonth[5]).toBeGreaterThanOrEqual(2);
   expect(r.worst14).toBeLessThanOrEqual(4);
 });
+
+test('a weekend that a defined holiday touches is left to holiday call, whether or not it has been assigned yet', async ({ page }) => {
+  const r = await page.evaluate(async ({ reset, preview, GROUP }) => {
+    const mk = new Function('return ' + reset)(), run = new Function('return ' + preview)();
+    mk(GROUP, { irDailyMax: 0, irWkndMax: 0 });
+    S.holidayDefs = [
+      { id: 9001, name: "New Year's Day", year: 2027, dates: ['2027-01-01', '2027-01-02', '2027-01-03'] },   // Fri–Sun; Monday is a normal day
+      { id: 9002, name: 'Labor Day', year: 2027, dates: ['2027-09-06'] },                                    // the Monday only
+      { id: 9003, name: 'Thanksgiving', year: 2027, dates: ['2027-11-25'] },                                 // a Thursday
+      { id: 9004, name: 'Christmas Day', year: 2027, dates: ['2027-12-24', '2027-12-25', '2027-12-26'] },
+    ];
+    // Christmas has already been assigned on the Holiday tab; the others have not.
+    S.irCalls.push({ id: 9100, physId: 6, date: '2027-12-24', callType: 'weekend', irGroup: 'South', site: '', notes: 'Christmas Day (Holiday)' });
+    if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    const out = await run('year', null, 'weekend');
+    const fri = d => (S.iraPreview || []).some(a => a.callType === 'weekend' && a.date === d);
+    const year = _irYearSlots('weekend', 2027, 'South');
+    return { text: out.text, newYear: fri('2027-01-01'), laborDay: fri('2027-09-03'), afterThanksgiving: fri('2027-11-26'), christmas: fri('2027-12-24'), ordinary: fri('2027-01-08'),
+      inYear: ['2027-01-01', '2027-09-03', '2027-11-26', '2027-12-24'].map(d => year.includes(d)), nYear: year.length, n: out.n,
+      shareSum: Object.values(previewIRAA._last.lim).reduce((sum, L) => sum + L.W.base, 0),
+      helper: [_irHolidayWeekend('2027-01-01'), _irHolidayWeekend('2027-09-03'), _irHolidayWeekend('2027-11-26'), _irHolidayWeekend('2027-01-08')] };
+  }, { ...FN, GROUP });
+
+  expect(r.newYear).toBe(false);                             // used to be handed out as a regular weekend (only 3 of its 4 days are holiday)
+  expect(r.laborDay).toBe(false);                            // the holiday Monday belongs to the weekend that ends on it
+  expect(r.christmas).toBe(false);
+  expect(r.afterThanksgiving).toBe(true);                    // a Thursday holiday does not touch the weekend after it
+  expect(r.ordinary).toBe(true);
+  expect(r.helper).toEqual([true, true, false, false]);
+  expect(r.inYear).toEqual([false, false, true, false]);
+  expect(r.n).toBe(r.nYear);                                 // every regular weekend filled, none of the holiday ones
+  expect(r.shareSum).toBeCloseTo(r.nYear, 6);                // shares are of the regular weekends only
+  expect(r.text).toContain('left to holiday call');
+  expect(r.text).toContain("New Year's Day");
+  expect(r.text).toContain('holiday call not assigned yet');
+  expect(r.text).toMatch(/2 have nobody assigned yet/);      // New Year's and Labor Day; Christmas is assigned
+  expect(r.text).toContain('holiday call: Full3');
+});
