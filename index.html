@@ -14965,22 +14965,10 @@ const _MIGRATIONS = [
     }
   },
   // v8 → v9 (rs-v128): the IR call maximums became hard YEARLY limits for the
-  // auto-builders. Through rs-v127 every practice was seeded with 20 / 4 (state
-  // seed, input defaults, saveCfg fallbacks), nothing enforced them, and My
-  // Schedule compared them with one MONTH's calls. An untouched 20 / 4 pair is
-  // therefore "never set", not a yearly maximum: clear it (0 = none). A practice
-  // that entered its own numbers keeps them.
-  { from: 8, to: 9, fn: (d) => {
-      const c = d.cfg;
-      if(c && typeof c === 'object'){
-        const dly = c.irDailyMax ?? c.irMax, wk = c.irWkndMax;
-        if(+dly === 20 && (wk == null || +wk === 4)){
-          c.irDailyMax = 0; c.irMax = 0; c.irWkndMax = 0;
-        }
-      }
-      return d;
-    }
-  },
+  // auto-builders and moved to their own keys — see _irMaxYearlyInit. Runs once
+  // per practice: a payload that already has the new keys is left alone, so a
+  // tab still on an older build re-saving the row (stamped v8) changes nothing.
+  { from: 8, to: 9, fn: (d) => { _irMaxYearlyInit(d.cfg); return d; } },
 ];
 
 function _runMigrations(d){
@@ -16375,7 +16363,7 @@ let S=/*S_START*/{
   irGroups:['North','South'],
   wkndNeeds:{},
   holNeeds:{},
-  cfg:{wdMax:20,wkMax:4,irMax:0,irDailyMax:0,irWkndMax:0,rest:1,anchorPct:70,shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
+  cfg:{wdMax:20,wkMax:4,irMax:0,irDailyMax:0,irWkndMax:0,irDailyMaxYr:0,irWkndMaxYr:0,rest:1,anchorPct:70,shiftTimes:{'1st':{dep:'06:30',ret:'15:00'}},
     // wRVU defaults per shift type. Overridden per-shift by s.wRVUGoal,
     // per-physician by p.wRVUMultiplier (1.0 = standard expectation).
     // 'IR <shift>' keys (IR 1st/2nd/3rd/Home) cover IR ROSTER shifts —
@@ -16820,9 +16808,29 @@ function _irGroupFteOnStaff(group, months){
 // and for IR weekend call. It is a YEARLY figure; blank or 0 means no maximum.
 function _irCallMaxBase(kind){
   const cfg=(S&&S.cfg)?S.cfg:{};
-  const v=kind==='weekend' ? cfg.irWkndMax : (cfg.irDailyMax ?? cfg.irMax);
+  // cfg.irDailyMaxYr / cfg.irWkndMaxYr hold them. The older keys (irDailyMax,
+  // irMax, irWkndMax) are read only while those are absent — data not yet
+  // migrated — because builds before rs-v128 still write the old keys (their
+  // Settings save clamps them to 31 / 12 and re-seeds 20 / 4) and must not be
+  // able to change a yearly maximum.
+  const v=kind==='weekend' ? (cfg.irWkndMaxYr ?? cfg.irWkndMax) : (cfg.irDailyMaxYr ?? cfg.irDailyMax ?? cfg.irMax);
   const n=+v;
   return (v!=null && v!=='' && isFinite(n) && n>0) ? n : Infinity;
+}
+// Fills cfg.irDailyMaxYr / cfg.irWkndMaxYr once, from the older keys (schema
+// v8 → v9, and a configuration file exported by an older build). Through
+// rs-v127 every practice was seeded with 20 / 4, nothing enforced them, and My
+// Schedule compared them with one MONTH's calls — so a pair that holds nothing
+// but that seed (or 0, or nothing) means "never set": no maximum. Numbers a
+// practice entered itself are carried over as they are.
+function _irMaxYearlyInit(c){
+  if(!c || typeof c !== 'object' || c.irDailyMaxYr != null || c.irWkndMaxYr != null) return c;
+  const dly = c.irDailyMax ?? c.irMax, wk = c.irWkndMax;
+  const dSeed = dly == null || +dly === 0 || +dly === 20, wSeed = wk == null || +wk === 0 || +wk === 4;
+  const never = dSeed && wSeed;
+  c.irDailyMaxYr = (!never && +dly > 0) ? +dly : 0;
+  c.irWkndMaxYr  = (!never && +wk  > 0) ? +wk  : 0;
+  return c;
 }
 // One physician's maximum for a calendar year: that number × their IR FTE × the
 // part of the year they are on staff (start May 1 at 1.0 FTE with a maximum of
@@ -26834,12 +26842,10 @@ function renderSettings(){
   // The yearly call maximums (rs-v128): blank = none. "Max DR weekend calls per
   // year" IS the yearly cap of the DR Weekends page (cfg.wkndYearCapBase);
   // cfg.wkMax, the older per-month figure, has no field any more and is left
-  // as stored.
-  [['cfg-wk','wkndYearCapBase'],['cfg-ir-daily','irDailyMax'],['cfg-ir-wknd','irWkndMax']].forEach(([id,k])=>{
+  // as stored. The IR maximums are cfg.irDailyMaxYr / cfg.irWkndMaxYr.
+  [['cfg-wk',+(S.cfg?.wkndYearCapBase)],['cfg-ir-daily',_irCallMaxBase('daily')],['cfg-ir-wknd',_irCallMaxBase('weekend')]].forEach(([id,v])=>{
     const el=document.getElementById(id); if(!el) return;
-    // the weekday field shows what the builder applies (cfg.irMax is its older name)
-    const v=+(k==='irDailyMax' ? (S.cfg?.irDailyMax ?? S.cfg?.irMax) : S.cfg?.[k]);
-    el.value=(isFinite(v)&&v>0)?v:'';
+    el.value=(isFinite(v)&&v>0)?v:'';        // the IR fields show exactly what the builders apply
   });
   // Per-field defaults — used when the saved value is undefined/null/0. Matches
   // the HTML input defaults and the state-init seed so there are no surprises.
@@ -27092,17 +27098,20 @@ function saveCfg(){
   let _badMax = false;
   const _maxOk = (elId, cur) => {
     const el = document.getElementById(elId);
-    if(el && el.validity && el.validity.badInput){ el.value = (+cur > 0) ? cur : ''; _badMax = true; return false; }
+    // unreadable text, or a negative number (which the clamp would turn into 0 = none)
+    if(el && el.validity && (el.validity.badInput || el.validity.rangeUnderflow)){ el.value = (isFinite(cur) && cur > 0) ? cur : ''; _badMax = true; return false; }
     return true;
   };
-  if(_maxOk('cfg-wk', S.cfg.wkndYearCapBase)){
+  if(_maxOk('cfg-wk', +S.cfg.wkndYearCapBase)){
     const _wkYr = _readNum('cfg-wk', 0, 0, 60);
     S.cfg.wkndYearCapBase = _wkYr > 0 ? _wkYr : 0;
     const _wy = document.getElementById('wknd-year-cap'); if(_wy && document.activeElement !== _wy) _wy.value = _wkYr > 0 ? _wkYr : '';
   }
-  if(_maxOk('cfg-ir-daily', S.cfg.irDailyMax ?? S.cfg.irMax)) S.cfg.irDailyMax = _readNum('cfg-ir-daily', 0, 0, 366);
-  if(_maxOk('cfg-ir-wknd', S.cfg.irWkndMax))                  S.cfg.irWkndMax  = _readNum('cfg-ir-wknd',  0, 0, 53);
-  if(S.cfg.irDailyMax != null) S.cfg.irMax = S.cfg.irDailyMax; // legacy alias
+  if(_maxOk('cfg-ir-daily', _irCallMaxBase('daily')))   S.cfg.irDailyMaxYr = _readNum('cfg-ir-daily', 0, 0, 366);
+  if(_maxOk('cfg-ir-wknd',  _irCallMaxBase('weekend'))) S.cfg.irWkndMaxYr  = _readNum('cfg-ir-wknd',  0, 0, 53);
+  // The older keys mirror them, for sessions still on a build before rs-v128.
+  if(S.cfg.irDailyMaxYr != null){ S.cfg.irDailyMax = S.cfg.irDailyMaxYr; S.cfg.irMax = S.cfg.irDailyMaxYr; }
+  if(S.cfg.irWkndMaxYr  != null) S.cfg.irWkndMax = S.cfg.irWkndMaxYr;
   // cfg.wkMax (the older per-month DR weekend figure, still read by the monthly
   // views) has no field any more: keep it usable.
   if(!(+S.cfg.wkMax > 0)) S.cfg.wkMax = 4;
@@ -27121,7 +27130,7 @@ function saveCfg(){
   S.cfg.useSolver = solverRadio ? solverRadio.value : 'greedy';
   triggerSave();
   if(typeof _toast === 'function'){
-    if(_badMax) _toast('A maximum field held text that is not a number \u2014 that maximum was left unchanged.', 'warn');
+    if(_badMax) _toast('A maximum field did not hold a usable number \u2014 that maximum was left unchanged.', 'warn');
     else _toast('Scheduler config saved.', 'ok');
   }
 }
@@ -39594,7 +39603,7 @@ const _SANITY_CHECKS = [
       }
       // The IR yearly call maximums are optional (blank / 0 = none); only a
       // negative or non-numeric value is wrong.
-      for(const k of ['irDailyMax','irWkndMax']){
+      for(const k of ['irDailyMaxYr','irWkndMaxYr','irDailyMax','irWkndMax']){
         if(cfg[k] == null || cfg[k] === '') continue;
         const v = +cfg[k];
         if(v < 0 || !Number.isFinite(v)) bad.push(`${k}=${cfg[k]}`);
@@ -41483,6 +41492,14 @@ function _setWkndSummerCap(v){
 function _setWkndYearCapBase(v){
   if(!_adminOnly('change weekend caps')) return;
   if(!S.cfg) S.cfg={};
+  // Unreadable text ("8e" — a number input then reports an empty value) or a
+  // negative number is not "blank = no cap": keep what is stored.
+  { const _el=document.getElementById('wknd-year-cap');
+    if(_el&&_el.validity&&(_el.validity.badInput||_el.validity.rangeUnderflow)){
+      _el.value=S.cfg.wkndYearCapBase>0?S.cfg.wkndYearCapBase:'';
+      if(typeof _toast==='function') _toast('That is not a usable number \u2014 the yearly cap was left unchanged.','warn');
+      return;
+    } }
   // 0 = no cap. Stored, never deleted: other open sessions merge cfg with
   // Object.assign and would keep a deleted key (the cap would come back).
   const n=+v; S.cfg.wkndYearCapBase=(v===''||!isFinite(n)||n<=0)?0:n;
@@ -44582,7 +44599,10 @@ function previewIRAA(){
     const L = _L(p, kind);
     if(!L || !(L.toDate > 0)) return { met: 1, ratio: 1e9 };
     const have = L.before + _cnt(p, kind);
-    return { met: have >= Math.ceil(L.toDate - 1e-9) ? 1 : 0, ratio: have / L.toDate };
+    // ...and only while they are not already ahead of an even spread of this
+    // period's quota (urgency < 1): someone far behind for the year (back from
+    // a long leave) would otherwise take every date until their cap was used up.
+    return { met: (have >= Math.ceil(L.toDate - 1e-9) || _urgency(p, kind) < 1 - 1e-9) ? 1 : 0, ratio: have / L.toDate };
   };
   function sortDaily(pool, date){
     return pool.slice().sort((a, b) => {
@@ -44676,10 +44696,16 @@ function previewIRAA(){
         // instead, so everyone's allowance is used evenly through the period and
         // the open slots are spread across it rather than piling up at the end
         // (or all landing after a mid-year starter arrives). Measured against
-        // the maximum only: when back-to-back spacing is what falls short,
-        // calendar order fills more.
-        const room = gPhys.reduce((sum, p) => sum + Math.max(0, lim[p.id][key].pm - cnt[p.id]), 0);
-        const short = room < todo.length;
+        // the maximum only — when back-to-back spacing is what falls short,
+        // calendar order fills more — and only the part of it that can be used.
+        // A physician's maximum counts only as far as they have open dates to use
+        // it on (_avail, filled above) ...
+        const room = gPhys.reduce((sum, p) => sum + Math.max(0, Math.min(lim[p.id][key].pm - cnt[p.id], _avail[p.id])), 0);
+        // ... against what the group could place with no maximum at all: the dates
+        // somebody can take, and no more than back-to-back spacing lets each hold.
+        const reach = Math.min(todo.filter(d => baseElig[d].length).length,
+          gPhys.reduce((sum, p) => sum + _irCallCapacity(todo.filter(d => baseElig[d].includes(p)), kind), 0));
+        const short = room < reach;
         const chrono = todo.slice().sort();
         const pos = {}; chrono.forEach((d, i) => { pos[d] = i; });
         const bits = Math.max(1, Math.ceil(Math.log2(chrono.length || 1)));
@@ -45981,8 +46007,18 @@ function previewIRRebalance(){
   }
 
   // ── Back-to-back checks against calls OUTSIDE the 6-month window ──
+  // Every (group|type|date) this run can re-plan. A call on any other key stays
+  // where it is when the plan is applied (other group or type, a day that is not
+  // a regular slot, holiday call) — it counts for back-to-back like a call
+  // outside the period.
+  const _replanKeys=new Set();
+  groups.forEach(g=>{ if(!S.physicians.some(p=>p.irFte>0&&p.irGroup===g)) return;
+    ['daily','weekend'].forEach(kind=>{ if(typ!=='both'&&typ!==kind) return; const wk=kind==='weekend';
+      const hol=new Set(S.irCalls.filter(c=>c.callType===kind&&c.irGroup===g&&inPeriod(c.date)&&(c.notes||'').includes('(Holiday)')).map(c=>c.date));
+      months.forEach(ym=>buildCal(ym).forEach(c=>{ if(!c.day||hol.has(c.date)) return;
+        if(wk ? (c.dow===5&&![c.date,addDays(c.date,1),addDays(c.date,2),addDays(c.date,3)].every(d=>isHolidayBlackout(d))) : (c.dow>=1&&c.dow<=4&&!isHolidayBlackout(c.date))) _replanKeys.add(`${g}|${kind}|${c.date}`); })); }); });
   function outsideAdjacent(pid, date, callType){
-    const outside=S.irCalls.filter(c=>c.physId===pid&&!inPeriod(c.date));
+    const outside=S.irCalls.filter(c=>c.physId===pid&&(!inPeriod(c.date)||!_replanKeys.has(`${c.irGroup}|${c.callType}|${c.date}`)));
     const prev=addDays(date,-1),next=addDays(date,1);
     if(callType==='daily'){
       return outside.some(c=>
@@ -46005,7 +46041,7 @@ function previewIRRebalance(){
   // never takes anyone past either. `irrLim` keeps them for the summary table.
   const _irrYr=months[0].slice(0,4), _irrStart=months[0]+'-01';
   const _irrEnd=(()=>{ const ym=months[months.length-1], [y,m]=ym.split('-').map(Number); return `${ym}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`; })();
-  const irrLim={};
+  let irrLim={}, _irrBack={};
   // Per group and call type: {capFn, share, base, held(p, orig), settle(orig)}.
   //   room  — the most of this group's dates a physician may hold in the period
   //           under the Settings maximum; the calls on those dates are being
@@ -46025,7 +46061,10 @@ function previewIRRebalance(){
     const room={}, outside={};
     gPhys.forEach(p=>{
       const m=mx[p.id], fixed=Math.max(0,m.inP-ahead[p.id]);
-      room[p.id]=isFinite(m.max)?Math.max(0,Math.min(m.pace-m.before,m.max-m.before-m.after)-fixed):Infinity;
+      // …except cover that the other group's pass of this same run hands back
+      // (_irrBack, known on the second planning pass): that room is free again.
+      const used=Math.max(0,fixed-((_irrBack[p.id]||{})[key]||0));
+      room[p.id]=isFinite(m.max)?Math.max(0,Math.min(m.pace-m.before,m.max-m.before-m.after)-used):Infinity;
       outside[p.id]=m.before+m.after+fixed;
     });
     const sh=_irFairShares(gPhys,dates,kind,room);
@@ -46038,6 +46077,8 @@ function previewIRRebalance(){
     };
   };
 
+  const _irrPlanAll=()=>{
+  irrLim={}; Object.assign(plan,{daily:[],weekend:[],swapsD:0,swapsW:0,failedD:[],failedW:[]});
   groups.forEach(g=>{
     const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
     if(!gPhys.length) return;
@@ -46267,6 +46308,31 @@ function previewIRRebalance(){
       });
     }
   });
+  };
+  // Rows of ANOTHER group of this run that take a call away from a physician:
+  // cover that the plan hands back to the group it belongs to. physId → {D, W}.
+  const _irrHandedBack=()=>{ const m={};
+    [...plan.daily,...plan.weekend].forEach(a=>{
+      if(a.origPhysId==null||a.origPhysId===a.physId) return;
+      const op=S.physicians.find(x=>x.id===a.origPhysId), k=a.callType==='weekend'?'W':'D';
+      if(op&&op.irGroup!==a.irGroup&&(irrLim[op.id]||{})[k]) (m[op.id]=m[op.id]||{D:0,W:0})[k]++;
+    });
+    return m; };
+  _irrPlanAll();
+  let _irrHb=_irrHandedBack();
+  if(Object.keys(_irrHb).length){
+    // Plan once more without charging those calls to their holder. The first
+    // plan stands if the second hands any of them back less often — the holder
+    // could then pass the Settings maximum.
+    const first={daily:plan.daily,weekend:plan.weekend,swapsD:plan.swapsD,swapsW:plan.swapsW,failedD:plan.failedD,failedW:plan.failedW}, lim1=irrLim;
+    _irrBack=_irrHb; _irrPlanAll();
+    const hb2=_irrHandedBack();
+    if(Object.keys(_irrHb).some(id=>['D','W'].some(k=>((hb2[id]||{})[k]||0)<_irrHb[id][k]))){ Object.assign(plan,first); irrLim=lim1; }
+    else _irrHb=hb2;
+  }
+  // A handed-back call is on a plan row, not "outside" any more (an unticked
+  // row counts it for its holder again — _irrUpdateDistribution, applyIRRebalance).
+  Object.keys(_irrHb).forEach(id=>['D','W'].forEach(k=>{ const L=(irrLim[id]||{})[k]; if(L) L.outside-=_irrHb[id][k]; }));
 
   plan.lim=irrLim; plan.year=_irrYr;         // for the live table (_irrUpdateDistribution)
   plan.stamp=_iraStamp();                    // the schedule and limits this plan was computed from
@@ -46459,7 +46525,7 @@ function _irrUpdateDistribution(){
       const td=_lD?Math.max(_lD.base,_lD.share):irDailyTargetPeriod(p,months);
       const pdNew=td>0?Math.round(newD/td*100):0;
       const dyEl=document.getElementById(`irrd-dy-${p.id}`);
-      if(dyEl) dyEl.innerHTML=_irrYearMaxCell(_lD,_irrPlan.daily.filter(a=>effectivePid(a)===p.id&&a.irGroup===p.irGroup).length);
+      if(dyEl) dyEl.innerHTML=_irrYearMaxCell(_lD,_irrPlan.daily.filter(a=>effectivePid(a)===p.id&&(a.irGroup===p.irGroup||a.isSwap)).length);
       const dChg=newD-oldD;
       const dArrow=dChg>0?`<span style="color:var(--green-t)"> ▲${dChg}</span>`:dChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(dChg)}</span>`:'';
       const dCls=newD>Math.ceil(td-1e-9)?'color:var(--red-t)':pdNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
@@ -46475,7 +46541,7 @@ function _irrUpdateDistribution(){
       const tw=_lW?Math.max(_lW.base,_lW.share):irWkndTargetPeriod(p,months);
       const pwNew=tw>0?Math.round(newW/tw*100):0;
       const wyEl=document.getElementById(`irrd-wy-${p.id}`);
-      if(wyEl) wyEl.innerHTML=_irrYearMaxCell(_lW,_irrPlan.weekend.filter(a=>effectivePid(a)===p.id&&a.irGroup===p.irGroup).length);
+      if(wyEl) wyEl.innerHTML=_irrYearMaxCell(_lW,_irrPlan.weekend.filter(a=>effectivePid(a)===p.id&&(a.irGroup===p.irGroup||a.isSwap)).length);
       const wChg=newW-oldW;
       const wArrow=wChg>0?`<span style="color:var(--green-t)"> ▲${wChg}</span>`:wChg<0?`<span style="color:var(--amber,#d97706)"> ▼${Math.abs(wChg)}</span>`:'';
       const wCls=newW>Math.ceil(tw-1e-9)?'color:var(--red-t)':pwNew>=85?'color:var(--green-t)':'color:var(--amber,#d97706)';
@@ -46496,6 +46562,9 @@ async function applyIRRebalance(){
   if(typeof _snapshotBeforeBulk === 'function'){
     try{ await _snapshotBeforeBulk('ir-rebalance'); }catch(_){}
   }
+  // The plan can be gone by now: a remote update re-rendered this page while
+  // the backup was being written, or a second click has already applied it.
+  if(!_irrPlan) return;
   const months  =_irrMonths();
   const grp     =document.getElementById('irr-grp')?.value||'both';
   const typ     =document.getElementById('irr-type')?.value||'both';
@@ -46571,13 +46640,13 @@ async function applyIRRebalance(){
     [...(_irrPlan.daily||[]),...(_irrPlan.weekend||[])].forEach(a=>{
       const cb=(a.isSwap&&a._swapIdx!==undefined)?document.getElementById(`irr-swap-${a._swapIdx}`):null;
       const pid=(cb&&!cb.checked)?a.origPhysId:a.physId, k=a.callType==='weekend'?'W':'D';
-      if(a.irGroup===grpOf(pid)) (eff[pid]=eff[pid]||{D:0,W:0})[k]++;          // own-group rows; the rest is in lim.outside
+      if(a.irGroup===grpOf(pid)||a.isSwap) (eff[pid]=eff[pid]||{D:0,W:0})[k]++;   // own-group rows and cover kept by unticking; the rest is in lim.outside
       if(a.irGroup===grpOf(a.physId)) (full[a.physId]=full[a.physId]||{D:0,W:0})[k]++;
     });
     const over=[];
     Object.keys(eff).forEach(pid=>['D','W'].forEach(k=>{
-      const L=(lim[pid]||{})[k], n=eff[pid][k];
-      if(L&&isFinite(L.max)&&L.outside+n>L.max&&n>((full[pid]||{})[k]||0))
+      const L=(lim[pid]||{})[k], n=eff[pid][k], _p=(S.physicians||[]).find(x=>x.id===+pid);
+      if(L&&isFinite(L.max)&&_p&&(_p.irFte||0)*_physYearFraction(_p,_irrPlan.year)>0&&L.outside+n>L.max&&n>((full[pid]||{})[k]||0))
         over.push(`${pname(+pid)}: ${L.outside+n} ${k==='W'?'weekend':'weekday'} calls in ${_irrPlan.year} (maximum ${L.max})`);
     }));
     if(over.length&&!confirm(`With the rows you unticked these physicians pass the Settings maximum:\n\n\u2022 ${over.join('\n\u2022 ')}\n\nApply anyway?`)) return;
@@ -53701,6 +53770,9 @@ async function importPracticeConfig(input){
       'irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','shiftPickGroups',
       'wkndNeeds','natLangRules','holidayDefs','physicianPairRules','siteCaps',
       'shiftSubNeeds','cfg'];
+    // A file exported before rs-v128 carries the IR maximums under the old keys
+    // only (possibly the never-enforced 20 / 4 seed): give it the yearly keys.
+    if(config.cfg && typeof config.cfg === 'object') _irMaxYearlyInit(config.cfg);
     overlay.forEach(k => { if(config[k] !== undefined) S[k] = config[k]; });
     if(typeof _audit === 'function') _audit('config.import', { fields: overlay });
     triggerSave();

@@ -27,7 +27,7 @@ function buildGroup({ maxD = 31, maxW = 8, start = '2027-05-01' } = {}) {
     mk(5, 'Full2', 1), mk(6, 'Full3', 1), mk(7, 'Full4', 1)];
   S.irCalls = []; S.vacations = []; S.holidays = []; S.holidayDefs = []; S.irShifts = []; S.drShifts = []; S.weekendCalls = []; S.natLangRules = [];
   S.tumorBoards = []; S.clinics = [];
-  S.cfg = Object.assign({}, S.cfg, { irDailyMax: maxD, irWkndMax: maxW, irMax: maxD });
+  S.cfg = Object.assign({}, S.cfg, { irDailyMaxYr: maxD, irWkndMaxYr: maxW, irDailyMax: maxD, irWkndMax: maxW, irMax: maxD });
   _isRestoring = false;
   if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
 }
@@ -249,7 +249,7 @@ test('what a colleague cannot take is split among the others — never past the 
     S.physicians.find(p => p.last === 'Full1').irCallBlackouts = [{ start: '2027-01-01', end: '2027-05-31', reason: 'leave' }];
     if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
     const roomy = await run('H1');
-    S.cfg.irDailyMax = 30; S.cfg.irMax = 30;               // H1 pace: 15 each — not enough to absorb it
+    S.cfg.irDailyMaxYr = 30;                               // H1 pace: 15 each — not enough to absorb it
     const tight = await run('H1');
     return { roomy, tight };
   }, FN);
@@ -267,7 +267,7 @@ test('what a colleague cannot take is split among the others — never past the 
 
 test('Settings: yearly maximums above 31, blank means none, and the DR weekend field is the yearly cap', async ({ page }) => {
   const r = await page.evaluate(() => {
-    S.cfg = Object.assign({}, S.cfg, { wkMax: 4, wkndYearCapBase: 7.5, irDailyMax: 31, irWkndMax: 8, irMax: 31 });
+    S.cfg = Object.assign({}, S.cfg, { wkMax: 4, wkndYearCapBase: 7.5, irDailyMaxYr: 31, irWkndMaxYr: 8, irDailyMax: 31, irWkndMax: 8, irMax: 31 });
     nav('settings', document.querySelector('.snav-item[data-pg="settings"]'));
     const val = id => document.getElementById(id).value;
     const shown = { wk: val('cfg-wk'), d: val('cfg-ir-daily'), w: val('cfg-ir-wknd') };
@@ -276,7 +276,7 @@ test('Settings: yearly maximums above 31, blank means none, and the DR weekend f
     saveCfg();
     const dr = { id: 900, first: 'D', last: 'R', role: 'DR', drFte: 1, irFte: 0, shiftElig: { s1: true, wknd: true } };
     const starter = { id: 901, first: 'I', last: 'R', role: 'IR', drFte: 0, irFte: 1, startDate: '2027-07-01' };
-    const out = { shown, daily: S.cfg.irDailyMax, wknd: S.cfg.irWkndMax, wk: S.cfg.wkMax, yearBase: S.cfg.wkndYearCapBase, drCap: _wkndYearCap(dr, 2027),
+    const out = { shown, daily: S.cfg.irDailyMaxYr, wknd: S.cfg.irWkndMaxYr, mirror: [S.cfg.irDailyMax, S.cfg.irMax, S.cfg.irWkndMax], wk: S.cfg.wkMax, yearBase: S.cfg.wkndYearCapBase, drCap: _wkndYearCap(dr, 2027),
       starterMax: _irCallMaxYear(starter, 'daily', 2027), starterMaxNext: _irCallMaxYear(starter, 'daily', 2028), starterMaxBefore: _irCallMaxYear(starter, 'daily', 2026),
       labels: [...document.querySelectorAll('label')].map(l => l.textContent).filter(t => /per year \(1\.0 FTE\)/.test(t)).length };
     set('cfg-ir-daily', ''); set('cfg-ir-wknd', ''); set('cfg-wk', '');
@@ -289,6 +289,7 @@ test('Settings: yearly maximums above 31, blank means none, and the DR weekend f
   expect(r.shown).toEqual({ wk: '7.5', d: '31', w: '8' });   // the field shows the cap that is enforced, not the old monthly number
   expect(r.daily).toBe(40);                                // used to be silently cut to 31
   expect(r.wknd).toBe(10);
+  expect(r.mirror).toEqual([40, 40, 10]);                  // the older keys follow, for sessions still on an older build
   expect(r.yearBase).toBe(9);                              // the DR weekend builders follow the Settings number
   expect(r.drCap).toBe(9);
   expect(r.wk).toBe(4);                                    // the per-month figure other screens read is left alone
@@ -332,7 +333,7 @@ test('a manual IR call past the maximum asks first; holiday call and "no maximum
     out.starterAtMax = _confirmIrCallMax(starter, 'weekend', '2027-11-05');     // 5 of 5 → asks (and we answer no)
     out.fullWithHoliday = _confirmIrCallMax(full, 'weekend', '2027-11-05');     // 7 regular + 1 holiday of 8 → no question
     out.daily = _confirmIrCallMax(starter, 'daily', '2027-11-08');              // weekday count is separate
-    S.cfg.irWkndMax = 0;
+    S.cfg.irWkndMaxYr = 0;
     out.noMax = _confirmIrCallMax(starter, 'weekend', '2027-11-05');
     window.confirm = real;
     return { out, asked };
@@ -367,7 +368,7 @@ test('the IR rebalancer never hands anyone a new date past the limits', async ({
     await run('H1');
     await doApply();
     // tighten the maximum afterwards, then ask the rebalancer to redistribute H1
-    S.cfg.irDailyMax = 24; S.cfg.irMax = 24; S.cfg.irWkndMax = 6;
+    S.cfg.irDailyMaxYr = 24; S.cfg.irWkndMaxYr = 6;
     if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
     const realConfirm = window.confirm, realAlert = window.alert; window.confirm = () => true; window.alert = () => {};
     nav('ir-rebalance', document.querySelector('.snav-item[data-pg="ir-rebalance"]'));
