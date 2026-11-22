@@ -123,3 +123,21 @@ test('Clear Period removes only the selected half-month', async ({ page }) => {
   expect(r.left).toEqual(['2027-01-06 Home', '2027-01-16', '2027-02-03', '2027-07-07']);   // was: July cleared, January untouched
   expect(r.asked).toContain('2027-01-01 to 2027-01-15');
 });
+
+test('min-cost-flow fills every slot the greedy can when colleagues are away for months (no ceiling on extra shifts)', async ({ page }) => {
+  const r = await page.evaluate(async ({ build, preview }) => {
+    const run = new Function('return ' + preview)(), mk = new Function('return ' + build)();
+    const count = async solver => {
+      mk(solver);
+      S.vacations.push({ id: 7101, physId: 3, start: '2027-01-01', end: '2027-01-31', type: 'Vacation' });
+      S.vacations.push({ id: 7102, physId: 4, start: '2027-01-01', end: '2027-01-31', type: 'Vacation' });
+      if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+      return await run('2027-01');
+    };
+    return { mcf: await count('mcf'), greedy: await count('greedy') };
+  }, FN);
+  // Two of five away all month: the other three can hold at most three of the four daily slots.
+  expect(r.mcf.doubles).toBe(0);
+  expect(r.mcf.away).toEqual([]);
+  expect(r.mcf.n).toBe(r.greedy.n);                          // was: stopped at quota + 10 and called the rest unfillable
+});
