@@ -3758,6 +3758,7 @@ tbody tr:hover{background:var(--bg3)}
     <button class="br bsm" onclick="clearWkCalls()" title="Clear all entries from this schedule">🗑 Reset All</button>
     <button class="bt bsm" onclick="exportWkCallXls()" title="Download the weekend call schedule as an Excel file">⬇ Excel</button>
     <button class="bp bsm" onclick="exportDRCallWorkbook()" title="Download the full DR call workbook: weekend call, open slots, holiday call, and a per-physician tally with daytime DR FTE">📗 Full DR Call Workbook</button>
+    <button class="bp bsm" onclick="exportAllCallWorkbook(_drCallYear())" title="Download every call assignment for a year — DR weekend, IR weekday and weekend, and holiday call — with open slots and per-physician totals">📒 All Call for a Year</button>
   </div>
 
   <div class="note ni">DR weekend call is <strong>two shifts per weekend — Day and Swing</strong> — each covering both Saturday and Sunday by the same physician. Enter the Saturday date. Physicians outside Eastern time (by home address) can only take Swing.</div>
@@ -3839,6 +3840,7 @@ tbody tr:hover{background:var(--bg3)}
     </span>
     <span style="flex:1"></span>
     <button class="bt bsm" onclick="_tallyExportCsv()" title="Download this tally as an Excel file">⬇ Excel</button>
+    <button class="bp bsm" onclick="exportAllCallWorkbook(_tallyYear)" title="Download every call assignment for a year — DR weekend, IR weekday and weekend, and holiday call — with open slots and per-physician totals">📒 All Call for a Year</button>
   </div>
   <div class="card scroll-x" id="tally-box"><p class="txt3">Loading…</p></div>
 </div>
@@ -3876,6 +3878,7 @@ tbody tr:hover{background:var(--bg3)}
   <div class="pg-title">IR Schedule</div>
   <div class="flexe" style="margin-bottom:8px;gap:6px;flex-wrap:wrap">
     <button class="bt bsm" onclick="exportIRSchedXls()" title="Download this month's IR shifts and calls as an Excel file" style="align-self:flex-end;order:99">⬇ Excel</button>
+    <button class="bp bsm" onclick="exportAllCallWorkbook((document.getElementById('irc-mo')?.value||'').slice(0,4))" title="Download every call assignment for a year — DR weekend, IR weekday and weekend, and holiday call — with open slots and per-physician totals" style="align-self:flex-end;order:100">📒 All Call for a Year</button>
     <div class="fg m0" ><label>Month</label><input id="irc-mo" type="month" oninput="renderIRCal()"></div>
     <div class="fg m0" ><label>Group</label>
       <select id="irc-grp" onchange="renderIRCal()">
@@ -4443,6 +4446,7 @@ tbody tr:hover{background:var(--bg3)}
     <div class="tab" onclick="holTab('schedule',this)">📅 Schedule</div>
     <span style="flex:1"></span>
     <button class="bt bsm" onclick="exportHolidayXls()" title="Download all holiday call assignments as an Excel file" style="align-self:center">⬇ Excel</button>
+    <button class="bp bsm" onclick="exportAllCallWorkbook(document.getElementById('hol-yr')?.value)" title="Download every call assignment for a year — DR weekend, IR weekday and weekend, and holiday call — with open slots and per-physician totals" style="align-self:center;margin-left:6px">📒 All Call for a Year</button>
   </div>
 
   <!-- DEFINE HOLIDAYS TAB -->
@@ -15897,7 +15901,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v132';
+const _SW_VERSION = 'rs-v133';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17682,7 +17686,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v132';
+const _RS_HTML_BUILD = 'rs-v133';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -42672,6 +42676,112 @@ function exportDRCallWorkbook(){
   ]);
   if(typeof _audit==='function') _audit('export.drCallWorkbook',{year:yr,weekend:wknd.length,open:opens.length});
   if(typeof _toast==='function') _toast(`Downloaded DR_Call_${yr}.xlsx`,'ok');
+}
+// ── Annual call workbook: every call assignment for one year (rs-v133) ──
+// One workbook: DR weekend call, IR weekday and weekend call, holiday call
+// (DR and IR), the call slots still open, and per-physician totals. Asks for
+// the year, defaulting to the one the page is showing.
+function exportAllCallWorkbook(yrDefault){
+  const def = /^\d{4}$/.test(String(yrDefault||'')) ? String(yrDefault) : String(new Date().getFullYear());
+  const ans = prompt('Download every call assignment for which year?', def);
+  if(ans == null) return;
+  const yr = String(ans).trim();
+  if(!/^\d{4}$/.test(yr)){ if(typeof _toast==='function') _toast('Enter a four-digit year, e.g. '+def+'.','warn'); return; }
+  const nm = pid => { const p = _physById(pid); return p ? (p.first ? `${p.last}, ${p.first}` : (p.last || String(pid))) : (pid == null ? '' : String(pid)); };
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dow = iso => { const d = parseDateLocal(iso); return d ? DOW[d.getDay()] : ''; };
+  const span = (a, b) => a === b ? dow(a) : `${dow(a)}–${dow(b)}`;
+  const inYr = d => String(d||'').startsWith(yr);
+  const HDR = ['From','To','Days','Call','Type','Group / Subspecialty','Site','Physician','Notes'];
+  const rows = [];   // [from, to, days, call, type, group/sub, site, physician, notes]
+
+  // DR weekend call (one row per Sat–Sun assignment)
+  (S.weekendCalls||[]).forEach(w => {
+    const sat = w.satDate || w.date; if(!inYr(sat)) return;
+    const sun = w.sunDate || addDays(sat, 1);
+    rows.push([sat, sun, span(sat, sun), 'DR weekend call', (w.wshift||'day')==='swing' ? 'Swing' : 'Day',
+      w.sub || 'General', w.site || '', nm(w.physId), w.notes || '']);
+  });
+  // IR call (weekday, and Fri→Mon weekends recorded on the Friday)
+  const irHolCover = {};   // physId → Set of dates already shown as an IR holiday call
+  (S.irCalls||[]).forEach(c => {
+    if(!inYr(c.date)) return;
+    const wk = c.callType === 'weekend', end = wk ? addDays(c.date, 3) : c.date, hol = _isHolidaySyncedCall(c);
+    if(hol){ const set = irHolCover[c.physId] || (irHolCover[c.physId] = new Set()); for(let d = c.date; d <= end; d = addDays(d, 1)) set.add(d); }
+    rows.push([c.date, end, span(c.date, end), hol ? 'IR holiday call' : 'IR call', wk ? 'Weekend (Fri→Mon)' : 'Weekday',
+      c.irGroup || '', c.site || '', nm(c.physId), c.notes || '']);
+  });
+  // Holiday call from the Holiday tab: one row per block (physician × holiday).
+  // An IR holiday already listed as an IR call above is not listed twice.
+  const blocks = {};
+  (S.holidays||[]).forEach(h => {
+    if(!h.date || h.physId == null) return;
+    if(String(h.year || String(h.date).slice(0,4)) !== yr) return;
+    const k = [h.physId, h.name||'', h.group||'', h.wshift||'', h.sub||''].join('|');
+    (blocks[k] = blocks[k] || { h, dates: [] }).dates.push(h.date);
+  });
+  Object.values(blocks).forEach(({ h, dates }) => {
+    dates.sort();
+    const from = dates[0], to = dates[dates.length - 1], dr = (h.group || '') === 'DR';
+    if(!dr && irHolCover[h.physId] && dates.some(d => irHolCover[h.physId].has(d))) return;
+    rows.push([from, to, span(from, to), dr ? 'DR holiday call' : 'IR holiday call',
+      (h.name || 'Holiday') + (dr && h.wshift ? (h.wshift === 'swing' ? ' · Swing' : ' · Day') : ''),
+      dr ? (h.sub || 'General') : String(h.group || '').replace(/^IR-/, ''), '', nm(h.physId), h.notes || '']);
+  });
+  rows.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[3] < b[3] ? -1 : a[3] > b[3] ? 1 : (a[7] < b[7] ? -1 : 1)));
+
+  // Call still open: DR weekend slots on the open-shift market, IR call slots
+  // nobody holds, and IR holiday weekends with no holiday call assigned yet.
+  const open = [['Date','Days','Call','Group / Subspecialty','Status']];
+  (S.openShifts||[]).filter(o => o.shiftType === 'Weekend Call' && !o.claimedBy && inYr(o.date))
+    .forEach(o => open.push([o.date, span(o.date, addDays(o.date, 1)), 'DR weekend call · ' + ((o.wshift||'day') === 'swing' ? 'Swing' : 'Day'), o.sub || 'General', 'Open — not claimed']));
+  getIRGroups().forEach(g => {
+    if(!(S.physicians||[]).some(p => p.irFte > 0 && p.irGroup === g)) return;
+    const held = kind => new Set((S.irCalls||[]).filter(c => c.irGroup === g && c.callType === kind).map(c => c.date));
+    const hd = held('daily'), hw = held('weekend');
+    _irYearSlots('daily', yr, g).forEach(d => { if(!hd.has(d)) open.push([d, dow(d), 'IR call · Weekday', g, 'Nobody assigned']); });
+    _irYearSlots('weekend', yr, g).forEach(d => { if(!hw.has(d)) open.push([d, span(d, addDays(d, 3)), 'IR call · Weekend (Fri→Mon)', g, 'Nobody assigned']); });
+    for(let m = 1; m <= 12; m++) buildCal(`${yr}-${String(m).padStart(2,'0')}`).forEach(c => {
+      if(c.day && c.dow === 5 && _irHolidayWeekend(c.date, g) && !hw.has(c.date))
+        open.push([c.date, span(c.date, addDays(c.date, 3)), 'IR holiday weekend', g, 'Holiday call not assigned yet (Holiday Call tab)']);
+    });
+  });
+  open.splice(1, open.length - 1, ...open.slice(1).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[3] < b[3] ? -1 : 1)));
+
+  // Totals per physician — kept as separate counters, never summed into one number.
+  const T = {}, t = pid => T[pid] || (T[pid] = { wd: 0, ws: 0, ird: 0, irw: 0, drHol: new Set(), irHol: 0 });
+  (S.weekendCalls||[]).forEach(w => { if(!inYr(w.satDate || w.date) || w.physId == null) return; const x = t(w.physId); if((w.wshift||'day') === 'swing') x.ws++; else x.wd++; });
+  (S.irCalls||[]).forEach(c => { if(!inYr(c.date) || c.physId == null) return; const x = t(c.physId);
+    if(_isHolidaySyncedCall(c)) x.irHol++; else if(c.callType === 'weekend') x.irw++; else x.ird++; });
+  Object.values(blocks).forEach(({ h, dates }) => {
+    if((h.group || '') === 'DR') t(h.physId).drHol.add(h.name || '');
+    else if(!(irHolCover[h.physId] && dates.some(d => irHolCover[h.physId].has(d)))) t(h.physId).irHol++;
+  });
+  const people = (S.physicians||[]).filter(p => T[p.id] || ((p.drFte > 0 || p.irFte > 0) && _physYearFraction(p, yr) > 0))
+    .sort((a, b) => nm(a.id).localeCompare(nm(b.id)));
+  const tot = [['Physician','Day DR FTE','IR FTE','Part of year on staff','DR wknd Day','DR wknd Swing','DR holiday blocks',
+    'IR weekday call','IR weekday max','IR weekend call','IR weekend max','IR holiday call']];
+  const mx = v => isFinite(v) ? v : '';
+  people.forEach(p => {
+    const x = T[p.id] || t(p.id), fr = _physYearFraction(p, yr);
+    tot.push([nm(p.id), Math.round(_drDayFte(p) * 100) / 100, p.irFte || 0, fr < 1 ? `${Math.round(fr * 100)}% (from ${_physStartDate(p)})` : '100%',
+      x.wd, x.ws, x.drHol.size,
+      x.ird, p.irFte > 0 ? mx(_irCallMaxYear(p, 'daily', yr)) : '', x.irw, p.irFte > 0 ? mx(_irCallMaxYear(p, 'weekend', yr)) : '', x.irHol]);
+  });
+
+  if(!rows.length && open.length === 1){ if(typeof _toast==='function') _toast(`No call assignments or call slots for ${yr}.`,'info'); return; }
+  const pick = f => [HDR].concat(rows.filter(f));
+  _xlsxDownload(`All_Call_${yr}`, [
+    { name: 'All call', rows: [HDR].concat(rows) },
+    { name: 'DR weekend', rows: pick(r => r[3] === 'DR weekend call') },
+    // IR call records, holiday-synced ones included (their type is Weekday / Weekend)
+    { name: 'IR call', rows: pick(r => r[3] === 'IR call' || (r[3] === 'IR holiday call' && /^(Weekday|Weekend)/.test(r[4]))) },
+    { name: 'Holiday call', rows: pick(r => /holiday call$/.test(r[3])) },
+    { name: 'Open slots', rows: open },
+    { name: 'Totals by physician', rows: tot },
+  ]);
+  if(typeof _audit==='function') _audit('export.allCallWorkbook', { year: yr, assignments: rows.length, open: open.length - 1 });
+  if(typeof _toast==='function') _toast(`Downloaded All_Call_${yr}.xlsx — ${rows.length} call assignment${rows.length===1?'':'s'}.`,'ok');
 }
 function exportHolidayXls(){
   // One row per BLOCK (physician × holiday), spanning all its dates — a
