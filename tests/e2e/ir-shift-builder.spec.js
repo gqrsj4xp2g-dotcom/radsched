@@ -182,3 +182,33 @@ test('a call-day rule set to "IR daily call only" stays that way after data arri
   }, FN);
   expect(r).toEqual(['ir-call']);                              // was: rewritten to 'any-call' on every load
 });
+
+test('rebalancing a freshly built schedule changes little, and a second rebalance changes nothing', async ({ page }) => {
+  const r = await page.evaluate(async ({ build, preview }) => {
+    const run = new Function('return ' + preview)(), mk = new Function('return ' + build)();
+    mk('mcf');
+    S.vacations.push({ id: 7201, physId: 5, start: '2027-02-06', end: '2027-02-28', type: 'Vacation' });   // the part-time floater away for three weeks
+    if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    const realConfirm = window.confirm, realAlert = window.alert; window.confirm = () => true; window.alert = () => {};
+    let built = 0;
+    for (const ym of ['2027-01', '2027-02', '2027-03']) { await run(ym); built += _irsaPreview.length; applyIRShiftAA(); await new Promise(res => setTimeout(res, 150)); }
+    const rebalance = async () => {
+      nav('ir-rebalance', document.querySelector('.snav-item[data-pg="ir-rebalance"]')); renderIRRebalancePrep();
+      const ry = document.getElementById('irr-yr'); if (![...ry.options].some(o => o.value === '2027')) { const o = document.createElement('option'); o.value = '2027'; o.textContent = '2027'; ry.appendChild(o); }
+      ry.value = '2027'; document.getElementById('irr-period').value = 'H1'; document.getElementById('irr-grp').value = 'both'; document.getElementById('irr-type').value = 'shifts';
+      _irrPlan = null; previewIRRebalance();
+      await new Promise(res => setTimeout(res, 300));
+      for (let i = 0; i < 600 && !_irrPlan; i++) await new Promise(res => setTimeout(res, 50));
+      const swaps = (_irrPlan && _irrPlan.swapsS) || 0;
+      if (swaps) { await applyIRRebalance(); await new Promise(res => setTimeout(res, 300)); }
+      return swaps;
+    };
+    const first = await rebalance(), second = await rebalance();
+    window.confirm = realConfirm; window.alert = realAlert;
+    return { built, first, second, floater: S.irShifts.filter(x => x.physId === 5).length };
+  }, FN);
+  expect(r.built).toBeGreaterThan(150);
+  expect(r.first).toBeLessThanOrEqual(Math.ceil(r.built * 0.1));   // was: most shifts re-picked from scratch
+  expect(r.second).toBe(0);                                         // settles
+  expect(r.floater).toBeGreaterThan(0);
+});

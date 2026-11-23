@@ -11915,7 +11915,7 @@ async function runSolverComparison(opts){
       const ctl = ['irsa-period','irsa-yr','irsa-mo','irsa-grp'].map(id => document.getElementById(id)), old = ctl.map(e => e ? e.value : null);
       const ui = ['irsa-box','irsa-apply','irsa-apply-note'].map(id => document.getElementById(id));
       const oldUi = [ui[0] && ui[0].innerHTML, ui[1] && ui[1].style.display, ui[2] && ui[2].textContent];
-      const setv = (e, v) => { if(!e) return; if(e.tagName === 'SELECT' && ![...e.options].some(o => o.value === v)){ const o = document.createElement('option'); o.value = v; o.textContent = v; e.appendChild(o); } e.value = v; };
+      const added = [], setv = (e, v) => { if(!e) return; if(e.tagName === 'SELECT' && ![...e.options].some(o => o.value === v)){ const o = document.createElement('option'); o.value = v; o.textContent = v; e.appendChild(o); added.push(o); } e.value = v; };
       const y = months[0].slice(0, 4), half = m => months.length === 6 && months.every((x, i) => x === y + '-' + String(m + i).padStart(2, '0'));
       try{
         if(S.cfg) S.cfg.useSolver = 'greedy';
@@ -11928,6 +11928,7 @@ async function runSolverComparison(opts){
       } finally {
         if(S.cfg) S.cfg.useSolver = wasFlag;
         previewIRShiftAA._deferred = wasDef; previewIRShiftAA._stamp = wasStamp;
+        added.forEach(o => o.remove());  // a picker the IR shift page has not filled yet must stay empty, or it never gets its years
         ctl.forEach((e, i) => { if(e && old[i] != null) e.value = old[i]; });
         if(ui[0]) ui[0].innerHTML = oldUi[0]; if(ui[1]) ui[1].style.display = oldUi[1]; if(ui[2]) ui[2].textContent = oldUi[2];
       }
@@ -15647,7 +15648,10 @@ function _applyRemoteData(d){
       _cdrMigrated++;
     });
   });
-  if(!_cdrDone && S.cfg && (S.physicians||[]).length) S.cfg._cdrAnyCallMigrated = true;
+  // Set it whenever the payload carried a roster, even an empty one: a new
+  // practice has no legacy rules, and leaving it unset there broadened the
+  // first strict-daily rules its admin picked at the next load.
+  if(!_cdrDone && S.cfg && Array.isArray(d.physicians)) S.cfg._cdrAnyCallMigrated = true;
   if(_cdrMigrated > 0){
     try{ console.warn('[RS] Migrated '+_cdrMigrated+' call-day rule(s) from callType=ir-call to any-call (now covers weekend calls too). If you intended strict daily-only scope, edit the rule to re-set callType to "IR daily call only".'); }catch(_){}
   }
@@ -15893,7 +15897,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v131';
+const _SW_VERSION = 'rs-v132';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17678,7 +17682,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v131';
+const _RS_HTML_BUILD = 'rs-v132';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -25309,6 +25313,7 @@ function previewIRShiftAA(){
             if(_irsaBlocked(p,_s.date,assigned))return false;
             if(_conferenceBlocksSlot(p.id,_s.date,_s.site))return false;
             var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,ym:_mo};
+            if(!irSiteRuleOk(p,_s.site,_s.date))return false;          // blocked site / blackout / allowedShifts (MCF: siteOk)
             if(!dayConditionSiteOk(p,_s.site,_s.date,'ir-shift'))return false;
             if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||''))return false;
             if(!callDayRulesOk(p,_ictx))return false;
@@ -37393,7 +37398,7 @@ function natLangRulesOk(ctx){
       if(t.requireSite  && ctx.site  && ctx.site  !== t.requireSite)  return false;
       if(t.requireShift && ctx.shift && ctx.shift !== t.requireShift) return false;
     }
-    if(t.action==='limit'){
+    if(t.action==='limit'&&!ctx.noLimit){   // noLimit: the caller's counts are not in S yet (Rebalance)
       const monthKey=(ctx.date||'').slice(0,7);
       const yearKey =(ctx.date||'').slice(0,4);
       // Count existing assignments for this physician in the same "kind" bucket
@@ -46273,9 +46278,16 @@ function previewIRRebalance(){
       (S.irShifts||[]).forEach(s=>{ if(inPeriod(s.date)&&!_replanIds.has(s.id)) _busyKept.add(s.physId+'|'+s.date); });
       (S.drShifts||[]).forEach(s=>{ if(inPeriod(s.date)) _busyKept.add(s.physId+'|'+s.date); });
       gShiftEntries.forEach(e=>{ if(!e._synthetic){ const k=e.physId+'|'+e.date; _pendOrig[k]=(_pendOrig[k]||0)+1; } });
-      const _freeFor=(p,entry)=>!_busyKept.has(p.id+'|'+entry.date)&&!(_pendOrig[p.id+'|'+entry.date]>0)
+      // Free for an entry also means the IR procedure-shift rules the builders' on-call path and Pass 1
+      // apply (site, day, sequence, call-day, conference, natural-language), used by the pin and the pick
+      // alike. Natural-language 'limit' counts are skipped: S.irShifts still holds the shifts this plan
+      // redistributes, so counting them would strip a physician already at the limit.
+      const _freeFor=(p,entry)=>{ const c={physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift',irGroup:g,noLimit:true};
+        return !_busyKept.has(p.id+'|'+entry.date)&&!(_pendOrig[p.id+'|'+entry.date]>0)
         &&!_conferenceBlocksSlot(p.id,entry.date,entry.site)
-        &&callDayRulesOk(p,{physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift'});
+        &&irSiteRuleOk(p,entry.site,entry.date)&&dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')
+        &&sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'')
+        &&callDayRulesOk(p,c)&&tbRulesOk(p,c)&&natLangRulesOk(c); };
 
       gShiftEntries.forEach(entry=>{
         if(!entry._synthetic) _pendOrig[entry.physId+'|'+entry.date]--;
@@ -46310,9 +46322,6 @@ function previewIRRebalance(){
           if(p.allowedSites?.length&&!p.allowedSites.includes(entry.site)) return false;
           if(gSAsgn.some(a=>a.physId===p.id&&a.date===entry.date)) return false;
           if(!_freeFor(p,entry)) return false;
-          if(!siteRuleOk(p,entry.site,entry.date.slice(0,7),entry.date,'s1')) return false;
-          if(!dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')) return false;
-          if(!sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'')) return false;
           if(isSoldBackDate(p.id,entry.date)) return false;
           // Mixed-site gate: only anchors + permitted fill-ins can cover this slot
           if(!_irsaEligibleForSlot(p,entry)) return false;
@@ -46330,6 +46339,10 @@ function previewIRRebalance(){
             const qA=shiftCapFn(a),qB=shiftCapFn(b);
             const underA=cntS[a.id]<qA,underB=cntS[b.id]<qB;
             if(underA!==underB) return underA?-1:1;
+            // The current holder keeps the shift while under quota (rs-v131 review): a rebalance only
+            // moves what it must, instead of re-picking every slot in date order.
+            const holdA=!entry._synthetic&&a.id===entry.physId,holdB=!entry._synthetic&&b.id===entry.physId;
+            if(holdA!==holdB) return holdA?-1:1;
             // Anchor fit: drives toward anchorPct% compliance without blocking slot coverage
             // Only for an anchor site with shifts in this plan (the builders' rule): a physician whose
             // home site has no IR slots cannot be "at anchor" anywhere, so they rank as a floater.
@@ -46340,9 +46353,9 @@ function previewIRRebalance(){
             const fitA=a.anchorSite===entry.site?ancNeedA:-ancNeedA;
             const fitB=b.anchorSite===entry.site?ancNeedB:-ancNeedB;
             if(fitA!==fitB) return fitB-fitA;
-            // Highest deficit first
-            const defA=irShiftTargetPeriod(a,months)-cntS[a.id];
-            const defB=irShiftTargetPeriod(b,months)-cntS[b.id];
+            // Highest relative deficit first (the builders' FTE pressure, (q − got) / q)
+            const defA=(qA-cntS[a.id])/Math.max(qA,1);
+            const defB=(qB-cntS[b.id])/Math.max(qB,1);
             if(Math.abs(defA-defB)>1e-9) return defB-defA;
             const iA=(gPhys.findIndex(x=>x.id===a.id)-off+n)%n;
             const iB=(gPhys.findIndex(x=>x.id===b.id)-off+n)%n;
@@ -54551,6 +54564,9 @@ async function importPracticeConfig(input){
     // A file exported before rs-v128 carries the IR maximums under the old keys
     // only (possibly the never-enforced 20 / 4 seed): give it the yearly keys.
     if(config.cfg && typeof config.cfg === 'object') _irMaxYearlyInit(config.cfg);
+    // The call-day rule migration flag is practice state, not configuration: a
+    // file without it (rs-v130 or older, hand-edited) must not re-arm the migration.
+    if(config.cfg && typeof config.cfg === 'object' && S.cfg && S.cfg._cdrAnyCallMigrated) config.cfg._cdrAnyCallMigrated = true;
     overlay.forEach(k => { if(config[k] !== undefined) S[k] = config[k]; });
     if(typeof _audit === 'function') _audit('config.import', { fields: overlay });
     triggerSave();
