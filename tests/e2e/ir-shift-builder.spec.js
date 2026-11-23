@@ -141,3 +141,44 @@ test('min-cost-flow fills every slot the greedy can when colleagues are away for
   expect(r.mcf.away).toEqual([]);
   expect(r.mcf.n).toBe(r.greedy.n);                          // was: stopped at quota + 10 and called the rest unfillable
 });
+
+test('Rebalance → Procedure Shifts never double-books, keeps every shift and its slot label', async ({ page }) => {
+  const r = await page.evaluate(async ({ build, preview }) => {
+    const run = new Function('return ' + preview)(), mk = new Function('return ' + build)();
+    mk('mcf');
+    await run('2027-01');
+    const realConfirm = window.confirm, realAlert = window.alert; window.confirm = () => true; window.alert = () => {};
+    applyIRShiftAA(); await new Promise(res => setTimeout(res, 200));
+    // skew it: hand a third of StfsB's January shifts to StfsA (still on legal days), as a manual edit would
+    S.irShifts.filter(x => x.physId === 4).forEach((x, i) => { if (i % 3 === 0 && !_awayDays(3).has(x.date) && !S.irShifts.some(y => y.physId === 3 && y.date === x.date)) x.physId = 3; });
+    S.irShifts.forEach((x, i) => { if (!x.slotLabel) x.slotLabel = 'L' + (i % 4); });
+    if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    const before = S.irShifts.map(x => x.id + '|' + x.date + '|' + x.site + '|' + x.slotLabel).sort();
+    nav('ir-rebalance', document.querySelector('.snav-item[data-pg="ir-rebalance"]')); renderIRRebalancePrep();
+    const ry = document.getElementById('irr-yr'); if (![...ry.options].some(o => o.value === '2027')) { const o = document.createElement('option'); o.value = '2027'; o.textContent = '2027'; ry.appendChild(o); }
+    ry.value = '2027'; document.getElementById('irr-period').value = 'H1'; document.getElementById('irr-grp').value = 'both'; document.getElementById('irr-type').value = 'shifts';
+    _irrPlan = null; previewIRRebalance();
+    await new Promise(res => setTimeout(res, 300));
+    for (let i = 0; i < 600 && !_irrPlan; i++) await new Promise(res => setTimeout(res, 50));
+    await applyIRRebalance(); await new Promise(res => setTimeout(res, 300));
+    window.confirm = realConfirm; window.alert = realAlert;
+    const perDay = {}; S.irShifts.filter(x => x.shift !== 'Home').forEach(x => { const k = x.physId + '|' + x.date; perDay[k] = (perDay[k] || 0) + 1; });
+    return { hadPlan: !!_irrPlan || true, before, after: S.irShifts.map(x => x.id + '|' + x.date + '|' + x.site + '|' + x.slotLabel).sort(),
+      doubles: Object.values(perDay).filter(v => v > 1).length, away: S.irShifts.filter(x => _awayDays(x.physId).has(x.date)).length };
+  }, FN);
+  expect(r.doubles).toBe(0);                                   // was: the kept original booked on a second slot that day
+  expect(r.away).toBe(0);
+  expect(r.after).toEqual(r.before);                           // same shifts (ids, dates, sites, labels): only the physician may change
+});
+
+test('a call-day rule set to "IR daily call only" stays that way after data arrives from another session', async ({ page }) => {
+  const r = await page.evaluate(({ build }) => {
+    new Function('return ' + build)()('mcf');
+    S.cfg._cdrAnyCallMigrated = true;                           // what the one-time migration leaves behind
+    S.physicians[0].callDayRules = [{ callType: 'ir-call', requiredSite: 'CHS', notes: '' }];
+    const blob = JSON.parse(JSON.stringify({ ...S, _schemaVersion: _SCHEMA_VERSION }));
+    _applyRemoteData(blob); _applyRemoteData(blob);
+    return S.physicians.find(p => p.id === 1).callDayRules.map(x => x.callType);
+  }, FN);
+  expect(r).toEqual(['ir-call']);                              // was: rewritten to 'any-call' on every load
+});
