@@ -15982,7 +15982,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v134';
+const _SW_VERSION = 'rs-v135';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17771,7 +17771,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v134';
+const _RS_HTML_BUILD = 'rs-v135';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -25108,6 +25108,9 @@ function previewIRShiftAA(){
   // Pre-allocated must-be-at-site days and earlier groups' cross-group fill-ins can be dated after the slot
   // being filled, so the sequence check looks ahead through the plan too.
   var _rp=_rulePlan(function(){return assigned;},null,true);
+  // rs-v135: per slot, whether its pool came from Pass 2-4 (a site rule, a sequence rule or the quota relaxed),
+  // and the preview entries placed from such a pool — labelled once the plan is final (_irsaRelaxedNotes).
+  var _rxOf=new Map(),_irsaRx=[];
   var gi,grp,phys,cells,slots,callMap,gFt,rawQ,callDays,pi,di,assigned,cnt,anc,si,slot,cPid,cP,pool,picked,note,ai;
   for(gi=0;gi<groups.length;gi++){
     grp=groups[gi];
@@ -25378,7 +25381,8 @@ function previewIRShiftAA(){
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
           &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&callDayRulesOk(p,_ictx);
-      });}
+      });
+      _rxOf.set(_s,!_irsaP1&&pool.length>0);}
       /* Pass 5: cross-group fill-in fallback.
          Only reached when the same-group pool is completely exhausted across
          all prior passes (nobody in this group is eligible + available). We
@@ -25445,6 +25449,7 @@ function previewIRShiftAA(){
       // (via _irsaPreview below) and can be inspected by sequence rules
       // that scope to a specific labeled slot.
       assigned.push({physId:picked.id,date:slot.date,site:slot.site,notes:note,slotLabel:slot.slotLabel||'',isFillIn:_isCross||!countsQ,_preAllocSlotIndex:slot.slotIndex});
+      if(_rxOf.get(slot))assigned[assigned.length-1]._rx=true;
       if(countsQ){cnt[picked.id]++;if(picked.anchorSite&&picked.anchorSite===slot.site)anc[picked.id]++;}
       totalA++;
     }
@@ -25462,6 +25467,7 @@ function previewIRShiftAA(){
       // slots at the same (date, site) and hide "already placed today"
       // from the diagnostic. slotIndex is unique per (date, site, role).
       _irsaPreview.push({physId:assigned[ai].physId,date:assigned[ai].date,site:assigned[ai].site,irGroup:_realGrp,shift:'1st',sub:'',notes:assigned[ai].notes,slotLabel:assigned[ai].slotLabel||'',isFillIn:!!assigned[ai].isFillIn,_preAllocSlotIndex:assigned[ai]._preAllocSlotIndex});
+      if(assigned[ai]._rx)_irsaRx.push(_irsaPreview[_irsaPreview.length-1]);
     }
     for(pi=0;pi<phys.length;pi++){
       phys[pi]._irsaAftCnt=cnt[phys[pi].id]||0;
@@ -25507,12 +25513,14 @@ function previewIRShiftAA(){
       }
     });
   })();
+  // rs-v135: label the Pass 2-4 shifts that break a rule in the final plan (rotated slot labels included)
+  var _irsaNRx=_irsaRelaxedNotes(_irsaRx,_irsaPreview);
   var box=document.getElementById('irsa-box'),applyBtn=document.getElementById('irsa-apply');
   if(!_irsaPreview.length){if(box)box.innerHTML='<div class="note '+(errors.length?'nw':'ni')+'">'+(errors.length?errors.join('<br>'):'No slots to fill for this period.')+'</div>';if(applyBtn)applyBtn.style.display='none';return;}
   var ancE=0,ancH=0,ri,row,rp,xi;
   for(ri=0;ri<_irsaPreview.length;ri++){row=_irsaPreview[ri];rp=null;for(xi=0;xi<allP.length;xi++){if(allP[xi].id===row.physId){rp=allP[xi];break;}}if(rp&&rp.anchorSite){ancE++;if(rp.anchorSite===row.site)ancH++;}}
   var ancPD=ancE>0?Math.round(ancH/ancE*100):0,allN=_irsaPreview.length;
-  var html='<div class="card mb10" ><div class="card-title">Preview \u2014 '+periodLbl+'<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">'+allN+' assigned \xb7 '+totalU+' unfillable \xb7 '+callF+' on-call \xb7 anchor '+ancPD+'% (target ~'+ancTgt+'%)</span></div><div class="g4 mb10" ><div class="met"><div class="met-lbl">Assigned</div><div class="met-val" style="color:var(--green-t)">'+allN+'</div></div><div class="met"><div class="met-lbl">On-Call</div><div class="met-val" style="color:var(--blue-t)">'+callF+'</div></div><div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:'+(Math.abs(ancPD-ancTgt)<=8?'var(--green-t)':'var(--amber,#d97706)')+'">'+ ancPD+'%</div></div><div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:'+(totalU?'var(--red-t)':'var(--txt3)')+'">'+totalU+'</div></div></div><div class="scroll-x"><table><thead><tr><th>Physician</th><th>Group</th><th>IR FTE</th><th>Period Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th></tr></thead><tbody>';
+  var html='<div class="card mb10" ><div class="card-title">Preview \u2014 '+periodLbl+'<span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">'+allN+' assigned \xb7 '+totalU+' unfillable \xb7 '+callF+' on-call'+(_irsaNRx?' \xb7 '+_irsaNRx+' rule relaxed':'')+' \xb7 anchor '+ancPD+'% (target ~'+ancTgt+'%)</span></div><div class="g4 mb10" ><div class="met"><div class="met-lbl">Assigned</div><div class="met-val" style="color:var(--green-t)">'+allN+'</div></div><div class="met"><div class="met-lbl">On-Call</div><div class="met-val" style="color:var(--blue-t)">'+callF+'</div></div><div class="met"><div class="met-lbl">Anchor Rate</div><div class="met-val" style="color:'+(Math.abs(ancPD-ancTgt)<=8?'var(--green-t)':'var(--amber,#d97706)')+'">'+ ancPD+'%</div></div><div class="met"><div class="met-lbl">Unfillable</div><div class="met-val" style="color:'+(totalU?'var(--red-t)':'var(--txt3)')+'">'+totalU+'</div></div></div><div class="scroll-x"><table><thead><tr><th>Physician</th><th>Group</th><th>IR FTE</th><th>Period Quota</th><th>Assigned</th><th>Attain %</th><th>Anchor %</th></tr></thead><tbody>';
   var gj,grp2,gp2,pj,p2,g2,q2,pct,hA,aR,col,acol;
   for(gj=0;gj<groups.length;gj++){grp2=groups[gj];gp2=allP.filter(function(p){return p.irFte>0&&p.irGroup===grp2;});
     for(pj=0;pj<gp2.length;pj++){p2=gp2[pj];if(!p2._irsaQta&&!p2._irsaAftCnt)continue;
@@ -25554,6 +25562,28 @@ function previewIRShiftAA(){
   var _applyNote=document.getElementById('irsa-apply-note');
   if(_applyNote)_applyNote.textContent='Apply adds these '+allN+' shift(s); existing shifts are kept.';
   previewIRShiftAA._stamp=_irsaStamp();
+}
+
+// rs-v135: the greedy builder's Pass 2 relaxes the site rules (site, day-condition, conference and
+// natural-language rules), Pass 3 the sequence rules too, Pass 4 the quota as well. A shift one of them
+// placed gets a note naming the rule it breaks in the FINAL plan -- every group's shifts, the rotated
+// slot labels, the shifts on either side of it (the builder does not place days in date order) -- as the
+// MCF labels its relaxed placements, and only then: an over-quota fill that breaks nothing keeps its note.
+// rx: those passes' preview entries (rewritten in place); preview: the whole plan. Returns how many.
+function _irsaRelaxedNotes(rx, preview){
+  if(!rx||!rx.length) return 0;
+  var all=_rulePlan(preview,null,true), n=0;
+  rx.forEach(function(a){
+    var p=(S.physicians||[]).find(function(x){return x.id===a.physId;});
+    if(!p) return;
+    var others=function(l){return (l||[]).filter(function(e){return e!==a;});};
+    var plan={drop:null,ahead:true,at:function(id,d){return others(all.at(id,d));},of:function(id){return others(all.of(id));}};
+    var ctx={physId:p.id,date:a.date,site:a.site,shift:'1st',kind:'ir-shift',irGroup:a.irGroup,plan:plan};
+    var seq=!sequenceOk(p,a.date,a.date.slice(0,7),a.site,a.slotLabel||'',plan);
+    var site=!(irSiteRuleOk(p,a.site,a.date)&&dayConditionSiteOk(p,a.site,a.date,'ir-shift')&&tbRulesOk(p,ctx)&&natLangRulesOk(ctx));
+    if(seq||site){a.notes=seq?'Auto (sequence rule relaxed)':'Auto (site rule relaxed)';n++;}
+  });
+  return n;
 }
 
 // A preview is only good for the schedule, roster and settings it was computed from (rs-v129; same
@@ -30834,13 +30864,20 @@ function addHoliday(){
   const pid   = +document.getElementById('hol-phys')?.value;
   const date  = document.getElementById('hol-date')?.value;
   const grp   = document.getElementById('hol-grp')?.value||'DR';
-  const name  = document.getElementById('hol-name')?.value.trim();
-  const yr    = +document.getElementById('hol-yr')?.value||new Date().getFullYear();
+  let   name  = document.getElementById('hol-name')?.value.trim();
+  let   yr    = +document.getElementById('hol-yr')?.value||new Date().getFullYear();
   const notes = document.getElementById('hol-notes')?.value.trim()||'';
   if(!pid)   { _toast('Select a physician.', 'err'); return; }
   if(!date)  { _toast('Select a date.', 'err'); return; }
   if(!name)  { _toast('Enter a holiday name.', 'err'); return; }
   if(typeof _canEditDate==='function' && !_canEditDate(date)) return;
+  // The Year is the holiday season this counts toward (rs-v135, _holAssignYear): the
+  // definition holding this date decides it, not the Year box's default.
+  const _fy = _holAssignYear(name, date, yr);
+  if(!_fy) return;
+  const _yrNote = _fy.def && (_fy.year !== yr || _fy.name !== name)
+    ? `Filed under ${_fy.year}: the year of the "${_fy.name}" ${_fy.year} holiday definition.` : '';
+  name = _fy.name; yr = _fy.year;
   const p = S.physicians.find(x=>x.id===pid);
   if(!p) return;
   if(grp==='DR' && p.role==='IR') { _toast('IR-only physicians cannot take DR holiday call.','warn'); return; }
@@ -30882,6 +30919,9 @@ function addHoliday(){
   if(grp==='DR') _syncHolDRDates(pid, [date], name);
   ['hol-date','hol-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   triggerSave();
+  // The Year box follows the season just used, so the next assignment starts there.
+  { const ye = document.getElementById('hol-yr'); if(ye && +ye.value !== yr) ye.value = yr; }
+  if(_yrNote && typeof _toast==='function') _toast(_yrNote, 'info');
   _populateHolFilterName();
   renderHolTable();
   renderHolCounter();
@@ -40590,13 +40630,12 @@ function _sanityAutoFixAll(){
 // The wizard:
 //   1. Reads last year's holidayDefs (or the most recent year with
 //      defs if 'last year' is empty)
-//   2. Computes the equivalent date in the target year for each:
-//        - "First Monday of September" style: use month + nth-DOW rule
-//          when we can infer it
-//        - Otherwise: same calendar date in the target year
+//   2. Computes the equivalent dates in the target year for each
+//      (_yrMapDef): federal holidays through the official dates,
+//      others by their month/day or day-of-week pattern
 //   3. Surfaces a preview table — admin can deselect any row
-//   4. On apply: pushes the new holidayDefs (additive — never
-//      overwrites existing target-year defs).
+//   4. On apply: pushes the new holidayDefs with the source's slots
+//      and notes (additive — never overwrites existing target-year defs).
 //
 // Idempotent: re-running the wizard after applying skips defs that
 // already exist for that (name, year). Safe to re-run.
@@ -40610,10 +40649,9 @@ function _yrInit(){
   }
 }
 
-// Best-effort: convert a date to a "nth weekday of month" rule when
-// the date IS the nth Mon/Tue/.../Sun of its month. Returns null if
-// the date is not a "patterned" holiday (e.g., Christmas is Dec 25
-// every year — calendar-fixed).
+// Describe a date as "nth weekday of month" (every date is one); isLast
+// when it is also the last such weekday of the month. Whether a holiday
+// follows this rule or its calendar date is decided in _yrMapDef.
 function _yrDateRule(isoDate){
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate || '');
   if(!m) return null;
@@ -40628,9 +40666,12 @@ function _yrDateRule(isoDate){
   return { month: mo, dow, nth, isLast };
 }
 
+// The nth occurrence wins over "last": a 4th Thursday that is also the last
+// one stays the 4th (Thanksgiving). Only a 5th occurrence, which not every
+// month has, becomes the last one.
 function _yrApplyRule(targetYear, rule){
-  const { month, dow, nth, isLast } = rule;
-  if(isLast){
+  const { month, dow, nth } = rule;
+  if(nth >= 5){
     // Last Monday of month etc. — walk back from month-end.
     const d = new Date(targetYear, month, 0);  // last day of `month`
     while(d.getDay() !== dow) d.setDate(d.getDate() - 1);
@@ -40647,6 +40688,115 @@ function _yrIso(d){
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yy}-${mm}-${dd}`;
+}
+function _yrDays(a, b){ return Math.round((parseDateLocal(b) - parseDateLocal(a)) / 864e5); }
+// Same month/day `shift` years on (Feb 29 → Feb 28 in a common year).
+function _yrSameDay(iso, shift){
+  const y = +iso.slice(0, 4) + shift, md = iso.slice(5);
+  return (md === '02-29' && new Date(y, 1, 29).getMonth() !== 1) ? `${y}-02-28` : `${y}-${md}`;
+}
+// Easter Sunday (Gregorian computus).
+function _yrEaster(y){
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const n = h + l - 7 * m + 114;
+  return _yrIso(new Date(y, Math.floor(n / 31) - 1, (n % 31) + 1));
+}
+// Federal holiday a definition stands for: its name read the way the holiday
+// lottery reads names (_holHistCanonHoliday) with dates within a week of the
+// holiday, or dates that are exactly an official block. k = which year's
+// holiday it is relative to the definition's year (-1: a Dec block filed
+// under the next year).
+function _yrFedFor(def, ds){
+  if(!ds.length || typeof officialUSHolidays !== 'function') return null;
+  const canon = typeof _holHistCanonHoliday === 'function' ? _holHistCanonHoliday(def.name) : def.name;
+  let best = null;
+  [0, -1, 1].forEach(k => officialUSHolidays(+def.year + k).forEach((h, i) => {
+    const exact = h.dates.join() === ds.join();
+    if(!exact && h.name !== canon) return;
+    const dist = exact ? -1 : Math.min(...ds.map(d => Math.abs(_yrDays(h.actual, d))));
+    if(dist <= 7 && (!best || dist < best.dist)) best = { i, k, h, dist, exact };
+  }));
+  return best;
+}
+// A definition's dates in the target year → { dst, how, via, fed }.
+//  • Federal holiday (_yrFedFor): an exact official block becomes the target
+//    year's official block — the observed day and absorbed weekend that
+//    Import official holidays builds. Other shapes keep their distance from a
+//    weekday-rule holiday (Thanksgiving Thu+Fri stays Thu+Fri) and, for a
+//    fixed-date one, their observed/actual role (not for an "… Eve" or a
+//    "Day after …") or else their month/day.
+//  • Anything else moves one block of consecutive days at a time, so a
+//    Fri–Sun stays contiguous. Easter holidays keep their distance from
+//    Easter. The same name's definition from an earlier year, when there is
+//    one, settles month/day vs weekday rule. Otherwise a block touching a
+//    weekday-rule federal holiday ("Black Friday") keeps its distance from
+//    it; one within 3 days of a fixed-date one (Christmas Eve, Dec 31) keeps
+//    its month/day; a Monday, or a block built around a weekend, keeps its
+//    weekday rule ("3rd Monday of April", the nth preferred over "last");
+//    everything else keeps its month/day.
+// Every date keeps its offset from the definition's year: Dec 31 filed under
+// 2027 rolls to Dec 31 2027 for 2028.
+function _yrMapDef(def, target, allDefs){
+  const ds = [...new Set((def.dates || []).filter(d => _yrDateRule(d)))].sort();
+  const shift = target - +def.year;
+  const ord = n => n + (['th', 'st', 'nd', 'rd'][n] || 'th');
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const fed = _yrFedFor(def, ds);
+  if(fed){
+    const ht = officialUSHolidays(target + fed.k)[fed.i], hs = fed.h;
+    if(fed.exact) return { dst: ht.dates.slice(), how: `official ${ht.name} ${target + fed.k} dates`, via: 'official', fed: ht };
+    if(_FED_HOLIDAYS[fed.i].kind === 'nth')
+      return { dst: ds.map(d => addDays(ht.actual, _yrDays(hs.actual, d))), how: `same days around ${ht.name} (${ht.actual})`, via: 'rule', fed: ht };
+    // "Day after Christmas" on a Monday is the observed Christmas that year, but
+    // it is still Dec 26 next year: a name relative to the holiday keeps its date.
+    if(!/\b(eve|after|before|following|prior|post|pre)\b/i.test(def.name || '') && ds.every(d => d === hs.actual || d === hs.observed))
+      return { dst: [...new Set(ds.map(d => d === hs.actual ? ht.actual : ht.observed))].sort(),
+        how: `${ht.name} ${[...new Set(ds.map(d => d === hs.actual ? 'actual' : 'observed'))].join(' + ')} day`, via: 'official', fed: ht };
+    return { dst: ds.map(d => _yrSameDay(d, shift)), how: 'same month/day', via: 'same', fed: ht };
+  }
+  const clean = String(def.name || '').toLowerCase().replace(/[^a-z]/g, '');
+  const easter = /goodfriday|easter|holythursday|maundythursday|holysaturday|palmsunday|ashwednesday|mardigras/.test(clean);
+  const prior = (allDefs || []).filter(d => +d.year < +def.year && String(d.name || '').trim().toLowerCase() === String(def.name || '').trim().toLowerCase())
+    .sort((a, b) => b.year - a.year)[0];
+  const priorDates = prior ? (prior.dates || []).filter(d => _yrDateRule(d)) : [];
+  const runs = [];
+  ds.forEach(d => { const r = runs[runs.length - 1]; if(r && _yrDays(r[r.length - 1], d) === 1) r.push(d); else runs.push([d]); });
+  const dst = [], hows = []; let via = 'same';
+  runs.forEach(run => {
+    const a = run.find(d => { const w = parseDateLocal(d).getDay(); return w >= 1 && w <= 5; }) || run[0];
+    const ay = +a.slice(0, 4);
+    let near = null;
+    [ay - 1, ay, ay + 1].forEach(y => officialUSHolidays(y).forEach((h, i) => {
+      const dist = Math.min(...run.map(d => Math.abs(_yrDays(h.actual, d))));
+      if(dist <= (_FED_HOLIDAYS[i].kind === 'nth' ? 1 : 3) && (!near || dist < near.dist)) near = { h, i, y, dist };
+    }));
+    const ps = prior ? +def.year - +prior.year : 0;
+    const priorSame = priorDates.some(p => _yrSameDay(p, ps) === a);
+    const priorRule = !priorSame && priorDates.some(p => _yrApplyRule(+p.slice(0, 4) + ps, _yrDateRule(p)) === a);
+    let dstA, how, rule = false;
+    if(easter){
+      const e0 = _yrEaster(ay), e1 = _yrEaster(ay + shift);
+      dstA = addDays(e1, _yrDays(e0, a)); how = `same days around Easter (${e1})`; rule = true;
+    } else if(near && _FED_HOLIDAYS[near.i].kind === 'nth' && !priorSame){
+      const ht = officialUSHolidays(near.y + shift)[near.i];
+      dstA = addDays(ht.actual, _yrDays(near.h.actual, a)); how = `same days around ${ht.name} (${ht.actual})`; rule = true;
+    } else {
+      const r = _yrDateRule(a);
+      const useRule = priorSame ? false : priorRule ? true
+        : !near && (r.dow === 1 || (run.length > 1 && run.some(d => [0, 6].includes(parseDateLocal(d).getDay()))));
+      if(useRule){
+        dstA = _yrApplyRule(ay + shift, r); rule = true;
+        how = `${r.nth >= 5 ? 'last' : ord(r.nth)} ${DOW[r.dow]} of ${MON[r.month - 1]}`;
+      } else { dstA = _yrSameDay(a, shift); how = 'same month/day'; }
+    }
+    if(rule) via = 'rule';
+    run.forEach(d => dst.push(addDays(dstA, _yrDays(a, d))));
+    if(!hows.includes(how)) hows.push(how);
+  });
+  return { dst: [...new Set(dst)].sort(), how: hows.join('; '), via, fed: null };
 }
 
 function previewYearRollover(){
@@ -40669,26 +40819,30 @@ function previewYearRollover(){
   }
   const sourceYr = years[0];
   const sourceDefs = defs.filter(d => d.year === sourceYr);
-  const existingTargetNames = new Set(defs.filter(d => d.year === target).map(d => d.name));
+  const norm = s => String(s || '').trim().toLowerCase();
+  const targetDefs = defs.filter(d => d.year === target);
+  const existingTargetNames = new Set(targetDefs.map(d => norm(d.name)));
 
   // Build the plan.
+  const planned = new Set();
   const plan = sourceDefs.map(def => {
-    if(existingTargetNames.has(def.name)){
-      return { name: def.name, status: 'skip', reason: `Already exists for ${target}`, newDates: [] };
+    const src = (def.dates || []).slice().sort();
+    if(existingTargetNames.has(norm(def.name))){
+      return { name: def.name, status: 'skip', reason: `Already exists for ${target}`, src, dst: [] };
     }
-    // For each date in the source def, compute the target-year date.
-    const newDates = (def.dates || []).map(srcDate => {
-      const rule = _yrDateRule(srcDate);
-      if(rule){
-        // Patterned — use the rule.
-        return { src: srcDate, dst: _yrApplyRule(target, rule), via: 'rule' };
-      }
-      // Calendar-fixed — same month/day, new year.
-      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(srcDate);
-      if(!m) return { src: srcDate, dst: null, via: 'unparseable' };
-      return { src: srcDate, dst: `${target}-${m[2]}-${m[3]}`, via: 'fixed' };
-    });
-    return { name: def.name, status: 'add', sourceYr, newDates, includeInApply: true };
+    if(planned.has(norm(def.name))) return { name: def.name, status: 'skip', reason: `Listed twice in ${sourceYr}`, src, dst: [] };
+    planned.add(norm(def.name));
+    const m = _yrMapDef(def, target, defs);
+    if(!m.dst.length) return { name: def.name, status: 'skip', reason: 'No valid dates', src, dst: [] };
+    const same = targetDefs.find(d => (d.dates || []).slice().sort().join() === m.dst.join());
+    if(same) return { name: def.name, status: 'skip', reason: `Same dates as “${same.name}” (${target})`, src, dst: m.dst, how: m.how };
+    return { name: def.name, status: 'add', sourceYr, srcId: def.id, src, dst: m.dst, how: m.how, via: m.via, fed: m.fed, includeInApply: true };
+  });
+  // Flag a date another target-year holiday (existing or in this plan) also covers.
+  plan.forEach(p => {
+    if(p.status !== 'add') return;
+    const others = [...targetDefs, ...plan.filter(q => q !== p && q.status === 'add').map(q => ({ name: q.name, dates: q.dst }))];
+    p.warn = others.map(o => { const hit = (o.dates || []).filter(d => p.dst.includes(d)); return hit.length ? `shares ${hit.join(', ')} with “${o.name}”` : ''; }).filter(Boolean).join('; ');
   });
   _yrRolloverPlan = { target, sourceYr, items: plan };
 
@@ -40698,24 +40852,23 @@ function previewYearRollover(){
   let html = `<div style="margin-bottom:10px;font-weight:600">Rolling ${sourceYr} → ${target}: ${adds.length} new holiday def(s), ${skips.length} skipped.</div>`;
   if(plan.length){
     html += '<table style="width:100%;font-size:12px"><thead><tr><th class="tal">Include</th><th class="tal">Holiday</th><th class="tal">Source date(s)</th><th class="tal">→ New date(s)</th><th class="tal">Status</th></tr></thead><tbody>';
+    const mono = (d, color) => `<span style="font-family:ui-monospace,monospace;font-size:11px${color ? ';color:' + color : ''}">${escHtml(d)}</span>`;
     plan.forEach((p, i) => {
-      const dates = p.newDates.length
-        ? p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px">${escHtml(d.src)} → ${escHtml(d.dst || '?')}</span>`).join('<br>')
-        : '<span class="txt3">—</span>';
       const checkbox = p.status === 'add'
         ? `<input type="checkbox" id="yr-inc-${i}" checked onchange="_yrTogglePlan(${i}, this.checked)">`
         : '';
       const statusColor = p.status === 'add' ? 'var(--green-t)' : 'var(--txt3)';
+      const dstColor = p.via && p.via !== 'same' ? 'var(--blue-t)' : 'var(--txt2)';
       html += `<tr style="border-top:1px solid var(--bdr)">
         <td style="padding:6px 8px">${checkbox}</td>
         <td style="padding:6px 8px;font-weight:600">${escHtml(p.name)}</td>
-        <td style="padding:6px 8px">${p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px">${escHtml(d.src)}</span>`).join('<br>') || '—'}</td>
-        <td style="padding:6px 8px">${p.newDates.map(d => `<span style="font-family:ui-monospace,monospace;font-size:11px;color:${d.via==='rule'?'var(--blue-t)':'var(--txt2)'}">${escHtml(d.dst || '?')}</span>`).join('<br>') || '—'}</td>
-        <td style="padding:6px 8px;color:${statusColor}">${p.status === 'add' ? '✚ Will add' : '⏭ ' + (p.reason || 'Skip')}</td>
+        <td style="padding:6px 8px">${p.src.map(d => mono(d)).join('<br>') || '—'}</td>
+        <td style="padding:6px 8px">${p.dst.map(d => mono(d, dstColor)).join('<br>') || '—'}${p.how ? `<div class="txt3" style="font-size:10px">${escHtml(p.how)}</div>` : ''}</td>
+        <td style="padding:6px 8px;color:${statusColor}">${p.status === 'add' ? '✚ Will add' : '⏭ ' + escHtml(p.reason || 'Skip')}${p.warn ? `<div style="font-size:10px;color:var(--amber,#d97706)">⚠ ${escHtml(p.warn)}</div>` : ''}</td>
       </tr>`;
     });
     html += '</tbody></table>';
-    html += `<div class="note ni" style="font-size:11px;margin-top:8px">Blue dates were computed via day-of-week rule (e.g., "first Monday of September"). Other dates use the same month/day in the new year. Verify each before applying.</div>`;
+    html += `<div class="note ni" style="font-size:11px;margin-top:8px">Federal holidays take the official ${target} dates, with the observed day and weekend block that Import official holidays uses. Blue dates follow a pattern (official dates, a day-of-week rule such as "3rd Mon of Apr", or days around a holiday); grey dates keep the same month/day. Slots and notes are copied from ${sourceYr}. Verify each before applying.</div>`;
   }
   result.innerHTML = html;
   const applyBtn = document.getElementById('yr-apply');
@@ -40734,20 +40887,31 @@ function applyYearRollover(){
     return;
   }
   const plan = _yrRolloverPlan;
-  const adds = plan.items.filter(p => p.status === 'add' && p.includeInApply !== false);
+  // Re-check names at apply time: another session may have added some since the preview.
+  const have = new Set((S.holidayDefs || []).filter(d => d.year === plan.target).map(d => String(d.name || '').trim().toLowerCase()));
+  const adds = plan.items.filter(p => p.status === 'add' && p.includeInApply !== false && !have.has(String(p.name || '').trim().toLowerCase()));
   if(!adds.length){
     alert('Nothing selected to apply. Tick at least one row.');
     return;
   }
   if(!confirm(`Add ${adds.length} holiday definition(s) for ${plan.target}? Already-existing defs for ${plan.target} are left alone.`)) return;
   if(!Array.isArray(S.holidayDefs)) S.holidayDefs = [];
+  const OFFICIAL_NOTE = /^Official( \(falls \d{4}-\d\d-\d\d, observed \d{4}-\d\d-\d\d\))?$/;
   for(const p of adds){
+    const src = S.holidayDefs.find(d => d.id === p.srcId) || {};
     const newDef = {
       id: S.nextId++,
       name: p.name,
       year: plan.target,
-      dates: p.newDates.map(d => d.dst).filter(Boolean),
+      dates: p.dst.slice(),
     };
+    // Carry the staffing over: a definition without slots gets nobody on the
+    // holiday lottery and leaves IR weekend call treating the weekend as regular.
+    ['drSlots', 'irNorthSlots', 'irSouthSlots', 'irSlots'].forEach(k => { if(src[k] != null) newDef[k] = src[k]; });
+    if(src.irSlotsByGroup) newDef.irSlotsByGroup = { ...src.irSlotsByGroup };
+    newDef.notes = (p.fed && OFFICIAL_NOTE.test(src.notes || ''))
+      ? (p.fed.observed !== p.fed.actual ? `Official (falls ${p.fed.actual}, observed ${p.fed.observed})` : 'Official')
+      : (src.notes || '');
     S.holidayDefs.push(newDef);
   }
   if(typeof _audit === 'function') _audit('rollover.year', { target: plan.target, added: adds.map(p => p.name) });
@@ -46462,6 +46626,55 @@ function _irrQuotas(gPhys, slots, targetFn){
   return q;
 }
 
+// Both Rebalance → Procedure Shifts planners (redistribute and fill to 100% FTE): each date's slots are shared
+// among the group's physicians on staff that day (start date), as irShiftTargetPeriod and the builders prorate.
+// entries: the plan's slots ({date}). target: each physician's share (unrounded); quotas: whole numbers
+// summing to entries.length (_irrQuotas).
+function _irrStartQuotas(gPhys, entries){
+  const fteOn={}, target={};
+  entries.forEach(e=>{ if(fteOn[e.date]==null) fteOn[e.date]=gPhys.reduce((s,x)=>s+(_physStartedBy(x,e.date)?x.irFte:0),0); });
+  gPhys.forEach(p=>{ target[p.id]=entries.reduce((w,e)=>w+(fteOn[e.date]>0&&_physStartedBy(p,e.date)?p.irFte/fteOn[e.date]:0),0); });
+  return {target, quotas:_irrQuotas(gPhys,entries.length,p=>target[p.id])};
+}
+
+// Both Rebalance → Procedure Shifts planners: the IR procedure-shift rules a slot is checked against before p
+// is put on it — the ones the builders' on-call path and Pass 1 apply (conference, site, day, sequence,
+// call-day, tumor-board, natural-language). Sequence rules and natural-language 'limit' counts read the plan
+// as it stands (rs-v134): rp is its _rulePlan, whose drop set holds the stored shifts the plan replaces.
+// Someone taking over a slot is also checked at the later days they still hold within their rule span: they
+// keep those if nobody else can take them, so the takeover must not break a rule there. That includes the
+// days they keep for certain — a shift the plan does not replace (Home, another group's, the next period's)
+// or a DR shift: sequenceOk only looks back, so a takeover the day before one of those is only seen from there.
+// A natural-language limit already counts the shifts kept for certain; the later replaced shifts they still
+// hold count too (rs-v135), so a takeover leaves room for them.
+// held: the replaced shifts, with their current physicians; holds(p, entry): p already works this slot.
+function _irrRuleCheck(g, months, rp, held, holds){
+  const drop=rp.drop, ownLater={}, keptOf={};
+  held.forEach(e=>{ (ownLater[e.physId]=ownLater[e.physId]||[]).push(e); });
+  (S.irShifts||[]).forEach(s=>{ if(!drop.has(s.id)&&s.date>=months[0]) (keptOf[s.physId]=keptOf[s.physId]||[]).push(s); });
+  (S.drShifts||[]).forEach(s=>{ if(s.date>=months[0]) (keptOf[s.physId]=keptOf[s.physId]||[]).push(s); });
+  const seqSpan=p=>Math.max(0,...[p.seqRules||{}].concat(p.siteRules||[],p.siteSeqRules||[]).map(r=>Math.max(+(r&&r.maxConsec)||0,+(r&&r.minRest)||0)));
+  const seqOk=(p,entry)=>{
+    if(!sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'',rp)) return false;
+    const span=holds(p,entry)?0:seqSpan(p); if(!span) return true;
+    const lim=addDays(entry.date,span), inSpan=e=>e.date>entry.date&&e.date<=lim;
+    const later=(ownLater[p.id]||[]).filter(inSpan), pts=later.concat((keptOf[p.id]||[]).filter(inSpan));
+    if(!pts.length) return true;
+    const v=_rulePlan(rp.of(p.id).concat([{physId:p.id,date:entry.date,site:entry.site,slotLabel:entry.slotLabel||''}],later),drop);
+    return pts.every(e=>sequenceOk(p,e.date,e.date.slice(0,7),e.site,e.slotLabel||'',v)); };
+  const limited=p=>(S.natLangRules||[]).some(r=>r&&r.enabled!==false&&r.then&&r.then.action==='limit'&&(!r.when||r.when.physId==null||r.when.physId===p.id));
+  const limitOk=(p,entry,c)=>{
+    if(!natLangRulesOk(c)) return false;
+    if(holds(p,entry)||!limited(p)) return true;
+    const later=(ownLater[p.id]||[]).filter(e=>e.date>entry.date);
+    return !later.length||natLangRulesOk(Object.assign({},c,{plan:_rulePlan(rp.of(p.id).concat(later),drop)})); };
+  return (p,entry)=>{ const c={physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift',irGroup:g,plan:rp};
+    return !_conferenceBlocksSlot(p.id,entry.date,entry.site)
+      &&irSiteRuleOk(p,entry.site,entry.date)&&dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')
+      &&seqOk(p,entry)
+      &&callDayRulesOk(p,c)&&tbRulesOk(p,c)&&limitOk(p,entry,c); };
+}
+
 // "calls this year / Settings maximum" cell of the rebalancer's summary table.
 // L: {max, outside} for one physician and call type; n: calls in the period under the plan.
 function _irrYearMaxCell(L, n){
@@ -46557,10 +46770,8 @@ function previewIRRebalance(){
       // Use FTE-proportional share of ACTUAL existing shifts — not slot-config targets.
       // This guarantees redistribution reaches 100% regardless of how irShiftSlots is configured.
       // Each date's shifts are shared among the physicians on staff that day (start date), as
-      // irShiftTargetPeriod (the target shown) and the builders prorate.
-      const _fteOn={};gShiftEntries.forEach(e=>{ if(_fteOn[e.date]==null) _fteOn[e.date]=gPhys.reduce((s,x)=>s+(_physStartedBy(x,e.date)?x.irFte:0),0); });
-      const shiftQuotas=_irrQuotas(gPhys,gShiftEntries.length,p=>
-        gShiftEntries.reduce((w,e)=>w+(_fteOn[e.date]>0&&_physStartedBy(p,e.date)?p.irFte/_fteOn[e.date]:0),0));
+      // irShiftTargetPeriod (the target shown) and the builders prorate (_irrStartQuotas).
+      const shiftQuotas=_irrStartQuotas(gPhys,gShiftEntries).quotas;
       const shiftCapFn=p=>(shiftQuotas[p.id]!=null&&shiftQuotas[p.id]>0)?shiftQuotas[p.id]:Math.max(Math.round(irShiftTargetPeriod(p,months)),1);
       const _ancSites=new Set(gShiftEntries.map(e=>e.site));
       const gSAsgn=[];
@@ -46578,35 +46789,12 @@ function previewIRRebalance(){
       (S.irShifts||[]).forEach(s=>{ if(inPeriod(s.date)&&!_replanIds.has(s.id)) _busyKept.add(s.physId+'|'+s.date); });
       (S.drShifts||[]).forEach(s=>{ if(inPeriod(s.date)) _busyKept.add(s.physId+'|'+s.date); });
       gShiftEntries.forEach(e=>{ if(!e._synthetic){ const k=e.physId+'|'+e.date; _pendOrig[k]=(_pendOrig[k]||0)+1; } });
-      // Free for an entry also means the IR procedure-shift rules the builders' on-call path and Pass 1
-      // apply (site, day, sequence, call-day, conference, natural-language), used by the pin and the pick
-      // alike. Sequence rules and natural-language 'limit' counts read the plan as it stands (rs-v134):
+      // Free for an entry also means the IR procedure-shift rules (_irrRuleCheck), used by the pin and the
+      // pick alike. Sequence rules and natural-language 'limit' counts read the plan as it stands (rs-v134):
       // the shifts it redistributes drop out of S.irShifts and its own decisions so far count instead.
       const _rp=_rulePlan(gSAsgn,_replanIds);
-      // Someone taking over a slot is also checked at the later days they still hold within their rule
-      // span: they keep those if nobody else can take them, so the takeover must not break a rule there.
-      // That includes the days they keep for certain — a shift this plan does not replan (Home, another
-      // group's, the next period's) or a DR shift: sequenceOk only looks back, so a takeover the day before
-      // one of those is only seen from there.
-      const _ownLater={}, _keptOf={};
-      gShiftEntries.forEach(e=>{ if(!e._synthetic) (_ownLater[e.physId]=_ownLater[e.physId]||[]).push(e); });
-      (S.irShifts||[]).forEach(s=>{ if(!_replanIds.has(s.id)&&s.date>=months[0]) (_keptOf[s.physId]=_keptOf[s.physId]||[]).push(s); });
-      (S.drShifts||[]).forEach(s=>{ if(s.date>=months[0]) (_keptOf[s.physId]=_keptOf[s.physId]||[]).push(s); });
-      const _seqSpan=p=>Math.max(0,...[p.seqRules||{}].concat(p.siteRules||[],p.siteSeqRules||[]).map(r=>Math.max(+(r&&r.maxConsec)||0,+(r&&r.minRest)||0)));
-      const _seqOk=(p,entry)=>{
-        if(!sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'',_rp)) return false;
-        const span=p.id===entry.physId?0:_seqSpan(p); if(!span) return true;
-        const lim=addDays(entry.date,span), inSpan=e=>e.date>entry.date&&e.date<=lim;
-        const later=(_ownLater[p.id]||[]).filter(inSpan), pts=later.concat((_keptOf[p.id]||[]).filter(inSpan));
-        if(!pts.length) return true;
-        const v=_rulePlan(_rp.of(p.id).concat([{physId:p.id,date:entry.date,site:entry.site,slotLabel:entry.slotLabel||''}],later),_replanIds);
-        return pts.every(e=>sequenceOk(p,e.date,e.date.slice(0,7),e.site,e.slotLabel||'',v)); };
-      const _freeFor=(p,entry)=>{ const c={physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift',irGroup:g,plan:_rp};
-        return !_busyKept.has(p.id+'|'+entry.date)&&!(_pendOrig[p.id+'|'+entry.date]>0)
-        &&!_conferenceBlocksSlot(p.id,entry.date,entry.site)
-        &&irSiteRuleOk(p,entry.site,entry.date)&&dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')
-        &&_seqOk(p,entry)
-        &&callDayRulesOk(p,c)&&tbRulesOk(p,c)&&natLangRulesOk(c); };
+      const _rulesOk=_irrRuleCheck(g,months,_rp,gShiftEntries.filter(e=>!e._synthetic),(p,entry)=>p.id===entry.physId);
+      const _freeFor=(p,entry)=>!_busyKept.has(p.id+'|'+entry.date)&&!(_pendOrig[p.id+'|'+entry.date]>0)&&_rulesOk(p,entry);
 
       gShiftEntries.forEach(entry=>{
         if(!entry._synthetic) _pendOrig[entry.physId+'|'+entry.date]--;
@@ -46820,18 +47008,26 @@ function previewIRRebalance(){
   }
   // ── Day Shifts Full Fill (typ==='day-fill') ────────────────────────────
   if(typ==='day-fill'){
-    const plan={shifts:[],displacedHomes:[],filled:0,unfilled:0,homesDisplaced:0,failedDates:[]};
+    const plan={shifts:[],displacedHomes:[],filled:0,unfilled:0,homesDisplaced:0,failedDates:[],target:{}};
+    // rs-v135: a physician is checked for a slot as Procedure Shifts (redistribute) checks one — busy with work
+    // the plan does not replace, the IR procedure-shift rules (_irrRuleCheck), quotas prorated by start date
+    // (_irrStartQuotas) — the physician already on a slot keeps it while under quota, and the slots are decided
+    // in one fixed date → group → site order. The shifts the plan lands on are the ones _irrDayFillMatch
+    // matches: the period's non-Home shifts of these groups, by date and site.
+    const pool=(S.irShifts||[]).filter(s=>inPeriod(s.date)&&groups.includes(s.irGroup)&&s.shift!=='Home');
+    const atKey={}; pool.forEach(s=>{ if((s.shift||'1st')==='1st') (atKey[s.date+'|'+s.site]=atKey[s.date+'|'+s.site]||[]).push(s); });
+    // A 1st shift of a group this run leaves alone (the group filter) holds its slot: the plan does not refill it.
+    const outside={}; (S.irShifts||[]).forEach(s=>{ if(inPeriod(s.date)&&!groups.includes(s.irGroup)&&(s.shift||'1st')==='1st') outside[s.date+'|'+s.site]=(outside[s.date+'|'+s.site]||0)+1; });
 
-    groups.forEach(g=>{
+    // ── Enumerate every Day Shift slot for each group across the period ──
+    // Include mixed-role sites (Riverview etc.) where ownership belongs to this group,
+    // consistent with _irsaBuildSlots. Each slot carries mixed + anchors/fillins metadata
+    // so the eligibility + quota accounting below can enforce role rules.
+    const slots=[], gOf={}, quota={}, cnt={};
+    groups.forEach((g,gi)=>{
       const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
       if(!gPhys.length) return;
-      const gFteTot=gPhys.reduce((s,p)=>s+p.irFte,0)||1;
-
-      // ── Enumerate every Day Shift slot for this group across the period ──
-      // Include mixed-role sites (Riverview etc.) where ownership belongs to this group,
-      // consistent with _irsaBuildSlots. Each slot carries mixed + anchors/fillins metadata
-      // so the eligibility + quota accounting below can enforce role rules.
-      const slots=[];
+      const gSlots=[];
       months.forEach(ym=>{
         const cells=buildCal(ym).filter(c=>c.day&&c.dow>=1&&c.dow<=5&&!isHolidayBlackout(c.date));
         const siteList=S.sites.filter(s=>{
@@ -46842,135 +47038,147 @@ function previewIRRebalance(){
         siteList.forEach(site=>{
           const mixed=(site.irAnchors&&site.irAnchors.length)||(site.irFillins&&site.irFillins.length);
           cells.forEach(c=>{
-            const need=(S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`]||0;
-            for(let i=0;i<need;i++) slots.push({
-              date:c.date,site:site.name,irGroup:g,
+            const need=((S.irShiftSlots||{})[`${site.name}|${c.dow}|1st`]||0)-(outside[c.date+'|'+site.name]||0);
+            for(let i=0;i<need;i++) gSlots.push({
+              date:c.date,site:site.name,irGroup:g,gi,idx:i,slotLabel:(S.irShiftSlotLabels||{})[`${site.name}|${c.dow}|1st#${i}`]||'',
               mixed:!!mixed,anchors:site.irAnchors||[],fillins:site.irFillins||[]
             });
           });
         });
       });
-      slots.sort((a,b)=>a.date>b.date?1:-1);
-      if(!slots.length) return;
-
-      // ── FTE-proportional quotas ──
-      const quotas=_irrQuotas(gPhys, slots.length, p=>{
-        return slots.length*(p.irFte/gFteTot);
-      });
-
-      // Running counts
-      const cnt={};
-      gPhys.forEach(p=>{cnt[p.id]=0;});
-      const vacCache={};
-      const vd=(pid)=>{ if(!vacCache[pid]) vacCache[pid]=_awayDays(pid); return vacCache[pid]; };
-
-      // Track proc-assignments per date (no doubles on same date)
-      const assignedOnDate={};
-
-      // Build a quick lookup: which physicians have a Home shift on each date (in this group)
-      const homeOnDate={};  // date → Set of physIds
-      S.irShifts.filter(s=>s.irGroup===g&&s.shift==='Home'&&months.some(ym=>s.date.startsWith(ym)))
-        .forEach(s=>{
-          if(!homeOnDate[s.date]) homeOnDate[s.date]=new Set();
-          homeOnDate[s.date].add(s.physId);
-        });
-
-      slots.forEach(slot=>{
-        const eligible=gPhys.filter(p=>{
-          if(vd(p.id).has(slot.date)) return false;
-          if(_has2ndOr3rdShift(p.id,slot.date)) return false;
-          if(p.allowedSites?.length&&!p.allowedSites.includes(slot.site)) return false;
-          // No two proc-shifts same physician same date
-          if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
-          // Mixed-site role gate: only designated anchors or permitted fill-ins may cover
-          if(!_irsaEligibleForSlot(p,slot)) return false;
-          // Hard FTE quota cap — only applies if the shift would count toward this
-          // physician's quota (fill-in shifts at mixed sites are "bonus" and bypass the cap)
-          if(_irsaCountsForQuota(p,slot) && cnt[p.id] >= (quotas[p.id]??Infinity)) return false;
-          return true;
-          // Note: physicians on Home shift ARE eligible — we will displace their Home shift
-        });
-
-        // Cross-group fill-in fallback: if no one from this group can cover
-        // the slot, look at every physician registered as a fill-in at this
-        // site regardless of their group. These assignments are flagged
-        // isFillIn so they don't count toward any group's quota.
-        let _fromCrossGroup=false;
-        if(!eligible.length){
-          const xFillins = slot.fillins || [];
-          if(xFillins.length){
-            const xPool = (S.physicians||[]).filter(p => {
-              if(!(p.irFte>0)) return false;
-              if(p.irGroup === g) return false;
-              if(xFillins.indexOf(p.id) < 0) return false;
-              if(vd(p.id).has(slot.date)) return false;
-              if(_has2ndOr3rdShift(p.id,slot.date)) return false;
-              if((assignedOnDate[slot.date]||new Set()).has(p.id)) return false;
-              return true;
-            });
-            if(xPool.length){
-              _fromCrossGroup = true;
-              // Replace eligible with the cross-group pool so the existing
-              // sort+pick logic below still works. Use FTE as the only tier
-              // since these aren't tracked in `cnt` (no quota accounting).
-              eligible.push(...xPool);
-            }
-          }
-        }
-
-        if(!eligible.length){
-          plan.unfilled++;
-          plan.failedDates.push(slot.date);
-          return;
-        }
-
-        // Sort: most behind quota first; prefer non-Home (less disruption), then highest FTE
-        eligible.sort((a,b)=>{
-          const defA=(quotas[a.id]||0)-cnt[a.id];
-          const defB=(quotas[b.id]||0)-cnt[b.id];
-          if(defA!==defB) return defB-defA;
-          // Prefer physician NOT currently on Home (saves displacement for when necessary)
-          const aHome=homeOnDate[slot.date]?.has(a.id)?1:0;
-          const bHome=homeOnDate[slot.date]?.has(b.id)?1:0;
-          if(aHome!==bHome) return aHome-bHome;
-          return b.irFte-a.irFte;
-        });
-
-        const picked=eligible[0];
-        const countsQ=!_fromCrossGroup && _irsaCountsForQuota(picked,slot);
-        if(countsQ) cnt[picked.id]++; // only count if not a fill-in at a mixed site AND not cross-group
-        if(!assignedOnDate[slot.date]) assignedOnDate[slot.date]=new Set();
-        assignedOnDate[slot.date].add(picked.id);
-
-        // Check if picked physician is being moved from a Home shift
-        const displacingHome=homeOnDate[slot.date]?.has(picked.id);
-        if(displacingHome){
-          // Mark their Home shift for removal on apply
-          const homeShift=S.irShifts.find(s=>s.physId===picked.id&&s.date===slot.date&&s.shift==='Home'&&s.irGroup===g);
-          if(homeShift) plan.displacedHomes.push(homeShift.id);
-          plan.homesDisplaced++;
-        }
-
-        const noteBase = _fromCrossGroup ? 'Auto-fill (cross-group fill-in)'
-                        : displacingHome ? 'Auto-fill (Home→Proc)'
-                        : 'Auto-fill';
-        plan.shifts.push({
-          physId:picked.id,date:slot.date,site:slot.site,
-          // Record the physician's REAL irGroup so downstream group-based
-          // views (quota attainment, anchor rates) use the right bucket.
-          irGroup:_fromCrossGroup ? (picked.irGroup||g) : g,
-          shift:'1st',sub:'',
-          notes:_fromCrossGroup ? noteBase
-              : (countsQ ? noteBase : noteBase+' (fill-in)'),
-          isFillIn: _fromCrossGroup || !countsQ,
-        });
-        plan.filled++;
-      });
+      if(!gSlots.length) return;
+      // ── FTE-proportional quotas, prorated by start date ──
+      const q=_irrStartQuotas(gPhys,gSlots);
+      gPhys.forEach(p=>{ quota[p.id]=q.quotas[p.id]; cnt[p.id]=0; plan.target[p.id]=q.target[p.id]; });
+      gOf[g]=gPhys; gSlots.forEach(s=>slots.push(s));
     });
+    // Date, then group, then site, then the slot's place there — a strict order, so a day's sites always
+    // come in the same order and the same inputs give the same plan.
+    slots.sort((a,b)=>(a.date<b.date?-1:a.date>b.date?1:0)||(a.gi-b.gi)||(a.site<b.site?-1:a.site>b.site?1:0)||(a.idx-b.idx));
+
+    // The plan replaces the 1st shifts on its slots' dates and sites. A physician is busy on a date when they
+    // hold work there it does not replace: a DR shift, another group's shift, or a shift of these groups on no
+    // slot of the plan (another shift type, a day or site with no slot, a holiday-blackout day) — the builder's
+    // _irsaBlocked rule. A Home shift of these groups is not: the plan may convert it (prefers not to).
+    // A physician on a slot of the plan is kept free for it until that site's slots come up that day (the
+    // 'shifts' branch's rule), so they are not moved to an earlier site of the same day.
+    const keyHasSlot=new Set(slots.map(s=>s.date+'|'+s.site));
+    const replaced=new Set(pool.filter(s=>(s.shift||'1st')==='1st'&&keyHasSlot.has(s.date+'|'+s.site)).map(s=>s.id));
+    const busy=new Set(), pend={}, homeOn={};
+    (S.drShifts||[]).forEach(s=>{ if(inPeriod(s.date)) busy.add(s.physId+'|'+s.date); });
+    (S.irShifts||[]).forEach(s=>{ if(!inPeriod(s.date)) return; const k=s.physId+'|'+s.date;
+      if(replaced.has(s.id)) pend[k]=(pend[k]||0)+1;
+      else if(s.shift==='Home'&&groups.includes(s.irGroup)) (homeOn[k]=homeOn[k]||[]).push(s);
+      else busy.add(k); });
+    // The rules read the plan as it stands: the replaced shifts drop out of S.irShifts (a converted Home shift
+    // too) and its decisions so far count instead; at the end of each day the replaced shifts their physician
+    // still keeps there (_irrDayFillMatch: nobody takes them over) count again.
+    const drop=new Set(replaced), rp=_rulePlan(plan.shifts,drop), held=pool.filter(s=>replaced.has(s.id)), rulesOk={};
+    Object.keys(gOf).forEach(g=>{ rulesOk[g]=_irrRuleCheck(g,months,rp,held,(p,slot)=>slot.holders.includes(p.id)); });
+
+    const vacCache={};
+    const vd=(pid)=>{ if(!vacCache[pid]) vacCache[pid]=_awayDays(pid); return vacCache[pid]; };
+    // Physicians placed per date — no two proc-shifts same physician same date, across the groups
+    const assigned=new Set(), opened=new Set(), order=new Map((S.physicians||[]).map((p,i)=>[p.id,i]));
+    const freeOn=(p,date)=>{ const k=p.id+'|'+date;
+      return !assigned.has(k)&&!busy.has(k)&&!(pend[k]>0)&&!vd(p.id).has(date)&&!_has2ndOr3rdShift(p.id,date)&&!isSoldBackDate(p.id,date); };
+    const qOf=id=>quota[id]??Infinity, cOf=id=>cnt[id]||0, xc={}, xOf=id=>xc[id]||0;
+    let day=null, dayEntries=[];
+    const closeDay=()=>{ if(day) _irrDayFillMatch(dayEntries,d=>d===day,groups).keep.forEach(s=>drop.delete(s.id)); dayEntries=[]; };
+
+    slots.forEach(slot=>{
+      if(slot.date!==day){ closeDay(); day=slot.date; }
+      const key=slot.date+'|'+slot.site, mine=atKey[key]||[], g=slot.irGroup, ok=rulesOk[g];
+      slot.holders=mine.map(s=>s.physId);
+      if(!opened.has(key)){ opened.add(key); mine.forEach(s=>{ pend[s.physId+'|'+s.date]--; }); }
+      const eligible=gOf[g].filter(p=>{
+        if(!freeOn(p,slot.date)) return false;
+        // Mixed-site role gate (only designated anchors or permitted fill-ins may cover) and allowedSites,
+        // which an anchor or fill-in of the site overrides, as in the builders
+        if(!_irsaEligibleForSlot(p,slot)) return false;
+        // Hard FTE quota cap — only applies if the shift would count toward this
+        // physician's quota (fill-in shifts at mixed sites are "bonus" and bypass the cap)
+        if(_irsaCountsForQuota(p,slot) && cOf(p.id) >= qOf(p.id)) return false;
+        return ok(p,slot);
+        // Note: physicians on Home shift ARE eligible — we will displace their Home shift
+      });
+
+      // Cross-group fill-in fallback: if no one from this group can cover
+      // the slot, look at every physician registered as a fill-in at this
+      // site regardless of their group. These assignments are flagged
+      // isFillIn so they don't count toward any group's quota.
+      let _fromCrossGroup=false;
+      if(!eligible.length){
+        const xFillins = slot.fillins || [];
+        if(xFillins.length){
+          const xPool = (S.physicians||[]).filter(p => p.irFte>0 && p.irGroup!==g && xFillins.indexOf(p.id)>=0 && freeOn(p,slot.date) && ok(p,slot));
+          if(xPool.length){ _fromCrossGroup = true; eligible.push(...xPool); }
+        }
+      }
+
+      if(!eligible.length){
+        plan.unfilled++;
+        plan.failedDates.push(slot.date);
+        return;
+      }
+
+      // Sort: under quota first; then the physician already on this slot (a fill moves only what it must, as
+      // Procedure Shifts does); among cross-group fill-ins, the one with the fewest so far (they count toward
+      // no quota); then most behind quota; then not on a Home shift (less disruption); then highest FTE; then
+      // roster order, so equals always come out the same way.
+      eligible.sort((a,b)=>{
+        const underA=cOf(a.id)<qOf(a.id), underB=cOf(b.id)<qOf(b.id);
+        if(underA!==underB) return underA?-1:1;
+        const holdA=slot.holders.includes(a.id), holdB=slot.holders.includes(b.id);
+        if(holdA!==holdB) return holdA?-1:1;
+        if(_fromCrossGroup&&xOf(a.id)!==xOf(b.id)) return xOf(a.id)-xOf(b.id);
+        const defA=(quota[a.id]||0)-cOf(a.id), defB=(quota[b.id]||0)-cOf(b.id);
+        if(defA!==defB) return defB-defA;
+        const aHome=homeOn[a.id+'|'+slot.date]?1:0, bHome=homeOn[b.id+'|'+slot.date]?1:0;
+        if(aHome!==bHome) return aHome-bHome;
+        if(a.irFte!==b.irFte) return b.irFte-a.irFte;
+        return order.get(a.id)-order.get(b.id);
+      });
+
+      const picked=eligible[0];
+      const countsQ=!_fromCrossGroup && _irsaCountsForQuota(picked,slot);
+      if(countsQ) cnt[picked.id]=cOf(picked.id)+1; // only count if not a fill-in at a mixed site AND not cross-group
+      if(_fromCrossGroup) xc[picked.id]=xOf(picked.id)+1;
+      const pk=picked.id+'|'+slot.date;
+      assigned.add(pk);
+
+      // Picked physician moved from a Home shift (of these groups): it goes on apply
+      const homes=homeOn[pk]||[], displacingHome=homes.length>0;
+      if(displacingHome){
+        homes.forEach(h=>{ plan.displacedHomes.push(h.id); drop.add(h.id); });
+        plan.homesDisplaced++;
+      }
+
+      const own=mine.find(s=>s.physId===picked.id);
+      const noteBase = _fromCrossGroup ? 'Auto-fill (cross-group fill-in)'
+                      : displacingHome ? 'Auto-fill (Home→Proc)'
+                      : 'Auto-fill';
+      const e={
+        physId:picked.id,date:slot.date,site:slot.site,
+        // Record the physician's REAL irGroup so downstream group-based
+        // views (quota attainment, anchor rates) use the right bucket.
+        irGroup:_fromCrossGroup ? (picked.irGroup||g) : g,
+        shift:'1st',sub:'',slotLabel:own?(own.slotLabel||''):slot.slotLabel,
+        notes:_fromCrossGroup ? noteBase
+            : (countsQ ? noteBase : noteBase+' (fill-in)'),
+        isFillIn: _fromCrossGroup || !countsQ,
+      };
+      plan.shifts.push(e); dayEntries.push(e);
+      plan.filled++;
+    });
+    closeDay();
 
     _irrPlan={type:'day-fill',shifts:plan.shifts,displacedHomes:plan.displacedHomes,homesDisplaced:plan.homesDisplaced};
     const _dfm=_irrDayFillMatch(plan.shifts,inPeriod,groups), _dfKept={};
     _dfm.keep.forEach(s=>{ _dfKept[s.physId]=(_dfKept[s.physId]||0)+1; });
+    // rs-v135: so do the period's procedure shifts the match does not see at all — their irGroup is none of
+    // these groups (e.g. empty). Apply leaves them as they are, and Before counts them, so After does too.
+    (S.irShifts||[]).forEach(s=>{ if(inPeriod(s.date)&&s.shift!=='Home'&&!groups.includes(s.irGroup)) _dfKept[s.physId]=(_dfKept[s.physId]||0)+1; });
 
     // ── Preview table ──
     const months2=months;
@@ -46985,13 +47193,11 @@ function previewIRRebalance(){
       const rows=[];
       groups.forEach(g=>{
         const gPhys=S.physicians.filter(p=>p.irFte>0&&p.irGroup===g);
-        const gFteTot=gPhys.reduce((s,p)=>s+p.irFte,0)||1;
-        const totalSlots=plan.shifts.filter(s=>s.irGroup===g).length
-          + plan.unfilled; // approximate
         gPhys.forEach(p=>{
           const before=months2.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
           const after=plan.shifts.filter(s=>s.physId===p.id).length+(_dfKept[p.id]||0);
-          const target=Math.round(totalSlots*(p.irFte/gFteTot)*10)/10;
+          // FTE share of the group's slots, each date shared among those on staff (start date)
+          const target=Math.round((plan.target[p.id]||0)*10)/10;
           const pctBefore=target>0?Math.round(before/target*100):0;
           const pctAfter =target>0?Math.round(after/target*100):0;
           rows.push({p,g,before,after,target,pctBefore,pctAfter});
@@ -47743,18 +47949,20 @@ async function applyIRRebalance(){
       reassigned, unchanged:m.reuse.length-reassigned, added:m.add.length, kept:m.keep.length, removed:m.drop.size, held:m.held});
     triggerSave();
     const isDayFill=_irrPlan?.type==='day-fill';
+    // The Done message counts what was done (rs-v135): the shifts the plan sits on — unchanged or reassigned
+    // in place — plus the ones added; a held move is not made and is reported on its own.
     const totalApplied=_irrPlan.shifts.length;
     const homesDisplaced=_irrPlan.homesDisplaced||0;
     _irrPlan=null;
     document.getElementById('irr-apply').style.display='none';
     document.getElementById('irr-apply-note').textContent='';
     _updateSaveUI(isDayFill
-      ?`✓ ${totalApplied} Day Shift(s) filled${homesDisplaced?' ('+homesDisplaced+' Home→Procedure)':''}`
+      ?`✓ ${m.reuse.length+m.add.length} Day Shift(s) filled${homesDisplaced?' ('+homesDisplaced+' Home→Procedure)':''}`
       :`✓ Shifts rebalanced — ${appliedSwaps} swap(s) applied`,
       'var(--green-t)');
     renderIRRebalancePrep();
     document.getElementById('irr-preview').innerHTML=isDayFill
-      ?`<div class="note ns">✓ Done. ${totalApplied} Day Shift(s) filled across the period (${reassigned} reassigned in place, ${m.add.length} added)${m.keep.length?' · '+m.keep.length+' shift(s) the plan does not fill kept':''}${m.held?' · '+m.held+' planned move(s) not made (each would leave a slot empty)':''}${m.drop.size?' · '+m.drop.size+' removed':''}${homesDisplaced?' · '+homesDisplaced+' Home shift(s) converted to Procedure':' · no Home shifts displaced'}. Refresh to see updated FTE %.</div>`
+      ?`<div class="note ns">✓ Done. ${m.reuse.length+m.add.length} Day Shift(s) filled across the period (${m.reuse.length-reassigned} unchanged, ${reassigned} reassigned in place, ${m.add.length} added)${m.keep.length?' · '+m.keep.length+' shift(s) the plan does not fill kept':''}${m.held?' · '+m.held+' planned move(s) not made (each would leave a slot empty)':''}${m.drop.size?' · '+m.drop.size+' removed':''}${homesDisplaced?' · '+homesDisplaced+' Home shift(s) converted to Procedure':' · no Home shifts displaced'}. Refresh to see updated FTE %.</div>`
       :`<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied.</div>`;
     return;
   }
@@ -48709,7 +48917,8 @@ function holTab(t,el){
     if(e) e.style.display=x===t?'block':'none';
   });
   const _hy=document.getElementById('holoff-year');
-  if(_hy&&!_hy.value) _hy.value=new Date().getFullYear();
+  // Importing official holidays creates definitions too: same default year as the form below (rs-v135).
+  if(_hy&&!_hy.value) _hy.value=_holdefDefaultYear();
   const _hdy=document.getElementById('holdef-year');
   if(_hdy&&!_hdy.value) _hdy.value=_holdefDefaultYear();
   // The manual assignment and Auto-Assign Year boxes start on the same year (both were a fixed 2026).
@@ -48797,6 +49006,29 @@ function _holdefSyncYear(){
   if(_holdefEditId != null || _holdefYearTouched) return;
   const el = document.getElementById('holdef-year'); if(!el) return;
   el.value = _holdefSeasonYear(_holdefDates, document.getElementById('holdef-name')?.value) || _holdefDefaultYear();
+}
+// Season a manual Holiday Call assignment is filed under (rs-v135). Its Year is what
+// the definition's slot count, Auto-Assign, the Counter and (rs-v134) the All Call
+// workbook read, but the Assign form's Year box only defaults to the current year —
+// so a 2027 holiday assigned in 2026 was filed under 2026 with no warning: its
+// definition still showed the slot open (Auto-Assign filled it again, replacing the
+// pick) and its IR call left the 2027 workbook for the 2026 one. A definition with
+// this name (case aside) holding the date decides the year, and its spelling of the
+// name is used; otherwise the box stands when the date is in its season, and a date
+// outside it is checked with the admin. Returns { year, name, def } or null (go back).
+function _holAssignYear(name, date, yr){
+  const key = String(name||'').trim().toLowerCase();
+  const defs = (S.holidayDefs||[]).filter(d => d && String(d.name||'').trim().toLowerCase() === key && (d.dates||[]).includes(date) && +d.year);
+  if(defs.length){
+    const d = defs.find(x => +x.year === yr) || defs[0];
+    return { year: +d.year, name: String(d.name), def: d };
+  }
+  if(!(yr >= 2000 && yr <= 2100)) yr = _holdefSeasonYear([date], name) || _holdefDefaultYear();
+  if(_holdefInSeason(date, yr)) return { year: yr, name, def: null };
+  const fit = _holdefSeasonYear([date], name);
+  const msg = `${date} is outside the ${yr} holiday season.\n\nThe Year decides which season "${name}" counts toward (the holiday's slots, Auto-Assign, Counter, All Call workbook).`;
+  if(fit && fit !== yr && confirm(`${msg}\n\nOK: file it under ${fit}.\nCancel: keep ${yr} or go back.`)) return { year: fit, name, def: null };
+  return confirm(`${msg}\n\nFile it under ${yr} anyway?`) ? { year: yr, name, def: null } : null;
 }
 
 function renderHolDefList(){
@@ -48917,7 +49149,7 @@ function officialUSHolidays(year){
 }
 function _holoffYear(){
   const v=+document.getElementById('holoff-year')?.value;
-  return (isFinite(v)&&v>=2000&&v<=2100)?v:new Date().getFullYear();
+  return (isFinite(v)&&v>=2000&&v<=2100)?v:_holdefDefaultYear();
 }
 function previewOfficialHolidays(){
   const year=_holoffYear();
