@@ -77,3 +77,35 @@ test('All Call for a Year downloads every call of the year, open slots and total
   expect(tot['Gamma, Cy'][4]).toBe('1');                                 // DR weekend day
   expect(tot['Gamma, Cy'][6]).toBe('1');                                 // DR holiday block
 });
+
+test('a holiday call filed on the last day of the year is listed once, in its holiday year; an unassigned weekday IR holiday is an open slot', async ({ page }) => {
+  await openApp(page, '/index.html?e2e=all-call-2');
+  await launchSyntheticUser(page, 'superuser');
+  await page.evaluate(() => {
+    _isRestoring = true;
+    const mk = (id, first, last, grp, fte) => ({ id, first, last, role: 'IR', drFte: 0, irFte: fte, irGroup: grp, drSubs: [], irSubs: [], shiftElig: { s1: true, wknd: true },
+      irCallBlackouts: [], siteRules: [], tbRules: [], dayConditions: [], callDayRules: [], siteSeqRules: [], allowedSites: [] });
+    S.physicians = [mk(1, 'Ann', 'Alpha', 'South', 1), mk(2, 'Bob', 'Beta', 'South', 1)];
+    // 'NY' of 2027 is observed on Thu 2026-12-31: the Holiday tab files it under 2027, the synced IR call is dated 2026.
+    S.holidayDefs = [{ id: 411, name: 'NY', year: 2027, dates: ['2026-12-31'], irSlotsByGroup: { South: 1 } },
+      { id: 412, name: 'Thanksgiving', year: 2027, dates: ['2027-11-25'], irSlotsByGroup: { South: 1 } }];
+    S.irCalls = [{ id: 111, physId: 1, date: '2026-12-31', callType: 'daily', irGroup: 'South', site: '', notes: 'NY (Holiday)' }];
+    S.holidays = [{ id: 311, physId: 1, date: '2026-12-31', name: 'NY', year: 2027, group: 'IR-South' }];
+    S.weekendCalls = []; S.openShifts = []; S.drShifts = []; S.irShifts = []; S.vacations = [];
+    _isRestoring = false; if (typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    nav('ir-cal', document.querySelector('.snav-item[data-pg="ir-cal"]'));
+  });
+  const button = page.locator('#page-ir-cal button', { hasText: 'All Call for a Year' });
+  const book = async yr => {
+    await page.evaluate(y => { window.prompt = () => y; }, String(yr));
+    const [dl] = await Promise.all([page.waitForEvent('download'), button.click()]);
+    return readXlsx(require('fs').readFileSync(await dl.path()));
+  };
+  const y26 = await book(2026), y27 = await book(2027);
+  const ny = x => x['All call'].slice(1).filter(r => r[0] === '2026-12-31');
+  expect(ny(y27).length).toBe(1);                              // listed once, under its holiday year
+  expect(ny(y26).length).toBe(0);                              // was: also in the 2026 workbook
+  const ann = x => (x['Totals by physician'].find(r => /Alpha/.test(r[0])) || []);
+  expect(ann(y26).slice(-1)[0] || '0').toBe('0');
+  expect(y27['Open slots'].slice(1).some(r => r[0] === '2027-11-25' && r[2] === 'IR holiday weekday' && r[3] === 'South')).toBe(true);   // was: missing
+});

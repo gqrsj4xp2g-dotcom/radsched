@@ -4466,9 +4466,9 @@ tbody tr:hover{background:var(--bg3)}
       <div class="card-title" id="holdef-form-title">Create New Holiday</div>
       <div class="g2">
         <div class="fg"><label>Holiday Name</label>
-          <input id="holdef-name" placeholder="e.g. Thanksgiving 2026"></div>
+          <input id="holdef-name" placeholder="e.g. Thanksgiving 2026" oninput="_holdefSyncYear()"></div>
         <div class="fg"><label>Year</label>
-          <input id="holdef-year" type="number" min="2024" max="2035" value="2026" style="width:90px"></div>
+          <input id="holdef-year" type="number" min="2024" max="2035" oninput="_holdefYearTouched=true" title="The holiday season this counts toward (auto-assign, Counter, Schedule). Filled in from the dates until you type a year; a New Year block may include Dec 31 of the year before." style="width:90px"></div>
       </div>
       <div class="note ni" style="font-size:11px;margin-bottom:6px">
         One slot per pool. Set = <strong>1</strong> for each pool that needs a physician covering the whole block.
@@ -4516,7 +4516,7 @@ tbody tr:hover{background:var(--bg3)}
       </div>
       <div class="g3">
         <div class="fg"><label>Year</label>
-          <input id="hol-yr" type="number" value="2026" min="2020" max="2035" style="width:90px"></div>
+          <input id="hol-yr" type="number" min="2020" max="2035" style="width:90px"></div>
         <div class="fg"><label>Group</label>
           <select id="hol-grp">
             <option value="DR">DR Call</option>
@@ -4595,7 +4595,7 @@ tbody tr:hover{background:var(--bg3)}
     <div class="ibox mb10" >
       <div class="g3">
         <div class="fg m0" ><label>Year</label>
-          <input id="haa-year" type="number" value="2026" min="2020" max="2035" style="width:90px"
+          <input id="haa-year" type="number" min="2020" max="2035" style="width:90px"
             oninput="renderHolCareerTally()"></div>
         <div class="fg m0" ><label>Group</label>
           <select id="haa-grp" onchange="renderHolCareerTally()" style="width:150px">
@@ -10821,6 +10821,8 @@ function _diagnoseSlotUnfillable(slot, opts){
     runAssigns = _irsaPreview;
   }
   runAssigns = runAssigns || [];
+  // rs-v134: sequence rules and natural-language limits count this preview's shifts, as the builders do
+  const runPlan = _rulePlan(runAssigns);
   const placedThisRun = {};   // physId → {date, site, slotLabel}
   runAssigns.forEach(a => {
     if(!a || a.physId == null) return;
@@ -10843,7 +10845,7 @@ function _diagnoseSlotUnfillable(slot, opts){
   const out = [];
   allP.forEach(p => {
     const reasons = [];
-    const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group || p.irGroup, ym };
+    const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group || p.irGroup, ym, plan: runPlan };
     // In-run placement — this is the new check. If the solver already
     // placed this physician at a different slot today in THIS preview
     // run, they cannot also fill the current slot — but they're not
@@ -10893,7 +10895,7 @@ function _diagnoseSlotUnfillable(slot, opts){
     // Day condition
     try{ if(typeof dayConditionSiteOk === 'function' && !dayConditionSiteOk(p, slot.site, slot.date, 'ir-shift')) reasons.push('day condition mismatch'); }catch(_){}
     // Sequence rules (max consecutive / min rest, slot-aware)
-    try{ if(typeof sequenceOk === 'function' && !sequenceOk(p, slot.date, ym, slot.site, slot.slotLabel||'')) reasons.push('sequence rule (consecutive / rest)'); }catch(_){}
+    try{ if(typeof sequenceOk === 'function' && !sequenceOk(p, slot.date, ym, slot.site, slot.slotLabel||'', runPlan)) reasons.push('sequence rule (consecutive / rest)'); }catch(_){}
     // Tumor board / conference participation
     try{ if(typeof tbRulesOk === 'function' && !tbRulesOk(p, ctx)) reasons.push('tumor-board / clinic conflict'); }catch(_){}
     try{ if(typeof _conferenceBlocksSlot === 'function' && _conferenceBlocksSlot(p.id, slot.date, slot.site)) reasons.push('participating in a conference at this site'); }catch(_){}
@@ -11429,7 +11431,7 @@ function _irsaMcfEdgeTier(p, slot, dayBlocked){
 // the total cost does not rise. It only moves along edges that exist in the
 // network, leaves every physician with ≤ 1 slot per date and with the same
 // number of quota-counting shifts — nothing the network guarantees changes.
-function _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost){
+function _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost, rulesHold){
   const cand = (j, pi) => { const l = cands[j]; for(let i = 0; i < l.length; i++){ if(l[i].pi === pi) return l[i]; } return null; };
   const plain = c => !!c && c.counts && c.siteOk && c.seqOk;      // quota-counting, no rule relaxed
   const busy = {};                                                // 'pi|date' → slot index
@@ -11467,6 +11469,8 @@ function _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost){
             const after  = bAtA.cost + (dayCost[b + '|' + dA] || 0) + aAtB.cost + (dayCost[a + '|' + dB] || 0);
             if(after > before) continue;
             asg[jA] = b; asg[jB] = a;
+            // rs-v134: the swap can change both colleagues' dates — it must keep their sequence rules / limits
+            if(rulesHold && !rulesHold(a, b)){ asg[jA] = a; asg[jB] = b; continue; }
             delete busy[a + '|' + dA]; delete busy[b + '|' + dB];
             busy[b + '|' + dA] = jA; busy[a + '|' + dB] = jB;
             swaps++; done = true;
@@ -11686,8 +11690,8 @@ function _irsaSolveMCF(opts){
   //       (a). If such a physician is a fill-in candidate for a slot that is
   //       still open, those days are tried as fill-in-only.
   const MAX_ROUNDS = 6;
-  let best = solve();
-  while(rounds < MAX_ROUNDS){
+  let best = solve(), roundCap = MAX_ROUNDS;
+  const settle = () => { while(rounds < roundCap){
     const charged = best.picked.filter(a => info[a.pi].gm && !candOf(a).counts && !fillInDay[dayKey(a)]);
     if(charged.length){
       charged.forEach(a => { fillInDay[dayKey(a)] = true; });
@@ -11715,12 +11719,70 @@ function _irsaSolveMCF(opts){
     if(alt.picked.length > best.picked.length){ best = alt; continue; }
     busyTry.forEach(dk => { delete fillInDay[dk]; });
     break;
+  } };
+  settle();
+  // ── Sequence rules + natural-language limits across the plan (rs-v134) ──
+  // An edge's seqOk / siteOk were judged against the STORED schedule. A streak or a
+  // count the plan builds out of its own shifts constrains one physician across days,
+  // which a flow network cannot carry. So each physician's shifts in the solution are
+  // walked in date order (the greedy's order); a shift that breaks such a rule through
+  // the plan's earlier shifts reprices that physician's edges for the day into the
+  // relaxed tier a stored-schedule breach already pays (+SEQ_RELAX / +SITE_RELAX; a
+  // cross-group fill-in edge, which only exists with every rule intact, is dropped),
+  // and the network is solved again. Penalties only accumulate, so this ends; at the
+  // round cap a breach still left is repriced in place, i.e. labelled relaxed.
+  const ruleOn = info.map(pin => _planRulesFor(pin.p)), anyRule = ruleOn.some(Boolean), slotsOn = {};
+  if(anyRule) allSlots.forEach((s, j) => { (slotsOn[s.date] = slotsOn[s.date] || []).push(j); });
+  const candAt = (j, pi) => cands[j].find(c => c.pi === pi);
+  // mode 0: count breaches · 1: reprice them (the re-solve moves the shift) · 2: reprice and keep the shift
+  const ruleWalk = (pi, js, mode) => {
+    const p = info[pi].p, kept = [], plan = _rulePlan(kept);
+    const test = (s, c) => ({
+      seq: c.seqOk && !sequenceOk(p, s.date, s.date.slice(0, 7), s.site, s.slotLabel || '', plan),
+      nl: c.siteOk && !natLangRulesOk({ physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift', irGroup: s._group, ym: s.date.slice(0, 7), plan: plan }),
+    });
+    const reprice = j2 => {
+      const c2 = candAt(j2, pi); if(!c2) return;
+      const t2 = test(allSlots[j2], c2);
+      if(c2.cross && mode === 1){ if(t2.seq || t2.nl) cands[j2].splice(cands[j2].indexOf(c2), 1); return; }
+      if(t2.seq){ c2.seqOk = false; c2.cost += C.SEQ_RELAX; }
+      if(t2.nl){ c2.siteOk = false; c2.cost += C.SITE_RELAX; }
+    };
+    let bad = 0;
+    js.sort((a, b) => allSlots[a].date < allSlots[b].date ? -1 : (allSlots[a].date > allSlots[b].date ? 1 : a - b)).forEach(j => {
+      const s = allSlots[j], t = test(s, candAt(j, pi));
+      const keep = () => { kept.push({ physId: p.id, date: s.date, site: s.site, slotLabel: s.slotLabel || '' }); };
+      if(!t.seq && !t.nl){ keep(); return; }
+      bad++;
+      if(!mode) return;
+      (slotsOn[s.date] || []).forEach(reprice);
+      if(mode === 2) keep();
+    });
+    // Anticipate the re-solve: on the dates p does not work, an edge that would now break the rule
+    // is repriced too, or the next solve just moves the breach to the neighbouring day.
+    if(mode === 1 && bad){
+      const busy = new Set(js.map(j => allSlots[j].date));
+      Object.keys(slotsOn).forEach(d => { if(!busy.has(d)) slotsOn[d].forEach(reprice); });
+    }
+    return bad;
+  };
+  const SEQ_ROUNDS = 8;
+  let seqRounds = 0;
+  while(anyRule){
+    const last = seqRounds >= SEQ_ROUNDS, mine = {};
+    best.picked.forEach(a => { if(ruleOn[a.pi]) (mine[a.pi] = mine[a.pi] || []).push(a.j); });
+    let bad = 0;
+    Object.keys(mine).forEach(pi => { bad += ruleWalk(+pi, mine[pi], last ? 2 : 1); });
+    if(!bad || last) break;
+    seqRounds++; roundCap = rounds + MAX_ROUNDS;
+    best = solve(); settle();
   }
   const flowCost = best.cost;
   // asg[j] = index (into allP) of the physician on slot j, or -1.
   const asg = allSlots.map(() => -1);
   best.picked.forEach(a => { asg[a.j] = a.pi; });
-  const spreadSwaps = _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost);
+  const spreadSwaps = _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost, !anyRule ? null
+    : (a, b) => [a, b].every(pi => !ruleOn[pi] || !ruleWalk(pi, asg.reduce((l, x, j) => { if(x === pi) l.push(j); return l; }, []), 0)));
   // ── Decode ─────────────────────────────────────────────────────────────
   // Per physician: the LAST K quota-counting shifts (by date) beyond the
   // remaining quota are the over-quota ones, so the preview row + audit note
@@ -11750,24 +11812,41 @@ function _irsaSolveMCF(opts){
   const placedOn = {};                                            // 'pi|date' → slot index
   asg.forEach((pi, j) => { if(pi >= 0) placedOn[pi + '|' + allSlots[j].date] = j; });
   let nOnCall = 0, nCross = 0, nOver = 0, nRelaxed = 0, nFillin = 0;
+  // rs-v134: an edge repriced in an earlier repair round can be clear of the rule in the final
+  // plan, so a rule physician's shift is labelled relaxed only when the final plan breaks the rule.
+  const broken = {};                                              // slot j → { seq, site }
+  if(anyRule) info.forEach((pin, pi) => {
+    if(!ruleOn[pi]) return;
+    const p = pin.p, mine = [], plan = _rulePlan(mine);
+    asg.reduce((l, x, j) => { if(x === pi) l.push(j); return l; }, [])
+      .sort((a, b) => allSlots[a].date < allSlots[b].date ? -1 : (allSlots[a].date > allSlots[b].date ? 1 : a - b))
+      .forEach(j => {
+        const s = allSlots[j], ym = s.date.slice(0, 7);
+        const ctx = { physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift', irGroup: s._group, ym: ym, plan: plan };
+        broken[j] = { seq: !sequenceOk(p, s.date, ym, s.site, s.slotLabel || '', plan),
+          site: !(irSiteRuleOk(p, s.site, s.date) && dayConditionSiteOk(p, s.site, s.date, 'ir-shift') && tbRulesOk(p, ctx) && natLangRulesOk(ctx)) };
+        mine.push({ physId: p.id, date: s.date, site: s.site, slotLabel: s.slotLabel || '' });
+      });
+  });
   allSlots.forEach((slot, j) => {
     const r = rows[j];
     if(!r){ unfilledSlots.push(slot); return; }
     const pin = info[asg[j]], p = pin.p, c = r.c;
     const dc = dayCost[asg[j] + '|' + slot.date] || 0;
     const onCall = dc < 0;
+    const b = broken[j], seqRelaxed = !c.seqOk && (!b || b.seq), siteRelaxed = !c.siteOk && (!b || b.site);
     // Note priority: cross-group, then a relaxed rule, then over-quota — an
     // admin scanning the table cares most about the heaviest exception.
     const note = c.cross ? 'MCF (cross-group)'
-               : !c.seqOk ? 'MCF (sequence rule relaxed)'
-               : !c.siteOk ? 'MCF (site rule relaxed)'
+               : seqRelaxed ? 'MCF (sequence rule relaxed)'
+               : siteRelaxed ? 'MCF (site rule relaxed)'
                : r.over ? 'MCF (over-quota)'
                : !c.counts ? 'MCF (fill-in)'
                : onCall ? 'MCF (on-call)'
                : 'MCF';
     if(onCall) nOnCall++;
     if(c.cross) nCross++; else if(!c.counts) nFillin++;
-    if(!c.siteOk || !c.seqOk) nRelaxed++;
+    if(siteRelaxed || seqRelaxed) nRelaxed++;
     if(r.over) nOver++;
     preview.push({
       physId: p.id, date: slot.date, site: slot.site,
@@ -11798,7 +11877,7 @@ function _irsaSolveMCF(opts){
       cost: flowCost, edgesConsidered: considered, edgesEligible: eligible,
       edgesBlocked: considered - eligible,
       onCall: nOnCall, crossGroup: nCross, fillIn: nFillin, overQuota: nOver, relaxed: nRelaxed,
-      rounds: rounds, spreadSwaps: spreadSwaps, nodes: netNodes, edges: netEdges,
+      rounds: rounds, seqRounds: seqRounds, spreadSwaps: spreadSwaps, nodes: netNodes, edges: netEdges,
       solveMs: Math.round(solveMs), totalMs: Math.round(_now() - t0),
     },
     assignmentExplain,
@@ -14938,6 +15017,8 @@ async function doLogout(){
     _presenceChannel = null;
   }
   if(typeof _rsTeardown === 'function') _rsTeardown();
+  // Close any open Define Holidays form — it keeps its state across refreshes (rs-v134).
+  try{ if(typeof cancelHolDef === 'function') cancelHolDef(); }catch(_){}
   // Side-table sync snapshot is per-practice — invalidate so the
   // next login starts fresh.
   if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
@@ -15901,7 +15982,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v133';
+const _SW_VERSION = 'rs-v134';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -17449,6 +17530,10 @@ async function switchPractice(id,name){
   try{
     // 4. Clear per-practice in-memory state (users from previous practice must not leak)
     if(typeof _rsTeardown === 'function') _rsTeardown();   // reports/peer realtime+caches are per-practice
+    // The Define Holidays form keeps its state across page refreshes (rs-v134);
+    // a definition open from the old practice must not be saved over the new
+    // practice's definition with the same id.
+    try{ if(typeof cancelHolDef === 'function') cancelHolDef(); }catch(_){}
     USERS.length=0;
     if(CU) USERS.push(CU); // keep the logged-in user so auth still resolves
     // 5. Reassign reactive arrays through the Proxy so each new array is freshly wrapped.
@@ -17686,7 +17771,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v133';
+const _RS_HTML_BUILD = 'rs-v134';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -24513,7 +24598,7 @@ function _irsaAnchorNextSlot(slots,si,assigned,poolOf,env){
 // otherwise the first slot they qualify for (as before) -- unless another slot they qualify for
 // lets the rest of the group fill more of the date's open slots (a site only they can cover).
 // Same checks as the on-call path itself.
-function _irsaOnCallSlotFirst(slots,si,cPid,phys,assigned){
+function _irsaOnCallSlotFirst(slots,si,cPid,phys,assigned,rp){
   var cP=null,d=slots[si].date,first=-1,home=-1,open=[],ok=[],i,j,k;
   for(i=0;i<phys.length;i++){if(phys[i].id===cPid){cP=phys[i];break;}}
   if(!cP||_irsaBlocked(cP,d,assigned))return;
@@ -24525,9 +24610,9 @@ function _irsaOnCallSlotFirst(slots,si,cPid,phys,assigned){
     if(taken)continue;
     open.push(j);
     if(!_irsaEligibleForSlot(cP,s))continue;
-    var ctx={physId:cP.id,date:s.date,site:s.site,shift:'1st',kind:'ir-shift'};
+    var ctx={physId:cP.id,date:s.date,site:s.site,shift:'1st',kind:'ir-shift',irGroup:cP.irGroup,plan:rp};
     if(!(irSiteRuleOk(cP,s.site,s.date)&&dayConditionSiteOk(cP,s.site,s.date,'ir-shift')
-       &&sequenceOk(cP,s.date,s.date.slice(0,7),s.site,s.slotLabel||'')
+       &&sequenceOk(cP,s.date,s.date.slice(0,7),s.site,s.slotLabel||'',rp)
        &&tbRulesOk(cP,ctx)&&callDayRulesOk(cP,ctx)&&natLangRulesOk(ctx)))continue;
     ok.push(j);
     if(first<0)first=j;
@@ -25019,6 +25104,10 @@ function previewIRShiftAA(){
   // diagnostic at the end. Each entry has the same shape _irsaBuildSlots
   // emits, with _group annotated for the diagnostic helper.
   var unfilledSlotsLegacy = [];
+  // rs-v134: this run's own shifts (earlier groups' included), for the sequence rules and natural-language limits.
+  // Pre-allocated must-be-at-site days and earlier groups' cross-group fill-ins can be dated after the slot
+  // being filled, so the sequence check looks ahead through the plan too.
+  var _rp=_rulePlan(function(){return assigned;},null,true);
   var gi,grp,phys,cells,slots,callMap,gFt,rawQ,callDays,pi,di,assigned,cnt,anc,si,slot,cPid,cP,pool,picked,note,ai;
   for(gi=0;gi<groups.length;gi++){
     grp=groups[gi];
@@ -25158,10 +25247,10 @@ function previewIRShiftAA(){
               // itself one of the rules, so skip tbRulesOk? No — tbRulesOk
               // passes because requiredSite === target site. All other rule
               // checks still apply (call-day-site, sequence, etc.)
-              var _eCtx = {physId:_p.id, date:_cand.date, site:_cand.site, shift:'1st', kind:'ir-shift', irGroup:grp, ym:_cand.date.slice(0,7)};
+              var _eCtx = {physId:_p.id, date:_cand.date, site:_cand.site, shift:'1st', kind:'ir-shift', irGroup:grp, ym:_cand.date.slice(0,7), plan:_rp};
               if(!irSiteRuleOk(_p, _cand.site, _cand.date)) continue;
               if(!dayConditionSiteOk(_p, _cand.site, _cand.date, 'ir-shift')) continue;
-              if(!sequenceOk(_p, _cand.date, _cand.date.slice(0,7), _cand.site, _cand.slotLabel||'')) continue;
+              if(!sequenceOk(_p, _cand.date, _cand.date.slice(0,7), _cand.site, _cand.slotLabel||'', _rp)) continue;
               if(!callDayRulesOk(_p, _eCtx)) continue;
               if(!tbRulesOk(_p, _eCtx)) continue;
               if(!natLangRulesOk(_eCtx)) continue;
@@ -25189,7 +25278,7 @@ function previewIRShiftAA(){
     var _irsaEnv=_irsaAnchorEnv(grp,phys,cells,slots,allS,slots_cfg,rawQ,callDays,months,cnt,anc,ancTgt,assigned);
     for(si=0;si<slots.length;si++){
       // rs-v129: on a call day, visit first the slot the on-call physician should take (their anchor site when they qualify for a slot there).
-      if(callMap[slots[si].date])_irsaOnCallSlotFirst(slots,si,callMap[slots[si].date],phys,assigned);
+      if(callMap[slots[si].date])_irsaOnCallSlotFirst(slots,si,callMap[slots[si].date],phys,assigned,_rp);
       slot=slots[si];var slotMo=slot.date.slice(0,7);
       // Skip if pre-allocation already placed someone in this exact slot
       // (matched by date + site + slotIndex). slotIndex correctly
@@ -25222,10 +25311,11 @@ function previewIRShiftAA(){
         // fails. Enforcing both directions makes the rule work regardless
         // of run order.
         if(cP && !_irsaBlocked(cP,slot.date,assigned) && _irsaEligibleForSlot(cP,slot)){
-          var _cpCtx={physId:cP.id,date:slot.date,site:slot.site,shift:'1st',kind:'ir-shift'};
+          // irGroup (rs-v134): a natural-language rule scoped to the group ('North: at most 12 a month') applies here as in Pass 1
+          var _cpCtx={physId:cP.id,date:slot.date,site:slot.site,shift:'1st',kind:'ir-shift',irGroup:grp,plan:_rp};
           var _cpPassesRules = irSiteRuleOk(cP,slot.site,slot.date)
                             && dayConditionSiteOk(cP,slot.site,slot.date,'ir-shift')
-                            && sequenceOk(cP,slot.date,slotMo,slot.site,slot.slotLabel||'')
+                            && sequenceOk(cP,slot.date,slotMo,slot.site,slot.slotLabel||'',_rp)
                             && tbRulesOk(cP,_cpCtx)
                             && callDayRulesOk(cP,_cpCtx)
                             && natLangRulesOk(_cpCtx);
@@ -25251,14 +25341,15 @@ function previewIRShiftAA(){
       var _irsaPoolOf=function(_s,_mo,_xOnly){var pool=[];if(!_xOnly){
       /* Pass 1: eligible + all rules + within quota */
       pool=phys.filter(function(p){
-        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
+        var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,plan:_rp};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
           &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
           &&irSiteRuleOk(p,_s.site,_s.date)
           &&dayConditionSiteOk(p,_s.site,_s.date,'ir-shift')
-          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
+          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'',_rp)
           &&tbRulesOk(p,_ictx)
           &&callDayRulesOk(p,_ictx)
+          &&natLangRulesOk(_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
       var _irsaP1=pool.length>0;   // rs-v129: a Pass-1 pool (all rules, within quota)
@@ -25269,7 +25360,7 @@ function previewIRShiftAA(){
         var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift'};
         return _irsaEligibleForSlot(p,_s)&&!_irsaBlocked(p,_s.date,assigned)
           &&!_conferenceBlocksSlot(p.id,_s.date,_s.site)
-          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'')
+          &&sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'',_rp)
           &&callDayRulesOk(p,_ictx)
           &&(!_irsaCountsForQuota(p,_s)||_cnt[p.id]<_irsaEffQ(p,_r,_cd,months));
       });
@@ -25316,10 +25407,10 @@ function previewIRShiftAA(){
             if(xFillins.indexOf(p.id)<0)return false;                // not a registered fill-in here
             if(_irsaBlocked(p,_s.date,assigned))return false;
             if(_conferenceBlocksSlot(p.id,_s.date,_s.site))return false;
-            var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,ym:_mo};
+            var _ictx={physId:p.id,date:_s.date,site:_s.site,shift:'1st',kind:'ir-shift',irGroup:grp,ym:_mo,plan:_rp};
             if(!irSiteRuleOk(p,_s.site,_s.date))return false;          // blocked site / blackout / allowedShifts (MCF: siteOk)
             if(!dayConditionSiteOk(p,_s.site,_s.date,'ir-shift'))return false;
-            if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||''))return false;
+            if(!sequenceOk(p,_s.date,_mo,_s.site,_s.slotLabel||'',_rp))return false;
             if(!callDayRulesOk(p,_ictx))return false;
             if(!tbRulesOk(p,_ictx))return false;
             if(!natLangRulesOk(_ictx))return false;
@@ -37358,7 +37449,9 @@ function _describeCallSiteRule(r){
 
 /**
  * natLangRulesOk(ctx) — evaluate all enabled natural-language if/then rules.
- * ctx = { physId, date, site?, shift?, sub?, irGroup?, kind }
+ * ctx = { physId, date, site?, shift?, sub?, irGroup?, kind, plan? }
+ *   plan (rs-v134): a builder's own assignments S does not hold yet (_rulePlan) —
+ *   they count toward a 'limit', and the stored IR shifts they replace do not.
  *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
  * Returns true if no enabled rule BLOCKS this assignment, false otherwise.
  * Semantics:
@@ -37402,7 +37495,7 @@ function natLangRulesOk(ctx){
       if(t.requireSite  && ctx.site  && ctx.site  !== t.requireSite)  return false;
       if(t.requireShift && ctx.shift && ctx.shift !== t.requireShift) return false;
     }
-    if(t.action==='limit'&&!ctx.noLimit){   // noLimit: the caller's counts are not in S yet (Rebalance)
+    if(t.action==='limit'){
       const monthKey=(ctx.date||'').slice(0,7);
       const yearKey =(ctx.date||'').slice(0,4);
       // Count existing assignments for this physician in the same "kind" bucket
@@ -37420,10 +37513,12 @@ function natLangRulesOk(ctx){
           return false;
         };
         let n=0;
+        const drop=ctx.plan&&ctx.plan.drop;
         (S.drShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
-        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
+        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date) && !(drop&&drop.has(s.id))) n++; });
         (S.irCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.date)) n++; });
         (S.weekendCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.satDate||c.date)) n++; });
+        if(ctx.plan) ctx.plan.of(ctx.physId).forEach(a=>{ if(inRange(a.date)) n++; });
         return n;
       };
       if(t.maxPerMonth!=null && count('month')>=t.maxPerMonth) return false;
@@ -37435,13 +37530,24 @@ function natLangRulesOk(ctx){
   return true;
 }
 /**
- * sequenceOk(p, date, ym)
+ * sequenceOk(p, date, ym, candSite, candSlotLabel, plan)
  * Returns true if assigning physician p to their primary site on `date` would
  * NOT violate any maxConsec (consecutive-day) rule across all their site rules.
  * Called before adding a shift to prevent streaks longer than the configured cap.
+ * plan (rs-v134, optional): a builder's own assignments S does not hold yet
+ * (_rulePlan). They count toward a streak or a rest gap like stored shifts, and
+ * the stored IR shifts the plan replaces (plan.drop — Rebalance) do not. With
+ * plan.ahead the plan's own LATER shifts count as well (a builder that places
+ * some days out of date order: pre-allocated days, an earlier group's
+ * cross-group fill-ins) — the run or rest gap through `date` either side.
  */
-function sequenceOk(p, date, ym, candSite, candSlotLabel){
+function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
   const seq = p.seqRules;
+  const drop = plan && plan.drop;
+  const kept = s => !(drop && drop.has(s.id));
+  const planned = (d, f) => !!plan && (plan.at(p.id, d) || []).some(f || (() => true));
+  // consecutive days right after `date` the plan already holds (up to n), with plan.ahead
+  const ahead = (n, f) => { let k = 0; if(plan && plan.ahead){ let d = date; while(k < n){ d = addDays(d, 1); if(!planned(d, f)) break; k++; } } return k; };
   // Per-site maxConsec from siteRules (old model, kept for compat)
   const perSiteRules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
   for(const rule of perSiteRules){
@@ -37450,10 +37556,11 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
       const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site);
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site&&kept(s))
+             ||planned(d,a=>a.site===rule.site);
       if(has) streak++; else break;
     }
-    if(streak>=cap) return false;
+    if(streak + ahead(cap - streak, a => a.site === rule.site) >= cap) return false;
   }
   // Global maxConsec from seqRules
   if(seq?.maxConsec){
@@ -37462,18 +37569,21 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
       const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d);
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&kept(s))
+             ||planned(d);
       if(has) streak++; else break;
     }
-    if(streak>=cap) return false;
+    if(streak + ahead(cap - streak) >= cap) return false;
   }
   // Global minRest (min days off between shifts)
   if(seq?.minRest){
     for(let i=1;i<=seq.minRest;i++){
       const prev=addDays(date,-i);
       const prevHas=S.drShifts.some(s=>s.physId===p.id&&s.date===prev)
-                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev);
+                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev&&kept(s))
+                  ||planned(prev);
       if(prevHas) return false;
+      if(plan && plan.ahead && planned(addDays(date,i))) return false;
     }
   }
   // Per-site / per-slot sequence rules — newer system. Each rule scopes to a
@@ -37501,13 +37611,15 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
       const counts = (d) => {
         const irHits = (S.irShifts||[]).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
-          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
+          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel) && kept(s));
         if(irHits.length) return true;
         const drHits = (S.drShifts||[]).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
           && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
-        return drHits.length > 0;
+        return drHits.length > 0
+          || planned(d, a => a.site === rule.site && (!rule.slotLabel || (a.slotLabel||'') === rule.slotLabel));
       };
+      const inRule = a => a.site === rule.site && (!rule.slotLabel || (a.slotLabel||'') === rule.slotLabel);
       if(rule.maxConsec){
         const cap = rule.maxConsec;
         let streak=0, d=date;
@@ -37515,20 +37627,59 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
           d = addDays(d,-1);
           if(counts(d)) streak++; else break;
         }
-        if(streak >= cap) return false;
+        if(streak + ahead(cap - streak, inRule) >= cap) return false;
       }
       if(rule.minRest){
         for(let i=1;i<=rule.minRest;i++){
           const prev = addDays(date,-i);
           if(counts(prev)) return false;
+          if(plan && plan.ahead && planned(addDays(date,i), inRule)) return false;
         }
       }
     }
   }
   return true;
 }
-
 /* @JS_SCHED_RULES_END */
+// Defined OUTSIDE the @JS_SCHED_RULES managed block on purpose: the greedy builder and Rebalance
+// (unmanaged code) call _rulePlan, and the GitHub Pages deploy regenerates the managed blocks from
+// src/parts — which does not have these yet — so inside the block they would be undefined there.
+// rs-v134: a builder's own assignments, for the rule checks that read the schedule
+// (sequenceOk, natural-language 'limit' counts) — S does not hold them until Apply.
+// src: the array the builder appends to (or a function returning the current one);
+// drop: ids of stored IR shifts the plan replaces (Rebalance); ahead: the plan holds
+// shifts dated after the day being decided, and sequenceOk must count them too.
+function _rulePlan(src, drop, ahead){
+  let arr = null, n = 0, by = null, per = null;
+  const sync = () => {
+    const a = typeof src === 'function' ? src() : src;
+    if(a !== arr || !a || a.length < n){ arr = a; n = 0; by = new Map(); per = new Map(); }
+    for(; arr && n < arr.length; n++){
+      const e = arr[n];
+      if(!e || e.physId == null || !e.date) continue;
+      const k = e.physId + '|' + e.date;
+      if(!by.has(k)) by.set(k, []);
+      by.get(k).push(e);
+      if(!per.has(e.physId)) per.set(e.physId, []);
+      per.get(e.physId).push(e);
+    }
+  };
+  return {
+    drop: drop || null, ahead: !!ahead,
+    at(physId, date){ sync(); return by.get(physId + '|' + date); },
+    of(physId){ sync(); return per.get(physId) || []; },
+  };
+}
+// rs-v134: can a plan's own shifts change p's rule checks? (a sequence rule, or a
+// natural-language limit that may apply to p)
+function _planRulesFor(p){
+  if(!p) return false;
+  if((p.siteRules||[]).some(r => r && r.maxConsec > 0)) return true;
+  if(p.seqRules && (p.seqRules.maxConsec || p.seqRules.minRest)) return true;
+  if((p.siteSeqRules||[]).some(r => r && (r.maxConsec || r.minRest))) return true;
+  return (S.natLangRules||[]).some(r => r && r.enabled !== false && r.then && r.then.action === 'limit'
+    && (!r.when || r.when.physId == null || r.when.physId === p.id));
+}
 /**
  * _driveTimeCell(physId, site)
  * Returns an inline HTML badge showing drive-time data for the physician→site pair.
@@ -42518,7 +42669,10 @@ function _xlsxZip(files){
   out.set(eocd,pos);
   return out;
 }
-function _xlsxEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// Control characters other than tab / LF / CR (a vertical tab from a note pasted
+// out of Word, say) are not allowed in XML 1.0 at all: one would make Excel
+// refuse the sheet ("We found a problem with some content"), so they become spaces.
+function _xlsxEsc(s){return String(s==null?'':s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g,' ').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _xlsxCol(i){let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=(i-m-1)/26;}return s;}
 // rows: array of arrays. Row 0 is styled as a bold header.
 function _xlsxSheet(rows){
@@ -42703,10 +42857,29 @@ function exportAllCallWorkbook(yrDefault){
       w.sub || 'General', w.site || '', nm(w.physId), w.notes || '']);
   });
   // IR call (weekday, and Fri→Mon weekends recorded on the Friday)
-  const irHolCover = {};   // physId → Set of dates already shown as an IR holiday call
+  // Holiday call belongs to its HOLIDAY's year (the Holiday tab, its counter and
+  // the DR holiday rows below all read it that way): an IR call synced from a
+  // Holiday-tab entry follows that entry, so New Year's 2027 worked on Thu
+  // 2026-12-31 — or New Year's 2028 on Sat 2028-01-01, recorded on Fri
+  // 2027-12-31 — is listed and counted once, in the holiday's year, not in both
+  // workbooks. A holiday-synced call with no Holiday-tab entry keeps its date's year.
+  const bk = h => [h.physId, h.name||'', h.group||'', h.wshift||'', h.sub||''].join('|');
+  const holYr = h => String(h.year || String(h.date).slice(0,4));
+  const holName = c => String(c.notes||'').replace(/\s*\(Holiday\)\s*$/, '');
+  const irHolSrc = c => {   // the Holiday-tab entry this synced call came from (same physician, a date in its span)
+    const end = c.callType === 'weekend' ? addDays(c.date, 3) : c.date;
+    const cand = (S.holidays||[]).filter(h => h.physId === c.physId && h.date && h.date >= c.date && h.date <= end && (h.group || '') !== 'DR');
+    return cand.find(h => (h.name||'') === holName(c)) || cand[0] || null;
+  };
+  const irIn = [];         // { c, hol, src } — the IR calls of this workbook
   (S.irCalls||[]).forEach(c => {
-    if(!inYr(c.date)) return;
-    const wk = c.callType === 'weekend', end = wk ? addDays(c.date, 3) : c.date, hol = _isHolidaySyncedCall(c);
+    const hol = _isHolidaySyncedCall(c), src = hol ? irHolSrc(c) : null;
+    if(src ? holYr(src) !== yr : !inYr(c.date)) return;
+    irIn.push({ c, hol, src });
+  });
+  const irHolCover = {};   // physId → Set of dates already shown as an IR holiday call
+  irIn.forEach(({ c, hol }) => {
+    const wk = c.callType === 'weekend', end = wk ? addDays(c.date, 3) : c.date;
     if(hol){ const set = irHolCover[c.physId] || (irHolCover[c.physId] = new Set()); for(let d = c.date; d <= end; d = addDays(d, 1)) set.add(d); }
     rows.push([c.date, end, span(c.date, end), hol ? 'IR holiday call' : 'IR call', wk ? 'Weekend (Fri→Mon)' : 'Weekday',
       c.irGroup || '', c.site || '', nm(c.physId), c.notes || '']);
@@ -42716,8 +42889,8 @@ function exportAllCallWorkbook(yrDefault){
   const blocks = {};
   (S.holidays||[]).forEach(h => {
     if(!h.date || h.physId == null) return;
-    if(String(h.year || String(h.date).slice(0,4)) !== yr) return;
-    const k = [h.physId, h.name||'', h.group||'', h.wshift||'', h.sub||''].join('|');
+    if(holYr(h) !== yr) return;
+    const k = bk(h);
     (blocks[k] = blocks[k] || { h, dates: [] }).dates.push(h.date);
   });
   Object.values(blocks).forEach(({ h, dates }) => {
@@ -42731,42 +42904,57 @@ function exportAllCallWorkbook(yrDefault){
   rows.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[3] < b[3] ? -1 : a[3] > b[3] ? 1 : (a[7] < b[7] ? -1 : 1)));
 
   // Call still open: DR weekend slots on the open-shift market, IR call slots
-  // nobody holds, and IR holiday weekends with no holiday call assigned yet.
+  // nobody holds, and IR holidays (weekends, and Tue–Thu holidays — a Monday
+  // one rides with its weekend, as _syncHolidayToIRCall files it) with no
+  // holiday call assigned yet. A date assigned on the Holiday tab counts as
+  // assigned even before its IR call record has been synced.
   const open = [['Date','Days','Call','Group / Subspecialty','Status']];
   (S.openShifts||[]).filter(o => o.shiftType === 'Weekend Call' && !o.claimedBy && inYr(o.date))
     .forEach(o => open.push([o.date, span(o.date, addDays(o.date, 1)), 'DR weekend call · ' + ((o.wshift||'day') === 'swing' ? 'Swing' : 'Day'), o.sub || 'General', 'Open — not claimed']));
+  const holTabIR = new Set((S.holidays||[]).filter(h => h.date && h.physId != null && (h.group || '') !== 'DR').map(h => {
+    const m = /^IR-(.+)$/.exec(h.group || ''), p = m ? null : _physById(h.physId);
+    return (m ? m[1] : (p && p.irGroup) || '') + '|' + h.date;
+  }));
   getIRGroups().forEach(g => {
     if(!(S.physicians||[]).some(p => p.irFte > 0 && p.irGroup === g)) return;
     const held = kind => new Set((S.irCalls||[]).filter(c => c.irGroup === g && c.callType === kind).map(c => c.date));
     const hd = held('daily'), hw = held('weekend');
     _irYearSlots('daily', yr, g).forEach(d => { if(!hd.has(d)) open.push([d, dow(d), 'IR call · Weekday', g, 'Nobody assigned']); });
     _irYearSlots('weekend', yr, g).forEach(d => { if(!hw.has(d)) open.push([d, span(d, addDays(d, 3)), 'IR call · Weekend (Fri→Mon)', g, 'Nobody assigned']); });
+    const holFor = d => (S.holidayDefs||[]).some(h => (h.dates||[]).includes(d) && _irHolSlotsFor(h, g) > 0);
     for(let m = 1; m <= 12; m++) buildCal(`${yr}-${String(m).padStart(2,'0')}`).forEach(c => {
-      if(c.day && c.dow === 5 && _irHolidayWeekend(c.date, g) && !hw.has(c.date))
+      if(!c.day) return;
+      if(c.dow === 5 && _irHolidayWeekend(c.date, g) && !hw.has(c.date) && ![0, 1, 2, 3].some(i => holTabIR.has(g + '|' + addDays(c.date, i))))
         open.push([c.date, span(c.date, addDays(c.date, 3)), 'IR holiday weekend', g, 'Holiday call not assigned yet (Holiday Call tab)']);
+      else if(c.dow >= 2 && c.dow <= 4 && holFor(c.date) && !hd.has(c.date) && !holTabIR.has(g + '|' + c.date))
+        open.push([c.date, dow(c.date), 'IR holiday weekday', g, 'Holiday call not assigned yet (Holiday Call tab)']);
     });
   });
   open.splice(1, open.length - 1, ...open.slice(1).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[3] < b[3] ? -1 : 1)));
 
   // Totals per physician — kept as separate counters, never summed into one number.
-  const T = {}, t = pid => T[pid] || (T[pid] = { wd: 0, ws: 0, ird: 0, irw: 0, drHol: new Set(), irHol: 0 });
+  // Holiday call counts BLOCKS for IR as for DR — the Holiday counter's unit
+  // (name × year × pool): a Thu + Fri Thanksgiving synced as a weekday and a
+  // weekend IR call is one. A synced IR call with no Holiday-tab entry counts
+  // once per holiday name.
+  const T = {}, t = pid => T[pid] || (T[pid] = { wd: 0, ws: 0, ird: 0, irw: 0, drHol: new Set(), irHol: new Set() });
   (S.weekendCalls||[]).forEach(w => { if(!inYr(w.satDate || w.date) || w.physId == null) return; const x = t(w.physId); if((w.wshift||'day') === 'swing') x.ws++; else x.wd++; });
-  (S.irCalls||[]).forEach(c => { if(!inYr(c.date) || c.physId == null) return; const x = t(c.physId);
-    if(_isHolidaySyncedCall(c)) x.irHol++; else if(c.callType === 'weekend') x.irw++; else x.ird++; });
-  Object.values(blocks).forEach(({ h, dates }) => {
+  irIn.forEach(({ c, hol, src }) => { if(c.physId == null) return; const x = t(c.physId);
+    if(hol){ if(!src) x.irHol.add(holName(c) + '|IR-' + (c.irGroup||'')); } else if(c.callType === 'weekend') x.irw++; else x.ird++; });
+  Object.values(blocks).forEach(({ h }) => {
     if((h.group || '') === 'DR') t(h.physId).drHol.add(h.name || '');
-    else if(!(irHolCover[h.physId] && dates.some(d => irHolCover[h.physId].has(d)))) t(h.physId).irHol++;
+    else t(h.physId).irHol.add((h.name||'') + '|' + (h.group||''));
   });
   const people = (S.physicians||[]).filter(p => T[p.id] || ((p.drFte > 0 || p.irFte > 0) && _physYearFraction(p, yr) > 0))
     .sort((a, b) => nm(a.id).localeCompare(nm(b.id)));
   const tot = [['Physician','Day DR FTE','IR FTE','Part of year on staff','DR wknd Day','DR wknd Swing','DR holiday blocks',
-    'IR weekday call','IR weekday max','IR weekend call','IR weekend max','IR holiday call']];
+    'IR weekday call','IR weekday max','IR weekend call','IR weekend max','IR holiday blocks']];
   const mx = v => isFinite(v) ? v : '';
   people.forEach(p => {
     const x = T[p.id] || t(p.id), fr = _physYearFraction(p, yr);
     tot.push([nm(p.id), Math.round(_drDayFte(p) * 100) / 100, p.irFte || 0, fr < 1 ? `${Math.round(fr * 100)}% (from ${_physStartDate(p)})` : '100%',
       x.wd, x.ws, x.drHol.size,
-      x.ird, p.irFte > 0 ? mx(_irCallMaxYear(p, 'daily', yr)) : '', x.irw, p.irFte > 0 ? mx(_irCallMaxYear(p, 'weekend', yr)) : '', x.irHol]);
+      x.ird, p.irFte > 0 ? mx(_irCallMaxYear(p, 'daily', yr)) : '', x.irw, p.irFte > 0 ? mx(_irCallMaxYear(p, 'weekend', yr)) : '', x.irHol.size]);
   });
 
   if(!rows.length && open.length === 1){ if(typeof _toast==='function') _toast(`No call assignments or call slots for ${yr}.`,'info'); return; }
@@ -45900,44 +46088,6 @@ function previewIRAA(){
   document.getElementById('ira-apply').style.display=preview.length?'inline-block':'none';
 }
 
-// A preview (or a rebalance plan) is only good for the schedule and limits it
-// was computed from (rs-v128): the IR calls on the schedule, the Settings
-// maximums as applied, each IR physician's group, FTE and start date, and the
-// defined holidays — and everything the hard rules read (whyBlocked): each IR
-// physician's vacations / sold-back time, IR call blackouts, primary site and
-// rules (site, day-condition, call-day, conference, sequence), the
-// natural-language rules, the conferences, and the IR physicians' DR shifts,
-// IR shifts and DR weekend calls.
-// Order-independent on purpose.
-function _iraStamp(){
-  const isIr={}; (S.physicians||[]).forEach(p=>{ if(p.irFte>0) isIr[p.id]=true; });
-  const L=a=>Array.isArray(a)?a:[], ids=a=>L(a).slice().sort().join(',');
-  // JSON with sorted keys, so a reload that only reorders an object's keys is not a change.
-  const cj=v=>{
-    if(v===null||v===undefined||typeof v!=='object') return JSON.stringify(v===undefined?null:v);
-    if(Array.isArray(v)) return '['+v.map(cj).join(',')+']';
-    return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+cj(v[k])).join(',')+'}';
-  };
-  // A conference as the rules see it: its schedule and participants, and who the rotation has on each date.
-  const conf=ev=>{ const r=ev&&ev.rotation;
-    return cj(Object.assign({},ev,{rotation:null}))+'|'+(r&&r.enabled?Object.keys(r.assignments||{}).sort().map(d=>d+'='+ids(_rotationPhysIdsFor(ev,d))).join(';'):''); };
-  const mine=a=>L(a).filter(x=>x&&isIr[x.physId]);
-  return JSON.stringify([
-    (S.physicians||[]).filter(p=>p.irFte>0).map(p=>p.id+':'+(p.irSitePrim||'')+':'+cj([L(p.irCallBlackouts),L(p.siteRules),L(p.dayConditions),L(p.callDayRules),L(p.tbRules),p.seqRules||null,L(p.siteSeqRules)])).sort(),
-    cj(S.natLangRules||[]), L(S.tumorBoards).map(conf).sort(), L(S.clinics).map(conf).sort(),
-    mine(S.vacations).map(v=>[v.id,v.physId,v.start,v.end,v.type||''].join(':')).sort(),
-    mine(S.drShifts).map(x=>[x.id,x.physId,x.date,x.shift,x.site||''].join(':')).sort(),
-    mine(S.irShifts).map(x=>[x.id,x.physId,x.date,x.shift,x.site||''].join(':')).sort(),
-    mine(S.weekendCalls).map(w=>[w.physId,w.date||'',w.satDate||'',w.sunDate||''].join(':')).sort(),
-    String(_irCallMaxBase('daily')), String(_irCallMaxBase('weekend')),
-    (S.physicians||[]).filter(p=>p.irFte>0).map(p=>[p.id,p.irFte,p.irGroup||'',p.startDate||''].join(':')).sort(),
-    // holidays decide which days and weekends are regular call (rs-v130)
-    (S.holidayDefs||[]).map(h=>JSON.stringify([(h.dates||[]).slice().sort(),Object.keys(h.irSlotsByGroup||{}).sort().map(k=>k+'='+h.irSlotsByGroup[k]),h.irNorthSlots,h.irSouthSlots])).sort(),
-    String((S.cfg||{}).skipUniversalHolidays),
-    (S.irCalls||[]).map(c=>[c.id,c.physId,c.date,c.callType,c.irGroup||'',_isHolidaySyncedCall(c)?1:0].join(':')).sort()
-  ]);
-}
-
 function applyIRAA(){
   if(!_adminOnly('apply IR auto-assign'))return;
   if(!S.iraPreview.length){ if(typeof _toast==='function') _toast('Run Preview first to see what will be assigned.','info'); return; }
@@ -46070,6 +46220,46 @@ function applyIRAA(){
 }
 
 /* @JS_IR_ASSIGN_END */
+
+// Kept outside the managed block (rs-v134): previewIRRebalance and applyIRAA call it, and the
+// GitHub Pages build regenerates @JS_IR_ASSIGN from src/parts, which does not have it.
+// A preview (or a rebalance plan) is only good for the schedule and limits it
+// was computed from (rs-v128): the IR calls on the schedule, the Settings
+// maximums as applied, each IR physician's group, FTE and start date, and the
+// defined holidays — and everything the hard rules read (whyBlocked): each IR
+// physician's vacations / sold-back time, IR call blackouts, primary site and
+// rules (site, day-condition, call-day, conference, sequence), the
+// natural-language rules, the conferences, and the IR physicians' DR shifts,
+// IR shifts and DR weekend calls.
+// Order-independent on purpose.
+function _iraStamp(){
+  const isIr={}; (S.physicians||[]).forEach(p=>{ if(p.irFte>0) isIr[p.id]=true; });
+  const L=a=>Array.isArray(a)?a:[], ids=a=>L(a).slice().sort().join(',');
+  // JSON with sorted keys, so a reload that only reorders an object's keys is not a change.
+  const cj=v=>{
+    if(v===null||v===undefined||typeof v!=='object') return JSON.stringify(v===undefined?null:v);
+    if(Array.isArray(v)) return '['+v.map(cj).join(',')+']';
+    return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+cj(v[k])).join(',')+'}';
+  };
+  // A conference as the rules see it: its schedule and participants, and who the rotation has on each date.
+  const conf=ev=>{ const r=ev&&ev.rotation;
+    return cj(Object.assign({},ev,{rotation:null}))+'|'+(r&&r.enabled?Object.keys(r.assignments||{}).sort().map(d=>d+'='+ids(_rotationPhysIdsFor(ev,d))).join(';'):''); };
+  const mine=a=>L(a).filter(x=>x&&isIr[x.physId]);
+  return JSON.stringify([
+    (S.physicians||[]).filter(p=>p.irFte>0).map(p=>p.id+':'+(p.irSitePrim||'')+':'+cj([L(p.irCallBlackouts),L(p.siteRules),L(p.dayConditions),L(p.callDayRules),L(p.tbRules),p.seqRules||null,L(p.siteSeqRules)])).sort(),
+    cj(S.natLangRules||[]), L(S.tumorBoards).map(conf).sort(), L(S.clinics).map(conf).sort(),
+    mine(S.vacations).map(v=>[v.id,v.physId,v.start,v.end,v.type||''].join(':')).sort(),
+    mine(S.drShifts).map(x=>[x.id,x.physId,x.date,x.shift,x.site||''].join(':')).sort(),
+    mine(S.irShifts).map(x=>[x.id,x.physId,x.date,x.shift,x.site||''].join(':')).sort(),
+    mine(S.weekendCalls).map(w=>[w.physId,w.date||'',w.satDate||'',w.sunDate||''].join(':')).sort(),
+    String(_irCallMaxBase('daily')), String(_irCallMaxBase('weekend')),
+    (S.physicians||[]).filter(p=>p.irFte>0).map(p=>[p.id,p.irFte,p.irGroup||'',p.startDate||''].join(':')).sort(),
+    // holidays decide which days and weekends are regular call (rs-v130)
+    (S.holidayDefs||[]).map(h=>JSON.stringify([(h.dates||[]).slice().sort(),Object.keys(h.irSlotsByGroup||{}).sort().map(k=>k+'='+h.irSlotsByGroup[k]),h.irNorthSlots,h.irSouthSlots])).sort(),
+    String((S.cfg||{}).skipUniversalHolidays),
+    (S.irCalls||[]).map(c=>[c.id,c.physId,c.date,c.callType,c.irGroup||'',_isHolidaySyncedCall(c)?1:0].join(':')).sort()
+  ]);
+}
 
 
 /* ─── IR CALL BLACKOUTS ─── */
@@ -46390,13 +46580,32 @@ function previewIRRebalance(){
       gShiftEntries.forEach(e=>{ if(!e._synthetic){ const k=e.physId+'|'+e.date; _pendOrig[k]=(_pendOrig[k]||0)+1; } });
       // Free for an entry also means the IR procedure-shift rules the builders' on-call path and Pass 1
       // apply (site, day, sequence, call-day, conference, natural-language), used by the pin and the pick
-      // alike. Natural-language 'limit' counts are skipped: S.irShifts still holds the shifts this plan
-      // redistributes, so counting them would strip a physician already at the limit.
-      const _freeFor=(p,entry)=>{ const c={physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift',irGroup:g,noLimit:true};
+      // alike. Sequence rules and natural-language 'limit' counts read the plan as it stands (rs-v134):
+      // the shifts it redistributes drop out of S.irShifts and its own decisions so far count instead.
+      const _rp=_rulePlan(gSAsgn,_replanIds);
+      // Someone taking over a slot is also checked at the later days they still hold within their rule
+      // span: they keep those if nobody else can take them, so the takeover must not break a rule there.
+      // That includes the days they keep for certain — a shift this plan does not replan (Home, another
+      // group's, the next period's) or a DR shift: sequenceOk only looks back, so a takeover the day before
+      // one of those is only seen from there.
+      const _ownLater={}, _keptOf={};
+      gShiftEntries.forEach(e=>{ if(!e._synthetic) (_ownLater[e.physId]=_ownLater[e.physId]||[]).push(e); });
+      (S.irShifts||[]).forEach(s=>{ if(!_replanIds.has(s.id)&&s.date>=months[0]) (_keptOf[s.physId]=_keptOf[s.physId]||[]).push(s); });
+      (S.drShifts||[]).forEach(s=>{ if(s.date>=months[0]) (_keptOf[s.physId]=_keptOf[s.physId]||[]).push(s); });
+      const _seqSpan=p=>Math.max(0,...[p.seqRules||{}].concat(p.siteRules||[],p.siteSeqRules||[]).map(r=>Math.max(+(r&&r.maxConsec)||0,+(r&&r.minRest)||0)));
+      const _seqOk=(p,entry)=>{
+        if(!sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'',_rp)) return false;
+        const span=p.id===entry.physId?0:_seqSpan(p); if(!span) return true;
+        const lim=addDays(entry.date,span), inSpan=e=>e.date>entry.date&&e.date<=lim;
+        const later=(_ownLater[p.id]||[]).filter(inSpan), pts=later.concat((_keptOf[p.id]||[]).filter(inSpan));
+        if(!pts.length) return true;
+        const v=_rulePlan(_rp.of(p.id).concat([{physId:p.id,date:entry.date,site:entry.site,slotLabel:entry.slotLabel||''}],later),_replanIds);
+        return pts.every(e=>sequenceOk(p,e.date,e.date.slice(0,7),e.site,e.slotLabel||'',v)); };
+      const _freeFor=(p,entry)=>{ const c={physId:p.id,date:entry.date,site:entry.site,shift:'1st',kind:'ir-shift',irGroup:g,plan:_rp};
         return !_busyKept.has(p.id+'|'+entry.date)&&!(_pendOrig[p.id+'|'+entry.date]>0)
         &&!_conferenceBlocksSlot(p.id,entry.date,entry.site)
         &&irSiteRuleOk(p,entry.site,entry.date)&&dayConditionSiteOk(p,entry.site,entry.date,'ir-shift')
-        &&sequenceOk(p,entry.date,entry.date.slice(0,7),entry.site,entry.slotLabel||'')
+        &&_seqOk(p,entry)
         &&callDayRulesOk(p,c)&&tbRulesOk(p,c)&&natLangRulesOk(c); };
 
       gShiftEntries.forEach(entry=>{
@@ -46413,8 +46622,10 @@ function previewIRRebalance(){
              _irsaEligibleForSlot(callP,entry)&&_freeFor(callP,entry)){
             const isSwap=!entry._synthetic&&entry.physId!==callPhysId;
             const countsQ=_irsaCountsForQuota(callP,entry);
-            const e={physId:callPhysId,date:entry.date,site:entry.site,shift:'1st',
-              irGroup:g,sub:entry.sub||'',notes:(entry.notes||'')+(countsQ?'':' (fill-in)'),
+            // A reassigned shift gets a note of its own: the previous holder's ('Auto-paired with IR call',
+            // which removeIRCall / _removeHolidayIRCall use to find a call's paired shift) is not true of it.
+            const e={physId:callPhysId,date:entry.date,site:entry.site,shift:'1st',slotLabel:entry.slotLabel||'',
+              irGroup:g,sub:entry.sub||'',notes:isSwap?(countsQ?'Rebalanced (on-call)':'Rebalanced (on-call fill-in)'):(entry.notes||'')+(countsQ?'':' (fill-in)'),
               origPhysId:entry.physId,origId:entry.id,isSwap,callPriority:true,synthetic:!!entry._synthetic};
             plan.shifts.push(e);gSAsgn.push(e);
             if(countsQ){
@@ -46477,8 +46688,8 @@ function previewIRRebalance(){
         if(picked){
           const isSwap=!entry._synthetic&&entry.physId!==picked.id;
           const countsQ=_irsaCountsForQuota(picked,entry);
-          const e={physId:picked.id,date:entry.date,site:entry.site,shift:'1st',
-            irGroup:g,sub:entry.sub||'',notes:(entry.notes||'')+(countsQ?'':' (fill-in)'),
+          const e={physId:picked.id,date:entry.date,site:entry.site,shift:'1st',slotLabel:entry.slotLabel||'',
+            irGroup:g,sub:entry.sub||'',notes:isSwap?(countsQ?'Rebalanced':'Rebalanced (fill-in)'):(entry.notes||'')+(countsQ?'':' (fill-in)'),
             origPhysId:entry.physId,origId:entry.id,isSwap,synthetic:!!entry._synthetic};
           plan.shifts.push(e);gSAsgn.push(e);
           if(countsQ){
@@ -46489,7 +46700,7 @@ function previewIRRebalance(){
         } else {
           plan.failedS.push(entry.date);
           if(entry._synthetic) return;   // an unfilled slot of an unscheduled period: nothing to keep
-          const e={physId:entry.physId,date:entry.date,site:entry.site,shift:'1st',
+          const e={physId:entry.physId,date:entry.date,site:entry.site,shift:'1st',slotLabel:entry.slotLabel||'',
             irGroup:g,sub:entry.sub||'',notes:entry.notes||'',
             origPhysId:entry.physId,origId:entry.id,isSwap:false,constrained:true};
           plan.shifts.push(e);gSAsgn.push(e);cntS[entry.physId]=(cntS[entry.physId]||0)+1;
@@ -46758,6 +46969,8 @@ function previewIRRebalance(){
     });
 
     _irrPlan={type:'day-fill',shifts:plan.shifts,displacedHomes:plan.displacedHomes,homesDisplaced:plan.homesDisplaced};
+    const _dfm=_irrDayFillMatch(plan.shifts,inPeriod,groups), _dfKept={};
+    _dfm.keep.forEach(s=>{ _dfKept[s.physId]=(_dfKept[s.physId]||0)+1; });
 
     // ── Preview table ──
     const months2=months;
@@ -46777,7 +46990,7 @@ function previewIRRebalance(){
           + plan.unfilled; // approximate
         gPhys.forEach(p=>{
           const before=months2.reduce((s,ym)=>s+irProcShiftCnt(p.id,ym),0);
-          const after=plan.shifts.filter(s=>s.physId===p.id).length;
+          const after=plan.shifts.filter(s=>s.physId===p.id).length+(_dfKept[p.id]||0);
           const target=Math.round(totalSlots*(p.irFte/gFteTot)*10)/10;
           const pctBefore=target>0?Math.round(before/target*100):0;
           const pctAfter =target>0?Math.round(after/target*100):0;
@@ -46840,7 +47053,7 @@ function previewIRRebalance(){
     const applyNote=document.getElementById('irr-apply-note');
     if(applyBtn) applyBtn.style.display=plan.shifts.length?'inline-block':'none';
     if(applyNote) applyNote.textContent=plan.shifts.length
-      ?`Ready to apply ${plan.shifts.length} shifts. This will REPLACE all existing Day Shifts in the period.`:'';
+      ?`Ready to apply ${plan.shifts.length} shifts: ${_dfm.reuse.length} on the shifts already there (same id and slot label), ${_dfm.add.length} added.${_dfm.keep.length?` ${_dfm.keep.length} shift(s) the plan does not fill stay with their physician.`:''}${_dfm.held?` ${_dfm.held} planned move(s) are not made: they would only leave another slot empty.`:''}${_dfm.drop.size?` ${_dfm.drop.size} shift(s) are removed: the plan moves their physician to another slot that day, or the physician cannot work it (away, no IR FTE or on a 2nd/3rd DR shift).`:''}`:'';
     return; // day-fill path complete
   }
   // ── END Day Shifts Full Fill ─────────────────────────────────────────────────
@@ -47412,6 +47625,41 @@ function _irrUpdateDistribution(){
   });
 }
 
+// How a Day-Fill plan lands on the schedule: in place, as the Procedure Shifts apply does. An entry takes
+// over a procedure shift already on its date and site (the same physician's first, so a slot that is
+// already right is untouched), which keeps that shift's id and slot label; only an entry with none left
+// there is added. A shift no entry takes over stays with its physician unless the plan puts that
+// physician on another shift that day (one shift a day) or the physician cannot work it: it is removed.
+// Pure: preview counts with it, apply acts on it.
+function _irrDayFillMatch(planShifts, inPeriod, groups){
+  const pool=(S.irShifts||[]).filter(s=>inPeriod(s.date)&&groups.includes(s.irGroup)&&s.shift!=='Home');
+  const at={}; pool.forEach(s=>{ if((s.shift||'1st')==='1st') (at[s.date+'|'+s.site]=at[s.date+'|'+s.site]||[]).push(s); });
+  const planned=new Set(planShifts.map(a=>a.physId+'|'+a.date)), taken=new Set(), reuse=[], add=[], rest=[];
+  planShifts.forEach(a=>{ const o=(at[a.date+'|'+a.site]||[]).find(s=>!taken.has(s.id)&&s.physId===a.physId);
+    if(o){ taken.add(o.id); reuse.push([a,o]); } else rest.push(a); });
+  // Another physician's shift there: first one whose physician the plan places elsewhere that day (they
+  // cannot keep it), then one whose holder cannot work it — unknown, off the IR roster (no IR FTE), away
+  // (vacation or before their start date) or on a 2nd/3rd DR shift that day, the physicians the plan never
+  // places — so the shift left over is a real one. A left-over shift of such a holder goes, as before.
+  const away={}, cant=s=>{ const p=(S.physicians||[]).find(x=>x.id===s.physId);
+    return !p||!(p.irFte>0)||(away[p.id]=away[p.id]||_awayDays(p.id)).has(s.date)||_has2ndOr3rdShift(p.id,s.date); };
+  const rank=s=>planned.has(s.physId+'|'+s.date)?0:cant(s)?1:2;
+  rest.forEach(a=>{ const o=(at[a.date+'|'+a.site]||[]).filter(s=>!taken.has(s.id)).sort((x,y)=>rank(x)-rank(y))[0];
+    if(o){ taken.add(o.id); reuse.push([a,o]); } else add.push(a); });
+  // A run of moves in which a physician leaves their shift for a colleague's, who takes another's … and the
+  // last shift taken belongs to someone the plan leaves off that day (who can work it) only moves a gap onto the
+  // first physician's old slot. Undo it: everyone in it keeps the shift they hold, so no slot loses cover.
+  const via=new Map(), undone=new Set(), extra=[];
+  reuse.forEach(r=>{ if(r[1].physId!==r[0].physId) via.set(r[0].physId+'|'+r[0].date,r); });
+  pool.forEach(L=>{ if(taken.has(L.id)||!planned.has(L.physId+'|'+L.date)) return;
+    const chain=[]; let cur=L.physId, r;
+    while((r=via.get(cur+'|'+L.date))&&!undone.has(r)&&!chain.includes(r)){ chain.push(r); cur=r[1].physId; if(!planned.has(cur+'|'+L.date)) break; }
+    if(chain.length&&!planned.has(cur+'|'+L.date)&&rank(chain[chain.length-1][1])===2){ chain.forEach(x=>undone.add(x)); taken.add(L.id); extra.push(chain[chain.length-1][1]); }
+  });
+  const left=pool.filter(s=>!taken.has(s.id)), gone=s=>rank(s)<2;
+  return {reuse:reuse.filter(r=>!undone.has(r)), add, held:undone.size, drop:new Set(left.filter(gone).map(s=>s.id)), keep:left.filter(s=>!gone(s)).concat(extra)};
+}
+
 async function applyIRRebalance(){
   if(!_adminOnly('apply IR rebalance')) return;
   if(!_irrPlan) return;
@@ -47468,30 +47716,31 @@ async function applyIRRebalance(){
     document.getElementById('irr-preview').innerHTML=`<div class="note ns">\u2713 Done. ${appliedSwaps} reassignment(s) applied${addTxt}.</div>`;
     return;
   }
-  // ── Day-Fill apply path ──
+  // ── Day-Fill apply path ── in place (_irrDayFillMatch): the period's shifts keep their ids and slot
+  // labels, and a shift the plan does not fill is not deleted.
   if(typ==='shifts'||typ==='day-fill'||_irrPlan?.type==='day-fill'){
     if(!_irrPlan.shifts?.length){_irrPlan=null;return;}
-    // Remove existing non-Home irShifts in period for affected groups
-    // Also remove Home shifts that were explicitly displaced by day-fill
-    const displacedIds=new Set(_irrPlan.displacedHomes||[]);
-    S.irShifts=S.irShifts.filter(s=>{
-      if(!inPeriod(s.date)) return true;
-      if(!groups.includes(s.irGroup)) return true;
-      if(s.shift==='Home') return !displacedIds.has(s.id); // remove displaced Home, keep others
-      return false; // remove existing proc shifts
-    });
     let appliedSwaps=0,revertedSwaps=0;
-    _irrPlan.shifts.forEach(a=>{
+    const entries=_irrPlan.shifts.map(a=>{
       let physId=a.physId;
       if(a.isSwap&&a._swapIdx!==undefined){
         const cb=document.getElementById(`irr-swap-${a._swapIdx}`);
         if(cb&&!cb.checked){physId=a.origPhysId;revertedSwaps++;}
         else appliedSwaps++;
       }
-      S.irShifts.push({id:S.nextId++,physId,date:a.date,shift:'1st',
-        site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup});
+      return Object.assign({},a,{physId});
     });
-    if(typeof _audit==='function') _audit('irRebalance.shifts.apply', {totalApplied:_irrPlan.shifts.length, appliedSwaps, revertedSwaps, type:_irrPlan?.type||'shifts', months});
+    // Home shifts the plan converts to procedure shifts go
+    const displacedIds=new Set(_irrPlan.displacedHomes||[]);
+    S.irShifts=S.irShifts.filter(s=>!(displacedIds.has(s.id)&&s.shift==='Home'&&inPeriod(s.date)&&groups.includes(s.irGroup)));
+    const m=_irrDayFillMatch(entries,inPeriod,groups);
+    let reassigned=0;
+    m.reuse.forEach(([a,o])=>{ if(o.physId!==a.physId){ o.physId=a.physId; o.notes=a.notes||''; o.irGroup=a.irGroup; reassigned++; } });
+    m.add.forEach(a=>S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',
+      site:a.site,sub:a.sub||'',notes:a.notes||'',irGroup:a.irGroup}));
+    if(m.drop.size) S.irShifts=S.irShifts.filter(s=>!m.drop.has(s.id));
+    if(typeof _audit==='function') _audit('irRebalance.shifts.apply', {totalApplied:_irrPlan.shifts.length, appliedSwaps, revertedSwaps, type:_irrPlan?.type||'shifts', months,
+      reassigned, unchanged:m.reuse.length-reassigned, added:m.add.length, kept:m.keep.length, removed:m.drop.size, held:m.held});
     triggerSave();
     const isDayFill=_irrPlan?.type==='day-fill';
     const totalApplied=_irrPlan.shifts.length;
@@ -47505,7 +47754,7 @@ async function applyIRRebalance(){
       'var(--green-t)');
     renderIRRebalancePrep();
     document.getElementById('irr-preview').innerHTML=isDayFill
-      ?`<div class="note ns">✓ Done. ${totalApplied} Day Shift(s) filled across the period${homesDisplaced?' · '+homesDisplaced+' Home shift(s) converted to Procedure':' · no Home shifts displaced'}. Refresh to see updated FTE %.</div>`
+      ?`<div class="note ns">✓ Done. ${totalApplied} Day Shift(s) filled across the period (${reassigned} reassigned in place, ${m.add.length} added)${m.keep.length?' · '+m.keep.length+' shift(s) the plan does not fill kept':''}${m.held?' · '+m.held+' planned move(s) not made (each would leave a slot empty)':''}${m.drop.size?' · '+m.drop.size+' removed':''}${homesDisplaced?' · '+homesDisplaced+' Home shift(s) converted to Procedure':' · no Home shifts displaced'}. Refresh to see updated FTE %.</div>`
       :`<div class="note ns">✓ Done. ${appliedSwaps} reassignment(s) applied.</div>`;
     return;
   }
@@ -48461,6 +48710,10 @@ function holTab(t,el){
   });
   const _hy=document.getElementById('holoff-year');
   if(_hy&&!_hy.value) _hy.value=new Date().getFullYear();
+  const _hdy=document.getElementById('holdef-year');
+  if(_hdy&&!_hdy.value) _hdy.value=_holdefDefaultYear();
+  // The manual assignment and Auto-Assign Year boxes start on the same year (both were a fixed 2026).
+  ['hol-yr','haa-year'].forEach(id=>{ const e=document.getElementById(id); if(e&&!e.value) e.value=_holdefDefaultYear(); });
   document.querySelectorAll('#hol-tabs .tab').forEach(x=>x.classList.remove('on'));
   if(el) el.classList.add('on');
   else {
@@ -48490,9 +48743,13 @@ function renderHolidays(){
   }
   // Populate the per-IR-group slot inputs on the Define Holidays form. Must
   // run on every render so new IR groups appear as inputs when the admin adds
-  // them from the IR Slots & Groups tab.
+  // them from the IR Slots & Groups tab. Values already in the inputs are kept:
+  // this also runs when another session's save refreshes the page, and must
+  // not reset a half-filled new holiday (rs-v134).
   if(typeof _renderHoldefIRSlotInputs === 'function' && !_holdefEditId){
-    _renderHoldefIRSlotInputs();
+    const cur = {};
+    getIRGroups().forEach(g => { const e = document.getElementById(`holdef-ir-slot-${g}`); if(e) cur[g] = e.value; });
+    _renderHoldefIRSlotInputs(cur);
   }
   // Restore whichever tab was last active (default: assignments if holidays exist)
   const tab = _holActiveTab || (S.holidays.length ? 'assignments' : 'define');
@@ -48502,9 +48759,51 @@ function renderHolidays(){
 // ── Holiday Definition CRUD ─────────────────────────────────────────────────
 let _holdefDates = [];   // scratch pad for dates being added to a new/edit def
 let _holdefEditId = null;
+let _holdefYearTouched = false; // the admin typed a Year — stop filling it in from the dates
+
+// The Year on a holiday definition is its holiday SEASON: the auto-assigner,
+// Counter and Schedule group holidays by it. Dates normally fall in that
+// calendar year, but a New Year block can reach back a few days ("NY 2027"
+// holding 2026-12-31; the official import files a Saturday New Year's observed
+// Friday Dec 31 under the next year) and a Christmas block can run into early
+// January. So Dec 25 of the year before through Jan 7 of the year after is in season.
+function _holdefInSeason(date, yr){
+  return date >= `${yr-1}-12-25` && date <= `${yr+1}-01-07`;
+}
+// Season year for a set of dates: a year written in the name ("NY 2027") when
+// every date fits it; else, for a block holding Jan 1 but not the Christmas
+// Day before it, that Jan 1's year (the official New Year's block for a Monday
+// Jan 1 is Sat Dec 30 – Mon Jan 1, filed under the new year); otherwise the
+// calendar year most dates fall in (a tie goes to the later year).
+function _holdefSeasonYear(dates, name){
+  dates = dates || [];
+  const m = /\b(20\d\d)\b/.exec(name || '');
+  if(m && dates.every(d => _holdefInSeason(d, +m[1]))) return +m[1];
+  const ny = dates.find(d => String(d).slice(4) === '-01-01');
+  if(ny && !dates.includes(`${+ny.slice(0, 4) - 1}-12-25`)) return +ny.slice(0, 4);
+  const n = {};
+  dates.forEach(d => { const y = +String(d).slice(0, 4); if(y) n[y] = (n[y] || 0) + 1; });
+  const ys = Object.keys(n).map(Number).sort((a, b) => (n[b] - n[a]) || (b - a));
+  return ys.length ? ys[0] : null;
+}
+// Year a new definition starts on: this year, or next year once Christmas has passed.
+function _holdefDefaultYear(){
+  const t = new Date();
+  return t.getFullYear() + ((t.getMonth() === 11 && t.getDate() > 25) ? 1 : 0);
+}
+// While adding a new holiday, keep the Year in step with its dates until the
+// admin types one. An existing definition's year is never changed this way.
+function _holdefSyncYear(){
+  if(_holdefEditId != null || _holdefYearTouched) return;
+  const el = document.getElementById('holdef-year'); if(!el) return;
+  el.value = _holdefSeasonYear(_holdefDates, document.getElementById('holdef-name')?.value) || _holdefDefaultYear();
+}
 
 function renderHolDefList(){
-  _holdefDates = [];
+  // Re-draw the chips from the form's own scratch dates. This runs on every
+  // refresh, including another session's save landing while a definition is
+  // open — clearing the dates here used to blank the form, and saving after
+  // re-adding one date then replaced the holiday's dates (rs-v134).
   renderHoldefDatesChips();
   const el = document.getElementById('holdef-list'); if(!el) return;
   const defs = (S.holidayDefs||[]).sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
@@ -48662,11 +48961,13 @@ function holdefAddDate(){
   _holdefDates.sort();
   document.getElementById('holdef-add-date').value='';
   renderHoldefDatesChips();
+  _holdefSyncYear();
 }
 
 function holdefRemoveDate(dt){
   _holdefDates = _holdefDates.filter(d=>d!==dt);
   renderHoldefDatesChips();
+  _holdefSyncYear();
 }
 
 function renderHoldefDatesChips(){
@@ -48684,7 +48985,7 @@ function renderHoldefDatesChips(){
 function submitHolDef(){
   if(!_adminOnly('manage holiday definitions')) return;
   const name  = document.getElementById('holdef-name')?.value.trim();
-  const year  = +document.getElementById('holdef-year')?.value||2026;
+  let year    = +document.getElementById('holdef-year')?.value;
   const drSlots = +document.getElementById('holdef-dr')?.value||0;
   // Read per-group IR slot values from the dynamic inputs. Each input has id
   // holdef-ir-slot-<GroupName> so the parse is generic across any groups the
@@ -48702,29 +49003,53 @@ function submitHolDef(){
   const notes = document.getElementById('holdef-notes')?.value.trim()||'';
   if(!name){ _toast('Enter a holiday name.', 'err'); return; }
   if(!_holdefDates.length){ alert('Add at least one date.'); return; }
+  if(!S.holidayDefs) S.holidayDefs=[];
+  const d = _holdefEditId!=null ? S.holidayDefs.find(x=>x.id===_holdefEditId) : null;
+  // Deleted in another session while open here: saving used to do nothing and
+  // close the form, losing the edits (rs-v134).
+  if(_holdefEditId!=null && !d &&
+     !confirm(`"${name}" was deleted (on another device or by another admin) while it was open here.\n\nSave your edits as a new holiday?`)) return;
+  // The Year is the holiday season (see _holdefInSeason). It used to default to
+  // a fixed 2026 and was never checked against the dates (rs-v134).
+  if(!(year >= 2000 && year <= 2100)) year = _holdefSeasonYear(_holdefDates, name) || _holdefDefaultYear();
+  const off = _holdefDates.filter(dt => !_holdefInSeason(dt, year));
+  if(off.length){
+    const fit = _holdefSeasonYear(_holdefDates, name);
+    const alt = (fit && fit !== year && _holdefDates.filter(dt => !_holdefInSeason(dt, fit)).length < off.length) ? fit : null;
+    const nAsg = d ? (S.holidays||[]).filter(h => h.name === d.name && h.year === d.year).length : 0;
+    const msg = `"${name}" is filed under ${year}, but ${off.length===1?'this date is':'these dates are'} outside the ${year} holiday season:\n  ${off.join(', ')}\n\nThe Year decides which season the holiday counts toward (auto-assign, Counter, Schedule).`;
+    if(alt && confirm(`${msg}\n\nOK: save it under ${alt} instead${nAsg && alt !== d.year ? ` (its ${nAsg} existing assignment${nAsg===1?' stays':'s stay'} filed under ${d.year})` : ''}.\nCancel: keep ${year} or go back.`)){
+      year = alt;
+      const ye = document.getElementById('holdef-year'); if(ye) ye.value = alt;
+    } else if(!confirm(`${msg}\n\nSave it under ${year} anyway?`)) return;
+  }
   const hasAnyIRSlots = Object.values(irSlotsByGroup).some(v => v > 0);
   if(!drSlots && !hasAnyIRSlots){
     if(!confirm('No slots configured for any pool. Create this holiday as blackout-only?')) return;
   }
-  if(!S.holidayDefs) S.holidayDefs=[];
-  if(_holdefEditId!=null){
-    const d=S.holidayDefs.find(x=>x.id===_holdefEditId);
-    if(d){
-      d.name=name; d.year=year; d.dates=[..._holdefDates];
-      d.drSlots=drSlots;
-      d.irSlotsByGroup=irSlotsByGroup;
-      d.irNorthSlots=irNorthSlots; d.irSouthSlots=irSouthSlots;  // back-compat
-      d.notes=notes;
-      delete d.irSlots; // clear legacy field
-    }
+  if(d){
+    d.name=name; d.year=year; d.dates=[..._holdefDates];
+    d.drSlots=drSlots;
+    d.irSlotsByGroup=irSlotsByGroup;
+    d.irNorthSlots=irNorthSlots; d.irSouthSlots=irSouthSlots;  // back-compat
+    d.notes=notes;
+    delete d.irSlots; // clear legacy field
     cancelHolDef();
   } else {
     S.holidayDefs.push({id:S.nextId++,name,year,dates:[..._holdefDates],
       drSlots,irSlotsByGroup,irNorthSlots,irSouthSlots,notes});
-    ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
-    _holdefDates=[];
-    renderHoldefDatesChips();
-    _renderHoldefIRSlotInputs(); // reset to defaults
+    if(_holdefEditId!=null) cancelHolDef();
+    else {
+      ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+      _holdefDates=[];
+      // A Year typed for this holiday is not carried to the next one: the next
+      // holiday's Year follows its own dates again. Carried over, it filed a
+      // New Year or Christmas block under the wrong season with no warning
+      // (those dates sit inside both neighbouring seasons).
+      _holdefYearTouched=false;
+      renderHoldefDatesChips();
+      _renderHoldefIRSlotInputs(); // reset to defaults
+    }
   }
   triggerSave();
   renderHolDefList();
@@ -48776,9 +49101,9 @@ function editHolDef(id){
 }
 
 function cancelHolDef(){
-  _holdefEditId=null; _holdefDates=[];
+  _holdefEditId=null; _holdefDates=[]; _holdefYearTouched=false;
   ['holdef-name','holdef-notes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
-  document.getElementById('holdef-year').value='2026';
+  document.getElementById('holdef-year').value=_holdefDefaultYear();
   document.getElementById('holdef-dr').value='1';
   _renderHoldefIRSlotInputs(); // resets to default 1 per group
   document.getElementById('holdef-form-title').textContent='Create New Holiday';
@@ -48818,6 +49143,7 @@ function deleteHolDef(id){
     const gone = new Set(affected.map(h => h.id));
     S.holidays = S.holidays.filter(h => !gone.has(h.id));
   }
+  if(id === _holdefEditId) cancelHolDef(); // it was open in the form above
   triggerSave();
   _afterMutation();
 }
