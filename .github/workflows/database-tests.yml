@@ -1,0 +1,24 @@
+name: Database Regression Tests
+
+on:
+  pull_request:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    name: Migrations and pgTAP
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.101.0
+      - name: Replay migrations and run database regressions
+        run: bash tools/test-database.sh

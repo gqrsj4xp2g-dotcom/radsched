@@ -449,6 +449,7 @@ function _aiExecuteTool(name, input) {
     if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = _physById(physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(typeof _physStartedBy === 'function' && !_physStartedBy(p, date)) return { ok:false, error:`${p.last} does not start until ${_physStartDate(p)}.` };
     const vd = vacDays(physId);
     if(vd.has(date)) return { ok:false, error:`${p.last} is on vacation on ${date}.` };
     const existing = S.drShifts.find(s=>s.physId===physId&&s.date===date);
@@ -567,6 +568,7 @@ function _aiExecuteTool(name, input) {
     if(typeof isMonthLocked === 'function' && isMonthLocked(date)) return { ok:false, error:`Month ${date.slice(0,7)} is locked (Schedule Lock). Unlock it in Settings before editing.` };
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(typeof _physStartedBy === 'function' && !_physStartedBy(p, date)) return { ok:false, error:`${p.last} does not start until ${_physStartDate(p)}.` };
     if((shift||'1st') !== 'Home' && typeof isHolidayBlackout === 'function' && isHolidayBlackout(date)){
       return { ok:false, error:`${date} is a defined holiday blackout — regular IR shifts are not allowed. Use holiday-call assignment instead.` };
     }

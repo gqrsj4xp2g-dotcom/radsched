@@ -770,7 +770,9 @@ function _describeCallSiteRule(r){
 
 /**
  * natLangRulesOk(ctx) — evaluate all enabled natural-language if/then rules.
- * ctx = { physId, date, site?, shift?, sub?, irGroup?, kind }
+ * ctx = { physId, date, site?, shift?, sub?, irGroup?, kind, plan? }
+ *   plan (rs-v134): a builder's own assignments S does not hold yet (_rulePlan) —
+ *   they count toward a 'limit', and the stored IR shifts they replace do not.
  *   kind ∈ {'dr-shift','ir-shift','ir-call','ir-weekend','dr-weekend','holiday'}
  * Returns true if no enabled rule BLOCKS this assignment, false otherwise.
  * Semantics:
@@ -832,10 +834,12 @@ function natLangRulesOk(ctx){
           return false;
         };
         let n=0;
+        const drop=ctx.plan&&ctx.plan.drop;
         (S.drShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
-        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
+        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date) && !(drop&&drop.has(s.id))) n++; });
         (S.irCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.date)) n++; });
         (S.weekendCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.satDate||c.date)) n++; });
+        if(ctx.plan) ctx.plan.of(ctx.physId).forEach(a=>{ if(inRange(a.date)) n++; });
         return n;
       };
       if(t.maxPerMonth!=null && count('month')>=t.maxPerMonth) return false;
@@ -847,13 +851,24 @@ function natLangRulesOk(ctx){
   return true;
 }
 /**
- * sequenceOk(p, date, ym)
+ * sequenceOk(p, date, ym, candSite, candSlotLabel, plan)
  * Returns true if assigning physician p to their primary site on `date` would
  * NOT violate any maxConsec (consecutive-day) rule across all their site rules.
  * Called before adding a shift to prevent streaks longer than the configured cap.
+ * plan (rs-v134, optional): a builder's own assignments S does not hold yet
+ * (_rulePlan). They count toward a streak or a rest gap like stored shifts, and
+ * the stored IR shifts the plan replaces (plan.drop — Rebalance) do not. With
+ * plan.ahead the plan's own LATER shifts count as well (a builder that places
+ * some days out of date order: pre-allocated days, an earlier group's
+ * cross-group fill-ins) — the run or rest gap through `date` either side.
  */
-function sequenceOk(p, date, ym, candSite, candSlotLabel){
+function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
   const seq = p.seqRules;
+  const drop = plan && plan.drop;
+  const kept = s => !(drop && drop.has(s.id));
+  const planned = (d, f) => !!plan && (plan.at(p.id, d) || []).some(f || (() => true));
+  // consecutive days right after `date` the plan already holds (up to n), with plan.ahead
+  const ahead = (n, f) => { let k = 0; if(plan && plan.ahead){ let d = date; while(k < n){ d = addDays(d, 1); if(!planned(d, f)) break; k++; } } return k; };
   // Per-site maxConsec from siteRules (old model, kept for compat)
   const perSiteRules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
   for(const rule of perSiteRules){
@@ -862,10 +877,11 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
       const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site);
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site&&kept(s))
+             ||planned(d,a=>a.site===rule.site);
       if(has) streak++; else break;
     }
-    if(streak>=cap) return false;
+    if(streak + ahead(cap - streak, a => a.site === rule.site) >= cap) return false;
   }
   // Global maxConsec from seqRules
   if(seq?.maxConsec){
@@ -874,18 +890,21 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
       const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d);
+             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&kept(s))
+             ||planned(d);
       if(has) streak++; else break;
     }
-    if(streak>=cap) return false;
+    if(streak + ahead(cap - streak) >= cap) return false;
   }
   // Global minRest (min days off between shifts)
   if(seq?.minRest){
     for(let i=1;i<=seq.minRest;i++){
       const prev=addDays(date,-i);
       const prevHas=S.drShifts.some(s=>s.physId===p.id&&s.date===prev)
-                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev);
+                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev&&kept(s))
+                  ||planned(prev);
       if(prevHas) return false;
+      if(plan && plan.ahead && planned(addDays(date,i))) return false;
     }
   }
   // Per-site / per-slot sequence rules — newer system. Each rule scopes to a
@@ -913,13 +932,15 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
       const counts = (d) => {
         const irHits = (S.irShifts||[]).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
-          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
+          && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel) && kept(s));
         if(irHits.length) return true;
         const drHits = (S.drShifts||[]).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
           && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
-        return drHits.length > 0;
+        return drHits.length > 0
+          || planned(d, a => a.site === rule.site && (!rule.slotLabel || (a.slotLabel||'') === rule.slotLabel));
       };
+      const inRule = a => a.site === rule.site && (!rule.slotLabel || (a.slotLabel||'') === rule.slotLabel);
       if(rule.maxConsec){
         const cap = rule.maxConsec;
         let streak=0, d=date;
@@ -927,12 +948,13 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel){
           d = addDays(d,-1);
           if(counts(d)) streak++; else break;
         }
-        if(streak >= cap) return false;
+        if(streak + ahead(cap - streak, inRule) >= cap) return false;
       }
       if(rule.minRest){
         for(let i=1;i<=rule.minRest;i++){
           const prev = addDays(date,-i);
           if(counts(prev)) return false;
+          if(plan && plan.ahead && planned(addDays(date,i), inRule)) return false;
         }
       }
     }

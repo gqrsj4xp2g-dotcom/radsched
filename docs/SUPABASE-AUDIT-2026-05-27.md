@@ -52,6 +52,8 @@ Migrations applied:
 - Applied via linked production SQL query on 2026-05-27 after verifying
   same-practice admins at `aal1` could not read their own practice row.
 
+Fresh installations receive these fixes through the versioned immutable-audit-chain and same-practice-read migrations. The read migration limits the AAL1 repair to SELECT policies and keeps MFA checks on administrator writes.
+
 Policies now present:
 
 - `practices_select_scoped`

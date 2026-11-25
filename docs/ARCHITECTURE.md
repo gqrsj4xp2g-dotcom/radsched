@@ -118,15 +118,11 @@ A red toolbar pill appears when `_hasUnsavedChanges` has been true for
 
 ### Daily backups
 
-`_runDailyBackupIfDue()` reads the canonical state from Supabase, copies
-it to `radscheduler_backups`, then **reads the backup row back** to
-verify the write actually landed before marking the day "done" in
-localStorage. A failed verify means tomorrow's run retries.
+PostgreSQL checks for missing daily practice snapshots at 15 minutes past each hour, using UTC dates. The first valid snapshot per practice and date is immutable to app clients. After a successful capture, the server keeps the latest seven calendar dates for that practice. Manual, pre-operation and pre-existing snapshots have independent retention.
 
-`restoreFromBackup(id)` pulls a backup, runs it through
-`_validateRemotePayload`, shows a confirm-with-stats, then upserts.
-The restored payload gets a fresh `savedAt` so peer devices on a poll
-re-pull it.
+Settings → Backups & Restore covers the shared practice row, including its schedule, roster and settings. Swap requests, on-call acknowledgements, private chat, accounts and other separate database tables keep their current state. Full database recovery requires a platform backup.
+
+A verified administrator confirms the backup and the current database version. One database transaction saves a pre-restore snapshot, writes the schedule, audit event, telemetry and a request receipt. A failed write rolls everything back. Retrying the same request returns current committed state and its original receipt.
 
 ---
 

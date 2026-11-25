@@ -45,8 +45,4 @@ These settings cannot be verified from the public browser client:
 
 ## Restore confidence
 
-The E2E suite includes a synthetic restore drill that validates a backup
-payload, writes it over the active practice row, applies it locally, and
-confirms an `admin.restoreBackup` audit event is written. For production,
-also do a staging restore using a copied practice row before the first
-real launch.
+The browser drill verifies confirmation and local hydration. The database suite exercises the real restore transaction, including rollback on audit failure, idempotent retries and side-table preservation. Verify the `rs-daily-practice-backups` job is active in staging and that a practice receives a UTC-day snapshot with no browser open. Run a staging restore on a copied practice before launch.

@@ -208,8 +208,8 @@ Before production use, run the launch checklist in [GO-LIVE.md](GO-LIVE.md).
    parses, then deploys on every push to `main`. The first deploy may
    take a minute; subsequent ones are seconds.
 4. The site will be at `https://<user>.github.io/<repo>/`. To use a
-   custom domain (e.g. `radsched.org`), add a `CNAME` file at the repo
-   root containing the domain, and configure DNS:
+   custom domain (e.g. `radsched.org`), enter it under **Settings → Pages →
+   Custom domain** and configure DNS:
 
    ```
    A    @     185.199.108.153
@@ -221,21 +221,21 @@ Before production use, run the launch checklist in [GO-LIVE.md](GO-LIVE.md).
 
 ### Vercel
 
-1. Connect the repo. Vercel auto-detects there's no build step.
-2. The included `vercel.json` configures cache headers, security
-   headers, and a SPA-style rewrite to `index.html`.
+1. Connect the repo. The included `vercel.json` runs `bash tools/package-site.sh`
+   and serves the verified `_site/` directory.
+2. The configuration applies cache and security headers and serves the
+   app shell for extensionless navigation routes.
 3. Custom domain: **Settings → Domains → Add**.
 
 ### Netlify
 
-Same shape as Vercel; the included `_headers` file handles cache and
-security. Netlify's `netlify.toml` is not needed for this project.
+Set the build command to `bash tools/package-site.sh` and the publish
+directory to `_site`. The package includes Netlify’s `_headers` file.
 
 ### Self-host
 
-Copy `index.html`, `sw.js`, `manifest.webmanifest`, `404.html`, and
-the `icons/` directory to any static host. Apply the same headers as
-`_headers` if you want strict caching + security defaults.
+Run `bash tools/package-site.sh` and copy the contents of `_site/` to the
+static host. Apply the response headers from `_headers` in the host configuration.
 
 ---
 

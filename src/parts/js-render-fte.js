@@ -13,8 +13,8 @@ function renderFTE(){
   // ── DR physicians ──
   const drPs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
   if(drPs.length){
-    html+=`<div class="card" style="margin-bottom:12px"><div class="card-title">Diagnostic Radiology — FTE Utilization</div>
-      <div style="overflow-x:auto"><table><thead><tr>
+    html+=`<div class="card mb12" ><div class="card-title">Diagnostic Radiology — FTE Utilization</div>
+      <div class="scroll-x"><table><thead><tr>
         <th>Physician</th><th>DR FTE</th>
         <th>Weekday Shifts</th><th>Target</th><th>Utilization</th>
         <th>Weekend Calls</th><th>Target</th><th>Utilization</th>
@@ -37,14 +37,14 @@ function renderFTE(){
       const statusCls=overAll?'color:var(--red-t)':underAll?'color:var(--amber,#d97706)':'color:var(--green-t)';
       const statusTxt=overAll||underAll||(wdPct>=80?'✓ On track':'Low');
       html+=`<tr>
-        <td style="font-weight:600">${pnameHtml(p.id)}</td>
-        <td style="text-align:center">${p.drFte}</td>
-        <td style="text-align:center">${wdUsed}</td>
-        <td style="text-align:center;color:var(--txt3)">${wdMax}</td>
-        <td style="text-align:center"><span style="${wdCls};font-weight:700">${wdPct}%</span></td>
-        <td style="text-align:center">${wkUsed}</td>
-        <td style="text-align:center;color:var(--txt3)">${wkMax}</td>
-        <td style="text-align:center"><span style="${wkCls};font-weight:700">${wkPct}%</span></td>
+        <td class="fw6">${pnameHtml(p.id)}</td>
+        <td class="tac">${p.drFte}</td>
+        <td class="tac">${wdUsed}</td>
+        <td class="tac txt3">${wdMax}</td>
+        <td class="tac"><span style="${wdCls};font-weight:700">${wdPct}%</span></td>
+        <td class="tac">${wkUsed}</td>
+        <td class="tac txt3">${wkMax}</td>
+        <td class="tac"><span style="${wkCls};font-weight:700">${wkPct}%</span></td>
         <td style="text-align:center;${ancCls};font-weight:700">${ancTxt}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
@@ -58,7 +58,7 @@ function renderFTE(){
     html+=`<div class="card"><div class="card-title">Interventional Radiology — FTE Utilization
       <span style="font-size:11px;font-weight:400;color:var(--txt3);margin-left:8px">Targets = finite slots in month ÷ group FTE × physician FTE</span>
     </div>
-      <div style="overflow-x:auto"><table><thead><tr>
+      <div class="scroll-x"><table><thead><tr>
         <th>Physician</th><th>IR FTE</th><th>Group</th>
         <th>Daily Calls</th><th>Daily Target</th><th>Daily Util%</th>
         <th>Weekend Calls</th><th>Wknd Target</th><th>Wknd Util%</th>
@@ -82,18 +82,18 @@ function renderFTE(){
       const statusTxt=over?'⚠ Over':(dailyPct>=80&&wkndPct>=80&&(shiftTgt===0||shiftPct>=80))?'✓ On track':'Low';
       const statusCls=over?'color:var(--red-t)':(dailyPct>=80&&wkndPct>=80&&(shiftTgt===0||shiftPct>=80))?'color:var(--green-t)':'color:var(--amber,#d97706)';
       html+=`<tr>
-        <td style="font-weight:600">${pnameHtml(p.id)}</td>
-        <td style="text-align:center">${p.irFte}</td>
+        <td class="fw6">${pnameHtml(p.id)}</td>
+        <td class="tac">${p.irFte}</td>
         <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup||'—'}</span></td>
-        <td style="text-align:center;font-weight:700">${dailyCalls}</td>
-        <td style="text-align:center;color:var(--txt3)">${dailyTgt.toFixed(1)}</td>
-        <td style="text-align:center"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
-        <td style="text-align:center;font-weight:700">${wkndCalls}</td>
-        <td style="text-align:center;color:var(--txt3)">${wkndTgt.toFixed(1)}</td>
-        <td style="text-align:center"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
-        <td style="text-align:center;font-weight:700">${procShifts}</td>
-        <td style="text-align:center;color:var(--txt3)">${shiftTgt>0?shiftTgt.toFixed(1):'—'}</td>
-        <td style="text-align:center">${shiftTgt>0?`<span style="${sCls};font-weight:700">${shiftPct}%</span>`:'—'}</td>
+        <td class="tac fw7">${dailyCalls}</td>
+        <td class="tac txt3">${dailyTgt.toFixed(1)}</td>
+        <td class="tac"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
+        <td class="tac fw7">${wkndCalls}</td>
+        <td class="tac txt3">${wkndTgt.toFixed(1)}</td>
+        <td class="tac"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
+        <td class="tac fw7">${procShifts}</td>
+        <td class="tac txt3">${shiftTgt>0?shiftTgt.toFixed(1):'—'}</td>
+        <td class="tac">${shiftTgt>0?`<span style="${sCls};font-weight:700">${shiftPct}%</span>`:'—'}</td>
         <td style="${statusCls};font-weight:700">${statusTxt}</td>
       </tr>`;
     });

@@ -69,14 +69,21 @@
 <!-- Defer to root automatically after a moment so deep-links to old paths
      just work. The link below is the explicit fallback for users who hit
      the page faster than the redirect or have noscript. -->
-<meta http-equiv="refresh" content="2;url=/">
+<noscript><meta http-equiv="refresh" content="2;url=/"></noscript>
 </head>
 <body>
   <main>
     <div class="mark">RS</div>
     <h1>Page not found</h1>
     <p>The link you followed isn't part of RadScheduler. Taking you back to the dashboard.</p>
-    <a href="/">Continue</a>
+    <a id="home" href="/">Continue</a>
   </main>
+  <script>
+    // A GitHub Pages project lives under /repository/, including its 404.
+    const project = location.hostname.endsWith('.github.io') && location.pathname.match(/^\/(?!\/)([^/]+)\/.+/);
+    const home = project ? '/' + project[1] + '/' : '/';
+    document.getElementById('home').href = home;
+    setTimeout(() => location.replace(home), 2000);
+  </script>
 </body>
 </html>

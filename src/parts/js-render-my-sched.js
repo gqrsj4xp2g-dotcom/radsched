@@ -17,10 +17,10 @@ function renderMySched(){
   const c=ancComp(p.id,ym);
   const monthLabel=new Date(y,m-1,1).toLocaleString('default',{month:'long',year:'numeric'});
 
-  let html=`<div class="g4" style="margin-bottom:12px">
+  let html=`<div class="g4 mb12" >
     <div class="met"><div class="met-lbl">DR Shifts</div><div class="met-val">${shifts.filter(s=>s.shift!=='Home').length}/${maxDR(p,'wd')}</div><div class="met-sub">this month</div></div>
-    <div class="met"><div class="met-lbl">Weekend Calls</div><div class="met-val">${wk.length}/${maxDR(p,'wk')}</div></div>
-    ${p.irFte>0?`<div class="met"><div class="met-lbl">IR Calls</div><div class="met-val">${ir.length}/${maxDR(p,'ir')}</div></div>
+    <div class="met"><div class="met-lbl">Weekend Calls</div><div class="met-val">${_wkndYearCount(p.id,String(y),null)}${_wkndYearCap(p,String(y))!=null?'/'+_wkndYearCap(p,String(y)):''}</div><div class="met-sub">${y} · ${wk.length} this month</div></div>
+    ${p.irFte>0?`<div class="met"><div class="met-lbl">IR Calls</div><div class="met-val">${_irCallYearCount(p.id,'daily',y)+_irCallYearCount(p.id,'weekend',y)}${isFinite(_irCallMaxYear(p,'daily',y)+_irCallMaxYear(p,'weekend',y))?'/'+(_irCallMaxYear(p,'daily',y)+_irCallMaxYear(p,'weekend',y)):''}</div><div class="met-sub">${y} · ${ir.length} this month</div></div>
     <div class="met"><div class="met-lbl">IR Shifts</div><div class="met-val">${irSh.length}</div><div class="met-sub">this month</div></div>`:''}
     ${c&&!c.noData?`<div class="met"><div class="met-lbl">⚓ Anchor</div><div class="met-val" style="color:${c.ok?'var(--green)':'var(--red)'}">${c.pct}%</div><div class="met-sub">≥${S.cfg.anchorPct}% target</div></div>`:''}
   </div>`;
@@ -29,7 +29,7 @@ function renderMySched(){
   try{
     if(typeof _renderMyLeaveBalances === 'function') html += _renderMyLeaveBalances();
   }catch(_){}
-  if(c&&c.ok===false) html+=`<div class="note nw" style="margin-bottom:10px">⚓ Anchor alert: ${c.pct}% at ${c.anchor} — need ≥${S.cfg.anchorPct}%.</div>`;
+  if(c&&c.ok===false) html+=`<div class="note nw mb10" >⚓ Anchor alert: ${c.pct}% at ${c.anchor} — need ≥${S.cfg.anchorPct}%.</div>`;
 
   // ── Next 7 days (mobile-first) ────────────────────────────────────────
   // The single most-asked question of this app is "what am I doing the
@@ -60,7 +60,7 @@ function renderMySched(){
     return (S.vacations||[]).some(v => v.physId === p.id && v.start <= ds && v.end >= ds);
   }
   const next7Html = `
-    <div style="margin-bottom:14px">
+    <div class="mb14">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-size:11px;font-weight:600;color:var(--rs-ink-3);text-transform:uppercase;letter-spacing:.06em">Next 7 days</div>
         <button class="bsm" onclick="openSwapSuggestModal()" title="See who could take any of your upcoming shifts">🔄 Find swap partner</button>
@@ -113,12 +113,12 @@ function renderMySched(){
   const _viewBtn = (v, label, icon) => {
     const on = _curView === v;
     return `<button class="bsm" data-msview="${v}" onclick="mySchedSetView('${v}')"
-      style="font-weight:${on?'700':'500'};background:${on?'var(--blue-bg)':'var(--bg3)'};color:${on?'var(--blue-t)':'var(--txt2)'};border:1px solid ${on?'var(--blue-t)':'var(--bdr)'};padding:5px 11px;font-size:11.5px">${icon} ${label}</button>`;
+      style="font-weight:${on?'700':'500'};background:${on?'var(--blue-bg)':'var(--bg3)'};color:${on?'var(--blue-t)':'var(--txt2)'};border:1px solid ${on?'var(--blue-t)':'var(--bdr)'};padding:5px 11px;font-size:11px">${icon} ${label}</button>`;
   };
   html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="bsm" onclick="mySchedStepFocus(-1)" title="Previous">‹</button>
-      <button class="bsm" onclick="mySchedStepFocus(0)" title="Today" style="font-weight:600">Today</button>
+      <button class="bsm fw6" onclick="mySchedStepFocus(0)" title="Today" >Today</button>
       <button class="bsm" onclick="mySchedStepFocus(1)" title="Next">›</button>
       <input type="date" id="my-focus" value="${escHtml(_focusISO)}" onchange="mySchedSetFocus(this.value)" style="font-size:12px;padding:4px 6px;margin-left:4px">
     </div>
@@ -142,7 +142,7 @@ function renderMySched(){
   html += _renderMySchedWeekView(_focusISO, p, _curView==='week');
 
   // MONTH view (existing calendar grid — preserved exactly)
-  html+=`<div id="mysched-grid-section" style="display:${_curView==='month'?'block':'none'}"><div class="card" style="margin-bottom:12px">
+  html+=`<div id="mysched-grid-section" style="display:${_curView==='month'?'block':'none'}"><div class="card mb12" >
     <div class="card-title">${monthLabel}</div>
     <div class="cal-grid" style="margin-bottom:4px">${DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('')}</div>
     <div class="cal-grid">`;
@@ -269,7 +269,7 @@ function renderMySched(){
     ...(S.holidays||[]).filter(h => h.physId===p.id && _wkRange(h.date)).map(h=>({date:h.date,type:'Holiday: '+h.name,site:'—',detail:h.group,col:'tp'})),
   ].sort((a,b)=>a.date>b.date?1:-1);
   if(allEvts.length){
-    html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${allEvts.length} item${allEvts.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>`;
+    html+=`<div class="card"><div class="card-title">My Assignments — Week of ${escHtml(_listWkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${allEvts.length} item${allEvts.length===1?'':'s'}</span></div><div class="scroll-x"><table><thead><tr><th>Date</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead><tbody>`;
     // Escape every cell — type/site/detail are concatenated from
     // admin-editable strings (h.name, s.sub, s.slotLabel, etc.) and
     // can contain HTML metacharacters or worse.
@@ -345,7 +345,7 @@ function _renderMySchedDayView(focusISO, phys, visible){
   e.holidays.forEach(h => rows.push({icon:'🎉', kind:'Holiday', site:'—', detail: h.name||'—', color:'tp'}));
   if(e.vacation) rows.push({icon:'🏖', kind:'Vacation / Off', site:'—', detail:'—', color:'tr'});
   const card = `<div id="mysched-day-section" style="display:${visible?'block':'none'}">
-    <div class="card" style="margin-bottom:12px">
+    <div class="card mb12" >
       <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span>${escHtml(dayLabel)}</span>
         ${isToday ? '<span class="tag tb" style="font-size:10px">TODAY</span>' : ''}
@@ -374,7 +374,7 @@ function _renderMySchedWeekView(focusISO, phys, visible){
   const sunISO = addDays(focusISO, -dow);
   const today = fmtDate(new Date());
   let html = `<div id="mysched-week-section" style="display:${visible?'block':'none'}">
-    <div class="card" style="margin-bottom:12px">
+    <div class="card mb12" >
       <div class="card-title">Week of ${escHtml(parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'}))} – ${escHtml(parseDateLocal(addDays(sunISO,6)).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'}))}</div>
       <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">
         ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((dn,i) => {

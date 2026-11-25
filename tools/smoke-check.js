@@ -113,7 +113,7 @@ check('sw.js SHELL array is discoverable', !!shellLiteral);
 if (shellLiteral) {
   const shellAssets = unique([...shellLiteral.matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1]));
   for (const asset of shellAssets) {
-    if (asset === '/') continue;
+    if (asset === './') continue;
     const file = asset.replace(/^\//, '');
     check(`Service-worker shell asset exists: ${asset}`, nonEmpty(file), rel(path.join(ROOT, file)));
   }
@@ -122,8 +122,10 @@ if (shellLiteral) {
 
 if (manifest) {
   check('Manifest has name and short_name', !!manifest.name && !!manifest.short_name);
-  check('Manifest start_url stays in scope', typeof manifest.start_url === 'string' && manifest.start_url.startsWith('/'));
-  check('Manifest scope is root', manifest.scope === '/');
+  const manifestBase = new URL('https://local.test/radsched/manifest.webmanifest');
+  const scope = new URL(manifest.scope, manifestBase).href;
+  check('Manifest scope follows the installation directory', scope === new URL('./', manifestBase).href);
+  check('Manifest start_url stays in scope', new URL(manifest.start_url, manifestBase).href.startsWith(scope));
   check('Manifest declares icons', Array.isArray(manifest.icons) && manifest.icons.length >= 2);
   for (const icon of manifest.icons || []) {
     const file = String(icon.src || '').replace(/^\//, '');
@@ -173,7 +175,7 @@ check('User management has protected superuser edit guard', /function\s+_canEdit
 check('System health card exists in ops tools', /id="sys-health-result"/.test(index) && /function\s+renderSystemHealth\(/.test(index));
 check('Rollback timeline is visible in tools', /showUndoTimeline\(\)/.test(index) && /Rollback timeline/.test(index));
 check('SSO login entry point exists', /function\s+doSSOLogin\(/.test(index) && /signInWithSSO/.test(index) && /auth-sso-domain/.test(index));
-check('Backup restore preview wizard exists', /function\s+previewBackupRestore\(/.test(index) && /Restore preview/.test(index) && /I understand this overwrites current data/.test(index));
+check('Backup restore preview wizard exists', /function\s+previewBackupRestore\(/.test(index) && /Restore preview/.test(index) && /I understand this replaces the shared schedule/.test(index));
 check('Stress-test revert opens backup restore UI', /function\s+renderRestoreFromBackups\(/.test(index) && /renderRestoreFromBackups\(\)/.test(index) && /renderBackupPicker\('backup-picker'\)/.test(index));
 
 check('create-user normalizes auth roles', /function\s+normalizeAuthRole/.test(createUser));
@@ -191,9 +193,9 @@ check('admin-ops restores through service-role wrapper with audit evidence', [
   /restore-backup/.test(adminOps),
   /function\s+hasAal2/.test(adminOps),
   /function\s+rateLimit/.test(adminOps),
-  /radscheduler_backups/.test(adminOps),
-  /radscheduler_audit/.test(adminOps),
-  /radscheduler_telemetry/.test(adminOps),
+  /admin\.rpc\("rs_restore_practice_backup"/.test(adminOps),
+  /p_request: requestId/.test(adminOps),
+  /p_expected_saved_at: expectedSavedAt/.test(adminOps),
 ].every(Boolean));
 check('Edge monitor probes admin-ops', /probe admin-ops POST/.test(read('tools/check-edge-functions.sh')));
 

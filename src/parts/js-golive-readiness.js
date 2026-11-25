@@ -29,10 +29,15 @@ async function _goLiveAuditChainItem(sb){
 async function _goLiveBackupItem(sb){
   if(!sb || !_ROW_ID) return _goLiveStatus('warn', 'Backup restore confidence', 'Sign in to a practice before checking backup inventory.');
   try{
-    const { data, error } = await sb.from(_BACKUP_TABLE).select('id, created_at').eq('practice_id', String(_ROW_ID)).order('created_at', { ascending:false }).limit(3);
+    const { data, error } = await sb.from(_BACKUP_TABLE).select('backup_day,created_at').eq('practice_id', String(_ROW_ID))
+      .order('backup_day', { ascending:false, nullsFirst:false }).limit(1);
     if(error) return _goLiveStatus('warn', 'Backup restore confidence', error.message || 'Could not read backup inventory.');
-    const count = Array.isArray(data) ? data.length : 0;
-    return _goLiveStatus(count ? 'ok' : 'warn', 'Backup restore confidence', count ? `${count} recent backup${count === 1 ? '' : 's'} visible; automated restore drill is covered by E2E.` : 'No backup rows visible yet. Let the daily backup run, then run the restore drill.');
+    const daily = data?.[0];
+    if(!daily?.backup_day) return _goLiveStatus('warn', 'Backup restore confidence', 'No server-managed daily snapshot is visible for this practice.');
+    const ageHours = (Date.now() - Date.parse(daily.created_at)) / 3600000;
+    const recent = ageHours >= 0 && ageHours < 25;
+    return _goLiveStatus(recent ? 'ok' : 'warn', 'Backup restore confidence',
+      'Latest server-managed schedule snapshot: '+daily.backup_day+' UTC.'+(recent ? '' : ' Check the scheduled database job.'));
   }catch(e){
     return _goLiveStatus('warn', 'Backup restore confidence', e?.message || String(e));
   }
@@ -63,8 +68,8 @@ async function _goLiveEdgeFunctionsItem(cfgUrl){
 async function _goLiveManifestItem(){
   try{
     const [sw, manifest] = await Promise.all([
-      _healthFetchText('/sw.js'),
-      _healthFetchText('/manifest.webmanifest'),
+      _healthFetchText('sw.js'),
+      _healthFetchText('manifest.webmanifest'),
     ]);
     const expected = (typeof _RS_HTML_BUILD !== 'undefined') ? _RS_HTML_BUILD : '';
     const liveSw = (/CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(sw.text || '') || [])[1] || '';

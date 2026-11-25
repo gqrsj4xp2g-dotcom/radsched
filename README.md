@@ -13,7 +13,7 @@ Open `index.html` from any modern browser, sign in, schedule.
 - **Manage physicians** — FTE, sub-specialty, site eligibility, custom rules, anchor sites, home/in-person preference.
 - **Drive-time aware** — Google Maps round-trip times factor into auto-assignment so the closest physician fills the slot when fairness allows.
 - **Live across devices** — Supabase Realtime keeps every laptop, phone, and iPad in sync. Multi-tab leader election ensures only one tab per browser holds the subscription.
-- **Resilient** — daily backups with verify-after-write, optimistic concurrency, JWT-expiry recovery, schema-versioned migrations, stale-save warnings, undo/redo.
+- **Resilient** — server-scheduled daily practice snapshots, optimistic concurrency, JWT-expiry recovery, schema-versioned migrations, stale-save warnings, undo/redo.
 - **Offline-capable** — service worker caches the shell; the most recent state is readable without network.
 
 ---
@@ -23,11 +23,11 @@ Open `index.html` from any modern browser, sign in, schedule.
 1. **Fork this repo** (or clone and re-host).
 2. **Create a Supabase project** at [supabase.com](https://supabase.com). From _Project Settings → API_, copy the **Project URL** and **anon public key**.
 3. **Run the SQL setup** in the Supabase SQL editor — see [docs/DEPLOY.md](docs/DEPLOY.md) for the exact statements (tables, RLS policies, edge functions).
-4. **Bake your credentials into `index.html`** — open it locally, log in once via the auth screen, click "Save & Connect" in Settings → Supabase. The app embeds the URL + anon key into the HTML on save.
-5. **Deploy.** Drop the repo onto any static host:
+4. **Configure the clean shell.** Set the public project URL and anon key in the existing `_SUPABASE_URL` and `_SUPABASE_KEY` constants in the repository’s `index.html`. The app’s Save File download is a private practice backup.
+5. **Deploy the site.**
    - **GitHub Pages**: push to `main`, enable Pages on the repo.
-   - **Vercel / Netlify**: connect the repo; the included `vercel.json` / `_headers` are pre-configured.
-   - **radsched.org / your-own-host**: copy `index.html` and `sw.js` to the same folder.
+   - **Vercel**: connect the repo. The included configuration builds and serves `_site/`.
+   - **Netlify / your own host**: run `bash tools/package-site.sh` and publish the contents of `_site/`.
 6. **First admin** — see [docs/DEPLOY.md](docs/DEPLOY.md#first-admin) for the bootstrap steps that promote your account to `role: admin` in JWT `app_metadata`.
 
 ---
@@ -129,7 +129,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#security) for full threat model.
 
 The scheduler is the operational backbone of a radiology practice. Losing a month of assignments is not an option. The robustness work that backs that promise:
 
-- **Daily backups** to a dedicated `radscheduler_backups` table, with source validation and verify-after-write.
+- **Daily backups** of each valid shared practice schedule, captured by PostgreSQL without a browser session.
 - **Restore UI** in Settings → Backups & Restore. Backups are listed by date with one-click restore (validated payload + confirm-with-stats before commit).
 - **Optimistic concurrency** on save — we probe `savedAt` before pushing, refuse to clobber if a peer has written, and re-pull + re-arm.
 - **Save watchdog** — if a push hangs (captive portal, dead socket), a 30 s timer force-clears the lock so the queue keeps moving.

@@ -178,7 +178,7 @@ function renderDash(){
   const open=S.openShifts.filter(o=>!o.claimedBy).length;
   const anchPhys=S.physicians.filter(p=>p.anchorSite);
   const anchOk=anchPhys.filter(p=>{const c=ancComp(p.id,ym);return c&&c.ok;}).length;
-  const _adminPages=new Set(['physicians','anchor-report','fte','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
+  const _adminPages=new Set(['physicians','anchor-report','fte','shift-tally','auto-assign','ir-auto','ir-rebalance','ir-shift-auto','user-mgmt','settings','practices','site-slots','ir-slots','ir-shift-slots','dr-builder','dr-weekends','wk-aa','ir-shifts','ir-builder','ai-agent','import','vac-pick','vacations','unfilled']);
   // Null guard — see dash-greet comment above.
   const dm=document.getElementById('dash-metrics');
   if(dm) dm.innerHTML=[
@@ -192,8 +192,8 @@ function renderDash(){
   const ancHtml=anchPhys.map(p=>{const c=ancComp(p.id,ym);const pct=c?c.pct:0;
     // escHtml on p.last / anchorSite — admin-editable strings; without
     // it, a name like `<img onerror=…>` would execute on every dash render.
-    return`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
-      <span style="color:var(--txt2)">${escHtml(p.last)} <span style="color:var(--txt3);font-size:10px">(${escHtml((p.anchorSite||'').split(' ')[0])})</span></span>
+    return`<div class="mb8"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+      <span class="txt2">${escHtml(p.last)} <span style="color:var(--txt3);font-size:10px">(${escHtml((p.anchorSite||'').split(' ')[0])})</span></span>
       <span style="font-weight:700;color:${pct>=S.cfg.anchorPct?'var(--green)':pct>=40?'var(--amber)':'var(--red)'}">${pct}%</span>
     </div>${ancBar(pct)}</div>`;}).join('');
   document.getElementById('dash-anc').innerHTML=ancHtml||'<p style="color:var(--txt3);font-size:12px">No anchor sites configured.</p>';
@@ -215,7 +215,7 @@ function renderDash(){
     // shiftType/sub are admin-editable; escape before innerHTML.
     `<div class="row" style="cursor:pointer" onclick="nav('open-shifts',document.querySelector('[onclick*=open-shifts]'))">
       <span style="font-size:12px;flex:1">${escHtml(o.date)}</span><span class="tag ta">${escHtml(o.shiftType)}</span>
-      <span style="color:var(--txt3);font-size:11px">${escHtml(o.sub||'')}</span></div>`
+      <span class="muted-xs">${escHtml(o.sub||'')}</span></div>`
   ).join('')||'<p style="color:var(--green-t);font-size:12px">All covered!</p>';
   // Dashboard vacation widget: was full-array sort on every render
   // (dashboard renders 6+ times/minute on a busy admin tab). Filter
@@ -224,19 +224,19 @@ function renderDash(){
   const _vacUpcoming = (S.vacations || []).filter(v => v.start >= ym + '-01');
   _vacUpcoming.sort((a, b) => a.start > b.start ? 1 : -1);
   document.getElementById('dash-vac').innerHTML = _vacUpcoming.slice(0,4).map(v=>
-    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(v.start)}</span></div>`
+    `<div class="row"><span style="flex:1;font-size:12px">${pnameHtml(v.physId)}</span><span class="tag tr">${escHtml(v.type)}</span><span class="muted-xs">${escHtml(v.start)}</span></div>`
   ).join('')||'<p style="color:var(--txt3);font-size:12px">None upcoming.</p>';
   if(isAdm){
     const drA=document.getElementById('dash-anc-mo');if(drA)drA.textContent=monthName;
     const drR=document.getElementById('dash-dr-recent');
     if(drR)drR.innerHTML=S.drShifts.filter(s=>s.date.startsWith(ym)).slice(0,5).map(s=>{
       const cls=s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${escHtml(s.shift)}</span><span style="color:var(--txt3);font-size:11px">${escHtml(s.date.slice(5))}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(s.physId)}</span><span class="tag ${cls}">${escHtml(s.shift)}</span><span class="muted-xs">${escHtml(s.date.slice(5))}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No shifts.</p>';
     const irR=document.getElementById('dash-ir-recent');
     if(irR)irR.innerHTML=S.irCalls.filter(c=>c.date.startsWith(ym)).slice(0,5).map(c=>{
       const cls=irGroupColorClass(c.irGroup);
-      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${escHtml(c.irGroup||'')}</span><span style="color:var(--txt3);font-size:11px">${escHtml(c.date.slice(5))} ${escHtml(c.callType||'')}</span></div>`;
+      return`<div class="row"><span style="font-size:12px;flex:1">${pnameHtml(c.physId)}</span><span class="tag ${cls}">${escHtml(c.irGroup||'')}</span><span class="muted-xs">${escHtml(c.date.slice(5))} ${escHtml(c.callType||'')}</span></div>`;
     }).join('')||'<p style="color:var(--txt3);font-size:12px">No IR calls.</p>';
     // rs-v100: 24h activity feed — renderer existed but was never
     // called and its container never added. Admin-only (audit data).

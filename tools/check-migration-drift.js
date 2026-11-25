@@ -111,6 +111,23 @@ for (const [label, pattern] of policyChecks) {
   requireMatch(label.startsWith('telemetry_') ? allScope : hardeningScope, label, pattern);
 }
 
+// Check executable history independently of reference SQL. A documented fix
+// missing from a fresh installation must fail even if the runbook describes it.
+const migrationSql = migrationFiles.map(name => fs.readFileSync(path.join(migrationDir, name), 'utf8')
+  .replace(/--[^\n]*/g, '')).join('\n');
+const migrationScope = { name: 'supabase/migrations/*.sql', text: migrationSql };
+const readFix = migrationFiles.find(name => name.endsWith('_rs_same_practice_read.sql'));
+const readFixScope = { name: 'same-practice read migration', text: readFix ? fs.readFileSync(path.join(migrationDir, readFix), 'utf8') : '' };
+requireMatch(readFixScope, 'SELECT-only policy repair', /cmd\s*=\s*'SELECT'/i);
+requireMatch(readFixScope, 'membership predicate', /select\s+target_practice_id\s*=\s*\(\(select\s+auth\.jwt\(\)\)\s*->\s*'app_metadata'\s*->>\s*'practiceId'\)/i);
+requireMatch(readFixScope, 'MFA-aware mutation helper', /radscheduler_non_admin_same_practice\([\s\S]*?not in \(\s*'admin'\s*,\s*'superuser'\s*\)[\s\S]*?->> 'aal' = 'aal2'/i);
+for (const name of ['rs_restore_practice_backup', 'rs_run_daily_practice_backups', 'rs_capture_practice_backup']) {
+  requireMatch(migrationScope, name, new RegExp('create (?:or replace )?function public\\.' + name + '\\(', 'i'));
+}
+requireMatch(migrationScope, 'server daily backup schedule', /cron\.schedule\('rs-daily-practice-backups',/i);
+requireMatch(migrationScope, 'durable restore receipt', /create table public\.rs_restore_receipts\s*\(/i);
+requireMatch(migrationScope, 'audit delete guard', /create trigger radscheduler_audit_prevent_delete_trg/i);
+
 const objectChecks = [
   ['audit dedupe unique index', /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+radscheduler_audit_dedupe_idx/i],
   ['shift touch function with fixed search_path', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\._radscheduler_shifts_touch\(\)[\s\S]*?SET\s+search_path\s*=\s*public,\s*pg_temp/i],
@@ -130,6 +147,7 @@ const objectChecks = [
 
 for (const [label, pattern] of objectChecks) {
   requireMatch(allScope, label, pattern);
+  if (!label.startsWith('same-practice access helper')) requireMatch(migrationScope, label, pattern);
 }
 
 rejectMatch(hardeningScope, 'broad FOR ALL authenticated policy still present in hardening migration', /CREATE\s+POLICY[\s\S]*?\bFOR\s+ALL\s+TO\s+authenticated/i);

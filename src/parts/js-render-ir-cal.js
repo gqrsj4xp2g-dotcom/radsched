@@ -124,15 +124,15 @@ function renderIRCal(){
         if(view === 'shifts') kindBits.push(`${monthCalls.length} call${monthCalls.length===1?'':'s'}`);
         if(view === 'call')   kindBits.push(`${monthShifts.length} daily shift${monthShifts.length===1?'':'s'}`);
         const kindLine = kindBits.length
-          ? `<br><span style="font-size:11.5px;opacity:0.85">Hidden: ${kindBits.join(' + ')}</span>` : '';
+          ? `<br><span style="font-size:11px;opacity:0.85">Hidden: ${kindBits.join(' + ')}</span>` : '';
         _bannerEl.innerHTML = `
-          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#78350f">
+          <div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--rl);padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--amber-t)">
             <span style="font-size:16px">⚠</span>
             <div style="flex:1">
               <strong>${hidden}</strong> IR record${hidden===1?'':'s'} hidden by active filters (${escHtml(filterBits.join(', '))})
               ${kindLine}
             </div>
-            <button onclick="_ircClearFilters()" style="background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
+            <button onclick="_ircClearFilters()" style="background:#fff;border:1px solid var(--amber);color:var(--amber-t);font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
           </div>`;
         _bannerEl.style.display = '';
       } else {
@@ -162,13 +162,13 @@ function renderIRCal(){
         // palette keyed by group name hash so the same group always gets the
         // same color throughout the app.
         const _irCalStyles = {
-          'North': 'background:#eff6ff;color:#1e40af;border:1px solid #93c5fd',
-          'South': 'background:#f0fdf4;color:#166534;border:1px solid #86efac',
+          'North': 'background:var(--blue-bg);color:var(--blue-t);border:1px solid var(--blue)',
+          'South': 'background:var(--green-bg);color:var(--green-t);border:1px solid var(--green)',
         };
         const _irCalCustomPalette = [
           'background:#faf5ff;color:#6b21a8;border:1px solid #d8b4fe',  // purple
-          'background:#fef3c7;color:#78350f;border:1px solid #fcd34d',  // amber
-          'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5',  // red
+          'background:var(--amber-bg);color:var(--amber-t);border:1px solid var(--amber)',  // amber
+          'background:var(--red-bg);color:var(--red-t);border:1px solid var(--red)',  // red
           'background:#ecfeff;color:#155e75;border:1px solid #67e8f9',  // cyan
         ];
         let grpColor = _irCalStyles[ic.irGroup];
@@ -208,9 +208,9 @@ function renderIRCal(){
       _shiftsOnDate('ir', c.date).filter(_matchIRShift).forEach(s=>{
         let style;
         if(s.shift==='Home')        style='background:#fdf4ff;color:#6b21a8;border:1px dashed #d8b4fe';
-        else if(s.shift==='1st')    style='background:#eff6ff;color:#1e40af;border:1px solid #93c5fd';
-        else if(s.shift==='2nd')    style='background:#f0fdf4;color:#166534;border:1px solid #86efac';
-        else                        style='background:#fefce8;color:#713f12;border:1px solid #fcd34d';
+        else if(s.shift==='1st')    style='background:var(--blue-bg);color:var(--blue-t);border:1px solid var(--blue)';
+        else if(s.shift==='2nd')    style='background:var(--green-bg);color:var(--green-t);border:1px solid var(--green)';
+        else                        style='background:var(--amber-bg);color:var(--amber-t);border:1px solid var(--amber)';
         const siteSh=(s.site||'').split(' ')[0];
         const subLbl=s.sub?` · ${s.sub.slice(0,6)}`:'';
         // Slot labels (e.g. "chn 1", "chn 2") let admins name distinct
@@ -318,7 +318,7 @@ function renderIRCal(){
           </div>`;
         });
       };
-      _emitRecur(S.tumorBoards, '🔬', 'Tumor Bd', 'background:#fef3c7;color:#78350f;border:1px solid #fbbf24');
+      _emitRecur(S.tumorBoards, '🔬', 'Tumor Bd', 'background:var(--amber-bg);color:var(--amber-t);border:1px solid #fbbf24');
       _emitRecur(S.clinics,     '🏥', 'Clinic',   'background:#cffafe;color:#155e75;border:1px solid #67e8f9');
     }
 
@@ -383,7 +383,7 @@ function _renderIRCalDayView(focusISO, matchCall, matchShift, view){
     return false;
   });
   const shifts = (S.irShifts || []).filter(s => s.date === focusISO && matchShift(s));
-  let html = `<div class="card" style="margin-bottom:12px">
+  let html = `<div class="card mb12" >
     <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span>${escHtml(dayLabel)}</span>
       ${isToday ? '<span class="tag tb" style="font-size:10px">TODAY</span>' : ''}
@@ -412,7 +412,7 @@ function _renderIRCalDayView(focusISO, matchCall, matchShift, view){
       });
       html += '<div><div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--rs-ink-2);border-bottom:1px solid var(--bdr);padding-bottom:4px">🩺 IR Shifts</div>';
       Object.keys(groups).sort().forEach(site => {
-        html += `<div style="margin-bottom:6px;font-size:12px"><span style="font-weight:600">${escHtml(site)}</span> ${groups[site].map(s => {
+        html += `<div style="margin-bottom:6px;font-size:12px"><span class="fw6">${escHtml(site)}</span> ${groups[site].map(s => {
           const p = _physById(s.physId);
           const pn = p ? `${p.last}, ${p.first}` : `Phys#${s.physId}`;
           const cls = s.shift==='1st'?'tb':s.shift==='2nd'?'tg':s.shift==='3rd'?'ta':'tpk';
@@ -436,7 +436,7 @@ function _renderIRCalWeekView(focusISO, matchCall, matchShift, view){
   const sunISO = addDays(focusISO, -dow);
   const today = fmtDate(new Date());
   const wkLabel = `${parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'})} – ${parseDateLocal(addDays(sunISO,6)).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'})}`;
-  let html = `<div class="card" style="margin-bottom:12px">
+  let html = `<div class="card mb12" >
     <div class="card-title">Week of ${escHtml(wkLabel)}</div>
     <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">`;
   ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach((dn,i) => {
@@ -517,7 +517,7 @@ function _renderIRCalListView(focusISO, matchCall, matchShift, view){
     el.innerHTML = `<div class="card"><div class="card-title">IR Assignments — Week of ${escHtml(wkLabel)}</div><div class="note ni">No IR assignments match the current filters for this week. Step ‹ › to browse other weeks.</div></div>`;
     return;
   }
-  let html = `<div class="card"><div class="card-title">IR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Kind</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Group/Sub</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
+  let html = `<div class="card"><div class="card-title">IR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div class="scroll-x"><table><thead><tr><th>Date</th><th>Day</th><th>Kind</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Group/Sub</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
   rows.forEach(r => {
     const p = _physById(r.physId);
     const pn = p ? `${p.last}, ${p.first}` : `Phys#${r.physId}`;

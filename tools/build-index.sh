@@ -52,6 +52,7 @@ declare -a REGIONS=(
   "AUTH:css-auth.css"
   "COMPONENTS:css-components.css"
   "REFINED:css-refined.css"
+  "PAGE_CODING:page-coding.html"
   "PAGE_WIDGET:page-widget.html"
   "PAGE_BROADCAST:page-broadcast.html"
   "PAGE_PUBLISH:page-publish.html"

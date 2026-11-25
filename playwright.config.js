@@ -17,7 +17,7 @@ module.exports = defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: `python3 -m http.server ${PORT} --bind 127.0.0.1`,
+    command: `python3 -m http.server ${PORT} --bind 127.0.0.1 --directory ${process.env.RAD_E2E_PACKAGED ? "_site" : "."}`,
     url: `${BASE_URL}/index.html`,
     reuseExistingServer: !process.env.CI,
     timeout: 15_000,

@@ -239,6 +239,8 @@ function _diagnoseSlotUnfillable(slot, opts){
     runAssigns = _irsaPreview;
   }
   runAssigns = runAssigns || [];
+  // rs-v134: sequence rules and natural-language limits count this preview's shifts, as the builders do
+  const runPlan = _rulePlan(runAssigns);
   const placedThisRun = {};   // physId → {date, site, slotLabel}
   runAssigns.forEach(a => {
     if(!a || a.physId == null) return;
@@ -261,7 +263,7 @@ function _diagnoseSlotUnfillable(slot, opts){
   const out = [];
   allP.forEach(p => {
     const reasons = [];
-    const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group || p.irGroup, ym };
+    const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group || p.irGroup, ym, plan: runPlan };
     // In-run placement — this is the new check. If the solver already
     // placed this physician at a different slot today in THIS preview
     // run, they cannot also fill the current slot — but they're not
@@ -273,6 +275,7 @@ function _diagnoseSlotUnfillable(slot, opts){
       reasons.push('already placed today (' + pr.site + (pr.slotLabel ? ' · ' + pr.slotLabel : '') + ') by this preview run');
     }
     // Vacation
+    try{ if(typeof _physStartedBy === 'function' && !_physStartedBy(p, slot.date)) reasons.push('not started yet (starts ' + _physStartDate(p) + ')'); }catch(_){}
     try{ if(typeof vacDays === 'function' && vacDays(p.id).has(slot.date)) reasons.push('on vacation'); }catch(_){}
     // Sold-back date (CME / personal)
     try{ if(typeof isSoldBackDate === 'function' && isSoldBackDate(p.id, slot.date)) reasons.push('sold-back date'); }catch(_){}
@@ -310,7 +313,7 @@ function _diagnoseSlotUnfillable(slot, opts){
     // Day condition
     try{ if(typeof dayConditionSiteOk === 'function' && !dayConditionSiteOk(p, slot.site, slot.date, 'ir-shift')) reasons.push('day condition mismatch'); }catch(_){}
     // Sequence rules (max consecutive / min rest, slot-aware)
-    try{ if(typeof sequenceOk === 'function' && !sequenceOk(p, slot.date, ym, slot.site, slot.slotLabel||'')) reasons.push('sequence rule (consecutive / rest)'); }catch(_){}
+    try{ if(typeof sequenceOk === 'function' && !sequenceOk(p, slot.date, ym, slot.site, slot.slotLabel||'', runPlan)) reasons.push('sequence rule (consecutive / rest)'); }catch(_){}
     // Tumor board / conference participation
     try{ if(typeof tbRulesOk === 'function' && !tbRulesOk(p, ctx)) reasons.push('tumor-board / clinic conflict'); }catch(_){}
     try{ if(typeof _conferenceBlocksSlot === 'function' && _conferenceBlocksSlot(p.id, slot.date, slot.site)) reasons.push('participating in a conference at this site'); }catch(_){}
@@ -352,6 +355,7 @@ function _assignOverQuotaNow(payload){
     return;
   }
   const p = (S.physicians||[]).find(x => x.id === physId);
+  if(p && typeof _confirmBeforeStart === 'function' && !_confirmBeforeStart(p,[date])) return;
   if(!p){
     if(typeof _toast === 'function') _toast('Physician not found.', 'err');
     return;
@@ -565,7 +569,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
     if(_uh){
       html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--red,#dc2626);border-radius:4px;font-size:11px">
         <div style="font-weight:700;color:var(--red-t);margin-bottom:2px">🎉 Universal holiday — ${escHtml(_uh)}</div>
-        <div style="color:var(--txt2)">Auto-assign correctly skipped this date. Use the Holiday Call tab to assign coverage if the practice operates on this holiday. Set <code>S.cfg.skipUniversalHolidays = false</code> to disable the universal-holiday block entirely.</div>
+        <div class="txt2">Auto-assign correctly skipped this date. Use the Holiday Call tab to assign coverage if the practice operates on this holiday. Set <code>S.cfg.skipUniversalHolidays = false</code> to disable the universal-holiday block entirely.</div>
       </div>`;
     } else {
       const inGroupTotal = diag.filter(d => d.group === slot._group).length;
@@ -578,14 +582,14 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       if(inGroupTotal > 0 && inGroupPlaced === inGroupTotal){
         html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--amber,#d97706);border-radius:4px;font-size:11px">
           <div style="font-weight:700;color:var(--amber-t);margin-bottom:2px">🗓 Group head-count shortage</div>
-          <div style="color:var(--txt2)">All ${inGroupTotal} in-group physicians are already placed at other slots today (one physician = one shift per day). Over-quota assignment cannot help here — the constraint is calendar capacity, not period quota. Options: pull from the cross-coverage pool below, hire/transfer to grow the group, or reduce the slot count for this date.</div>
+          <div class="txt2">All ${inGroupTotal} in-group physicians are already placed at other slots today (one physician = one shift per day). Over-quota assignment cannot help here — the constraint is calendar capacity, not period quota. Options: pull from the cross-coverage pool below, hire/transfer to grow the group, or reduce the slot count for this date.</div>
         </div>`;
       } else if(overQuota.length && overQuota.length === inGroupTotal - inGroupPlaced){
         // Every in-group phys not-placed-elsewhere is over quota.
         // Greedy Pass 4 / MCF's over-quota edge should pick one.
         html += `<div style="margin-bottom:8px;padding:8px 10px;background:var(--bg3);border-left:3px solid var(--amber,#d97706);border-radius:4px;font-size:11px">
           <div style="font-weight:700;color:var(--amber-t);margin-bottom:2px">⚖ Over-quota pool will be used (Pass 4)</div>
-          <div style="color:var(--txt2)">${overQuota.length} in-group physician${overQuota.length===1?' is':'s are'} at/over their period quota. Greedy Pass 4 will pick one and label the assignment "Auto (over-quota)". If you see this slot still unfilled in the preview, one of them is also blocked by call-day-site rule / conference / pre-existing shift — check the per-physician table below.</div>
+          <div class="txt2">${overQuota.length} in-group physician${overQuota.length===1?' is':'s are'} at/over their period quota. Greedy Pass 4 will pick one and label the assignment "Auto (over-quota)". If you see this slot still unfilled in the preview, one of them is also blocked by call-day-site rule / conference / pre-existing shift — check the per-physician table below.</div>
         </div>`;
       }
     }
@@ -600,7 +604,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       if(crossCoverage.length){
         html += `<div style="font-size:10.5px;font-weight:700;color:var(--green-t);margin-top:4px;margin-bottom:2px">✓ Available now — ${crossCoverage.length}</div>
         <table style="width:100%;font-size:11px;margin-bottom:6px"><thead><tr>
-          <th style="text-align:left">Physician</th><th style="text-align:left">Their Group</th><th style="text-align:left">Anchor Site</th><th style="text-align:left">Site Role</th>
+          <th class="tal">Physician</th><th class="tal">Their Group</th><th class="tal">Anchor Site</th><th class="tal">Site Role</th>
         </tr></thead><tbody>`;
         crossCoverage.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
           const p = (S.physicians||[]).find(x => x.id === c.physId);
@@ -608,11 +612,11 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
           const role = _siteRoleFor(c.physId, slot.site);
           const roleBadge = role
             ? `<span class="tag" style="font-size:9px;background:var(--green-bg);color:var(--green-t);font-weight:700">${role}</span>`
-            : `<span style="color:var(--txt3)">cross-group only</span>`;
+            : `<span class="txt3">cross-group only</span>`;
           html += `<tr>
-            <td style="font-weight:600">${escHtml(c.name)}</td>
+            <td class="fw6">${escHtml(c.name)}</td>
             <td><span class="tag" style="font-size:9px">${escHtml(c.group||'—')}</span></td>
-            <td style="color:var(--txt2)">${escHtml(anchor)}</td>
+            <td class="txt2">${escHtml(anchor)}</td>
             <td>${roleBadge}</td>
           </tr>`;
         });
@@ -626,7 +630,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       if(crossBlocked.length){
         html += `<div style="font-size:10.5px;font-weight:700;color:var(--amber-t);margin-top:4px;margin-bottom:2px">⚠ Also blocked — ${crossBlocked.length} (other-group, but also have a conflict)</div>
         <table style="width:100%;font-size:11px"><thead><tr>
-          <th style="text-align:left">Physician</th><th style="text-align:left">Group</th><th style="text-align:left">Other blocking reason(s)</th>
+          <th class="tal">Physician</th><th class="tal">Group</th><th class="tal">Other blocking reason(s)</th>
         </tr></thead><tbody>`;
         crossBlocked.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
           // Filter out the cross-group reason itself; show only the OTHER blocks.
@@ -635,7 +639,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
             ? otherReasons.map(r => `<span class="tag" style="font-size:9.5px;margin-right:4px">${escHtml(r)}</span>`).join('')
             : `<span class="tag" style="font-size:9.5px;background:var(--amber-bg);color:var(--amber-t)">cross-group only</span>`;
           html += `<tr>
-            <td style="font-weight:600">${escHtml(c.name)}</td>
+            <td class="fw6">${escHtml(c.name)}</td>
             <td><span class="tag" style="font-size:9px">${escHtml(c.group||'—')}</span></td>
             <td>${rh}</td>
           </tr>`;
@@ -656,7 +660,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
         <div style="font-size:11px;font-weight:700;color:var(--amber-t);margin-bottom:4px">⚖ Over-quota pool — ${overQuota.length} in-group physician${overQuota.length===1?'':'s'}</div>
         <div style="font-size:10.5px;color:var(--txt2);margin-bottom:6px">In-group, not blocked by any rule, but already at their period quota. Click <strong>Assign now</strong> to commit a shift to this slot immediately (over-quota override is admin-only and audit-logged).</div>
         <table style="width:100%;font-size:11px"><thead><tr>
-          <th style="text-align:left">Physician</th><th style="text-align:left">Quota</th><th style="text-align:left">Anchor Site</th><th></th>
+          <th class="tal">Physician</th><th class="tal">Quota</th><th class="tal">Anchor Site</th><th></th>
         </tr></thead><tbody>`;
       overQuota.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
         const p = (S.physicians||[]).find(x => x.id === c.physId);
@@ -679,10 +683,10 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
           irGroup: slot._group || '',
         }).replace(/"/g, '&quot;');
         html += `<tr>
-          <td style="font-weight:600">${escHtml(c.name)}</td>
+          <td class="fw6">${escHtml(c.name)}</td>
           <td><span class="tag" style="font-size:9px;background:var(--amber-bg);color:var(--amber-t)">${escHtml(qLabel)}</span></td>
-          <td style="color:var(--txt2)">${escHtml(anchor)}</td>
-          <td style="text-align:right"><button class="bp bsm" style="font-size:10.5px;padding:3px 8px" onclick="_assignOverQuotaNow(${slotPayload})">+ Assign now</button></td>
+          <td class="txt2">${escHtml(anchor)}</td>
+          <td class="tar"><button class="bp bsm" style="font-size:10.5px;padding:3px 8px" onclick="_assignOverQuotaNow(${slotPayload})">+ Assign now</button></td>
         </tr>`;
       });
       html += '</tbody></table></div>';
@@ -691,7 +695,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
     // primary cross-coverage info is what admins see first)
     html += `<details style="margin-top:6px"><summary style="font-size:11px;color:var(--txt3);cursor:pointer">▶ Show all ${diag.length} physicians and their reasons</summary>
         <div style="overflow-x:auto;margin-top:6px"><table style="width:100%"><thead><tr>
-          <th style="text-align:left">Physician</th><th style="text-align:left">Group</th><th style="text-align:left">Why excluded</th>
+          <th class="tal">Physician</th><th class="tal">Group</th><th class="tal">Why excluded</th>
         </tr></thead><tbody>`;
     diag.sort((a,b) => a.name.localeCompare(b.name)).forEach(d => {
       // When the diagnostic returns no reasons, the physician is genuinely
@@ -704,7 +708,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       const reasonHtml = d.reasons.length
         ? d.reasons.map(r => `<span class="tag" style="font-size:9.5px;margin-right:4px">${escHtml(r)}</span>`).join('')
         : '<span style="color:var(--green-t);font-weight:700">— eligible (passed all rules) — solver chose not to pick this round</span>';
-      html += `<tr><td style="font-weight:600">${escHtml(d.name)}</td><td><span class="tag" style="font-size:9px">${escHtml(d.group||'—')}</span></td><td>${reasonHtml}</td></tr>`;
+      html += `<tr><td class="fw6">${escHtml(d.name)}</td><td><span class="tag" style="font-size:9px">${escHtml(d.group||'—')}</span></td><td>${reasonHtml}</td></tr>`;
     });
     html += '</tbody></table></div></details></div></details>';
   });
@@ -719,253 +723,584 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
    greedy solver — so downstream code (preview render, applyIRShiftAA)
    doesn't need to change.
 
-   Cost model:
-     base 0
-     + 50 if anchor mismatch
-     + 200 if cross-group fill-in
-     - 80 if physician is on call that day (encourage on-call placement)
-     - 5 per unit of "below quota" deficit (push under-utilized phys earlier)
-     +  conferenceShiftPreference scaled (more-preferred = more negative)
+   Network:
+     source ─► physician ─► physician-day ─► slot ─► sink
+       source → physician      in-quota edges (total cap = effective quota
+                               minus the quota-counting shifts already held
+                               in the period) + over-quota edges (one unit
+                               per date of the period — no ceiling, like
+                               greedy Pass 4), each unit dearer than the last.
+       physician → phys-day    cap 1. ONE slot per physician per date, across
+                               every site and group — a physician cannot be
+                               routed to two slots of the same day.
+       phys-day → slot         cap 1, present only where the greedy's hard
+                               predicate holds (_irsaMcfEdgeTier). A
+                               physician on vacation / not started / on a
+                               2nd-3rd DR shift / already holding a shift
+                               that day has no phys-day node at all.
+       slot → sink             cap 1.
+   The solver maximises flow first (every fillable slot is filled), then
+   minimises cost — so an unfilled slot is costlier than anything below.
 
-   Hard rule violations (siteRuleOk, dayConditionSiteOk, sequenceOk,
-   tbRulesOk, callDayRulesOk, natLangRulesOk) are encoded as edge OMISSION,
-   not high cost — the solver simply can't route through impossible edges.
+   Cost model (_IRSA_MCF_COST), cheapest → dearest:
+     - 500…0  fair share: each in-quota shift earns FAIR × (1 − attainment),
+              so the physician furthest below quota is served first and
+              nobody is starved to keep a colleague at their anchor site
+       0      at the anchor site, or no anchor site / anchor site not in
+              this run (floaters are free to use)
+     + 50     away from the anchor site
+     + 60     in-group fill-in at a mixed-role site (its anchors go first)
+     + 100…   per shift above the quota, rising with each further one
+              (< 900; no cap on how many — greedy Pass 4 has none)
+     + 2000   a site rule / day condition / conference rule / NL rule had
+              to be relaxed (greedy Pass 2)
+     + 4000   a sequence rule had to be relaxed (greedy Pass 3)
+     + 20000  cross-group fill-in — last resort (greedy Pass 5)
+     - 80     physician is on call that day (per group call map)
+     plus the small pre-existing terms: conference shift preference,
+     look-ahead, burnout flags, unmet sub-specialty need.
+
+   Never relaxed (edge OMISSION, not cost): roster / start date /
+   allowedSites, vacation, 2nd-3rd DR shift, sold-back day, a shift
+   already on that date, conference block, call-day site rule.
 ═══════════════════════════════════════════════════════════════════════ */
+// Integers only — Bellman-Ford compares sums of these.
+const _IRSA_MCF_COST = {
+  ANCHOR: 50,          // away from the physician's anchor site
+  FILLIN: 60,          // in-group fill-in at a mixed-role site (does not count toward quota)
+  ONCALL: -80,         // on IR call that day → prefer a hospital placement
+  FAIR: 500,           // fair-share weight: an in-quota shift costs −FAIR × (1 − attainment).
+                       // ANCHOR / FAIR = 10 % → an anchor is only displaced to close an
+                       // attainment gap wider than ten points.
+  OVER: 100,           // first shift above the effective quota…
+  OVER_STEP_MAX: 400,  // …each further one costs more (same slope as FAIR) up to here…
+  OVER_TAIL: 400,      // …then still more, by a tail that flattens toward +OVER_TAIL (< 900 in
+                       // all): never flat, so the extras stay pro rata to quota however many
+                       // there are, and still cheaper than relaxing a rule.
+  SITE_RELAX: 2000,    // greedy Pass 2 relaxation
+  SEQ_RELAX: 4000,     // greedy Pass 3 relaxation
+  XGROUP: 20000,       // registered cross-group fill-in (greedy Pass 5)
+};
+
+// Per-group inputs on the SAME basis as the greedy (previewIRShiftAA): the
+// group's open slots, its on-call map, a largest-remainder quota table
+// (_irrQuotas → _irsaEffQ) and the quota-counting '1st' shifts each physician
+// already holds in the period (how the greedy seeds cnt[] / anc[]).
+function _irsaMcfGroupModel(grp, cells, months, inPeriod, allP, allS){
+  const phys = allP.filter(p => p.irGroup === grp);
+  if(!phys.length) return null;
+  const slots = _irsaBuildSlots(grp, cells, allS, S.irShiftSlots || {}, phys);
+  if(!slots.length) return null;
+  const callMap = _irsaBuildCallMap(grp, months, S.irCalls || []);
+  let gFt = 0; phys.forEach(p => { gFt += p.irFte; }); if(!gFt) gFt = 1;
+  const rawQ = _irrQuotas(phys, slots.length, p => { const t = irShiftTargetPeriod(p, months); return t > 0 ? t : slots.length * (p.irFte / gFt); });
+  const callDays = {}, existing = {}, existingAnc = {}, quota = {};
+  phys.forEach(p => { callDays[p.id] = 0; existing[p.id] = 0; existingAnc[p.id] = 0; });
+  Object.keys(callMap).forEach(d => { if(callDays.hasOwnProperty(callMap[d])) callDays[callMap[d]]++; });
+  (S.irShifts || []).forEach(es => {
+    if(!es || es.shift !== '1st' || !es.date || !inPeriod[es.date]) return;
+    if(existing[es.physId] == null) return;                       // only physicians of this group
+    const st = allS.find(x => x.name === es.site);
+    if(!st) return;
+    const mixed = (st.irAnchors && st.irAnchors.length) || (st.irFillins && st.irFillins.length);
+    const owner = (st.irGroup === grp || st.irGroup === 'Both') ? grp : (mixed ? _irsaMixedSiteOwnerGroup(st) : null);
+    if(owner !== grp) return;                                     // only at this group's sites
+    if(mixed && (st.irAnchors || []).indexOf(es.physId) < 0) return; // fill-in shifts are bonus
+    existing[es.physId]++;
+    const pp = phys.find(x => x.id === es.physId);
+    if(pp && pp.anchorSite === es.site) existingAnc[es.physId]++;
+  });
+  phys.forEach(p => { quota[p.id] = _irsaEffQ(p, rawQ, callDays, months); });
+  return { grp, phys, slots, callMap, callDays, existing, existingAnc, quota };
+}
+
+// Can physician p ever be routed to this slot, and at which rule tier?
+//   null                → no edge. These are never relaxed: roster / start date /
+//                         allowedSites (_irsaEligibleForSlot), the day-level block
+//                         (_irsaBlocked: vacation, not started, 2nd-3rd DR shift,
+//                         sold-back, a shift already on that date), a conference
+//                         block and the call-day site rule.
+//   {siteOk, seqOk}     → both true = the greedy's Pass-1 predicate; siteOk false =
+//                         only reachable by relaxing a site rule (Pass 2); seqOk
+//                         false = only by relaxing a sequence rule (Pass 3).
+function _irsaMcfEdgeTier(p, slot, dayBlocked){
+  if(dayBlocked) return null;
+  if(!_irsaEligibleForSlot(p, slot)) return null;
+  if(_conferenceBlocksSlot(p.id, slot.date, slot.site)) return null;
+  const ym = slot.date.slice(0, 7);
+  const ctx = { physId: p.id, date: slot.date, site: slot.site, shift: '1st', kind: 'ir-shift', irGroup: slot._group, ym: ym };
+  if(!callDayRulesOk(p, ctx)) return null;
+  return {
+    siteOk: !!(irSiteRuleOk(p, slot.site, slot.date) && dayConditionSiteOk(p, slot.site, slot.date, 'ir-shift')
+            && tbRulesOk(p, ctx) && natLangRulesOk(ctx)),
+    seqOk: !!sequenceOk(p, slot.date, ym, slot.site, slot.slotLabel || ''),
+  };
+}
+
+// Spread off-anchor shifts between colleagues anchored at the same site.
+// A per-physician "each further off-anchor shift costs a little more" term
+// cannot live in the network: it is an aggregate over the physician's
+// off-anchor edges ACROSS days, and that set crosses the physician-day
+// capacity that guarantees one slot per date (neither contains the other, so
+// no node layout carries both — and one-per-date is not negotiable). So the
+// network keeps the flat ANCHOR cost, and this pass walks the optimal
+// solution: it exchanges two same-anchor colleagues between two slots when
+// that evens out their off-anchor load (Σ off²/shifts strictly drops) and
+// the total cost does not rise. It only moves along edges that exist in the
+// network, leaves every physician with ≤ 1 slot per date and with the same
+// number of quota-counting shifts — nothing the network guarantees changes.
+function _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost, rulesHold){
+  const cand = (j, pi) => { const l = cands[j]; for(let i = 0; i < l.length; i++){ if(l[i].pi === pi) return l[i]; } return null; };
+  const plain = c => !!c && c.counts && c.siteOk && c.seqOk;      // quota-counting, no rule relaxed
+  const busy = {};                                                // 'pi|date' → slot index
+  asg.forEach((pi, j) => { if(pi >= 0) busy[pi + '|' + allSlots[j].date] = j; });
+  const teams = {};                                               // 'group|anchorSite' → [pi]
+  info.forEach((pin, pi) => { if(pin.anchored){ const k = pin.p.irGroup + '|' + pin.p.anchorSite; (teams[k] = teams[k] || []).push(pi); } });
+  let swaps = 0;
+  Object.keys(teams).forEach(k => {
+    const team = teams[k];
+    if(team.length < 2) return;
+    const site = info[team[0]].p.anchorSite;
+    for(let guard = 0; guard < 2000; guard++){
+      const at = {}, off = {};
+      team.forEach(pi => { at[pi] = []; off[pi] = []; });
+      asg.forEach((pi, j) => { if(pi >= 0 && at[pi] && plain(cand(j, pi))) (allSlots[j].site === site ? at[pi] : off[pi]).push(j); });
+      const pairs = [];
+      team.forEach(a => team.forEach(b => {
+        if(a === b || !off[a].length || !at[b].length) return;
+        const gain = (2 * off[a].length - 1) / (at[a].length + off[a].length) - (2 * off[b].length + 1) / (at[b].length + off[b].length);
+        if(gain > 1e-9) pairs.push({ a: a, b: b, gain: gain });
+      }));
+      pairs.sort((x, y) => y.gain - x.gain);
+      let done = false;
+      for(let q = 0; q < pairs.length && !done; q++){
+        const a = pairs[q].a, b = pairs[q].b;
+        for(let x = 0; x < off[a].length && !done; x++){
+          const jA = off[a][x], dA = allSlots[jA].date, bAtA = cand(jA, b);
+          if(!plain(bAtA)) continue;
+          for(let y = 0; y < at[b].length && !done; y++){
+            const jB = at[b][y], dB = allSlots[jB].date, aAtB = cand(jB, a);
+            if(!plain(aAtB)) continue;
+            // different dates: each must be free on the date they move to
+            if(dA !== dB && (busy[b + '|' + dA] !== undefined || busy[a + '|' + dB] !== undefined)) continue;
+            const before = cand(jA, a).cost + (dayCost[a + '|' + dA] || 0) + cand(jB, b).cost + (dayCost[b + '|' + dB] || 0);
+            const after  = bAtA.cost + (dayCost[b + '|' + dA] || 0) + aAtB.cost + (dayCost[a + '|' + dB] || 0);
+            if(after > before) continue;
+            asg[jA] = b; asg[jB] = a;
+            // rs-v134: the swap can change both colleagues' dates — it must keep their sequence rules / limits
+            if(rulesHold && !rulesHold(a, b)){ asg[jA] = a; asg[jB] = b; continue; }
+            delete busy[a + '|' + dA]; delete busy[b + '|' + dB];
+            busy[b + '|' + dA] = jA; busy[a + '|' + dB] = jB;
+            swaps++; done = true;
+          }
+        }
+      }
+      if(!done) break;
+    }
+  });
+  return swaps;
+}
+
 function _irsaSolveMCF(opts){
   opts = opts || {};
+  const C = _IRSA_MCF_COST;
+  const _now = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const t0 = _now();
   const months = opts.months || _iraMonths();
   const groups = opts.groups || (opts.groupFilter && opts.groupFilter !== 'both' ? [opts.groupFilter] : getIRGroups());
-  // Build calendar cells across all months (weekdays only — IR daily shifts
-  // are weekday-only by convention).
-  const cells = [];
+  // Calendar cells: weekdays only (IR daily shifts are weekday-only by
+  // convention), holidays skipped, and narrowed to the picked half-month for
+  // semi-1 / semi-2 (opts.period) exactly like the greedy. inPeriod holds
+  // every calendar date of the period — used to find shifts already held.
+  const cells = [], inPeriod = {};
   months.forEach(ym => {
-    buildCal(ym).forEach(c => {
-      if(c.day && c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date)) cells.push(c);
+    _filterCellsByPeriod(buildCal(ym), opts.period || '').forEach(c => {
+      inPeriod[c.date] = true;
+      if(c.dow >= 1 && c.dow <= 5 && !isHolidayBlackout(c.date)) cells.push(c);
     });
   });
   if(!cells.length) return { preview: [], stats: { reason: 'no calendar cells' } };
   const allP = (S.physicians||[]).filter(p => p.irFte > 0);
   if(!allP.length) return { preview: [], stats: { reason: 'no IR physicians' } };
   const allS = S.sites || [];
-  const slotsConfig = S.irShiftSlots || {};
-  // Build callMap (physician on call → date)
-  const callMap = (typeof _irsaBuildCallMap === 'function')
-    ? _irsaBuildCallMap(groups[0]||'', months) // single-group only for the simple path
-    : {};
-  // Per-group slot list (reuse existing slot builder)
-  const allSlots = [];
+  // Per-group model (slots, on-call map, quotas) — one per group, so the
+  // on-call bonus and the quota basis apply in EVERY group, not just the first.
+  const gModels = {}, allSlots = [];
   groups.forEach(grp => {
-    const phys = allP.filter(p => p.irGroup === grp);
-    if(!phys.length) return;
-    const slots = _irsaBuildSlots(grp, cells, allS, slotsConfig, phys);
-    slots.forEach(s => { s._group = grp; allSlots.push(s); });
+    if(gModels[grp]) return;
+    const gm = _irsaMcfGroupModel(grp, cells, months, inPeriod, allP, allS);
+    if(!gm) return;
+    gModels[grp] = gm;
+    gm.slots.forEach(s => { s._group = grp; allSlots.push(s); });
   });
   if(!allSlots.length) return { preview: [], stats: { reason: 'no slots to fill' } };
-  // Effective quotas (in-period + rolling-fairness adjustment from #6)
-  const rawQ = {}; const callDays = {};
-  allP.forEach(p => {
-    rawQ[p.id] = 0; callDays[p.id] = 0;
-    Object.keys(callMap).forEach(d => { if(callMap[d] === p.id) callDays[p.id]++; });
+  // Per-physician capacity. A physician whose group is not part of this run
+  // has no quota here (gm null) — they can only appear as a cross-group fill-in.
+  const info = allP.map(p => {
+    const gm = (p.irGroup && gModels[p.irGroup]) || null;
+    const quota = gm ? (gm.quota[p.id] || 0) : 0;
+    const existing = gm ? (gm.existing[p.id] || 0) : 0;
+    return {
+      p: p, gm: gm, quota: quota, existing: existing,
+      remQ: gm ? Math.max(0, quota - existing) : 0,
+      // The anchor-mismatch cost only applies when the anchor site has open
+      // slots in this run. A physician whose home site has no IR slots here
+      // cannot be "at anchor" anywhere, so they are as free to use as a floater.
+      anchored: !!(gm && p.anchorSite && gm.slots.some(s => s.site === p.anchorSite)),
+    };
   });
-  const quotas = {};
-  allP.forEach(p => { quotas[p.id] = _irsaEffQ(p, rawQ, callDays, months); });
-  // Build node ids: 0=source, 1..P=phys, P+1..P+S=slots, P+S+1=sink
-  const physIds = allP.map(p => p.id);
-  const physIdx = (id) => physIds.indexOf(id) + 1;
-  const slotIdx = (i)  => physIds.length + 1 + i;
-  const SOURCE = 0, SINK = physIds.length + allSlots.length + 1;
-  const numNodes = SINK + 1;
-  const edges = [];
-  // source → phys
-  // Per physician we emit TWO source→phys edges:
-  //   (a) "in-quota" cap = quotas[p], cost = 0   — the natural budget
-  //   (b) "over-quota" cap = OVER_ALLOWANCE,
-  //                       cost = OVER_QUOTA_PENALTY (= 100)
-  //
-  // Why two: with a single cap edge fixed at `quotas[p]`, the MCF model
-  // physically cannot route more than the quota through any in-group
-  // physician. When the in-group quota is exhausted, the only remaining
-  // flow path becomes a cross-group edge (cost +200), so the solver
-  // assigned cross-group physicians IN PREFERENCE TO in-group
-  // physicians who would simply have been over quota by one or two
-  // shifts. The greedy solver already prefers in-group over-quota
-  // (Pass 4) BEFORE cross-group (Pass 5); the MCF solver should match.
-  //
-  // The over-quota edge has cost (OVER_QUOTA_PENALTY = 100) < the
-  // cross-group cost (200), so the solver will prefer to push one more
-  // shift through an in-group physician before reaching for a cross-
-  // group fill-in. Capacity is bounded so we never push an outrageous
-  // number of extra shifts through one person.
-  const OVER_QUOTA_PENALTY = 100;          // < 200 (cross-group cost)
-  const OVER_ALLOWANCE     = 10;           // hard ceiling on over-shifts per phys
-  allP.forEach((p) => {
-    const inQuotaCap = quotas[p.id] || 0;
-    edges.push({ from: SOURCE, to: physIdx(p.id), cap: inQuotaCap, cost: 0,                 _kind: 's-phys',       _physId: p.id });
-    edges.push({ from: SOURCE, to: physIdx(p.id), cap: OVER_ALLOWANCE, cost: OVER_QUOTA_PENALTY, _kind: 's-phys-over', _physId: p.id });
-  });
-  // slot → sink
-  allSlots.forEach((s, i) => {
-    edges.push({ from: slotIdx(i), to: SINK, cap: 1, cost: 0, _kind: 'slot-t', _slotIdx: i });
-  });
-  // phys → slot (eligibility-gated)
-  let edgeStats = { considered: 0, eligible: 0, blockedHard: 0 };
-  allP.forEach(p => {
-    allSlots.forEach((s, i) => {
-      edgeStats.considered++;
-      // Hard-rule eligibility (mirrors previewIRShiftAA Pass 1)
-      if(typeof _irsaEligibleForSlot === 'function' && !_irsaEligibleForSlot(p, s)){ edgeStats.blockedHard++; return; }
-      const ctx = { physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift' };
-      if(typeof irSiteRuleOk === 'function' && !irSiteRuleOk(p, s.site, s.date)){ edgeStats.blockedHard++; return; }
-      if(typeof dayConditionSiteOk === 'function' && !dayConditionSiteOk(p, s.site, s.date, 'ir-shift')){ edgeStats.blockedHard++; return; }
-      if(typeof sequenceOk === 'function' && !sequenceOk(p, s.date, s.date.slice(0,7), s.site, s.slotLabel||'')){ edgeStats.blockedHard++; return; }
-      if(typeof tbRulesOk === 'function' && !tbRulesOk(p, ctx)){ edgeStats.blockedHard++; return; }
-      if(typeof callDayRulesOk === 'function' && !callDayRulesOk(p, ctx)){ edgeStats.blockedHard++; return; }
-      if(typeof natLangRulesOk === 'function' && !natLangRulesOk(ctx)){ edgeStats.blockedHard++; return; }
-      // Cost — sum of soft penalties. Edges with a HARD reject from any
-      // rule above were already excluded via `return`.
+  // ── Candidate edges ────────────────────────────────────────────────────
+  // cands[j] = physicians that may take slot j, with the edge cost. In-group
+  // physicians get an edge when the never-relaxed predicate holds (a relaxed
+  // site / sequence rule is priced, not hidden). Outside the slot's group
+  // ONLY a physician registered in the site's irFillins, and only with every
+  // rule intact.
+  const blockedDay = {}, dayCost = {}, monthCost = {};
+  const cands = allSlots.map(() => []);
+  let considered = 0, eligible = 0;
+  allSlots.forEach((s, j) => {
+    const ym = s.date.slice(0, 7);
+    const missing = (typeof _missingShiftSubNeeds === 'function') ? _missingShiftSubNeeds(s.date, s.site, '1st') : [];
+    allP.forEach((p, pi) => {
+      const cross = p.irGroup !== s._group;
+      if(cross && (s.fillins || []).indexOf(p.id) < 0) return;
+      considered++;
+      const dk = pi + '|' + s.date;
+      // Day-level block is slot-independent → evaluate once per physician-day.
+      if(blockedDay[dk] === undefined) blockedDay[dk] = !!_irsaBlocked(p, s.date, []);
+      const t = _irsaMcfEdgeTier(p, s, blockedDay[dk]);
+      if(!t) return;
+      if(cross && !(t.siteOk && t.seqOk)) return;
+      const pin = info[pi];
+      const counts = !cross && _irsaCountsForQuota(p, s);
       let cost = 0;
-      if(p.anchorSite && p.anchorSite !== s.site) cost += 50;
-      if(p.irGroup && s._group && p.irGroup !== s._group) cost += 200; // cross-group fill-in
-      if(callMap[s.date] === p.id) cost -= 80; // on-call preference
+      if(cross) cost += C.XGROUP;
+      else if(!counts) cost += C.FILLIN;
+      else if(pin.anchored && p.anchorSite !== s.site) cost += C.ANCHOR;
+      if(!t.siteOk) cost += C.SITE_RELAX;
+      if(!t.seqOk) cost += C.SEQ_RELAX;
+      const ctx = { physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift' };
       const confPref = (typeof _conferenceShiftPreferenceFor === 'function')
         ? _conferenceShiftPreferenceFor(p, ctx) : 0;
       if(isFinite(confPref)) cost += confPref * 5;
-      // Look-ahead adjustment — peek at next month's anchor commitments
-      // for this physician and bias the current month's choice so the
-      // next month doesn't over-commit them. Bounded ±5 so it doesn't
-      // dominate primary signals.
-      if(typeof _lookaheadAdjustment === 'function'){
-        cost += _lookaheadAdjustment(p, s.date.slice(0, 7));
+      // Look-ahead (±5) and burnout (+25 per flag) depend on physician + month only.
+      const mk = pi + '|' + ym;
+      if(monthCost[mk] === undefined){
+        let mc = 0;
+        if(typeof _lookaheadAdjustment === 'function') mc += _lookaheadAdjustment(p, ym);
+        if(typeof _physicianBurnoutFlags === 'function') mc += _physicianBurnoutFlags(p.id, ym).length * 25;
+        monthCost[mk] = mc;
       }
-      // Burnout penalty — physicians showing burnout signals get pushed
-      // toward last-resort. Not a hard reject; gives the solver room to
-      // pick them only when no alternative is reasonable.
-      if(typeof _physicianBurnoutFlags === 'function'){
-        const flags = _physicianBurnoutFlags(p.id, s.date.slice(0, 7));
-        if(flags.length){
-          cost += flags.length * 25;
-        }
-      }
+      cost += monthCost[mk];
       // Sub-specialty coverage incentive — prefer physicians who fill
       // unmet sub-specialty needs at this slot. Negative cost = bonus.
-      if(typeof _missingShiftSubNeeds === 'function'){
-        const missing = _missingShiftSubNeeds(s.date, s.site, '1st');
-        if(missing.length && Array.isArray(p.drSubs)){
-          const fillsUnmet = missing.some(line => {
-            // line is "subname (have X, need Y)"
-            const m = /^([^()]+)\s*\(/.exec(line);
-            const sub = m ? m[1].trim() : line;
-            return p.drSubs.includes(sub) || p.irSubs?.includes(sub);
-          });
-          if(fillsUnmet) cost -= 30; // small reward for filling unmet need
-        }
+      if(missing.length && Array.isArray(p.drSubs)){
+        const fillsUnmet = missing.some(line => {
+          // line is "subname (have X, need Y)"
+          const m = /^([^()]+)\s*\(/.exec(line);
+          const sub = m ? m[1].trim() : line;
+          return p.drSubs.includes(sub) || p.irSubs?.includes(sub);
+        });
+        // 2026-07: subspecialty coverage is a HARD priority — subspecialty
+        // spots always fill before general ones, so the bonus must dominate
+        // every soft preference (site/anchor/burnout are all < 100).
+        if(fillsUnmet) cost -= 300;
       }
-      // Tiebreaker: scaled inverse of (quota - existing assigns) — under-utilized
-      // physicians get a small bonus so they get picked first when costs tie.
-      cost -= Math.min(5, (quotas[p.id] || 0));
-      edges.push({ from: physIdx(p.id), to: slotIdx(i), cap: 1, cost, _kind: 'phys-slot', _physId: p.id, _slotIdx: i });
-      edgeStats.eligible++;
+      // On-call bonus sits on the physician→day edge (same for every slot that day).
+      if(dayCost[dk] === undefined) dayCost[dk] = (pin.gm && pin.gm.callMap[s.date] === p.id) ? C.ONCALL : 0;
+      cands[j].push({ pi: pi, cost: cost, counts: counts, cross: cross, siteOk: t.siteOk, seqOk: t.seqOk });
+      eligible++;
     });
   });
-  // Solve
-  const result = _mcfSolve(numNodes, edges, SOURCE, SINK, allSlots.length);
-  // First pass: count how much flow went through each physician's in-
-  // quota edge vs. their over-quota edge. We use this in the decode
-  // loop below to tag the LAST K assignments per physician as
-  // "over-quota" so the preview row + audit note reflect reality.
-  // (Edges are listed in deterministic source→phys-slot order; the
-  // tag-the-last-K rule matches the natural cost-minimising order.)
-  const perPhysOver = {};
-  edges.forEach((e, i) => {
-    if(e._kind === 's-phys-over'){
-      perPhysOver[e._physId] = (result.edgeFlows[i] || 0);
-    }
-  });
-  // Build per-slot candidate map for the explainer. Each phys→slot
-  // edge with cap=1 represents a physician who PASSED all hard rules
-  // for this slot; the edge.cost summarizes the soft penalties +
-  // tiebreakers. This is the data admins need to answer "why was X
-  // picked over Y on this date?". We collect it BEFORE the decode
-  // step so we can flag the picked physician for each slot.
-  const slotCandidates = {};   // slotIdx → [ {physId, cost, isPicked} ]
-  edges.forEach((e, i) => {
-    if(e._kind !== 'phys-slot') return;
-    if(!slotCandidates[e._slotIdx]) slotCandidates[e._slotIdx] = [];
-    slotCandidates[e._slotIdx].push({
-      physId: e._physId,
-      cost:   e.cost,
-      isPicked: (result.edgeFlows[i] === 1),
+  // ── Build + solve ──────────────────────────────────────────────────────
+  // Node ids: 0 = source, then physicians, physician-days, slots, sink.
+  // fillInDay['pi|date'] marks a physician-day that is fill-in-only (see the
+  // rounds below): it keeps only its fill-in edges and hangs off the source
+  // directly, so its shift never touches the physician's quota edges.
+  const fillInDay = {};
+  const dayKey = a => a.pi + '|' + allSlots[a.j].date;
+  const candOf = a => cands[a.j].find(c => c.pi === a.pi);
+  const build = () => {
+    const edges = [], dayNode = {}, open = [];
+    let nD = 0;
+    allSlots.forEach((s, j) => {
+      let any = false;
+      cands[j].forEach(c => {
+        const dk = c.pi + '|' + s.date;
+        if(fillInDay[dk] && c.counts) return;
+        if(dayNode[dk] === undefined) dayNode[dk] = nD++;
+        any = true;
+      });
+      if(any) open.push(j);
     });
-  });
-  // Decode: any phys→slot edge with flow=1 is an assignment
-  const preview = [];
-  // Stable per-physician order so the "last K = over-quota" rule is
-  // deterministic across runs.
-  const perPhysAssigns = {};
-  edges.forEach((e, i) => {
-    if(e._kind === 'phys-slot' && result.edgeFlows[i] === 1){
-      (perPhysAssigns[e._physId] ||= []).push({ slotIdx: e._slotIdx });
+    const P0 = 1, D0 = P0 + allP.length, S0 = D0 + nD, SINK = S0 + open.length;
+    // source → physician. For a physician with a quota in this run, unit edges
+    // with rising cost (a convex cost per physician — legal in a flow network
+    // because it sits on the physician node, upstream of the day nodes):
+    //   in-quota   quota − shifts already held, the k-th costing
+    //              −FAIR × (1 − attainment after it): the further below quota,
+    //              the bigger the bonus, so shortfalls are shared pro rata.
+    //   over-quota one per date of the period (no ceiling — greedy Pass 4
+    //              has none; one-per-date is the real limit), from +OVER
+    //              upward — dearer than any in-quota placement, cheaper than
+    //              an open slot, a relaxed rule or a cross-group fill-in.
+    // Consecutive units with the same cost are merged into one edge.
+    const ladder = (pi, kind, costs) => {
+      for(let i = 0; i < costs.length; ){
+        let n = 1; while(i + n < costs.length && costs[i + n] === costs[i]) n++;
+        edges.push({ from: 0, to: P0 + pi, cap: n, cost: costs[i], _kind: kind, _pi: pi });
+        i += n;
+      }
+    };
+    info.forEach((pin, pi) => {
+      if(!pin.gm){ edges.push({ from: 0, to: P0 + pi, cap: cells.length, cost: 0, _kind: 's-phys', _pi: pi }); return; }
+      const q = Math.max(1, pin.quota), inQ = [], over = [];
+      for(let k = 1; k <= pin.remQ; k++) inQ.push(Math.min(0, Math.round(C.FAIR * ((pin.existing + k - 0.5) / q - 1))) || 0);
+      for(let k = 0; k < cells.length; k++){
+        const r = Math.round(C.FAIR * (k + 0.5) / q), t = Math.max(0, r - C.OVER_STEP_MAX);
+        over.push(C.OVER + Math.min(C.OVER_STEP_MAX, r) + Math.round(C.OVER_TAIL * t / (t + C.OVER_TAIL)));
+      }
+      ladder(pi, 's-phys', inQ);
+      ladder(pi, 's-phys-over', over);
+    });
+    // physician → physician-day, cap 1: at most one slot per physician per date.
+    Object.keys(dayNode).forEach(dk => {
+      const pi = +dk.slice(0, dk.indexOf('|'));
+      edges.push({ from: fillInDay[dk] ? 0 : P0 + pi, to: D0 + dayNode[dk], cap: 1, cost: dayCost[dk] || 0, _kind: 'phys-day', _pi: pi });
+    });
+    // physician-day → slot (eligibility-gated), slot → sink
+    open.forEach((j, k) => {
+      const s = allSlots[j];
+      cands[j].forEach(c => {
+        const dk = c.pi + '|' + s.date;
+        if(fillInDay[dk] && c.counts) return;
+        // A fill-in shift on an ordinary day passes the quota edges and would
+        // collect up to FAIR of fair-share bonus it is not entitled to — cancel it.
+        const cost = c.cost + ((!c.counts && info[c.pi].gm && !fillInDay[dk]) ? C.FAIR : 0);
+        edges.push({ from: D0 + dayNode[dk], to: S0 + k, cap: 1, cost: cost, _kind: 'day-slot', _pi: c.pi, _slot: j });
+      });
+      edges.push({ from: S0 + k, to: SINK, cap: 1, cost: 0, _kind: 'slot-t', _slot: j });
+    });
+    return { edges: edges, numNodes: SINK + 1, sink: SINK, open: open.length };
+  };
+  let rounds = 0, solveMs = 0, netNodes = 0, netEdges = 0;
+  const solve = () => {
+    rounds++;
+    const net = build();
+    netNodes = net.numNodes; netEdges = net.edges.length;
+    const tS = _now();
+    const result = _mcfSolve(net.numNodes, net.edges, 0, net.sink, net.open);
+    solveMs += _now() - tS;
+    const picked = [];
+    net.edges.forEach((e, i) => { if(e._kind === 'day-slot' && result.edgeFlows[i] === 1) picked.push({ j: e._slot, pi: e._pi }); });
+    return { picked: picked, cost: result.cost };
+  };
+  // A fill-in shift (mixed-site fill-in, cross-group rescue) does not count
+  // toward the physician's quota, yet it must share the physician-day node
+  // with their quota-counting options — and one network cannot both exempt
+  // it from the quota edges and keep it on that node. With no fill-in edges
+  // in play (the usual case) the first solve is final. Otherwise:
+  //   (a) a solve that used a fill-in edge on an ordinary day charged it to
+  //       the quota (conservative — never over). Those physician-days become
+  //       fill-in-only and the rest is re-solved with the quota intact; the
+  //       previous solution stays feasible, so coverage can only grow.
+  //   (b) a physician whose quota edges are full cannot be handed a fill-in shift by
+  //       (a). If such a physician is a fill-in candidate for a slot that is
+  //       still open, those days are tried as fill-in-only.
+  const MAX_ROUNDS = 6;
+  let best = solve(), roundCap = MAX_ROUNDS;
+  const settle = () => { while(rounds < roundCap){
+    const charged = best.picked.filter(a => info[a.pi].gm && !candOf(a).counts && !fillInDay[dayKey(a)]);
+    if(charged.length){
+      charged.forEach(a => { fillInDay[dayKey(a)] = true; });
+      best = solve();
+      continue;
     }
-  });
-  Object.keys(perPhysAssigns).forEach(pidStr => {
-    const pid = +pidStr;
-    const list = perPhysAssigns[pid];
-    list.sort((a, b) => a.slotIdx - b.slotIdx);
-    const overCount = perPhysOver[pid] || 0;
-    list.forEach((entry, idx) => { entry.isOver = (idx >= list.length - overCount); });
-    const p = allP.find(x => x.id === pid);
-    if(!p) return;
-    list.forEach(entry => {
-      const slot = allSlots[entry.slotIdx];
-      if(!slot) return;
-      const isCross = slot._group !== p.irGroup;
-      // Note priority: cross-group beats over-quota in label since it
-      // carries more rule context. An admin scanning the table cares
-      // most that the shift crossed groups; the over-quota signal is
-      // surfaced on the per-physician row above.
-      const note = isCross ? 'MCF (cross-group)'
-                 : entry.isOver ? 'MCF (over-quota)'
-                 : 'MCF';
-      preview.push({
-        physId: p.id, date: slot.date, site: slot.site,
-        irGroup: p.irGroup || slot._group || '', shift: '1st', sub: '',
-        notes: note,
-        slotLabel: slot.slotLabel || '',
-        isFillIn: isCross,
-        _overQuota: entry.isOver,
-        _preAllocSlotIndex: slot.slotIndex,
+    const used = {}, filled = {}, working = {}, freeTry = [], busyTry = [];
+    best.picked.forEach(a => { filled[a.j] = true; working[dayKey(a)] = true; if(!fillInDay[dayKey(a)]) used[a.pi] = (used[a.pi] || 0) + 1; });
+    allSlots.forEach((s, j) => {
+      if(filled[j]) return;
+      cands[j].forEach(c => {
+        const dk = c.pi + '|' + s.date, pin = info[c.pi];
+        if(c.counts || !pin.gm || fillInDay[dk]) return;
+        if((used[c.pi] || 0) < pin.remQ + cells.length) return;
+        const list = working[dk] ? busyTry : freeTry;
+        if(list.indexOf(dk) < 0) list.push(dk);
       });
     });
+    // a day the physician is not working anyway costs nothing to hand over…
+    if(freeTry.length){ freeTry.forEach(dk => { fillInDay[dk] = true; }); best = solve(); continue; }
+    // …a day they are working is only worth it if more slots end up filled.
+    if(!busyTry.length) break;
+    busyTry.forEach(dk => { fillInDay[dk] = true; });
+    const alt = solve();
+    if(alt.picked.length > best.picked.length){ best = alt; continue; }
+    busyTry.forEach(dk => { delete fillInDay[dk]; });
+    break;
+  } };
+  settle();
+  // ── Sequence rules + natural-language limits across the plan (rs-v134) ──
+  // An edge's seqOk / siteOk were judged against the STORED schedule. A streak or a
+  // count the plan builds out of its own shifts constrains one physician across days,
+  // which a flow network cannot carry. So each physician's shifts in the solution are
+  // walked in date order (the greedy's order); a shift that breaks such a rule through
+  // the plan's earlier shifts reprices that physician's edges for the day into the
+  // relaxed tier a stored-schedule breach already pays (+SEQ_RELAX / +SITE_RELAX; a
+  // cross-group fill-in edge, which only exists with every rule intact, is dropped),
+  // and the network is solved again. Penalties only accumulate, so this ends; at the
+  // round cap a breach still left is repriced in place, i.e. labelled relaxed.
+  const ruleOn = info.map(pin => _planRulesFor(pin.p)), anyRule = ruleOn.some(Boolean), slotsOn = {};
+  if(anyRule) allSlots.forEach((s, j) => { (slotsOn[s.date] = slotsOn[s.date] || []).push(j); });
+  const candAt = (j, pi) => cands[j].find(c => c.pi === pi);
+  // mode 0: count breaches · 1: reprice them (the re-solve moves the shift) · 2: reprice and keep the shift
+  const ruleWalk = (pi, js, mode) => {
+    const p = info[pi].p, kept = [], plan = _rulePlan(kept);
+    const test = (s, c) => ({
+      seq: c.seqOk && !sequenceOk(p, s.date, s.date.slice(0, 7), s.site, s.slotLabel || '', plan),
+      nl: c.siteOk && !natLangRulesOk({ physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift', irGroup: s._group, ym: s.date.slice(0, 7), plan: plan }),
+    });
+    const reprice = j2 => {
+      const c2 = candAt(j2, pi); if(!c2) return;
+      const t2 = test(allSlots[j2], c2);
+      if(c2.cross && mode === 1){ if(t2.seq || t2.nl) cands[j2].splice(cands[j2].indexOf(c2), 1); return; }
+      if(t2.seq){ c2.seqOk = false; c2.cost += C.SEQ_RELAX; }
+      if(t2.nl){ c2.siteOk = false; c2.cost += C.SITE_RELAX; }
+    };
+    let bad = 0;
+    js.sort((a, b) => allSlots[a].date < allSlots[b].date ? -1 : (allSlots[a].date > allSlots[b].date ? 1 : a - b)).forEach(j => {
+      const s = allSlots[j], t = test(s, candAt(j, pi));
+      const keep = () => { kept.push({ physId: p.id, date: s.date, site: s.site, slotLabel: s.slotLabel || '' }); };
+      if(!t.seq && !t.nl){ keep(); return; }
+      bad++;
+      if(!mode) return;
+      (slotsOn[s.date] || []).forEach(reprice);
+      if(mode === 2) keep();
+    });
+    // Anticipate the re-solve: on the dates p does not work, an edge that would now break the rule
+    // is repriced too, or the next solve just moves the breach to the neighbouring day.
+    if(mode === 1 && bad){
+      const busy = new Set(js.map(j => allSlots[j].date));
+      Object.keys(slotsOn).forEach(d => { if(!busy.has(d)) slotsOn[d].forEach(reprice); });
+    }
+    return bad;
+  };
+  const SEQ_ROUNDS = 8;
+  let seqRounds = 0;
+  while(anyRule){
+    const last = seqRounds >= SEQ_ROUNDS, mine = {};
+    best.picked.forEach(a => { if(ruleOn[a.pi]) (mine[a.pi] = mine[a.pi] || []).push(a.j); });
+    let bad = 0;
+    Object.keys(mine).forEach(pi => { bad += ruleWalk(+pi, mine[pi], last ? 2 : 1); });
+    if(!bad || last) break;
+    seqRounds++; roundCap = rounds + MAX_ROUNDS;
+    best = solve(); settle();
+  }
+  const flowCost = best.cost;
+  // asg[j] = index (into allP) of the physician on slot j, or -1.
+  const asg = allSlots.map(() => -1);
+  best.picked.forEach(a => { asg[a.j] = a.pi; });
+  const spreadSwaps = _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost, !anyRule ? null
+    : (a, b) => [a, b].every(pi => !ruleOn[pi] || !ruleWalk(pi, asg.reduce((l, x, j) => { if(x === pi) l.push(j); return l; }, []), 0)));
+  // ── Decode ─────────────────────────────────────────────────────────────
+  // Per physician: the LAST K quota-counting shifts (by date) beyond the
+  // remaining quota are the over-quota ones, so the preview row + audit note
+  // reflect reality.
+  const rows = allSlots.map(() => null);
+  const perPhys = {};
+  info.forEach((pin, pi) => {
+    const mine = [];
+    asg.forEach((a, j) => { if(a === pi) mine.push({ j: j, c: cands[j].find(c => c.pi === pi), over: false }); });
+    const counting = mine.filter(m => m.c.counts);
+    counting.sort((a, b) => allSlots[a.j].date < allSlots[b.j].date ? -1 : (allSlots[a.j].date > allSlots[b.j].date ? 1 : a.j - b.j));
+    const over = pin.gm ? Math.max(0, counting.length - pin.remQ) : 0;
+    counting.forEach((m, i) => { m.over = i >= counting.length - over; });
+    mine.forEach(m => { rows[m.j] = m; });
+    perPhys[pin.p.id] = {
+      group: pin.p.irGroup || '', quota: pin.quota, existing: pin.existing,
+      counting: counting.length, fillin: mine.length - counting.length, over: over,
+      atAnchor: (pin.gm ? (pin.gm.existingAnc[pin.p.id] || 0) : 0)
+              + counting.filter(m => pin.p.anchorSite && pin.p.anchorSite === allSlots[m.j].site).length,
+    };
   });
-  // Build per-assignment explainer map keyed by date|site|slotIndex.
-  // Each entry has the picked physician + the top-N runners-up by cost,
-  // so the preview's "Why?" drill-down can show admins exactly which
-  // alternatives the solver considered and how much cheaper / more
-  // expensive they were.
-  const assignmentExplain = {};
-  preview.forEach(p => {
-    // Resolve slot index from preview row → look up candidate list.
-    const slotIdx = allSlots.findIndex(s =>
-      s.date === p.date && s.site === p.site && s.slotIndex === p._preAllocSlotIndex
-    );
-    if(slotIdx < 0) return;
-    const cands = (slotCandidates[slotIdx] || []).slice().sort((a, b) => a.cost - b.cost);
-    const key = p.date + '|' + p.site + '|' + (p._preAllocSlotIndex ?? 0);
-    assignmentExplain[key] = {
-      picked: p.physId,
-      pickedCost: (cands.find(c => c.physId === p.physId) || {}).cost,
-      candidates: cands,
-      slotGroup: allSlots[slotIdx]._group || '',
+  // Preview rows (slot order) + per-assignment explainer keyed by
+  // date|site|slotIndex: the picked physician and every candidate that had
+  // an edge to this slot with its cost, so the preview's "Why?" drill-down
+  // can show which alternatives the solver had and how much dearer they were.
+  const preview = [], assignmentExplain = {}, unfilledSlots = [];
+  const placedOn = {};                                            // 'pi|date' → slot index
+  asg.forEach((pi, j) => { if(pi >= 0) placedOn[pi + '|' + allSlots[j].date] = j; });
+  let nOnCall = 0, nCross = 0, nOver = 0, nRelaxed = 0, nFillin = 0;
+  // rs-v134: an edge repriced in an earlier repair round can be clear of the rule in the final
+  // plan, so a rule physician's shift is labelled relaxed only when the final plan breaks the rule.
+  const broken = {};                                              // slot j → { seq, site }
+  if(anyRule) info.forEach((pin, pi) => {
+    if(!ruleOn[pi]) return;
+    const p = pin.p, mine = [], plan = _rulePlan(mine);
+    asg.reduce((l, x, j) => { if(x === pi) l.push(j); return l; }, [])
+      .sort((a, b) => allSlots[a].date < allSlots[b].date ? -1 : (allSlots[a].date > allSlots[b].date ? 1 : a - b))
+      .forEach(j => {
+        const s = allSlots[j], ym = s.date.slice(0, 7);
+        const ctx = { physId: p.id, date: s.date, site: s.site, shift: '1st', kind: 'ir-shift', irGroup: s._group, ym: ym, plan: plan };
+        broken[j] = { seq: !sequenceOk(p, s.date, ym, s.site, s.slotLabel || '', plan),
+          site: !(irSiteRuleOk(p, s.site, s.date) && dayConditionSiteOk(p, s.site, s.date, 'ir-shift') && tbRulesOk(p, ctx) && natLangRulesOk(ctx)) };
+        mine.push({ physId: p.id, date: s.date, site: s.site, slotLabel: s.slotLabel || '' });
+      });
+  });
+  allSlots.forEach((slot, j) => {
+    const r = rows[j];
+    if(!r){ unfilledSlots.push(slot); return; }
+    const pin = info[asg[j]], p = pin.p, c = r.c;
+    const dc = dayCost[asg[j] + '|' + slot.date] || 0;
+    const onCall = dc < 0;
+    const b = broken[j], seqRelaxed = !c.seqOk && (!b || b.seq), siteRelaxed = !c.siteOk && (!b || b.site);
+    // Note priority: cross-group, then a relaxed rule, then over-quota — an
+    // admin scanning the table cares most about the heaviest exception.
+    const note = c.cross ? 'MCF (cross-group)'
+               : seqRelaxed ? 'MCF (sequence rule relaxed)'
+               : siteRelaxed ? 'MCF (site rule relaxed)'
+               : r.over ? 'MCF (over-quota)'
+               : !c.counts ? 'MCF (fill-in)'
+               : onCall ? 'MCF (on-call)'
+               : 'MCF';
+    if(onCall) nOnCall++;
+    if(c.cross) nCross++; else if(!c.counts) nFillin++;
+    if(siteRelaxed || seqRelaxed) nRelaxed++;
+    if(r.over) nOver++;
+    preview.push({
+      physId: p.id, date: slot.date, site: slot.site,
+      irGroup: p.irGroup || slot._group || '', shift: '1st', sub: '',
+      notes: note,
+      slotLabel: slot.slotLabel || '',
+      isFillIn: c.cross || !c.counts,
+      _overQuota: r.over,
+      _preAllocSlotIndex: slot.slotIndex,
+    });
+    assignmentExplain[slot.date + '|' + slot.site + '|' + (slot.slotIndex ?? 0)] = {
+      picked: p.id,
+      pickedCost: c.cost + dc,
+      candidates: cands[j].map(x => ({
+        physId: allP[x.pi].id,
+        cost: x.cost + (dayCost[x.pi + '|' + slot.date] || 0),
+        isPicked: x.pi === asg[j],
+        // holds another slot that day in this run → could not also take this one
+        elsewhere: x.pi !== asg[j] && placedOn[x.pi + '|' + slot.date] !== undefined,
+      })).sort((a, b) => a.cost - b.cost),
+      slotGroup: slot._group || '',
     };
   });
   return {
     preview,
     stats: {
       slots: allSlots.length, filled: preview.length, unfilled: allSlots.length - preview.length,
-      cost: result.cost, edgesConsidered: edgeStats.considered, edgesEligible: edgeStats.eligible,
-      edgesBlocked: edgeStats.blockedHard,
+      cost: flowCost, edgesConsidered: considered, edgesEligible: eligible,
+      edgesBlocked: considered - eligible,
+      onCall: nOnCall, crossGroup: nCross, fillIn: nFillin, overQuota: nOver, relaxed: nRelaxed,
+      rounds: rounds, seqRounds: seqRounds, spreadSwaps: spreadSwaps, nodes: netNodes, edges: netEdges,
+      solveMs: Math.round(solveMs), totalMs: Math.round(_now() - t0),
     },
     assignmentExplain,
+    unfilledSlots,   // slot objects (with _group) the network could not fill
+    perPhys,         // physId → {group, quota, existing, counting, fillin, over, atAnchor}
   };
 }
 
