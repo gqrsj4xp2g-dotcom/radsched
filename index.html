@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script id="rs-private-export" type="application/json"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- Content-Security-Policy — defense-in-depth against XSS that slipped past
@@ -1364,7 +1365,7 @@ tbody tr:hover{background:var(--bg3)}
        print region first. */
     @media print {
       .topbar, .sidebar, #rs-toast-host, #rs-error-badge,
-      #rs-stale-save-badge, #fs-status, #fs-toggle-btn, #gh-toolbar-status,
+      #rs-stale-save-badge, #fs-status, #fs-toggle-btn,
       #save-indicator, #mobile-nav-toggle, .modal, .tabs, .tab-bar,
       button, .bp, .bsm, .bt, .br, .bg, .bxs, .tb-btn, .abtn,
       .pg-actions, .filter-bar, .note, .helptip,
@@ -2135,9 +2136,9 @@ tbody tr:hover{background:var(--bg3)}
      Offline login is disabled." (audit fix 2026-07). Each falls back to its CDN
      only if the same-origin file is missing (e.g. a downloaded portable copy),
      via a synchronous global-presence check. Update /vendor/* when bumping. -->
-<script src="/vendor/xlsx.full.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <script>window.XLSX||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');</script>
-<script src="/vendor/supabase.js"></script>
+<script src="vendor/supabase.js"></script>
 <script>window.supabase||document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');</script>
 </head>
 <body>
@@ -2366,7 +2367,6 @@ tbody tr:hover{background:var(--bg3)}
       <div style="height:1px;background:var(--bdr);margin:4px 2px" id="rs-tb-more-fs-sep"></div>
       <div class="rs-tb-more-item" id="rs-tb-more-fs" onclick="_tbMoreRun('fs')" style="padding:8px 12px;border-radius:4px;cursor:pointer;display:none">📁 Auto-save to file…</div>
       <div class="rs-tb-more-item" id="rs-tb-more-fs-status" style="padding:6px 12px;font-size:10.5px;color:var(--rs-ink-3);display:none"></div>
-      <div class="rs-tb-more-item" id="rs-tb-more-gh-status"  style="padding:6px 12px;font-size:10.5px;color:var(--rs-ink-3);display:none"></div>
       <div style="height:1px;background:var(--bdr);margin:4px 2px"></div>
       <div class="rs-tb-more-item" data-rs-hold="clearAllData" style="padding:8px 12px;border-radius:4px;cursor:pointer;color:var(--red-t,#dc2626);font-weight:600" title="Hold 1.5s to reset all data">🗑 Hold to reset all data</div>
     </div>
@@ -2380,7 +2380,6 @@ tbody tr:hover{background:var(--bg3)}
     <button id="rs-calmode-btn" onclick="toggleCalendarMode()" style="display:none">📅</button>
     <button id="fs-toggle-btn" style="display:none">📁</button>
     <span id="fs-status" style="display:none"></span>
-    <span id="gh-toolbar-status" style="display:none"></span>
 
     <button class="tb-btn" onclick="doLogout()">Sign Out</button>
   </div>
@@ -4398,7 +4397,7 @@ tbody tr:hover{background:var(--bg3)}
       <label>Category</label>
       <select id="uf-cat" onchange="renderUnfilled()">
         <option value="all" selected>All categories</option>
-        <option value="dr">DR 1st shift</option>
+        <option value="dr">DR weekday shifts</option>
         <option value="ir">IR 1st shift</option>
         <option value="ircall">IR daily call</option>
         <option value="irwknd">IR weekend call</option>
@@ -5448,7 +5447,7 @@ WHERE email = 'your-admin@example.com';</pre>
     <div class="card-title">🩺 System health</div>
     <div class="note ni" style="font-size:11px;margin-bottom:14px">
       One place to verify sync, service worker, PWA assets, edge functions,
-      GitHub deploy configuration, save health, and recent runtime errors.
+      Save health and recent runtime errors.
       Use before a go-live session or when something feels off.
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -5865,7 +5864,7 @@ WHERE email = 'your-admin@example.com';</pre>
       Connect to Supabase to share data across all users in real time. Every schedule change syncs automatically.
       Get your credentials from <strong>supabase.com → Project Settings → API</strong>.
       <br><br>
-      <strong style="color:var(--amber,#d97706)">📲 Multi-device setup:</strong> After saving credentials here, click <strong>💾 Save File</strong> in the top toolbar and host/distribute the downloaded HTML. The saved file embeds both the URL <em>and</em> the anon key, so any device opening it is auto-configured and goes straight to the login form. The anon key is public by design — actual data access is gated by your Supabase Row-Level Security policies, so make sure those are set up before sharing the file widely.
+      <strong>Multi-device setup.</strong> Configure the public project URL and anon key in the repository’s clean app shell, then deploy the site through the release workflow. <strong>Save File</strong> creates a private backup containing practice data.
     </div>
     <div id="sb-status" style="margin-bottom:10px;padding:7px 12px;border-radius:var(--r);background:var(--bg3);font-size:12px">
       Status: <span id="sb-status-text" style="font-weight:800">Not configured</span>
@@ -5978,86 +5977,27 @@ CREATE POLICY radscheduler_update_scoped ON radscheduler FOR UPDATE TO authentic
     </div>
   </div>
 
-  <!-- ─── BACKUPS / RESTORE ───────────────────────────────────────────────
-       Daily snapshots are written automatically to the radscheduler_backups
-       table by _runDailyBackupIfDue. This card lets an admin browse those
-       snapshots and restore one over the current main row. Restore goes
-       through _validateRemotePayload so a corrupt backup can't poison the
-       live state, and shows a confirm with payload counts before commit.
-  ─────────────────────────────────────────────────────────────────────── -->
+  <!-- Practice schedule backups and restore -->
   <div class="card" style="margin-bottom:14px;border:2px solid var(--green-t,#059669)">
     <div class="card-title">🗄 Backups &amp; Restore</div>
     <div class="note ni" style="font-size:11px;margin-bottom:10px">
-      A snapshot of this practice is taken automatically once per day. Click <strong>Load list</strong>
-      to browse available backups, then <strong>Restore</strong> on a specific date to roll
-      back the live data to that snapshot. <strong style="color:var(--amber,#d97706)">Restoring overwrites
-      everything.</strong> Make a fresh manual save (toolbar → 💾 Save File) before restoring if
-      you want to be able to roll back the restore itself.
+      The server saves one schedule snapshot per UTC day and keeps the last seven dates.
+      Manual snapshots and existing restore points are kept separately. Restore replaces the shared practice
+      schedule, roster and settings. Swap requests, on-call acknowledgements, private chat, accounts,
+      reports and other database tables keep their current state. Fields absent from older snapshots are preserved. Each restore also saves the current schedule.
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <button class="bt bsm" onclick="renderBackupPicker('backup-picker')">📋 Load list</button>
+      <button class="bsm" onclick="downloadPrivateBackup()" title="Download this practice's current local snapshot for offline viewing">Download private file</button>
       <button class="bsm" onclick="(async()=>{
           if(!_adminOnly('run manual backup')) return;
           try{
-            try{ localStorage.removeItem('rs.lastBackupDate'); }catch(_){}
-            await _runDailyBackupIfDue();
-            _toast?.('Manual backup attempt completed (check Errors if it failed).', 'ok');
+            if(!await _snapshotBeforeBulk('manual')) throw new Error('A verified administrator session and a valid saved schedule are required.');
             renderBackupPicker('backup-picker');
           }catch(e){ alert('Backup failed: '+(e.message||e)); }
-        })()" title="Force a backup right now (normally runs automatically once per day)">⚡ Back up now</button>
+        })()" title="Save a separate manual schedule snapshot">⚡ Back up now</button>
     </div>
     <div id="backup-picker" style="font-size:12px"></div>
-  </div>
-
-  <!-- ─── GITHUB AUTO-DEPLOY ───────────────────────────────────────── -->
-  <div class="card" style="margin-bottom:14px;border:2px solid var(--purple)">
-    <div class="card-title">🐙 GitHub Auto-Deploy</div>
-    <div class="note nw" style="font-size:11px;margin-bottom:10px">
-      <strong>⚠ Disk-watch is the recommended writer.</strong> If <code>.git-autopush.sh</code>
-      is running (launchd agent <code>com.radscheduler.autopush</code>), leave the
-      auto-deploy checkbox below <strong>OFF</strong> — running both produces
-      409 conflicts when they race for the same SHA. Use this card for
-      occasional manual deploys (the 🚀 Deploy now button) or to deploy from
-      a device that can't run the disk-watch (phone, secondary laptop).
-    </div>
-    <div class="note ni" style="font-size:11px;margin-bottom:10px">
-      Push every save to a GitHub repo via the Contents API. Useful when the app is hosted on GitHub Pages — your phone / other devices see updates within ~30 sec of each save (GH Pages re-publish time).
-      <br><br>
-      <strong>One-time setup:</strong> create a fine-grained Personal Access Token with <em>Contents: Read and Write</em> permission on this repo only. Generate at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a>. The token stays in this browser's localStorage — never synced to Supabase, never embedded in saved HTML files.
-    </div>
-    <div class="g2 mb8" >
-      <div class="fg">
-        <label>Personal Access Token</label>
-        <input id="gh-token" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true" placeholder="github_pat_…" oninput="ghReadCfgFromForm()" style="font-size:11px;font-family:ui-monospace,monospace">
-      </div>
-      <div class="fg">
-        <label>Repo (owner/name)</label>
-        <div class="flex" style="gap:6px">
-          <input id="gh-owner" placeholder="owner" oninput="ghReadCfgFromForm()" style="flex:1;font-size:11px">
-          <span style="line-height:30px;color:var(--txt3)">/</span>
-          <input id="gh-repo" placeholder="repo-name" oninput="ghReadCfgFromForm()" style="flex:2;font-size:11px">
-        </div>
-      </div>
-    </div>
-    <div class="g2 mb8" >
-      <div class="fg">
-        <label>Branch</label>
-        <input id="gh-branch" placeholder="main" oninput="ghReadCfgFromForm()" class="fs-xs">
-      </div>
-      <div class="fg">
-        <label>Path (file in repo)</label>
-        <input id="gh-path" placeholder="index.html" oninput="ghReadCfgFromForm()" style="font-size:11px;font-family:ui-monospace,monospace">
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-      <label class="chk fs-xs" >
-        <input type="checkbox" id="gh-enabled" onchange="ghReadCfgFromForm()"> Auto-deploy on every save
-      </label>
-      <button class="bt bsm" onclick="ghTest()">🔌 Test connection</button>
-      <button class="bp bsm" onclick="ghDeployNow()">🚀 Deploy now</button>
-    </div>
-    <div id="gh-status-msg" style="font-size:12px;min-height:18px"></div>
-    <div id="gh-summary" style="font-size:11px;color:var(--txt3);margin-top:4px"></div>
   </div>
 
   <!-- Shift Rules & Config -->
@@ -6683,6 +6623,7 @@ Once set, ask me anything about your schedule!</div>
 </div>
 
 
+<!-- @PAGE_CODING_BEGIN — managed by tools/build-index.sh from src/parts/page-coding.html -->
 <!-- ========================================================================
      CPT Coding — radiology report → CPT codes + modifiers + reimbursement
      ============================================================
@@ -7214,6 +7155,7 @@ window.RVU_REFERENCE = [
       ["70549", "MRA neck w/o & w/",   "MR","neck",0,4,1,false, "mra neck without and with"],
       // ─ MR brain / spine
       ["70551", "MRI brain w/o contrast",              "MR","brain",0,4,1,false, "mri brain without"],
+      ["70552", "MRI brain w/ contrast",                "MR","brain",0,4,1,false, ""],
       ["70553", "MRI brain w/o & w/ contrast",         "MR","brain",0,4,1,false, "mri brain with and without"],
       ["72148", "MRI lumbar spine w/o contrast",       "MR","lumbar_spine",0,4,1,false, "mri lumbar without"],
       ["72149", "MRI lumbar spine w/ contrast",        "MR","lumbar_spine",0,4,1,false, "mri lumbar with"],
@@ -7327,7 +7269,7 @@ window.RVU_REFERENCE = [
     rvu: [
       ["70450",3.25,3.25,1.2,2.05,1,4,0],["70460",4.52,4.52,1.59,2.93,1,4,0],["70470",5.28,5.28,1.79,3.49,1,4,0],
       ["70486",3.9,3.9,1.21,2.69,1,4,0],["70491",5.6,5.6,1.94,3.66,1,4,0],["70498",8.41,8.41,2.46,5.95,1,4,0],
-      ["70551",5.98,5.98,2.08,3.9,1,4,0],["70553",9.71,9.71,3.24,6.47,1,4,0],["72148",5.82,5.82,2.09,3.73,1,4,0],
+      ["70551",5.98,5.98,2.08,3.9,1,4,0],["70552",8.24,8.24,2.51,5.73,1,4,0],["70553",9.71,9.71,3.24,6.47,1,4,0],["72148",5.82,5.82,2.09,3.73,1,4,0],
       ["72149",8.23,8.23,2.53,5.7,1,4,0],["72158",9.72,9.72,3.25,6.47,1,4,0],["73221",6.2,6.2,1.91,4.29,1,4,3],
       ["73721",6.19,6.19,1.91,4.28,1,4,3],["71045",0.78,0.78,0.26,0.52,1,0,0],["71046",1.01,1.01,0.31,0.7,1,0,0],
       ["71047",1.26,1.26,0.39,0.87,1,0,0],["71048",1.37,1.37,0.44,0.93,1,0,0],["71250",4.05,4.05,1.52,2.53,1,4,0],
@@ -7479,9 +7421,9 @@ window.RVU_REFERENCE = [
       // 76376/76377 must never attach to them (enforced belt-and-suspenders by the
       // NCCI PTP edits above). 3D IS separately reportable with the diagnostic CT/MR
       // codes below, which do not include postprocessing.
-      ["70450","76376"],["70460","76376"],["70470","76376"],["70486","76376"],["70553","76376"],
+      ["70450","76376"],["70460","76376"],["70470","76376"],["70486","76376"],["70552","76376"],["70553","76376"],
       ["71250","76376"],["71260","76376"],["74176","76376"],["74177","76376"],["74178","76376"],
-      ["70450","76377"],["70460","76377"],["70470","76377"],["70553","76377"],
+      ["70450","76377"],["70460","76377"],["70470","76377"],["70552","76377"],["70553","76377"],
       ["71250","76377"],["71260","76377"],["74176","76377"],["74177","76377"],["74178","76377"],
       // Image guidance
       ["47000","76942"],["47000","77002"],
@@ -7539,7 +7481,6 @@ window.RVU_REFERENCE = [
   ];
 
   function parseSections(text){
-    if(!text) return {raw:"",sections:{}};
     const matches = [];
     SECTION_PATTERNS.forEach(([name,re])=>{
       let m;
@@ -7550,20 +7491,28 @@ window.RVU_REFERENCE = [
     });
     matches.sort((a,b)=>a.start-b.start);
     const sections = {};
-    if(!matches.length){ sections.body = text.trim(); return {raw:text,sections}; }
+    const serviceParts = [];
+    function addSection(name,start,end){
+      const body = text.slice(start,end);
+      if(!body.trim()) return;
+      if(!(name in sections)) sections[name] = body.trim();
+      // History and comparisons describe other encounters. Keep their text for
+      // display, but never use it as evidence for a service in this report.
+      if(name!=="indication" && name!=="comparison") serviceParts.push({name,body,start});
+    }
+    addSection("body",0,matches.length ? matches[0].start : text.length);
     for(let i=0;i<matches.length;i++){
       const cur = matches[i];
       const next = matches[i+1] ? matches[i+1].start : text.length;
-      const body = text.slice(cur.end,next).trim();
-      if(!(cur.name in sections)) sections[cur.name] = body;
+      addSection(cur.name,cur.end,next);
     }
-    return {raw:text,sections,matches};
+    return {raw:text,sections,matches,serviceParts};
   }
 
   /* ─── feature regexes ────────────────────────────────────────────────── */
   const MODALITY = [
-    [/\bCTA\b|\bCT\s+angio(?:gra(?:m|phy))?/gi, "CTA"],
-    [/\bCT\b(?!\s*A\b)/gi, "CT"],
+    [/\bCTA\b|\bCT[- \t]+angio(?:gra(?:m|phy))?/gi, "CTA"],
+    [/\bCT\b(?![- \t]+angio)/gi, "CT"],
     [/\bMRA\b|\bMR\s+angio(?:gra(?:m|phy))?/gi, "MRA"],
     [/\bMR(?:I)?\b(?!\s*angi)/gi, "MR"],
     [/\bultraso(?:und|nographic)\b|\bUS\b|\bsonograph(?:y|ic)\b|\bduplex\b/gi, "US"],
@@ -7613,7 +7562,7 @@ window.RVU_REFERENCE = [
     [/\bCT[- ]guid(?:ed|ance)\b/gi,"ct"],
   ];
   const ADDONS_FEATURE = [
-    [/\b3D\s+(?:post[- ]?processing|reconstruction|rendering)\b|\bvolume[- ]rendered\b|\bMIP\b|\bMPR\b/gi,"3d"],
+    [/\b3D\s+(?:post[- ]?processing|reconstructions?|rendering|MPR)\b|\bvolume[- ]render(?:ed|ing)\b|\bMIP\b/gi,"3d"],
     [/\bindependent\s+workstation\b/gi,"indep_workstation"],
     [/\bcomputer[- ]aided\s+detection\b|\bCAD\b/gi,"cad"],
     [/\btomosynthesis\b|\bDBT\b/gi,"dbt"],
@@ -7684,47 +7633,33 @@ window.RVU_REFERENCE = [
   }
   function extractFeatures(parsed){
     const text = parsed.raw;
-    const sections = parsed.sections || {};
-    // Identity (modality/region/contrast) — only EXAM / TECHNIQUE / INDICATION, so "Lungs clear"
-    // in a CT A/P doesn't make it a chest study.
-    const identityBuckets = ["exam","technique","indication"];
-    const allBuckets    = ["exam","indication","technique","findings","impression","addendum","body"];
-    function bucketScan(buckets,table){
-      let out = [];
-      buckets.forEach(name=>{
-        const body = sections[name]; if(!body) return;
-        const idx = text.indexOf(body); if(idx<0) return;
-        out = out.concat(scan(body,idx,table));
-      });
-      if(!out.length && !sections.exam && !sections.technique){
-        // Fallback: scan whole text
-        out = out.concat(scan(text,0,table));
-      }
-      return out;
+    const parts = parsed.serviceParts;
+    const examParts = parts.filter(p=>p.name==="exam" || p.name==="body");
+    const techniqueParts = parts.filter(p=>p.name==="technique");
+    const examAndTechnique = examParts.concat(techniqueParts);
+    const identityParts = examAndTechnique.length ? examAndTechnique : parts;
+    function matchesIn(parts,table,scanner=scan){
+      return parts.flatMap(p=>scanner(p.body,p.start,table))
+        .filter(s=>isCurrentMention(text,s.start,s.end));
     }
-    function bucketScanPlain(buckets,patterns){
-      let out = [];
-      buckets.forEach(name=>{
-        const body = sections[name]; if(!body) return;
-        const idx = text.indexOf(body); if(idx<0) return;
-        out = out.concat(scanPlain(body,idx,patterns));
-      });
-      return out;
-    }
+    // Exam and technique identify the side imaged. Incidental findings can
+    // describe other sides, even when written in the current report.
+    const laterality = [examParts,techniqueParts,parts]
+      .map(group=>matchesIn(group,LATERALITY)).find(group=>group.length) || [];
     const feats = {
-      modality:   bucketScan(identityBuckets, MODALITY),
-      body_region:bucketScan(identityBuckets, BODY_REGION),
-      contrast:   bucketScan(identityBuckets, CONTRAST),
-      laterality: bucketScan(allBuckets, LATERALITY),
-      guidance:   bucketScan(allBuckets, GUIDANCE),
-      addons:     bucketScan(allBuckets, ADDONS_FEATURE),
-      procedures: bucketScan(allBuckets, PROCEDURES),
-      teaching:   bucketScanPlain(allBuckets, TEACHING),
-      repeat:     bucketScanPlain(allBuckets, REPEAT_SAME),
-      repeat_other: bucketScanPlain(allBuckets, REPEAT_OTHER),
-      discontinued: bucketScanPlain(allBuckets, DISCONTINUED),
-      reduced:    bucketScanPlain(allBuckets, REDUCED),
-      increased:  bucketScanPlain(allBuckets, INCREASED),
+      modality:   matchesIn(identityParts,MODALITY),
+      body_region:matchesIn(identityParts,BODY_REGION),
+      contrast:   matchesIn(identityParts,CONTRAST),
+      laterality,
+      guidance:   matchesIn(parts,GUIDANCE),
+      addons:     matchesIn(parts,ADDONS_FEATURE),
+      procedures: matchesIn(parts,PROCEDURES),
+      teaching:   matchesIn(parts,TEACHING,scanPlain),
+      repeat:     matchesIn(parts,REPEAT_SAME,scanPlain),
+      repeat_other: matchesIn(parts,REPEAT_OTHER,scanPlain),
+      discontinued: matchesIn(parts,DISCONTINUED,scanPlain),
+      reduced:    matchesIn(parts,REDUCED,scanPlain),
+      increased:  matchesIn(parts,INCREASED,scanPlain),
       additional_vessels: 0, additional_vessels_spans: [],
       additional_lesions: 0, additional_lesions_spans: [],
       additional_levels: 0,  additional_levels_spans: [],
@@ -7736,10 +7671,17 @@ window.RVU_REFERENCE = [
     feats.procedures = feats.procedures.filter(s=>!isRecommendationOnly(text, s.start, s.end-s.start));
     // Scalar counters with citations
     function scalarCount(re,key,key_spans){
-      let m; re.lastIndex = 0;
-      while((m = re.exec(text))!==null){
-        const n = parseInt(m[1] || m[2] || "0",10);
-        if(n > feats[key]){ feats[key] = n; feats[key_spans] = [{text:m[0],start:m.index,end:m.index+m[0].length}]; }
+      for(const p of parts){
+        re.lastIndex = 0;
+        let match;
+        while((match = re.exec(p.body))!==null){
+          const n = parseInt(match[1] || match[2] || "0",10);
+          const start = p.start + match.index, end = start + match[0].length;
+          if(n > feats[key] && isCurrentMention(text,start,end)){
+            feats[key] = n;
+            feats[key_spans] = [{text:match[0],start,end}];
+          }
+        }
       }
     }
     scalarCount(ADDL_VESSELS, "additional_vessels","additional_vessels_spans");
@@ -7769,7 +7711,7 @@ window.RVU_REFERENCE = [
     [["MRA"],["neck"], "without_and_with", "70549"],
     [["MR"],["brain"], "without", "70551"],
     [["MR"],["brain"], "without_and_with","70553"],
-    [["MR"],["brain"], "with",    "70553"],
+    [["MR"],["brain"], "with",    "70552"],
     [["MR"],["lumbar_spine"], "without","72148"],
     [["MR"],["lumbar_spine"], "with","72149"],
     [["MR"],["lumbar_spine"], "without_and_with","72158"],
@@ -7807,11 +7749,31 @@ window.RVU_REFERENCE = [
     return null;
   }
 
-  function candidatesFromRules(feats){
+  function candidatesFromRules(feats,text){
     let mods = labels(feats.modality);
     let regions = labels(feats.body_region);
     const ctr = pickContrast(labels(feats.contrast));   // global fallback
     const lat = labels(feats.laterality);
+
+    // If both CT and CTA occur, associate each anatomic mention with its own
+    // acquisition. A generic "CT images" in another section is not a neck CT.
+    const ctByRegion = new Map();
+    if(mods.has("CT") && mods.has("CTA")){
+      const acquisitions = feats.modality.filter(s=>s.label==="CT" || s.label==="CTA");
+      for(const region of feats.body_region){
+        let nearest = null, distance = Infinity;
+        for(const acquisition of acquisitions){
+          const follows = acquisition.start >= region.end;
+          const gap = follows ? text.slice(region.end,acquisition.start) : text.slice(acquisition.end,region.start);
+          if(/[.;:\n]/.test(gap) || (follows && /\b(?:and|plus|then)\s*$/i.test(gap))) continue;
+          if(gap.length<distance){ nearest = acquisition.label; distance = gap.length; }
+        }
+        if(nearest){
+          if(!ctByRegion.has(region.label)) ctByRegion.set(region.label,new Set());
+          ctByRegion.get(region.label).add(nearest);
+        }
+      }
+    }
 
     // If a compound region is documented, drop the constituents.
     Object.keys(REGION_CONSTITUENTS).forEach(comp=>{
@@ -7837,6 +7799,8 @@ window.RVU_REFERENCE = [
       const modOk = modSet.some(m=>mods.has(m));
       const regOk = regSet.some(r=>regions.has(r));
       if(!(modOk && regOk)) return;
+      if(ctByRegion.size && (modSet.includes("CT") || modSet.includes("CTA")) &&
+         !regSet.some(r=>ctByRegion.get(r)?.has(modSet[0]))) return;
       const lc = (wantCtr==null) ? null : localContrast(regSet);
       if(!(wantCtr==null || wantCtr===lc)) return;
       let final = code;
@@ -7911,22 +7875,35 @@ window.RVU_REFERENCE = [
     const sent = sentenceAround(text, idx, len);
     return REC_GUARD.test(sent) && !PERFORMED_OVERRIDE.test(sent);
   }
-  function candidatesFromKeywords(text){
+  function isCurrentMention(text,start,end){
+    // Check the words directly attached to a match. A prior procedure in the
+    // same sentence as today's procedure must not cancel the current service.
+    const before = text.slice(Math.max(0,start-80),start);
+    const after = text.slice(end,end+80);
+    if(/\b(?:history of|status post|prior|previous|previously|no|without|did not perform)[ \t]+(?:(?:a|an|any|separate|additional)[ \t]+)*$/i.test(before)) return false;
+    return !/^[ \t]+(?:(?:was|were)[ \t]+)?(?:not[ \t]+(?:performed|required|obtained)|last[ \t]+(?:week|month|year)|\d+[ \t]+(?:days?|weeks?|months?|years?)[ \t]+ago)\b/i.test(after);
+  }
+  function candidatesFromKeywords(parsed){
     const out = [];
-    const lower = text.toLowerCase();
+    const parts = parsed.serviceParts.map(p=>({...p, lower:p.body.toLowerCase()}));
     CPT_BY_CODE.forEach(cpt=>{
       if(!cpt.keywords) return;
       for(const raw of cpt.keywords.split(",")){
-        const phrase = raw.trim();
+        const phrase = raw.trim().toLowerCase();
         if(!phrase || phrase.length < 10) continue;
-        const idx = lower.indexOf(phrase.toLowerCase());
-        if(idx<0) continue;
-        // Skip matches that sit inside a recommendation/conditional clause.
-        if(isRecommendationOnly(text, idx, phrase.length)) continue;
-        out.push({code:cpt.code, short:cpt.short, score:0.75, source:"keyword",
-          rationale:`verbatim keyword "${phrase}"`,
-          supporting_spans:[{text:text.substr(idx,phrase.length),start:idx,end:idx+phrase.length}]});
-        return;  // one match per code
+        for(const p of parts){
+          let idx = p.lower.indexOf(phrase);
+          while(idx>=0){
+            const start = p.start+idx, end = start+phrase.length;
+            if(isCurrentMention(parsed.raw,start,end) && !isRecommendationOnly(parsed.raw,start,phrase.length)){
+              out.push({code:cpt.code, short:cpt.short, score:0.75, source:"keyword",
+                rationale:`verbatim keyword "${phrase}"`,
+                supporting_spans:[{text:parsed.raw.slice(start,end),start,end}]});
+              return;
+            }
+            idx = p.lower.indexOf(phrase,idx+phrase.length);
+          }
+        }
       }
     });
     return out;
@@ -8035,7 +8012,7 @@ window.RVU_REFERENCE = [
       const mm = m("50"); if(mm) out.push({code:"50",desc:mm.desc,plain:mm.plain,rule:mm.rule,
         supporting_spans:feats.laterality.filter(s=>s.label==="bilateral").slice(0,1),
         rationale:`${cpt.code} is unilateral (CMS bilat indicator ${rvuBilat}); report documents bilateral exam.`});
-    } else if((lat.has("left")||lat.has("right")) && bilatEligible){
+    } else if(lat.has("left")!==lat.has("right") && bilatEligible){
       const side = lat.has("left") ? "LT" : "RT";
       const mm = m(side); if(mm) out.push({code:side,desc:mm.desc,plain:mm.plain,rule:mm.rule,
         supporting_spans:feats.laterality.filter(s=>s.label===(side==="LT"?"left":"right")).slice(0,1),
@@ -8120,8 +8097,8 @@ window.RVU_REFERENCE = [
      RVU_BY_CODE = {nf,f,pc,tc,pctc,mult,bilat}. × CF = allowable dollars.
      lineComponents() resolves which component RVUs a line is paid on given its
      billed modifiers + place of service; computeReimbursement() then applies the
-     real MPPR (imaging = 50% off the TECHNICAL component of later studies, ranked
-     by TC within each family, professional component never reduced; surgical =
+     imaging MPPR (PC and TC ranked independently; indicator 4 reduces the
+     subsequent professional component by 5%) and surgical MPPR (indicator 2 =
      100/50/50 on the whole line) and the bilateral / -52 adjustments. */
   function round2(x){ return Math.round(x*100)/100; }
   const BILAT_FACTOR = {0:1.0, 1:1.5, 2:1.0, 3:2.0, 9:1.0};  // CMS BILAT SURG indicator → -50 factor
@@ -8158,8 +8135,12 @@ window.RVU_REFERENCE = [
                isAddon: ln.is_addon, blocked: ln.blocked_by_ncci };
     });
 
-    // Imaging MPPR (indicators 4/6/7): reduce TC of the 2nd..n study by 50%, ranked by
-    // TC within each family; professional component untouched (PC MPPR ended CY2017).
+    // CMS indicator 4: same-session imaging pays the largest PC in full and
+    // 95% of each subsequent PC. Rank PC independently of TC for global bills.
+    const pcReduced = new Set(info.filter(x=>!x.blocked && !x.isAddon && x.mult===4 && x.comp.pc>0)
+      .sort((a,b)=>b.comp.pc-a.comp.pc).slice(1).map(x=>x.i));
+    // CMS multiple-procedure indicators 4, 6 and 7 have distinct technical allowances.
+    const subsequentTechnicalRate = {4: 0.50, 6: 0.75, 7: 0.80};
     const tcReduced = new Set(), fam = {};
     info.filter(x=>!x.blocked && !x.isAddon && x.comp.tc>0 && (x.mult===4||x.mult===6||x.mult===7))
         .forEach(x=>{ (fam[x.mult]=fam[x.mult]||[]).push(x); });
@@ -8178,7 +8159,8 @@ window.RVU_REFERENCE = [
       const face = round2(x.comp.rvu * cf * units);    // pre-adjustment face value
       if(x.blocked) return {code:x.ln.code, base:face, allowance:0, naive:face, units, blocked:true};
       let pc = x.comp.pc, tc = x.comp.tc;
-      if(tcReduced.has(x.i)) tc = tc * 0.50;           // imaging MPPR (technical only)
+      if(pcReduced.has(x.i)) pc *= 0.95;
+      if(tcReduced.has(x.i)) tc *= subsequentTechnicalRate[x.mult];
       let rvu = pc + tc;
       if(surgReduced.has(x.i)) rvu = rvu * 0.50;       // surgical MPPR
       let mult = 1.0;
@@ -8197,8 +8179,8 @@ window.RVU_REFERENCE = [
   function runPipeline(text){
     const parsed = parseSections(text);
     const feats = extractFeatures(parsed);
-    const ruleC = candidatesFromRules(feats);
-    const kwC = candidatesFromKeywords(text);
+    const ruleC = candidatesFromRules(feats,text);
+    const kwC = candidatesFromKeywords(parsed);
     let cand = mergeCandidates(ruleC, kwC);
     cand = expandWithAddons(cand, feats);
     const lines = cand.map(c=>{
@@ -8444,6 +8426,7 @@ IMPRESSION: Three-level lumbar kyphoplasty without complication.`,
 })();
 </script>
 
+<!-- @PAGE_CODING_END -->
 
 <!-- ========================================================================
      PACS / RIS Integration — connection scaffolding + ingest playground
@@ -9911,7 +9894,7 @@ try{
     document.addEventListener(t, function(e){ if(e && e.isTrusted) _lastTrustedInputAt = Date.now(); }, { capture:true, passive:true });
   });
 }catch(_){}
-let _SRC=''; // kept for offline/export fallback
+let _SRC=''; // Initial shell captured before sign-in or user interaction.
 let _supabase=null;
 // Hoisted: declared here (NOT at the bottom of the script) so the early
 // _checkSession IIFE at the top of the script can read it without hitting
@@ -10065,7 +10048,7 @@ const _TABLE='radscheduler'; // table name in Supabase
 let _ROW_ID='main';          // set at login to the user's practiceId
 let _MFA_STATUS={loaded:false,currentLevel:'unknown',nextLevel:'unknown',verified:false,unavailable:false,factors:[],message:''};
 
-// _SRC is set by a script block at the bottom of <body> once DOM is fully loaded
+// Private downloads use the initial shell, captured at the end of the document.
 
 // Supabase functions defined in SUPABASE SETTINGS section below
 
@@ -10439,7 +10422,6 @@ const _PERSISTED_KEYS = [
   {key:'cfg',               type:'object'},
   {key:'driveTimes',        type:'object'},
   // Communication + messaging
-  {key:'chatMessages',      type:'array'},
   {key:'chatGroups',        type:'array'},
   // NOTE (#17 canonical cutover, 2026-07): 'swapRequests' and 'onCallAcks' are
   // intentionally ABSENT — they live canonically in the rs_swap_requests /
@@ -10492,10 +10474,6 @@ const _PERSISTED_KEYS = [
   // Same manifest-drift fix as above — notes were going to /dev/null
   // on save.
   {key:'cellNotes',         type:'object'},
-  // Pinned chat messages keyed by conv-id. Without manifest entry,
-  // a user pinning a message in the practice chat would see the pin
-  // vanish on their next device.
-  {key:'chatPins',          type:'object'},
   // Per-physician pair-affinity rules ("never schedule X and Y on
   // same day"). Referenced by manual rule violators.
   {key:'physicianPairRules', type:'array'},
@@ -12338,21 +12316,7 @@ function showPerEntityMigrationSQL(){
   win.document.body.textContent = _PER_ENTITY_MIGRATION_SQL;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   ROLLING BACKUPS
-   Once per day per browser, snapshots the current Supabase row to a
-   sibling row keyed `<practiceId>_backup_YYYY-MM-DD`. Keeps last 7 days
-   (older backup rows are deleted). Run on app launch (after data load),
-   so we always have a fresh restore point. Uses localStorage as a per-
-   device throttle so multi-tab doesn't write 5 copies.
-═══════════════════════════════════════════════════════════════════════ */
-const _BACKUP_LS_KEY = 'rs.lastBackupDate';
-const _BACKUP_KEEP_DAYS = 7;
-
-// Backups go to a dedicated table (radscheduler_backups) with no FK to
-// practices, so backup row IDs (`<practice>_backup_YYYY-MM-DD`) don't have
-// to satisfy the practice-FK constraint. RLS on that table mirrors the
-// source row's access policy.
+// Server-managed practice schedule snapshots.
 const _BACKUP_TABLE = 'radscheduler_backups';
 
 // ── Data integrity scanner ─────────────────────────────────────────────
@@ -12521,133 +12485,33 @@ function _scheduleIntegrityScan(){
   }, 4000); // wait for the page to settle before scanning
 }
 
-// ── Snapshot helper for risky operations ────────────────────────────────
-// Before any bulk mutation (Excel import, holiday auto-assign, IR
-// rebalance, full clear, restore), take an out-of-band backup tagged with
-// the operation kind. Lets admins roll back via Settings → Backups even
-// if the operation succeeds but produces unintended results.
-//
-// Returns true on success; false if Supabase isn't available or the
-// backup write fails. Callers can decide whether to abort the operation
-// or proceed without a snapshot — the caller's choice, not ours.
+// Capture the committed practice row on the server for this operation.
 async function _snapshotBeforeBulk(operationKind){
-  if(!_supabase) return false;
-  if(!_ROW_ID) return false;
+  if(!_supabase || !_ROW_ID) return false;
   try{
-    // Read the current main row's data, write to a date+tag-keyed backup id
-    const { data: rowData, error: fetchErr } = await _supabase
-      .from(_TABLE).select('data').eq('id', _ROW_ID).single();
-    if(fetchErr || !rowData?.data) return false;
-    const stamp = fmtDate(new Date()) + '_' + new Date().toTimeString().slice(0,8).replace(/:/g,'');
-    const backupId = `${_ROW_ID}_pre-${operationKind}_${stamp}`;
-    const { error: putErr } = await _supabase.from(_BACKUP_TABLE).upsert({
-      id: backupId,
-      practice_id: _ROW_ID,
-      data: rowData.data,
+    const {data, error} = await _supabase.rpc('rs_capture_practice_backup', {
+      p_practice: _ROW_ID, p_kind: operationKind
     });
-    if(putErr){
-      console.warn('[RS] _snapshotBeforeBulk: backup failed', putErr);
-      return false;
-    }
-    if(typeof _audit === 'function') _audit('backup.preBulk', { operationKind, backupId });
-    if(typeof _toast === 'function')
-      _toast(`✓ Pre-${operationKind} backup saved`, 'ok');
+    if(error || !data) throw new Error(error?.message || 'No snapshot was created.');
+    if(typeof _toast === 'function') _toast('Schedule snapshot saved', 'ok');
     return true;
   }catch(e){
-    console.warn('[RS] _snapshotBeforeBulk error:', e);
+    if(typeof _logError === 'function') _logError('backup', 'Schedule snapshot failed', e);
     return false;
-  }
-}
-
-async function _runDailyBackupIfDue(){
-  try{
-    if(!_supabase) return;
-    if(!_ROW_ID || (_ROW_ID === 'main' && !CU)) return;
-    const today = fmtDate(new Date());
-    let last = '';
-    try{ last = localStorage.getItem(_BACKUP_LS_KEY) || ''; }catch(_){}
-    if(last === today) return; // already backed up today
-    // Read the canonical state from Supabase, write a copy to a date-keyed row.
-    const { data: rowData, error: fetchErr } = await _supabase.from(_TABLE)
-      .select('data').eq('id', _ROW_ID).single();
-    if(fetchErr || !rowData?.data) return; // nothing to back up
-    // Sanity-check the source: a corrupted main row would get faithfully
-    // backed up, displacing yesterday's good copy. Verify the JSON parses
-    // and contains at least one expected core array. If not, abort the
-    // backup AND do NOT mark localStorage so we retry tomorrow.
-    let parsed = null;
-    try{ parsed = JSON.parse(rowData.data); }catch(_){}
-    const looksValid = parsed && typeof parsed === 'object' &&
-      (Array.isArray(parsed.physicians) || Array.isArray(parsed.sites));
-    if(!looksValid){
-      if(typeof _logError === 'function')
-        _logError('backup', `Refused to back up: source row data does not look like a valid practice payload.`, null);
-      return;
-    }
-    const backupId = `${_ROW_ID}_backup_${today}`;
-    const { error: putErr } = await _supabase.from(_BACKUP_TABLE).upsert({
-      id: backupId,
-      practice_id: _ROW_ID,
-      data: rowData.data,
-    });
-    if(putErr){
-      if(typeof _logError === 'function') _logError('backup', 'Daily backup write failed', putErr);
-      return;
-    }
-    // ── Verify-after-write ──────────────────────────────────────────────
-    // Read the row back. If the write silently failed (RLS reject, trigger
-    // failure, partial write), `data` will be null/empty and we should NOT
-    // mark localStorage as done — otherwise the user thinks they have a
-    // backup that doesn't actually exist. We only set the LS flag on a
-    // verified-readable backup.
-    try{
-      const { data: verifyData, error: verifyErr } = await _supabase.from(_BACKUP_TABLE)
-        .select('id, data').eq('id', backupId).single();
-      if(verifyErr || !verifyData?.data || verifyData.data.length < 100){
-        if(typeof _logError === 'function')
-          _logError('backup', 'Daily backup verify failed (write succeeded but readback empty)', verifyErr || {size: verifyData?.data?.length});
-        return; // intentionally don't mark LS — retry tomorrow
-      }
-    }catch(verifyEx){
-      if(typeof _logError === 'function')
-        _logError('backup', 'Daily backup verify threw', verifyEx);
-      return;
-    }
-    try{ localStorage.setItem(_BACKUP_LS_KEY, today); }catch(_){}
-    // Prune backups older than _BACKUP_KEEP_DAYS days for THIS practice only.
-    try{
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - _BACKUP_KEEP_DAYS);
-      const cutoffISO = fmtDate(cutoff);
-      const { data: list } = await _supabase.from(_BACKUP_TABLE)
-        .select('id').eq('practice_id', _ROW_ID);
-      const toDel = (list||[])
-        .map(r => r.id)
-        .filter(id => {
-          const m = /_backup_(\d{4}-\d{2}-\d{2})$/.exec(id);
-          return m && m[1] < cutoffISO;
-        });
-      for(const id of toDel){
-        await _supabase.from(_BACKUP_TABLE).delete().eq('id', id);
-      }
-      if(toDel.length) console.log(`[RS] Pruned ${toDel.length} old backup(s).`);
-    }catch(pruneErr){
-      console.warn('[RS] Backup prune failed:', pruneErr);
-    }
-    console.log(`[RS] Daily backup written: ${backupId}`);
-  }catch(e){
-    if(typeof _logError === 'function') _logError('backup', 'Daily backup unhandled error', e);
   }
 }
 
 // List available backups for the current practice.
 async function listBackups(){
-  if(!_supabase) return [];
+  if(!_supabase) throw new Error('Supabase is not configured.');
   const { data, error } = await _supabase.from(_BACKUP_TABLE)
     .select('id, created_at').eq('practice_id', _ROW_ID)
     .order('created_at', {ascending: false});
-  if(error) return [];
+  if(error) throw error;
   return (data||[]);
 }
+
+const _pendingBackupRestores = new Map();
 
 // Restore-from-backup. Pulls a specific backup row, validates the payload,
 // then asks the user to confirm overwriting the current main row. Refuses
@@ -12656,10 +12520,33 @@ async function restoreFromBackup(backupId){
   if(!_adminOnly('restore from backup')) return false;
   if(!_supabase){ alert('Supabase not configured.'); return false; }
   if(!backupId){ alert('Missing backup id.'); return false; }
+  if(_isSaving || _hasUnsavedChanges || _saveConflict){
+    alert('Finish saving or resolving local edits before restoring a schedule.');
+    return false;
+  }
+  const draftRevision = _dirtySeq;
+  const practice = _ROW_ID;
+  const actor = CU?.id || CU?.email;
+  const retryKey = 'rs.restore.' + JSON.stringify([actor, practice, backupId]);
   try{
+    // Keep the original version and operation ID across a lost response or reload.
+    let retry = _pendingBackupRestores.get(retryKey);
+    if(!retry){
+      try{ retry = JSON.parse(sessionStorage.getItem(retryKey)); }catch(_){}
+    }
+    if(!retry){
+      let version = S._remoteSavedAt;
+      if(!version){
+        const {data: current, error} = await _supabase.from(_TABLE).select('saved_at').eq('id',practice).single();
+        if(error) throw error;
+        version = current?.saved_at;
+      }
+      if(!version) throw new Error('Reload the saved schedule before restoring.');
+      retry = {requestId: crypto.randomUUID(), expectedSavedAt: version};
+    }
     // 1. Pull the backup row.
     const { data, error } = await _supabase.from(_BACKUP_TABLE)
-      .select('data').eq('id', backupId).single();
+      .select('data').eq('practice_id', practice).eq('id', backupId).single();
     if(error) throw error;
     if(!data?.data) throw new Error('Backup row is empty.');
     // 2. Parse + validate. We do NOT just blindly upsert — running through
@@ -12681,6 +12568,8 @@ async function restoreFromBackup(backupId){
     // restore blast radius; restoring a blob backup does not roll them back).
     delete parsed.swapRequests;
     delete parsed.onCallAcks;
+    delete parsed.chatMessages;
+    delete parsed.chatPins;
     // 3. Confirm with the user. Show summary stats so they know what they're about to restore.
     const stats = [
       `${(parsed.physicians||[]).length} physician(s)`,
@@ -12694,22 +12583,34 @@ async function restoreFromBackup(backupId){
     ].join('\n  • ');
     const ok = confirm(
       `Restore backup "${backupId}"?\n\n` +
-      `This will REPLACE all current data with:\n  • ${stats}\n\n` +
+      `This will replace the shared schedule, roster and settings with:\n  • ${stats}\n\n` +
       `Backup taken: ${parsed.savedAt || '(unknown)'}\n\n` +
-      `This cannot be easily undone — make sure the current state has been ` +
-      `backed up if you want to be able to roll back.`
+      `The service saves a pre-restore snapshot. Swap requests, on-call acknowledgements, private chat and other separate tables keep their current state.`
     );
     if(!ok) return false;
+    if(practice !== _ROW_ID || actor !== (CU?.id || CU?.email)) throw new Error('The active practice or user changed.');
+    if(_dirtySeq !== draftRevision || _isSaving || _hasUnsavedChanges || _saveConflict) throw new Error('The local schedule changed during review. Save it and confirm again.');
+    _pendingBackupRestores.set(retryKey, retry);
+    try{ sessionStorage.setItem(retryKey,JSON.stringify(retry)); }catch(_){}
     // 4. Prefer the service-role edge wrapper for the destructive write. It
     //    verifies the caller's admin role and AAL2 session server-side, writes
     //    the row, and records side-table audit/telemetry evidence.
     const result = await _invokeEdgeFn('admin-ops', {
       action: 'restore-backup',
       backupId,
-      practiceId: _ROW_ID,
+      practiceId: practice,
+      ...retry,
     });
     if(!result?.payload || typeof result.payload !== 'object') {
       throw new Error('Restore service returned no committed payload. Reload and verify before making edits.');
+    }
+    _pendingBackupRestores.delete(retryKey);
+    try{ sessionStorage.removeItem(retryKey); }catch(_){}
+    if(practice !== _ROW_ID || actor !== (CU?.id || CU?.email)) return true;
+    if(_dirtySeq !== draftRevision || _isSaving || _hasUnsavedChanges || _saveConflict){
+      _onSaveConflict(result.savedAt || result.payload._dbSavedAt, 'restore-backup');
+      alert('The restore committed. Edits made during the restore are still in this tab. Review the save conflict before continuing.');
+      return true;
     }
     // rs-v125: the server row IS the backup now — this tab must take it. End any
     // pending save conflict and stand the stale-remote guard down so the apply
@@ -12717,7 +12618,7 @@ async function restoreFromBackup(backupId){
     _clearSaveConflict('restore-backup');
     S._lastLocalChange = 0;
     _hasUnsavedChanges = false;
-    _applyRemoteData(result.payload);
+    _applyRemoteData(result.payload, true);
     if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
     if(Array.isArray(result?.warnings) && result.warnings.length){
       console.warn('[RS] admin-ops restore warnings:', result.warnings);
@@ -12725,6 +12626,10 @@ async function restoreFromBackup(backupId){
     if(typeof _toast === 'function') _toast(`✓ Restored from backup ${backupId}`, 'ok');
     return true;
   }catch(e){
+    if([400,404,409].includes(e.status)){
+      _pendingBackupRestores.delete(retryKey);
+      try{ sessionStorage.removeItem(retryKey); }catch(_){}
+    }
     console.error('[RS] restoreFromBackup failed:', e);
     alert('Restore failed: ' + (e.message || String(e)));
     return false;
@@ -12739,7 +12644,7 @@ async function previewBackupRestore(backupId, targetElId){
   target.innerHTML = '<div class="note ni">Loading backup preview...</div>';
   try{
     const { data, error } = await _supabase.from(_BACKUP_TABLE)
-      .select('data, created_at').eq('id', backupId).single();
+      .select('data, created_at').eq('practice_id', _ROW_ID).eq('id', backupId).single();
     if(error) throw error;
     if(!data?.data) throw new Error('Backup row is empty.');
     let parsed = null;
@@ -12757,8 +12662,8 @@ async function previewBackupRestore(backupId, targetElId){
       ['Holidays', (parsed.holidays||[]).length],
       ['Vacations', (parsed.vacations||[]).length],
     ];
-    const safeId = JSON.stringify(String(backupId)).replace(/"/g,'&quot;');
-    const safeTarget = JSON.stringify(String(targetElId)).replace(/"/g,'&quot;');
+    const safeId = escHtml(JSON.stringify(String(backupId)));
+    const safeTarget = escHtml(JSON.stringify(String(targetElId)));
     const restoreBtnId = 'rs-restore-confirm-' + Math.random().toString(36).slice(2);
     target.innerHTML = `<div class="rs-restore-preview">
       <div class="rs-restore-head">
@@ -12769,13 +12674,13 @@ async function previewBackupRestore(backupId, targetElId){
         <button class="bsm" onclick="renderBackupPicker(${safeTarget})">Back to list</button>
       </div>
       ${validation.ok || !validation.fatal
-        ? '<div class="note nw mb10" >Review the counts below. Restoring replaces the active practice row and requires admin MFA.</div>'
+        ? '<div class="note nw mb10" >Restore replaces the shared schedule, roster and settings and saves a pre-restore snapshot. Swaps, acknowledgements, private chat and other separate tables keep their current state. Administrator MFA is required.</div>'
         : `<div class="note ne mb10" >This backup failed validation: ${escHtml((validation.problems||[]).slice(0,4).join('; '))}</div>`}
       <div class="rs-restore-grid">
         ${stats.map(([label,value]) => `<div class="rs-restore-card"><div class="rs-restore-label">${escHtml(label)}</div><div class="rs-restore-value">${escHtml(String(value))}</div><div class="rs-restore-detail">Backup payload</div></div>`).join('')}
       </div>
       <div class="rs-restore-actions">
-        <label class="chk" style="border-radius:var(--rl)"><input type="checkbox" onchange="document.getElementById('${restoreBtnId}').disabled=!this.checked"> I understand this overwrites current data</label>
+        <label class="chk" style="border-radius:var(--rl)"><input type="checkbox" onchange="document.getElementById('${restoreBtnId}').disabled=!this.checked" ${validation.fatal ? 'disabled' : ''}> I understand this replaces the shared schedule, roster and settings</label>
         <button id="${restoreBtnId}" class="br bsm" disabled onclick="restoreFromBackup(${safeId}).then(ok=>{ if(ok) renderBackupPicker(${safeTarget}); })">Restore this backup</button>
         <button class="bsm" onclick="renderBackupPicker(${safeTarget})">Cancel</button>
       </div>
@@ -12796,24 +12701,23 @@ async function renderBackupPicker(targetElId){
   try{
     const list = await listBackups();
     if(!list.length){
-      target.innerHTML = '<div class="note nw">No backups found yet for this practice. The first daily backup runs automatically when an admin signs in.</div>';
+      target.innerHTML = '<div class="note nw">No backups found yet for this practice. The server checks for practices missing a daily snapshot at 15 minutes past each hour (UTC).</div>';
       return;
     }
     const rows = list.map(b => {
       const dateMatch = /_backup_(\d{4}-\d{2}-\d{2})$/.exec(b.id);
       const dateStr = dateMatch ? dateMatch[1] : (b.created_at||'').slice(0,10);
       const created = b.created_at ? new Date(b.created_at).toLocaleString() : '—';
-      const safeId = JSON.stringify(String(b.id)).replace(/"/g,'&quot;');
+      const safeId = escHtml(JSON.stringify(String(b.id)));
       return `<tr>
         <td class="fw6">${escHtml(dateStr)}</td>
         <td class="muted-xs">${escHtml(created)}</td>
         <td style="font-family:monospace;font-size:10px;color:var(--txt3)">${escHtml(b.id)}</td>
-        <td><button class="bsm" onclick="previewBackupRestore(${safeId}, ${JSON.stringify(String(targetElId)).replace(/"/g,'&quot;')})">Preview</button></td>
+        <td><button class="bsm" onclick="previewBackupRestore(${safeId}, ${escHtml(JSON.stringify(String(targetElId)))})">Preview</button></td>
       </tr>`;
     }).join('');
     target.innerHTML = `<div class="note nw mb8" >
-        <strong>⚠ Restoring overwrites all current data.</strong> Make a fresh manual snapshot
-        first if you want to be able to roll back the restore itself.
+        <strong>Restore replaces this practice’s shared schedule, roster and settings.</strong> Each restore saves a pre-restore snapshot. Separate database tables keep their current state.
       </div>
       <table class="tbl"><thead><tr>
         <th>Date</th><th>Taken</th><th>Backup ID</th><th></th>
@@ -13602,46 +13506,42 @@ function triggerSave(){
   // enabled). Independent debounce — keeps disk + remote in sync without
   // blocking either path on the other.
   if(typeof _fsScheduleWrite === 'function') _fsScheduleWrite();
-  // Schedule a GitHub deploy if configured + enabled. Heaviest of the three
-  // sinks (network round-trip to GitHub) so it's the longest-debounced.
-  if(typeof _ghScheduleDeploy === 'function') _ghScheduleDeploy();
+
 }
 
-function _buildSaveHTML(){
-  const source = _SRC || document.documentElement.outerHTML;
-  if(!source){alert('Cannot generate save file.');return '';}
-  // Embed live Supabase URL only; do not include anon keys in exported HTML files
-  const liveUrl=_getUrl()||'';
-  // Embed BOTH the project URL and the anon key into the exported HTML so
-  // any device opening this file is auto-configured and goes straight to
-  // the login form. The anon key is public-by-design — Supabase's Row-Level
-  // Security policies are what actually gate data access. Embedding it here
-  // doesn't grant additional permissions; it just removes the per-device
-  // "configure Supabase" friction.
-  const liveKey=_getKey()||'';
-  const sData='let S=/*S_START*/'+JSON.stringify(Object.assign(
-    _buildPersistedPayload('file'),
-    {
-      // File-save-specific extras. Preview arrays are intentionally blanked
-      // so a cold-boot from the exported HTML doesn't resurrect stale
-      // preview state. _lastSaved null signals "needs to be loaded fresh."
-      aaPreview:[], iraPreview:[], irsaPreview:[],
-      _lastSaved:null,
-    }
-  ))+'/*S_END*/';
-  const uData='let USERS = /*USERS_START*/'+JSON.stringify(USERS)+'/*USERS_END*/';
-  return source
-    .replace(/let S=\/\*S_START\*\/[\s\S]*?\/\*S_END\*\//,sData)
-    .replace(/let USERS = \/\*USERS_START\*\/[\s\S]*?\/\*USERS_END\*\//,uData)
-    .replace(/\/\*CREDS_URL_START\*\/[\s\S]*?\/\*CREDS_URL_END\*\//,
-      "/*CREDS_URL_START*/'"+liveUrl.replace(/'/g,"\\'")+"'\n/*CREDS_URL_END*/")
-    .replace(/\/\*CREDS_KEY_START\*\/[\s\S]*?\/\*CREDS_KEY_END\*\//,
-      "/*CREDS_KEY_START*/'"+liveKey.replace(/'/g,"\\'")+"'\n/*CREDS_KEY_END*/");
+// Practice snapshots are private downloads. Keep their JSON out of executable
+// JavaScript, replace by callback (so dollar signs stay literal), and never
+// serialize the signed-in page's rendered DOM, login fields, or auth tokens.
+function downloadPrivateBackup(){
+  if(!_adminOnly('download a private practice backup')) return false;
+  const blob = new Blob([_buildSaveHTML()],{type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href=url; link.download='RadScheduler-Private-Backup.html';
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  return true;
+}
+
+function _buildSaveHTML(clean=false){
+  if(!_SRC) throw new Error('The export shell has not finished loading.');
+  const payload = clean ? null : {
+    version:1, practiceId:_ROW_ID, exportedAt:new Date().toISOString(),
+    state:_buildPersistedPayload('file'),
+    users:USERS.map(({id,email,first,last,role,physId,practiceId}) =>
+      ({id,email,first,last,role,physId,practiceId})),
+  };
+  const json = payload ? JSON.stringify(payload).replace(/</g,'\\u003c') : '';
+  const island = /^(<script id="rs-private-export" type="application\/json">)[\s\S]*?(<\/script>)/m;
+  if(!island.test(_SRC)) throw new Error('The private export placeholder is missing.');
+  const privatePolicy = `<meta id="rs-private-offline" http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">`;
+  const shell = _SRC.replace(/^<meta id="rs-private-offline"[^>]*>/m, '');
+  return shell.replace(island, (_,open,end) => (clean ? '' : privatePolicy + '\n') + open + json + end);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
    AUTOSAVE-TO-LOCAL-FILE (File System Access API)
-   Lets the user pick their local index.html once. The browser stores a
+   Lets the user pick a private backup file once. The browser stores a
    FileSystemFileHandle which we persist in IndexedDB (handles ARE clonable
    for IDB storage). On every successful Supabase push we also write the
    latest _buildSaveHTML() output back to that file, keeping the on-disk
@@ -13653,7 +13553,14 @@ function _buildSaveHTML(){
 ═══════════════════════════════════════════════════════════════════════ */
 const _FS_IDB_NAME  = 'rs_fs_handles';
 const _FS_IDB_STORE = 'handles';
-const _FS_HANDLE_KEY = 'autosave';
+function _fsBackupKey(){
+  return CU?.id && _isAdminOrSU() ? JSON.stringify(['private-backup-v1',_ROW_ID,CU.id]) : null;
+}
+let _fsLinkedScope = null;
+function _fsDetach(){
+  clearTimeout(_fsWriteTimer);
+  _fsHandle=null; _fsAutosaveOn=false; _fsLinkedScope=null;
+}
 let   _fsHandle = null;        // FileSystemFileHandle (in memory)
 let   _fsAutosaveOn = false;   // toggled by user; persisted by handle presence
 let   _fsLastWrite = 0;        // timestamp
@@ -13717,23 +13624,30 @@ async function _fsEnsurePermission(handle, requestIfPrompt){
 }
 
 // User clicks "Enable autosave to file" in the toolbar — picks the local
-// index.html (or any file path), we save the handle and start mirroring.
+// private backup file, we save the handle and start mirroring.
 async function fsEnableAutosave(){
   if(!_fsSupported()){
     alert('Auto-save to local file requires Chrome, Edge, or Opera on desktop. Use 💾 Save File on this browser instead.');
     return;
   }
   if(!_adminOnly('enable autosave to file')) return;
+  const scope = _fsBackupKey();
+  if(!scope) return;
   try{
     const handle = await window.showSaveFilePicker({
-      suggestedName: 'RadScheduler_Web.html',
+      suggestedName: 'RadScheduler-Private-Backup.html',
       types: [{description:'HTML', accept:{'text/html':['.html','.htm']}}],
     });
+    if(/^index\.html?$/i.test(handle.name)){
+      alert('Choose a separate private backup filename. index.html is reserved for the public app.');
+      return;
+    }
     const ok = await _fsEnsurePermission(handle, true);
     if(!ok){ alert('Read/write permission denied.'); return; }
-    _fsHandle = handle;
+    if(scope !== _fsBackupKey()) return;
+    _fsHandle = handle; _fsLinkedScope=scope;
     _fsAutosaveOn = true;
-    try{ await _fsIDBPut(_FS_HANDLE_KEY, handle); }catch(_){}
+    try{ await _fsIDBPut(scope, handle); }catch(_){}
     _fsUpdateUI();
     // Write once immediately so the picked file reflects current state.
     await _fsWriteNow();
@@ -13748,9 +13662,9 @@ async function fsEnableAutosave(){
 
 // Stop autosaving but DON'T delete the file — just unlink the handle.
 async function fsDisableAutosave(){
-  _fsHandle = null;
-  _fsAutosaveOn = false;
-  try{ await _fsIDBDel(_FS_HANDLE_KEY); }catch(_){}
+  const scope = _fsLinkedScope;
+  _fsDetach();
+  try{ if(scope) await _fsIDBDel(scope); }catch(_){}
   _fsUpdateUI();
 }
 
@@ -13762,11 +13676,16 @@ async function fsDisableAutosave(){
 async function fsTryRestoreAutosave(){
   if(!_fsSupported()) return;
   let handle = null;
-  try{ handle = await _fsIDBGet(_FS_HANDLE_KEY); }catch(_){}
-  if(!handle) return;
-  _fsHandle = handle;
+  // Old handles could point at a release index.html. Require a fresh choice.
+  try{ await _fsIDBDel('autosave'); }catch(_){}
+  const scope = _fsBackupKey();
+  if(!scope) return;
+  try{ handle = await _fsIDBGet(scope); }catch(_){}
+  if(!handle || /^index\.html?$/i.test(handle.name)) return;
   // Don't request permission here (no user gesture). Just check.
   const granted = await _fsEnsurePermission(handle, false);
+  if(scope !== _fsBackupKey()) return;
+  _fsHandle = handle; _fsLinkedScope=scope;
   _fsAutosaveOn = !!granted;
   _fsUpdateUI();
 }
@@ -13775,7 +13694,7 @@ async function fsTryRestoreAutosave(){
 // permission. This MUST be called from a user gesture for the browser to
 // allow the prompt.
 async function fsResumeAutosave(){
-  if(!_fsHandle){ return fsEnableAutosave(); }
+  if(!_fsHandle || _fsLinkedScope !== _fsBackupKey()){ return fsEnableAutosave(); }
   const ok = await _fsEnsurePermission(_fsHandle, true);
   if(!ok){ alert('Permission denied.'); return; }
   _fsAutosaveOn = true;
@@ -13793,9 +13712,11 @@ function _fsScheduleWrite(){
 }
 
 async function _fsWriteNow(){
-  if(!_fsHandle || _fsWriteInFlight) return;
+  const handle = _fsHandle, scope = _fsLinkedScope;
+  if(!scope || scope !== _fsBackupKey() || !handle || /^index\.html?$/i.test(handle.name) || _fsWriteInFlight) return;
   // Re-check permission — a tab restoration may have downgraded it.
-  const ok = await _fsEnsurePermission(_fsHandle, false);
+  const ok = await _fsEnsurePermission(handle, false);
+  if(scope !== _fsBackupKey() || handle !== _fsHandle) return;
   if(!ok){ _fsAutosaveOn = false; _fsUpdateUI(); return; }
   _fsWriteInFlight = true;
   try{
@@ -13816,7 +13737,7 @@ async function _fsWriteNow(){
       _updateSaveUI('⚠ Auto-save aborted (builder failed)', 'var(--red-t)');
       return;
     }
-    const writable = await _fsHandle.createWritable();
+    const writable = await handle.createWritable();
     let writeOk = false;
     try{
       await writable.write(html);
@@ -13885,399 +13806,9 @@ function _fsUpdateUI(){
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   GITHUB AUTO-DEPLOY
-   Pushes the latest _buildSaveHTML() output to a configured GitHub repo
-   via the Contents API on every save. Keeps a hosted GH Pages copy of the
-   app in sync with desktop edits — phone / other devices see updates as
-   soon as GH Pages re-publishes (~30s after push).
-
-   Config (token + repo + branch + path) lives in localStorage per-browser.
-   The token is NEVER synced to Supabase or embedded in saved HTML — it
-   stays on the device that types it in.
-
-   Token: fine-grained Personal Access Token with `Contents: Read and Write`
-   on the target repo only. Generate at:
-     https://github.com/settings/tokens?type=beta
-═══════════════════════════════════════════════════════════════════════ */
-const _GH_LS_KEY = 'rs.github.deploy.v1';
-let _ghDeployTimer = null;
-let _ghDeployInFlight = false;
-let _ghLastDeploy = 0;
-let _ghLastSha = null;
-
-function _ghLoadCfg(){
-  try{
-    const raw = localStorage.getItem(_GH_LS_KEY);
-    if(!raw) return null;
-    const c = JSON.parse(raw);
-    return {
-      token: c.token || '',
-      owner: c.owner || '',
-      repo:  c.repo  || '',
-      branch:c.branch|| 'main',
-      path:  c.path  || 'index.html',
-      enabled: !!c.enabled,
-    };
-  }catch(_){ return null; }
-}
-function _ghSaveCfg(cfg){
-  try{ localStorage.setItem(_GH_LS_KEY, JSON.stringify(cfg)); }catch(_){}
-}
-
-// One-time auto-disable: the disk-watch autopush is now the recommended single
-// writer for index.html. If a previous version of the app left the in-browser
-// deploy enabled, flip it off so the two paths stop racing on every save. The
-// user can re-enable explicitly from Settings → GitHub Deploy if they want
-// the in-browser path back (e.g., to deploy from a phone).
-(function _autoDisableInBrowserDeploy(){
-  try{
-    const cfg = _ghLoadCfg();
-    if(!cfg || !cfg.enabled) return;
-    cfg.enabled = false;
-    _ghSaveCfg(cfg);
-    console.log('[RS] In-browser GitHub deploy disabled — disk-watch autopush is the active writer. Re-enable in Settings if needed.');
-  }catch(_){}
-})();
-
-// UTF-8-safe base64 encode (btoa() can't handle non-Latin1 characters which
-// our HTML — full of em-dashes and emoji — definitely contains).
-function _ghUtf8ToBase64(str){
-  const bytes = new TextEncoder().encode(str);
-  let bin = '';
-  // String.fromCharCode in 32k chunks to avoid stack-overflow on big strings.
-  for(let i=0; i<bytes.length; i+=32768){
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i+32768));
-  }
-  return btoa(bin);
-}
-
-// Lightweight error wrapper so callers can surface useful messages.
-async function _ghApi(cfg, method, urlPath, body){
-  if(!cfg?.token) throw new Error('No GitHub token configured.');
-  const res = await fetch(`https://api.github.com${urlPath}`, {
-    method,
-    headers: {
-      'Authorization': 'Bearer ' + cfg.token,
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(body ? {'Content-Type': 'application/json'} : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let data; try{ data = JSON.parse(text); }catch(_){ data = {message: text}; }
-  if(!res.ok){
-    const msg = data?.message || `HTTP ${res.status}`;
-    const err = new Error(`GitHub API ${method} ${urlPath} → ${res.status}: ${msg}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
-}
-
-// Fetch the current file's SHA from the configured branch. Needed for PUT
-// (GitHub uses optimistic-locking via SHA). Returns null if file doesn't
-// exist yet — first deploy will create it without a SHA.
-async function _ghFetchSha(cfg){
-  try{
-    const data = await _ghApi(cfg, 'GET',
-      `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${encodeURIComponent(cfg.path)}?ref=${encodeURIComponent(cfg.branch)}`);
-    return data?.sha || null;
-  }catch(e){
-    if(e.status === 404) return null; // file doesn't exist yet
-    throw e;
-  }
-}
-
-// Fetch SHA + base64 content together. When a 409 fires, we use this to
-// check whether the remote is already what we wanted to push (e.g. the
-// disk-watch autopush beat us to the same content) — that case is a
-// no-op success rather than an actual conflict. Returns
-// {sha, contentB64} or null on 404.
-async function _ghFetchShaAndContent(cfg){
-  try{
-    const data = await _ghApi(cfg, 'GET',
-      `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${encodeURIComponent(cfg.path)}?ref=${encodeURIComponent(cfg.branch)}`);
-    if(!data || !data.sha) return null;
-    return {
-      sha: data.sha,
-      // The Contents API returns base64 with newlines every ~60 chars.
-      // Strip whitespace before comparing.
-      contentB64: typeof data.content === 'string' ? data.content.replace(/\s/g, '') : null,
-    };
-  }catch(e){
-    if(e.status === 404) return null;
-    throw e;
-  }
-}
-
-// Transient HTTP errors worth retrying with backoff. 5xx are server faults
-// that often clear on a second attempt; 408/429 are explicit "try again"
-// signals from GitHub. SHA-stale (409/422) is handled separately because it
-// needs a SHA refetch, not just a delay.
-function _ghIsTransient(e){
-  if(!e) return false;
-  if(e.status === 408 || e.status === 429) return true;       // timeout / rate-limit
-  if(e.status >= 500 && e.status <= 599) return true;          // GitHub 5xx
-  // No status property → fetch-level failure (DNS, offline, CORS abort).
-  // Network errors are the most common reason a single retry succeeds.
-  if(typeof e.status === 'undefined' || e.status === 0) return true;
-  return false;
-}
-
-async function _ghDeploy(opts){
-  opts = opts || {};
-  if(_ghDeployInFlight) return { ok:false, error:'Deploy already in flight.' };
-  const cfg = _ghLoadCfg();
-  if(!cfg || !cfg.token || !cfg.owner || !cfg.repo){
-    return { ok:false, error:'GitHub deploy not configured.' };
-  }
-  _ghDeployInFlight = true;
-  try{
-    const html = _buildSaveHTML();
-    if(!html) throw new Error('Failed to build save HTML.');
-    // Compute the payload once; we'll compare its base64 against the remote
-    // on a 409 to detect "already-in-sync" no-ops.
-    const ourB64 = _ghUtf8ToBase64(html);
-    let sha = _ghLastSha;
-    // Always re-fetch the SHA on first deploy of a session, after a 409,
-    // or when explicitly forced. Subsequent same-session deploys reuse the
-    // last-returned SHA from the PUT response to skip a round trip.
-    if(!sha || opts.refreshSha) sha = await _ghFetchSha(cfg);
-    const stamp = new Date().toISOString().replace(/T/,' ').replace(/\..+/,'');
-    const who = (CU?.first ? `${CU.first} ${CU.last||''}` : 'unknown').trim();
-    const message = opts.message || `rs: autosave ${stamp} (${who})`;
-    const putPath = `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${encodeURIComponent(cfg.path)}`;
-    const body = {
-      message,
-      content: ourB64,
-      branch:  cfg.branch || 'main',
-      ...(sha ? {sha} : {}),
-    };
-    // Retry loop: up to MAX_TRIES total attempts.
-    //   • 409 / 422 (SHA stale): refetch sha + content. If the remote
-    //     content already matches what we were going to push (e.g. a
-    //     disk-watch autopush beat us to the same file), treat as a
-    //     no-op success and exit the loop. Otherwise update body.sha
-    //     and retry.
-    //   • 5xx / 408 / 429 / network: exponential backoff.
-    //   • everything else (auth, validation): bail out.
-    //
-    // 5 tries instead of 3 because in a two-writer environment (disk-watch
-    // autopush + browser deploy) the remote can move multiple times in a
-    // row. Tiny 50ms × attempt sleep on conflict prevents a tight spin.
-    const MAX_TRIES = 5;
-    let lastErr = null;
-    let res = null;
-    let alreadyInSync = false;
-    for(let attempt = 0; attempt < MAX_TRIES; attempt++){
-      try{
-        res = await _ghApi(cfg, 'PUT', putPath, body);
-        lastErr = null;
-        break;
-      }catch(e){
-        lastErr = e;
-        // SHA stale. Fetch the current SHA AND content; if the file on
-        // GitHub already matches ours, the remote is in sync and there's
-        // nothing to push.
-        if(e.status === 409 || e.status === 422){
-          try{
-            const remote = await _ghFetchShaAndContent(cfg);
-            if(remote && remote.contentB64 && remote.contentB64 === ourB64){
-              // Disk-watch (or another writer) already published this exact
-              // content. Treat as a successful deploy — there's literally
-              // nothing for us to do.
-              console.log('[RS] _ghDeploy: remote already matches our payload; treating as no-op success.');
-              _ghLastSha = remote.sha;
-              _ghLastDeploy = Date.now();
-              _ghUpdateUI();
-              alreadyInSync = true;
-              lastErr = null;
-              break;
-            }
-            if(remote && remote.sha){ body.sha = remote.sha; }
-            else delete body.sha;
-            // Tiny stagger so we don't tight-loop on a fast-moving remote.
-            await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
-            continue;
-          }catch(shaErr){
-            console.warn('[RS] _ghDeploy: SHA refetch failed', shaErr);
-            break;
-          }
-        }
-        // Transient network/5xx errors → backoff and retry. Cap delay at 4s
-        // because the user's already debouncing 3s before deploy fires.
-        if(_ghIsTransient(e) && attempt < MAX_TRIES - 1){
-          const backoffMs = Math.min(4000, 500 * Math.pow(2, attempt)); // 500, 1000, 2000
-          // Add small jitter so concurrent clients don't thunder GitHub.
-          const jitter = Math.floor(Math.random() * 250);
-          await new Promise(r => setTimeout(r, backoffMs + jitter));
-          continue;
-        }
-        // Non-transient (401, 403, 404, etc.) — bail out, no point retrying.
-        break;
-      }
-    }
-    if(alreadyInSync){
-      return { ok:true, noop:true, sha: _ghLastSha };
-    }
-    if(lastErr || !res){
-      // Give the user a meaningful message when the failure looks like a
-      // two-writer race rather than a network/auth problem. They can then
-      // decide whether to disable one of the two paths.
-      if(lastErr && (lastErr.status === 409 || lastErr.status === 422)){
-        const hint = ' Another writer (likely the disk-watch autopush) keeps moving this file. ' +
-          'If you have both running, disable in-browser deploy in Settings → GitHub Deploy ' +
-          'and rely on disk-watch only.';
-        const wrapped = new Error((lastErr.message || 'GitHub deploy conflict') + hint);
-        wrapped.status = lastErr.status;
-        throw wrapped;
-      }
-      throw (lastErr || new Error('GitHub deploy failed (unknown).'));
-    }
-    _ghLastSha = res?.content?.sha || null;
-    _ghLastDeploy = Date.now();
-    _ghUpdateUI();
-    return { ok:true, sha: _ghLastSha, commit: res?.commit?.sha, url: res?.commit?.html_url };
-  }catch(e){
-    console.warn('[RS] _ghDeploy failed:', e);
-    return { ok:false, error: e.message || String(e) };
-  }finally{
-    _ghDeployInFlight = false;
-  }
-}
-
-// Debounced trigger called from triggerSave alongside Supabase + file autosave.
-function _ghScheduleDeploy(){
-  const cfg = _ghLoadCfg();
-  if(!cfg || !cfg.enabled || !cfg.token) return;
-  clearTimeout(_ghDeployTimer);
-  // Longer debounce than file/Supabase saves — GitHub commits should cluster
-  // edits into one push, not spam the commit history.
-  _ghDeployTimer = setTimeout(() => {
-    _ghDeploy().then(r => {
-      if(r.ok){
-        // Quietly note no-op deploys (the disk-watch beat us); they aren't
-        // failures and we don't want to show ⚠ for them.
-        return;
-      }
-      // Failed deploy: surface the issue with a Retry button so the user
-      // doesn't have to navigate to Settings to re-attempt.
-      _updateSaveUI('⚠ GitHub: ' + (r.error || 'failed'), 'var(--red-t)');
-      if(typeof _toastAction === 'function'){
-        _toastAction(
-          'GitHub deploy failed: ' + (r.error || 'unknown error'),
-          'Retry',
-          () => _ghDeploy({refreshSha: true}).then(r2 => {
-            if(r2.ok && typeof _toast === 'function') _toast('Deploy succeeded.', 'ok');
-            else if(typeof _toast === 'function') _toast('Still failing: ' + (r2.error || ''), 'warn');
-          }),
-          'err'
-        );
-      }
-    });
-  }, 3000);
-}
-
-// Test that the token + repo + path are valid by GET-ing the file metadata.
-async function ghTest(){
-  if(!_adminOnly('test GitHub connection')) return;
-  ghReadCfgFromForm();
-  const cfg = _ghLoadCfg();
-  const status = document.getElementById('gh-status-msg');
-  const setStatus = (txt, color='var(--txt2)') => { if(status){ status.textContent = txt; status.style.color = color; } };
-  if(!cfg || !cfg.token || !cfg.owner || !cfg.repo){
-    setStatus('✕ Fill in token, owner, and repo first.', 'var(--red-t)'); return;
-  }
-  setStatus('Testing…');
-  try{
-    const sha = await _ghFetchSha(cfg);
-    _ghLastSha = sha;
-    if(sha){
-      setStatus(`✓ Reachable. Current ${cfg.path}@${cfg.branch} SHA: ${sha.slice(0,7)}.`, 'var(--green-t)');
-    } else {
-      setStatus(`✓ Token + repo OK. ${cfg.path} doesn't exist yet — first deploy will create it.`, 'var(--green-t)');
-    }
-  }catch(e){
-    setStatus('✕ '+(e.message||e), 'var(--red-t)');
-  }
-}
-
-// Force a deploy now, ignoring the debounce.
-async function ghDeployNow(){
-  if(!_adminOnly('deploy to GitHub')) return;
-  ghReadCfgFromForm();
-  const status = document.getElementById('gh-status-msg');
-  const setStatus = (txt, color='var(--txt2)') => { if(status){ status.textContent = txt; status.style.color = color; } };
-  setStatus('Deploying…');
-  const r = await _ghDeploy({refreshSha: true, message: `rs: manual deploy ${new Date().toISOString().replace(/T/,' ').replace(/\..+/,'')}`});
-  if(r.ok) setStatus(`✓ Deployed. Commit ${r.commit?.slice(0,7) || ''}. ${r.url ? '' : ''}`, 'var(--green-t)');
-  else     setStatus('✕ '+r.error, 'var(--red-t)');
-}
-
-// Save the form values to localStorage. Called from input onchange handlers
-// AND before ghTest/ghDeployNow so the latest form state is used.
-function ghReadCfgFromForm(){
-  const get = id => document.getElementById(id)?.value?.trim() || '';
-  const cfg = {
-    token:  get('gh-token'),
-    owner:  get('gh-owner'),
-    repo:   get('gh-repo'),
-    branch: get('gh-branch') || 'main',
-    path:   get('gh-path')   || 'index.html',
-    enabled: !!document.getElementById('gh-enabled')?.checked,
-  };
-  _ghSaveCfg(cfg);
-  _ghUpdateUI();
-}
-
-function ghLoadCfgIntoForm(){
-  const cfg = _ghLoadCfg() || {};
-  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v ?? ''; };
-  set('gh-token',  cfg.token  || '');
-  set('gh-owner',  cfg.owner  || '');
-  set('gh-repo',   cfg.repo   || '');
-  set('gh-branch', cfg.branch || 'main');
-  set('gh-path',   cfg.path   || 'index.html');
-  const en = document.getElementById('gh-enabled');
-  if(en) en.checked = !!cfg.enabled;
-  _ghUpdateUI();
-}
-
-function _ghUpdateUI(){
-  const cfg = _ghLoadCfg() || {};
-  const ind = document.getElementById('gh-toolbar-status');
-  if(ind){
-    if(!cfg.token || !cfg.owner || !cfg.repo){
-      ind.style.display = 'none';
-    } else if(!cfg.enabled){
-      ind.style.display = '';
-      ind.textContent = '🐙 paused';
-      ind.style.color = 'var(--txt3)';
-    } else {
-      ind.style.display = '';
-      if(_ghLastDeploy){
-        const ageS = Math.round((Date.now() - _ghLastDeploy)/1000);
-        const t = ageS < 5 ? 'just now' : ageS < 60 ? `${ageS}s` : ageS < 3600 ? `${Math.round(ageS/60)}m` : `${Math.round(ageS/3600)}h`;
-        ind.textContent = `🐙 ${cfg.repo} · ${t}`;
-      } else {
-        ind.textContent = `🐙 ${cfg.repo} · armed`;
-      }
-      ind.style.color = 'var(--txt3)';
-    }
-  }
-  const summary = document.getElementById('gh-summary');
-  if(summary){
-    if(_ghLastDeploy){
-      const date = new Date(_ghLastDeploy).toLocaleString();
-      summary.textContent = `Last deploy: ${date}` + (_ghLastSha ? ` · SHA ${_ghLastSha.slice(0,7)}` : '');
-    } else {
-      summary.textContent = 'Never deployed this session.';
-    }
-  }
-}
+// Earlier browser releases stored GitHub credentials for publishing. Retire
+// that local setting on upgrade, including on devices where it was enabled.
+try{ localStorage.removeItem('rs.github.deploy.v1'); }catch(_){}
 
 // Re-entrancy guard. hardSave() was async with no in-flight protection,
 // so a user double-clicking the toolbar 💾 Save File button could fire
@@ -14316,17 +13847,11 @@ async function hardSave(){
       // Supabase mode: push immediately
       _updateSaveUI('Saving…','var(--txt2)');
       const ok=await _pushToSupabase();
-      if(ok){_hasUnsavedChanges=false;_updateSaveUI('✓ Synced','var(--green-t)');}
+      if(ok && !_hasUnsavedChanges) _updateSaveUI('✓ Synced','var(--green-t)');
     } else {
       // Fallback: download updated HTML file
       try{
-        const updatedHTML=_buildSaveHTML();
-        if(!updatedHTML){alert('Cannot build save file.');return;}
-        const blob=new Blob([updatedHTML],{type:'text/html'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');a.href=url;a.download='RadScheduler_Web.html';
-        document.body.appendChild(a);a.click();document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        if(!downloadPrivateBackup()) return;
         _hasUnsavedChanges=false;
         _updateSaveUI('✓ Downloaded','var(--green-t)');
       }catch(e){alert('Save failed: '+e.message);}
@@ -14345,45 +13870,8 @@ function clearAllData(){
   if(!_adminOnly('reset all data')) return;
   if(!confirm('Reset ALL data to original seed data? This will download a fresh copy of the file. Any unsaved changes will be lost.'))return;
   if(typeof _audit === 'function') _audit('admin.clearAllData', {timestamp: new Date().toISOString()});
-  // Build a version with only the original seed data by temporarily clearing arrays
-  const backup={
-    drShifts:S.drShifts,weekendCalls:S.weekendCalls,irCalls:S.irCalls,
-    irShifts:S.irShifts,vacations:S.vacations,holidays:S.holidays,
-    openShifts:S.openShifts,physicians:S.physicians,chatMessages:S.chatMessages,
-    swapRequests:S.swapRequests,holidayBlackouts:S.holidayBlackouts,
-    holidayNeeds:S.holidayNeeds,sites:S.sites,holidayDefs:S.holidayDefs,
-    siteSlots:S.siteSlots,siteSlotsSubs:S.siteSlotsSubs,irSlots:S.irSlots,
-    irShiftSlots:S.irShiftSlots,irShiftSlotLabels:S.irShiftSlotLabels||{},siteSlotLabels:S.siteSlotLabels||{},wkndNeeds:S.wkndNeeds,holNeeds:S.holNeeds||{},nextId:S.nextId,
-    shiftPickGroups:S.shiftPickGroups||[],
-    tumorBoards:S.tumorBoards||[],
-    clinics:S.clinics||[],
-    publishLog:S.publishLog||[],
-    irGroups:S.irGroups,
-  };
-  const usersBackup=[...USERS];
-  // Reset to a clean practice. No demo physicians or embedded user accounts;
-  // authenticated identities are hydrated from Supabase Auth. Customers get the
-  // same clean slate a brand-new install gets. Preserves the "At Home /
-  // Remote" pseudo-site since code assumes it always exists.
-  //
-  // Driven by the _PERSISTED_KEYS manifest so adding a new state field
-  // only requires updating the manifest — Reset will clear it automatically.
-  // A few fields need custom post-reset seeding (Sites retains the "At
-  // Home / Remote" pseudo-site; irGroups retains the default N/S; nextId
-  // is the manifest's 100).
-  _resetPersistedState();
-  // #17 canonical cutover: swaps/acks are table-backed caches outside the
-  // manifest — clear them explicitly. NOTE: the rs_swap_requests /
-  // rs_on_call_acks TABLE rows intentionally survive this reset (they're the
-  // practice's historical record); an admin can purge them separately.
-  S.swapRequests=[]; S.onCallAcks=[];
-  S.sites=[{name:"At Home / Remote",irGroup:null,irAnchors:[],irFillins:[]}];
-  S.irGroups=['North','South'];
-  USERS.length=0;
   try{
-    const freshHTML=_buildSaveHTML();
-    // Restore backup in memory
-    Object.assign(S,backup);USERS.length=0;usersBackup.forEach(u=>USERS.push(u));
+    const freshHTML=_buildSaveHTML(true);
     if(!freshHTML){alert('Reset failed.');return;}
     const blob=new Blob([freshHTML],{type:'text/html'});
     const url=URL.createObjectURL(blob);
@@ -14392,7 +13880,6 @@ function clearAllData(){
     URL.revokeObjectURL(url);
     if(typeof _toast==='function') _toast('✓ Fresh copy downloaded. Open it to start with default data.', 'ok'); else alert('Fresh copy downloaded. Open the downloaded file to start with default data.');
   }catch(e){
-    Object.assign(S,backup);USERS.length=0;usersBackup.forEach(u=>USERS.push(u));
     alert('Reset failed: '+e.message);
   }
 }
@@ -14967,6 +14454,7 @@ async function doLogout(){
       }
     }
   }
+  _clearPrivateChat();
   // Tear down realtime + polling
   if(_realtimeSub){ try{ await _realtimeSub.unsubscribe(); }catch(e){} _realtimeSub=null; }
   if(_pollInterval){ clearInterval(_pollInterval); _pollInterval=null; }
@@ -14981,9 +14469,8 @@ async function doLogout(){
   if(typeof _fsWriteTimer !== 'undefined' && _fsWriteTimer){
     clearTimeout(_fsWriteTimer); _fsWriteTimer=null;
   }
-  if(typeof _ghDeployTimer !== 'undefined' && _ghDeployTimer){
-    clearTimeout(_ghDeployTimer); _ghDeployTimer=null;
-  }
+  _fsDetach();
+  _saveAttemptId++;
   _isSaving=false; _hasUnsavedChanges=false;
   _clearSaveConflict('logout');   // rs-v125: no banner / gate carried into the next sign-in
   // A1 fix (security audit): leader-election heartbeats and the
@@ -15222,7 +14709,6 @@ async function launchApp(){
     // with one click. Idempotent — safe to call on every launchApp.
     if(typeof fsTryRestoreAutosave === 'function') fsTryRestoreAutosave();
     // Daily backup (throttled per-device via localStorage). Best-effort.
-    if(typeof _runDailyBackupIfDue === 'function') setTimeout(_runDailyBackupIfDue, 8_000);
     // Optional: ?smoke=1 in URL kicks off the smoke-test harness post-load.
     try{
       if(new URLSearchParams(location.search).get('smoke') === '1' && typeof runSmokeTests === 'function'){
@@ -15459,7 +14945,7 @@ function _validateRemotePayload(d){
   // every object key SHOULD be an object. Wrong types likely mean either a
   // corrupt save or a payload from a much-older / much-newer client. Patch
   // the local field after warning so the app stays functional.
-  const arrayKeys = ['physicians','drSubs','irSubs','sites','irGroups','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups','tumorBoards','clinics','publishLog','vacSurveys'];
+  const arrayKeys = ['physicians','drSubs','irSubs','sites','irGroups','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays','openShifts','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts','shiftListings','shiftPickGroups','tumorBoards','clinics','publishLog','vacSurveys'];
   const objectKeys = ['siteSlots','siteSlotsSubs','irSlots','irShiftSlots','irShiftSlotLabels','siteSlotLabels','wkndNeeds','holNeeds','cfg','driveTimes','vacPicking'];
   arrayKeys.forEach(k => {
     if(k in d && !Array.isArray(d[k])){
@@ -15511,7 +14997,7 @@ function _validateRemotePayload(d){
   return { ok:true, fatal:false, problems, dropCounts };
 }
 
-function _applyRemoteData(d){
+function _applyRemoteData(d, replaceDraft=false){
   // Guard against null/undefined/non-object inputs so callers don't have to pre-check
   if(!d || typeof d !== 'object'){
     console.warn('[RS] _applyRemoteData called with invalid data:',typeof d);
@@ -15520,6 +15006,8 @@ function _applyRemoteData(d){
   // Schema sanity-check. Patch known-bad fields in place so the app degrades
   // gracefully instead of crashing on first render. Fatal problems (whole
   // payload wrong shape) abort.
+  delete d.chatMessages;
+  delete d.chatPins;
   const validation = _validateRemotePayload(d);
   if(!validation.ok && validation.fatal){
     if(typeof _logError === 'function') _logError('_applyRemoteData', 'Refused to apply malformed remote payload', validation.problems);
@@ -15528,26 +15016,15 @@ function _applyRemoteData(d){
   if(validation.problems.length && typeof _logError === 'function'){
     _logError('_applyRemoteData', `Patched ${validation.problems.length} schema issue(s)`, validation.problems);
   }
-  // Stale-remote guard: if we've mutated locally since the remote's savedAt timestamp,
-  // and the push for those mutations hasn't landed yet, skip applying the remote copy
-  // because it would clobber fresh local changes. _lastLocalChange is updated on every
-  // triggerSave(); _lastSaved is updated on successful push. If there are local changes
-  // newer than both the remote data AND the last successful push, bail.
-  // rs-v125: while a save conflict is waiting on the banner, the unsent edits
-  // stay exactly as the user left them. The time-based guard below would let a
-  // NEWER remote copy replace them silently, contradicting what the banner
-  // says. Explicit flows (Load latest, restore, practice switch) clear the
-  // conflict first.
-  if(_saveConflict && !_saveConflict.auto && !_conflictResolving){
-    console.log('[RS] Skipping remote apply — a save conflict is waiting on the user; unsent edits stay on screen');
-    return;
-  }
-  const remoteSaved = (d._dbSavedAt||d.savedAt) ? new Date(d._dbSavedAt||d.savedAt).getTime() : 0;
-  const localSaved  = S._lastSaved ? S._lastSaved.getTime() : 0;
-  const localChange = S._lastLocalChange || 0;
-  if(localChange > remoteSaved && localChange > localSaved){
-    console.log('[RS] Skipping remote apply — local has pending unsaved changes newer than remote');
-    return;
+  // The server revision is the CAS baseline. Wall clocks do not establish
+  // whether it contains our draft. Preserve pending edits until the existing
+  // save/conflict flow acknowledges them or the user chooses "Load latest".
+  if(!replaceDraft && (_saveConflict || _hasUnsavedChanges || (_isSaving && S._lastLocalChange))){
+    if(!_saveConflict && !_isSaving && _userEditPending){
+      const stamp = d._dbSavedAt || d.savedAt;
+      if(stamp && !_sameInstant(stamp, S._remoteSavedAt)) _onSaveConflict(stamp, 'remote-update');
+    }
+    return false;
   }
   _isRestoring=true;
   // Side-table snapshot is invalid as soon as we replace S.* with the
@@ -15558,7 +15035,7 @@ function _applyRemoteData(d){
   // AUDIT FIX (2026-07 deep dive): the previous hand-maintained KEYS list had
   // drifted 13 keys behind the manifest (onCallAcks, lockedMonths, announcements,
   // leaveAllocations, widgetPairings, physicianCredits, shiftOffers, auditLog,
-  // siteCaps, shiftSubNeeds, cellNotes, chatPins, physicianPairRules) — those
+  // siteCaps, shiftSubNeeds, cellNotes, physicianPairRules) — those
   // loaded empty on every fresh boot and the next save persisted the empties,
   // wiping the data for the whole practice. Save and load MUST share the manifest.
   const _APPLY_SPECIAL = new Set(['siteSlots','siteSlotsSubs','irGroups','irSlots',
@@ -15844,7 +15321,7 @@ function _applyRemoteData(d){
   // rather fix the root and let those stay terse. This guarantees a safe
   // empty-array on read; if you persist new core arrays add them here.
   const _coreArrays = ['physicians','sites','drShifts','weekendCalls','irShifts','irCalls',
-    'vacations','holidays','openShifts','chatMessages','chatGroups','swapRequests',
+    'vacations','holidays','openShifts','chatGroups','swapRequests',
     'onCallAcks','holidayBlackouts','holidayNeeds','holidayDefs','natLangRules','broadcasts',
     'shiftListings','tumorBoards','clinics','publishLog','drSubs','irSubs','irGroups',
     'shiftPickGroups'];
@@ -15898,6 +15375,7 @@ function _applyRemoteData(d){
     // before an admin opens Site Management (which persists the normalization).
     if(typeof _ssNormalizeGlobalSlots === 'function') _ssNormalizeGlobalSlots(false);
   }catch(_){}
+  return true;
 }
 
 let _realtimeSub=null;
@@ -15982,7 +15460,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v135';
+const _SW_VERSION = 'rs-v136';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16248,8 +15726,7 @@ function _initLeaderElection(){
       // its own realtime subscription.
       if(m.payload && !_isLeader){
         try{
-          _applyRemoteData(m.payload);
-          _refreshCurrentPage();
+          if(_applyRemoteData(m.payload)) _refreshCurrentPage();
         }catch(_){}
       }
     } else if(m.type === 'request-leader-takeover'){
@@ -16379,11 +15856,12 @@ function _doSubscribeRealtimeSocket(){
           // is one this tab actually pushed.
           if(d._originTab){ if(d._originTab === _TAB_ID && _isOwnPushStamp(d.savedAt)) return; }
           else if(S._lastSaved && (new Date()-S._lastSaved)<2500) return;
-          _applyRemoteData(d);
-          _refreshCurrentPage();
+          const applied = _applyRemoteData(d);
+          if(applied) _refreshCurrentPage();
           // Forward to follower tabs in this browser so they see the update
           // without each opening their own realtime subscription.
           _bcSend({type:'remote-update', tabId:_TAB_ID, payload:d, ts:Date.now()});
+          if(!applied) return;
           const si=document.getElementById('save-indicator');
           if(si){si.textContent='↻ Live update received';si.style.color='var(--blue-t)';
             setTimeout(()=>{if(si)si.textContent='';},3000);}
@@ -16501,10 +15979,11 @@ function _startPollFallback(){
       // version we hold; fall back to the clock comparison only on older DBs.
       const _changed = (cheap !== null) ? !_sameInstant(_dStamp, S._remoteSavedAt) : (remoteSaved>baseline+500);
       if(d&&_changed){
-        _applyRemoteData(d);
-        _refreshCurrentPage();
+        const applied = _applyRemoteData(d);
+        if(applied) _refreshCurrentPage();
         // Forward to follower tabs.
         _bcSend({type:'remote-update', tabId:_TAB_ID, payload:d, ts:Date.now()});
+        if(!applied) return;
         const si=document.getElementById('save-indicator');
         if(si){si.textContent='↻ Refreshed';si.style.color='var(--blue-t)';
           setTimeout(()=>{if(si)si.textContent='';},2000);}
@@ -16646,7 +16125,7 @@ function _afterMutation(){
 // ── Reactive persistence system ──
 // Declared here so it's available when S is first wrapped (S=_makeReactive(S) below)
 const _REACTIVE_KEYS=['drShifts','weekendCalls','irCalls','irShifts','vacations','holidays',
-  'openShifts','physicians','chatMessages','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs',
+  'openShifts','physicians','chatGroups','holidayBlackouts','holidayNeeds','holidayDefs',
   'sites','drSubs','irSubs','natLangRules','broadcasts','shiftListings'];
   // 'swapRequests' removed (#17): it is a table-backed cache now — mutations
   // persist via rs_* RPCs, not blob pushes.
@@ -16746,7 +16225,6 @@ let S=/*S_START*/{
     minWorking:null,minWeeksBase:null,extraSlots:{},
     seniority:[],physRounds:{},physSection:{},sectionLimits:{},totalWeekLimit:{},
     picks:{},assignments:{}},
-  chatMessages:[],
   chatGroups:[
     {id:1,name:'General',memberIds:[],createdBy:null,isPrivate:false,description:'Everyone'},
   ],
@@ -16773,6 +16251,46 @@ let S=/*S_START*/{
   // recipients received the email blast.
   publishLog:[],
 }/*S_END*/;
+// Private downloads can reopen their snapshot from disk. HTTP deployments
+// always boot the canonical empty state and load the authenticated practice.
+if(location.protocol === 'file:'){
+  const snapshotText = document.getElementById('rs-private-export')?.textContent;
+  if(snapshotText){
+    const saved = JSON.parse(snapshotText);
+    if(saved.version !== 1 || !saved.state || !Array.isArray(saved.users)) throw new Error('Invalid private snapshot.');
+    for(const {key,scope} of _PERSISTED_KEYS){
+      if(scope !== 'online-only' && Object.hasOwn(saved.state,key)) S[key] = saved.state[key];
+    }
+    USERS.splice(0, USERS.length, ...saved.users);
+    // The private file has no network access. Give its owner a local, readable
+    // view of every captured field without opening an authenticated session.
+    document.addEventListener('DOMContentLoaded', () => {
+      const reader = document.createElement('dialog');
+      reader.id = 'rs-private-reader';
+      reader.style.cssText = 'width:min(90vw,900px);max-height:90vh;padding:24px;border-radius:12px;overflow:auto';
+      const heading = document.createElement('h1');
+      heading.textContent = 'Private practice backup';
+      const info = document.createElement('p');
+      info.textContent = [saved.practiceId,saved.exportedAt].filter(Boolean).join(' · ');
+      reader.append(heading,info);
+      for(const [key,records] of Object.entries({...saved.state, users:saved.users})){
+        const section = document.createElement('details');
+        const title = document.createElement('summary');
+        title.textContent = Array.isArray(records) ? key + ' (' + records.length + ')' : key;
+        const body = document.createElement('pre');
+        body.style.whiteSpace = 'pre-wrap';
+        section.addEventListener('toggle', () => {
+          body.textContent = section.open ? JSON.stringify(records,null,2) : '';
+        });
+        section.append(title,body);
+        reader.append(section);
+      }
+      reader.addEventListener('cancel', event => event.preventDefault());
+      document.body.append(reader);
+      reader.showModal();
+    }, {once:true});
+  }
+}
 // _isRestoring and _dataRestored declared at top of script
 S=_makeReactive(S);
 
@@ -17481,7 +16999,7 @@ async function createPractice(){
   const blank={
     physicians:[],
     vacations:[], drShifts:[], weekendCalls:[], irShifts:[], irCalls:[],
-    holidays:[], openShifts:[], chatMessages:[], chatGroups:[],
+    holidays:[], openShifts:[], chatGroups:[],
     holidayBlackouts:[], holidayNeeds:[], holidayDefs:[], natLangRules:[],
     tumorBoards:[], clinics:[], publishLog:[],
     sites:[
@@ -17509,38 +17027,54 @@ async function createPractice(){
   alert(`Practice "${name}" created! Assign users to it by setting their practiceId to "${id}".`);
 }
 
+let _practiceSwitchPending = false;
 async function switchPractice(id,name){
-  if(!_superuserOnly('switch practices')) return;
-  if(!confirm(`Switch to practice "${name}" (${id})? Any unsaved changes in the current practice will be saved first.`))return;
-  // 1. Flush any pending debounced save for the CURRENT practice before switching
-  clearTimeout(_saveTimeout); _saveTimeout=null;
-  if(_hasUnsavedChanges){
-    try{ await _pushToSupabase(); }catch(e){console.warn('[RS] Flush-save before switch failed:',e);}
-  }
-  // 2. Tear down realtime + polling for the current practice. Await unsubscribe so any
-  //    in-flight payload has time to drop before we rebind to a different _ROW_ID.
-  if(_realtimeSub){ try{ await _realtimeSub.unsubscribe(); }catch(e){} _realtimeSub=null; }
-  if(_pollInterval){ clearInterval(_pollInterval); _pollInterval=null; }
-  // rs-v125: a save conflict belongs to the practice being left; end it so the
-  // new practice's data is allowed to load and saves are not gated.
-  _clearSaveConflict('switch-practice');
-  S._lastLocalChange = 0;
-  // 3. Freeze reactivity for the whole switch — no saves or renders fire against half-state.
-  _isRestoring=true;
+  if(!_superuserOnly('switch practices') || _practiceSwitchPending || id === _ROW_ID) return false;
+  if(!confirm(`Switch to practice "${name}" (${id})? Any unsaved changes in the current practice will be saved first.`)) return false;
+  const overlay = document.getElementById('loading-overlay');
+  _practiceSwitchPending = true;
+  let committing = false;
+  overlay.style.display='flex';
   try{
+    if(_isSaving || _saveConflict){
+      _toast('Finish the current save or resolve the conflict before switching practices.', 'warn');
+      return false;
+    }
+    if(_hasUnsavedChanges && !await _pushToSupabase()){
+      _toast('The current practice could not be saved. Your edits are still open.', 'warn');
+      return false;
+    }
+    const revision = _dirtySeq;
+    const origin = _ROW_ID;
+    const d = await _pullFromSupabase(id);
+    if(!d || !Array.isArray(d.physicians) || !Array.isArray(d.sites)){
+      _toast('Could not load the selected practice. The current practice is still open.', 'warn');
+      return false;
+    }
+    if(!CU || _ROW_ID !== origin || _dirtySeq !== revision || _hasUnsavedChanges || _isSaving || _saveConflict){
+      _toast('The current practice changed while switching. Save your work and try again.', 'warn');
+      return false;
+    }
+    // Commit only after both operations succeeded. All practice changes below
+    // run synchronously; late network responses check their captured practice.
+    _stopRealtimeAndPoll();
+    _fsDetach();
+    _clearPrivateChat();
+    _clearSaveConflict('switch-practice');
+    committing = true;
+    S._lastLocalChange = 0;
+    _isRestoring=true;
     // 4. Clear per-practice in-memory state (users from previous practice must not leak)
     if(typeof _rsTeardown === 'function') _rsTeardown();   // reports/peer realtime+caches are per-practice
     // The Define Holidays form keeps its state across page refreshes (rs-v134);
     // a definition open from the old practice must not be saved over the new
     // practice's definition with the same id.
     try{ if(typeof cancelHolDef === 'function') cancelHolDef(); }catch(_){}
-    USERS.length=0;
+    USERS.length=0; _recentlyAddedUsers=[];
     if(CU) USERS.push(CU); // keep the logged-in user so auth still resolves
-    // 5. Reassign reactive arrays through the Proxy so each new array is freshly wrapped.
-    // _isRestoring=true suppresses triggerSave from firing during the swap.
-    ['physicians','vacations','drShifts','weekendCalls','irShifts','irCalls','holidays',
-     'openShifts','chatMessages','chatGroups','swapRequests','onCallAcks','holidayBlackouts','holidayNeeds',
-     'sites','drSubs','irSubs','holidayDefs','natLangRules','broadcasts','shiftListings'].forEach(k=>{ S[k]=[]; });
+    _resetPersistedState();
+    S.swapRequests=[]; S.onCallAcks=[];
+    S._remoteSavedAt=null; S._lastSaved=null;
     // #17 canonical cutover: reset the table-cache gates so the new practice's
     // swaps/acks/comm-prefs reload from their rs_* tables (A→B→A same-session
     // switches would otherwise serve practice-A's stale caches).
@@ -17550,9 +17084,6 @@ async function switchPractice(id,name){
     // Drop any table load already in flight for the OLD practice — its rows
     // must not land in the new practice's caches when the await resolves.
     if(typeof _migTableGen !== 'undefined') _migTableGen++;
-    ['siteSlots','irSlots','irShiftSlots','wkndNeeds','holNeeds','cfg','vacPicking','driveTimes'].forEach(k=>{
-      if(S[k]&&typeof S[k]==='object') for(const kk of Object.keys(S[k])) delete S[k][kk];
-    });
     S.nextId=1;
     // Cross-tenant localStorage isolation. The previous practice's
     // filter selections / view modes / audit cache / side-table snap
@@ -17580,50 +17111,47 @@ async function switchPractice(id,name){
     try{ localStorage.setItem('rs.lastPracticeId', id); }catch(_){}
     const tbPrac=document.getElementById('tb-practice');
     if(tbPrac) tbPrac.textContent=name;
-    // 7. Load new practice's data
-    document.getElementById('loading-overlay').style.display='flex';
-    const d=await _pullFromSupabase();
-    if(d){
-      _applyRemoteData(d); // sets _isRestoring true/false internally, safe to nest
-      // ── Cross-practice cache invalidation (critical) ──
-      // _applyRemoteData runs under _isRestoring=true, which makes
-      // triggerSave() early-return WITHOUT bumping _dateIdxVersion.
-      // The version-gated caches (_dateIdx via _shiftsOnDate,
-      // _physByIdMap via _physById) therefore keep serving the
-      // PREVIOUS practice's data after a switch until some later
-      // mutation happens to bump the version — calendars/dashboard
-      // can render practice A's shifts + physician objects under
-      // practice B. Force a version bump here so both rebuild from
-      // the freshly-applied B state on next read.
-      if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
-      // Also clear content caches that would otherwise carry practice
-      // A's data into B: AI conversation, AI explanation cache, and
-      // audit-log side-table cache.
-      try{ _aiHistory = []; _aiTranscript = []; }catch(_){}
-      try{ if(typeof _aiExplainCache !== 'undefined' && _aiExplainCache.clear) _aiExplainCache.clear(); }catch(_){}
-      try{ _auditSideCache = { rows: null, fetchedAt: 0 }; }catch(_){}
-      // Practice id changed → leader election needs to rebind the channel
-      // name (which is keyed off _ROW_ID). Tear down + re-init.
-      _stopRealtimeAndPoll();
-      try{ _bc?.close(); }catch(_){}
-      _bc = null; _isLeader = false; _knownTabs.clear();
-      if(_leaderHbTimer){ clearInterval(_leaderHbTimer); _leaderHbTimer = null; }
-      if(_leaderCheckTimer){ clearInterval(_leaderCheckTimer); _leaderCheckTimer = null; }
-      _initLeaderElection();
-      // Re-arm the PACS reports / peer-review live module for the NEW practice
-      // (_rsTeardown at the top cleared it; without this the ⚖️ badge, 45s poll
-      // and realtime stay dead until a manual tab visit).
-      if(typeof _prBootWatcher === 'function') _prBootWatcher();
-    } else {
-      if(typeof _toast==='function') _toast('No data found for practice '+id+'.', 'info'); else alert('No data found for practice '+id+'.');
-    }
+    _applyRemoteData(d, true);
+    // ── Cross-practice cache invalidation (critical) ──
+    // _applyRemoteData runs under _isRestoring=true, which makes
+    // triggerSave() early-return WITHOUT bumping _dateIdxVersion.
+    // The version-gated caches (_dateIdx via _shiftsOnDate,
+    // _physByIdMap via _physById) therefore keep serving the
+    // PREVIOUS practice's data after a switch until some later
+    // mutation happens to bump the version — calendars/dashboard
+    // can render practice A's shifts + physician objects under
+    // practice B. Force a version bump here so both rebuild from
+    // the freshly-applied B state on next read.
+    if(typeof _markDateIdxDirty === 'function') _markDateIdxDirty();
+    // Also clear content caches that would otherwise carry practice
+    // A's data into B: AI conversation, AI explanation cache, and
+    // audit-log side-table cache.
+    try{ _aiHistory = []; _aiTranscript = []; }catch(_){}
+    try{ if(typeof _aiExplainCache !== 'undefined' && _aiExplainCache.clear) _aiExplainCache.clear(); }catch(_){}
+    try{ _auditSideCache = { rows: null, fetchedAt: 0 }; }catch(_){}
+    // Practice id changed → leader election needs to rebind the channel
+    // name (which is keyed off _ROW_ID). Tear down + re-init.
+    _stopRealtimeAndPoll();
+    try{ _bc?.close(); }catch(_){}
+    _bc = null; _isLeader = false; _knownTabs.clear();
+    if(_leaderHbTimer){ clearInterval(_leaderHbTimer); _leaderHbTimer = null; }
+    if(_leaderCheckTimer){ clearInterval(_leaderCheckTimer); _leaderCheckTimer = null; }
+    _initLeaderElection();
+    Promise.resolve(fsTryRestoreAutosave()).catch(()=>{});
+    // Re-arm the PACS reports / peer-review live module for the NEW practice
+    // (_rsTeardown at the top cleared it; without this the ⚖️ badge, 45s poll
+    // and realtime stay dead until a manual tab visit).
+    if(typeof _prBootWatcher === 'function') _prBootWatcher();
+    renderDash();
+    return true;
   }catch(e){
     console.error('[RS] switchPractice load error:',e);
     alert('Failed to load practice: '+(e.message||e));
+    return false;
   }finally{
-    _isRestoring=false;
-    document.getElementById('loading-overlay').style.display='none';
-    renderDash();
+    _practiceSwitchPending=false;
+    if(committing) _isRestoring=false;
+    overlay.style.display='none';
   }
 }
 
@@ -17771,7 +17299,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v135';
+const _RS_HTML_BUILD = 'rs-v136';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -17804,7 +17332,7 @@ function _rsShowReloadHalt(){
     d.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:10px">Update loop detected — paused</div>'
       + '<div style="font-size:13px;opacity:.85;max-width:420px;line-height:1.5;margin-bottom:20px">This device had a stale cached version that kept reloading. Auto-reload is paused. Tap below to clear the cache and load the latest version.</div>'
       + '<button id="rs-reload-halt-btn" style="background:#fff;color:#0a1f3a;border:0;border-radius:10px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer">Clear cache &amp; reload</button>'
-      + '<div style="font-size:12px;opacity:.75;margin-top:18px">Still here afterwards? Open <a href="reset" style="color:#fff;text-decoration:underline">the reset page</a> — it works even when the app will not load.</div>';
+      + '<div style="font-size:12px;opacity:.75;margin-top:18px">Still here afterwards? Open <a href="reset.html" style="color:#fff;text-decoration:underline">the reset page</a> — it works even when the app will not load.</div>';
     (document.body || document.documentElement).appendChild(d);
     var btn = document.getElementById('rs-reload-halt-btn');
     if(btn) btn.addEventListener('click', async function(){
@@ -18290,6 +17818,7 @@ function nav(pg, el, subTab, opts){
       localStorage.setItem('rs.scroll.' + id, String(sc));
     }
   }catch(_){}
+  if(pg !== 'chat' && _chatSession.scope) _clearPrivateChat();
   // Defensive: remove .on from every page AND force inline display:none.
   // The CSS rule `.page { display:none }` should be enough, but a screenshot
   // from a user showed Audit log + Error log (page-tools cards) leaking onto
@@ -19479,13 +19008,10 @@ function delUser(uid){
   if(u.id===CU?.id){alert('You cannot delete your own account.');return;}
   if(!_canEditUserRecord(u)){alert('Superuser access is managed through protected auth metadata.');return;}
   // Swaps reference physId (not userId), so they're cleaned up by removePhys, not here.
-  const msgCount=(S.chatMessages||[]).filter(m=>m.userId===uid||m.toUserId===uid).length;
   const groupMemberships=(S.chatGroups||[]).filter(g=>(g.memberIds||[]).includes(uid)).length;
-  const confirmMsg=`Delete ${u.email}?\n\nThis will also remove:\n\u2022 ${msgCount} chat message(s) sent to or from this user\n\u2022 ${groupMemberships} chat group membership(s)\n\nNote: The linked physician (if any) is NOT deleted. Remove them separately from Physicians if desired.`;
+  const confirmMsg=`Delete ${u.email}? This removes their account, associated chat messages, and ${groupMemberships} group membership(s). The linked physician is retained.`;
   if(!confirm(confirmMsg))return;
-  // Local cleanup
   USERS=USERS.filter(x=>x.id!==uid);
-  if(Array.isArray(S.chatMessages)) S.chatMessages=S.chatMessages.filter(m=>m.userId!==uid&&m.toUserId!==uid);
   (S.chatGroups||[]).forEach(g=>{
     if(Array.isArray(g.memberIds)) g.memberIds=g.memberIds.filter(m=>m!==uid);
   });
@@ -23353,11 +22879,16 @@ function _myEventsInRange(startISO, endISO){
       ...t,
     });
   });
-  (S.irCalls||[]).filter(c => c.physId===myId && inRange(c.date)).forEach(c => {
+  (S.irCalls||[]).forEach(c => {
+    if(c.physId !== myId || !c.date || c.date > endISO) return;
     const t = timesFor('ircall', 'IR Call');
+    const endDate = c.callType === 'weekend' ? addDays(c.date, 3)
+      : t.end <= t.start ? addDays(c.date, 1) : c.date;
+    if(endDate < startISO || (endDate === startISO && t.end === '00:00' && c.date < startISO)) return;
     events.push({
       uid: `irc-${c.id}@radscheduler`,
       date: c.date,
+      endDate,
       summary: `IR Call (${c.callType||'daily'})${c.site?' @ '+c.site:''}`,
       description: `RadScheduler · IR call · ${c.irGroup||''}${c.notes?'\\n'+c.notes:''}`,
       location: c.site||'',
@@ -23391,7 +22922,7 @@ function _myEventsInRange(startISO, endISO){
   // Vacations
   // Interval OVERLAP (not endpoint containment) — a vacation fully spanning the
   // export range has neither endpoint in range but must still be included.
-  (S.vacations||[]).filter(v => v.physId===myId && v.start <= endDate && (v.end || v.start) >= startDate).forEach(v => {
+  (S.vacations||[]).filter(v => v.physId===myId && v.start && v.start <= endISO && (v.end || v.start) >= startISO).forEach(v => {
     events.push({
       uid: `vac-${v.id}@radscheduler`,
       date: v.start,
@@ -23448,7 +22979,7 @@ function _myEventsInRange(startISO, endISO){
           start: item.time||'07:00',
           end: endTime,
           allDay: false,
-          _tbEndDate: endDate,
+          endDate,
         });
       }
     });
@@ -23497,12 +23028,10 @@ function _eventsToICS(events, calName){
       lines.push(`DTEND;VALUE=DATE:${fmtDateOnly(addDays(ev.date,1))}`);
     } else {
       const startDT = fmtDateTime(ev.date, ev.start);
-      // If end < start (overnight shift like 23:00 → 07:00), end is on next day.
-      // Tumor boards explicitly carry _tbEndDate so cross-midnight occurrences
-      // (rare — a 23:30 board running 60 min) serialize correctly without
-      // needing the heuristic below.
-      let endDate = ev._tbEndDate || ev.date;
-      if(!ev._tbEndDate && (ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00'))){
+      // Calls and conferences supply their exact end date. Other overnight
+      // shifts cross midnight when the wall-clock end precedes the start.
+      let endDate = ev.endDate || ev.date;
+      if(!ev.endDate && (ev.end < ev.start || (ev.end===ev.start && ev.start!=='00:00'))){
         endDate = addDays(ev.date,1);
       }
       const endDT = fmtDateTime(endDate, ev.end);
@@ -27156,27 +26685,139 @@ function addOpenShift(){
 /* ─── CHAT ─── */
 let _chatContext = null; // {type:'group'|'dm', id:string, name:string}
 
-// ── Sidebar rendering ──────────────────────────────────────────────────────
-function renderChat(){
+// Authorized conversations live only in this tab, outside schedule state, backups and exports.
+const _chatSession = { scope:null, messages:[], load:null, channel:null, client:null, timer:null, pending:false, status:'' };
+function _chatScope(){
+  return CU?.id ? JSON.stringify([_ROW_ID,CU.id]) : null;
+}
+// Older browser snapshots can contain shared chat from before the table cutover.
+function _scrubLegacyChatSnapshots(storage){
+  for(let i=storage.length-1; i>=0; i--){
+    const key=storage.key(i);
+    if(!/^rs\.snap\.\d+$/.test(key)) continue;
+    const raw=storage.getItem(key);
+    if(!raw || !/chatMessages|chatPins/.test(raw)) continue;
+    try{
+      function scrub(field,value){
+        if(field==='chatMessages' || field==='chatPins') return undefined;
+        if(field==='data' && typeof value==='string' && /chatMessages|chatPins/.test(value)){
+          return JSON.stringify(JSON.parse(value,scrub));
+        }
+        return value;
+      }
+      storage.setItem(key,JSON.stringify(JSON.parse(raw,scrub)));
+    }catch(_){storage.removeItem(key);}
+  }
+}
+try{ _scrubLegacyChatSnapshots(localStorage); }catch(_){}
+function _clearPrivateChat(){
+  const session=_chatSession;
+  if(session.channel) session.client.removeChannel(session.channel).catch(()=>{});
+  clearInterval(session.timer);
+  Object.assign(session,{scope:null,messages:[],load:null,channel:null,client:null,timer:null,pending:false,status:''});
+  _chatContext=null;
+  for(const key of Object.keys(_chatLastSeen)) delete _chatLastSeen[key];
+  const input=document.getElementById('chat-input');
+  if(input) input.value='';
+  for(const id of ['chat-dm-list','chat-group-list','chat-member-count']){
+    const el=document.getElementById(id); if(el) el.textContent='';
+  }
+  _showChatPlaceholder();
+}
+function _chatGroupReadable(group){
+  if(!group || !CU?.id) return false;
+  return group.createdBy===CU.id || (group.memberIds||[]).includes(CU.id)
+    || (!(group.memberIds||[]).length && !group.isPrivate);
+}
+function _paintPrivateChat(){
+  if(_chatContext?.type==='group' &&
+      !_chatGroupReadable((S.chatGroups||[]).find(g=>String(g.id)===_chatContext.id))) _chatContext=null;
   _renderChatGroupList();
   _renderChatDMList();
   if(_chatContext) _openChatContext(_chatContext);
   else _showChatPlaceholder();
 }
+async function _refreshPrivateChat(){
+  const session=_chatSession, scope=session.scope, client=session.client;
+  if(!scope || !client || scope!==_chatScope()) return;
+  if(session.load){session.pending=true; return;}
+  const token={};
+  session.load=token;
+  const practice=_ROW_ID;
+  const current=()=>session.load===token && scope===_chatScope();
+  try{
+    const messages=[];
+    let after=0;
+    for(;;){
+      const {data,error}=await client.from('rs_chat_messages')
+        .select('id,sender_id,recipient_id,group_id,body,sent_at,pinned_at')
+        .eq('practice_id',practice).gt('id',after).order('id').limit(500);
+      if(!current()) return;
+      if(error) throw error;
+      if(!data?.length) break;
+      for(const row of data){
+        messages.push({id:row.id,userId:row.sender_id,toUserId:row.recipient_id,
+          toGroupId:row.group_id,dmId:row.recipient_id ? _dmId(row.sender_id,row.recipient_id) : null,
+          ts:row.sent_at,text:row.body,pinned:!!row.pinned_at});
+      }
+      after=data[data.length-1].id;
+    }
+    session.messages=messages;
+    session.status='';
+  }catch(_){
+    if(!current()) return;
+    session.messages=[];
+    session.status='Chat is unavailable. Reconnect to load this conversation.';
+  }finally{
+    if(current()){
+      session.load=null;
+      _paintPrivateChat();
+      if(session.pending){session.pending=false; void _refreshPrivateChat();}
+    }
+  }
+}
+function renderChat(){
+  if(document.hidden || !document.getElementById('page-chat')?.classList.contains('on')) return;
+  const scope=_chatScope();
+  if(scope!==_chatSession.scope) _clearPrivateChat();
+  if(scope && !_chatSession.scope && navigator.onLine!==false){
+    const client=_initAuthClient();
+    if(client){
+      Object.assign(_chatSession,{scope,client,status:'Loading messages…'});
+      // Never forward private rows to the shared schedule BroadcastChannel.
+      const practice=_ROW_ID;
+      _chatSession.channel=client.channel('private-chat-'+practice+'-'+CU.id)
+        .on('postgres_changes',{event:'INSERT',schema:'public',table:'rs_chat_messages',filter:'practice_id=eq.'+practice},()=>{if(_chatSession.scope===scope) void _refreshPrivateChat();})
+        .on('postgres_changes',{event:'UPDATE',schema:'public',table:'rs_chat_messages',filter:'practice_id=eq.'+practice},()=>{if(_chatSession.scope===scope) void _refreshPrivateChat();})
+        .subscribe(status=>{if(status==='SUBSCRIBED' && _chatSession.scope===scope) void _refreshPrivateChat();});
+      _chatSession.timer=setInterval(_refreshPrivateChat,15000);
+      void _refreshPrivateChat();
+    }
+  }
+  _paintPrivateChat();
+}
+window.addEventListener('pagehide',_clearPrivateChat);
+window.addEventListener('offline',_clearPrivateChat);
+function _resumeChatIfVisible(){
+  if(document.getElementById('page-chat')?.classList.contains('on') && !document.hidden) renderChat();
+}
+window.addEventListener('pageshow',_resumeChatIfVisible);
+window.addEventListener('online',_resumeChatIfVisible);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden && _chatSession.scope) _clearPrivateChat();
+  else _resumeChatIfVisible();
+});
 
 function _renderChatGroupList(){
   const el=document.getElementById('chat-group-list');if(!el)return;
-  const groups=(S.chatGroups||[]).filter(g=>
-    !g.memberIds?.length || // public groups
-    g.memberIds.includes(CU?.id) || // member
-    _isAdminOrSU()
-  );
+  const groups=(S.chatGroups||[]).filter(g=>_chatGroupReadable(g)||_isAdminOrSU());
   if(!groups.length){
     el.innerHTML='<div style="font-size:11px;color:var(--txt3);font-style:italic">No groups yet</div>';
     return;
   }
   el.innerHTML=groups.map(g=>{
     const active=_chatContext?.type==='group'&&_chatContext.id===String(g.id);
+    if(!_chatGroupReadable(g)) return `<button class="bsm" onclick="openChatGroupEditor(this.dataset.group)" data-group="${escHtml(String(g.id))}">Edit # ${escHtml(g.name||'')}</button>`;
     const unread=_countUnread('group',String(g.id));
     return`<div onclick="openChatGroup('${g.id}')" style="padding:5px 8px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:${active?'var(--navy)':'transparent'};color:${active?'#fff':'var(--txt1)'};margin-bottom:2px;font-size:12px">
       <span># ${escHtml(g.name||'')}</span>
@@ -27205,7 +26846,7 @@ function _renderChatDMList(){
 
 // ── Open group / DM ──────────────────────────────────────────────────────
 function openChatGroup(groupId){
-  const g=(S.chatGroups||[]).find(x=>String(x.id)===String(groupId));if(!g)return;
+  const g=(S.chatGroups||[]).find(x=>String(x.id)===String(groupId));if(!_chatGroupReadable(g))return;
   _chatContext={type:'group',id:String(g.id),name:g.name};
   _markRead('group',String(g.id));
   _openChatContext(_chatContext);
@@ -27264,6 +26905,10 @@ function _renderMessages(){
   // chat; the unconditional scroll yanked anyone reading history back to the
   // latest message. An empty/fresh pane counts as "at bottom".
   const _nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
+  if(_chatSession.status || !_chatSession.scope){
+    el.textContent=_chatSession.status||'Connect to view chat.';
+    return;
+  }
   const msgs=_getContextMessages().sort((a,b)=>a.ts>b.ts?1:-1);
   if(!msgs.length){
     el.innerHTML='<div style="text-align:center;color:var(--txt3);padding:40px;font-size:13px">No messages yet. Say something!</div>';
@@ -27271,11 +26916,8 @@ function _renderMessages(){
   }
   let lastDate='';
   // rs-v101: pinned-messages banner + per-message 📌 toggle. Both
-  // _toggleChatPin and _renderPinnedBanner were fully implemented
-  // (S.chatPins has even been in the persistence manifest since
-  // rs-v64) but no UI ever created or displayed a pin.
   const _convId = String(_chatContext.id);
-  const _pinnedIds = (S.chatPins && S.chatPins[_convId]) || [];
+  const _pinnedIds = msgs.filter(m=>m.pinned).map(m=>m.id);
   const _pinBanner = (typeof _renderPinnedBanner === 'function')
     ? _renderPinnedBanner(_convId, msgs.map(m => ({ id: m.id, text: m.text, author: (USERS.find(x=>x.id===m.userId)?.first) || '?' })))
     : '';
@@ -27290,7 +26932,7 @@ function _renderMessages(){
       dateDivider=`<div style="text-align:center;font-size:10px;color:var(--txt3);margin:8px 0;display:flex;align-items:center;gap:8px"><div style="flex:1;height:1px;background:var(--bdr)"></div>${label}<div style="flex:1;height:1px;background:var(--bdr)"></div></div>`;
     }
     const _isPinned = _pinnedIds.includes(m.id);
-    // m.id is always numeric (sendChatMessage uses S.nextId++); the
+    // Chat message IDs are numeric database IDs; the
     // earlier `+m.id||0` coercion collapsed any non-numeric legacy id
     // to 0, making all such messages share one pin slot. Emit the raw
     // numeric id; skip the button entirely for non-numeric legacy ids.
@@ -27330,12 +26972,13 @@ async function sendChatMessage(){
   // auth.uid() so a client can't post AS another user; caller must be a practice
   // member. Client no longer writes the blob directly. Append the server-created
   // message optimistically; realtime reconciles.
-  const _ctx=_chatContext;
+  const _ctx=_chatContext, scope=_chatScope();
+  if(!_chatSession.scope || _chatSession.scope!==scope) return;
   const _sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
   if(!_sb){ if(typeof _toast==='function') _toast('Not connected — message not sent.','err'); return; }
   let _res;
   try{ _res=await _sb.rpc('rs_send_chat_message',{
-    p_practice:_rsPracticeId(), p_text:text,
+    p_practice:_ROW_ID, p_text:text,
     p_channel:_ctx.type==='group'?String(_ctx.id):'dm',
     p_to_group_id:_ctx.type==='group'?_ctx.id:null,
     p_to_user_id:_ctx.type==='dm'?_ctx.toUserId:null,
@@ -27345,53 +26988,29 @@ async function sendChatMessage(){
     const _m=(_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'send failed';
     if(typeof _toast==='function') _toast('Could not send: '+_m,'warn'); return;
   }
+  if(_chatSession.scope!==scope || _chatScope()!==scope) return;
   const msg=_res.data.msg;
-  if(!Array.isArray(S.chatMessages)) S.chatMessages=[];
-  if(!S.chatMessages.some(m=>m.id===msg.id)) S.chatMessages.push(msg);
-  inp.value='';
+  if(!_chatSession.messages.some(m=>m.id===msg.id)) _chatSession.messages.push(msg);
+  if(_chatContext===_ctx && inp.value.trim()===text) inp.value='';
   _renderMessages();
   // Sending your OWN message always jumps to it, even if you were scrolled up.
   try{ const _cm=document.getElementById('chat-messages'); if(_cm) _cm.scrollTop=_cm.scrollHeight; }catch(_){}
 
   // ── Notifications ──
   // Collect mention targets from the message text
-  const mentionedUserIds = _detectMentions(text);
   const senderName = CU?.first ? `${CU.first} ${CU.last||''}`.trim() : 'A colleague';
-  const channelLabel = (()=>{
-    if(_chatContext.type==='group'){
-      const g=(S.chatGroups||[]).find(x=>String(x.id)===String(_chatContext.id));
-      return g?('#'+g.name):'#group';
-    }
-    return 'Direct message';
-  })();
-
-  if(_chatContext.type==='dm'){
-    // DM — notify the recipient user directly
-    _notify('chatDM',{
-      userId:_chatContext.toUserId,
-      subject:`New direct message from ${senderName}`,
-      body:`${senderName} sent you a direct message in RadScheduler:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
-    });
-  } else if(_chatContext.type==='group'){
-    // Group — notify members. Mentions use chatMention pref; non-mentions use chatGroup.
-    const g=(S.chatGroups||[]).find(x=>String(x.id)===String(_chatContext.id));
-    const memberIds = new Set((g?.memberIds||[]).filter(id=>id!==CU?.id));
-    if(mentionedUserIds.length){
-      _notify('chatMention',{
-        userIds: mentionedUserIds.filter(id=>id!==CU?.id),
-        subject:`You were mentioned in ${channelLabel} by ${senderName}`,
-        body:`${senderName} mentioned you in ${channelLabel}:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
-      });
-    }
-    // Remaining group members (not already mentioned) get chatGroup-level notifs
-    const nonMention=[...memberIds].filter(id=>!mentionedUserIds.includes(id));
-    if(nonMention.length){
-      _notify('chatGroup',{
-        userIds: nonMention,
-        subject:`New message in ${channelLabel}`,
-        body:`${senderName} posted in ${channelLabel}:\n\n${text.slice(0,500)}${text.length>500?'…':''}\n\nReply in the app.`
-      });
-    }
+  const body='Sign in to RadScheduler to read the message.';
+  if(_ctx.type==='dm'){
+    _notify('chatDM',{messageId:msg.id,userId:_ctx.toUserId,subject:`New direct message from ${senderName}`,body});
+  } else {
+    const group=(S.chatGroups||[]).find(g=>String(g.id)===String(_ctx.id));
+    if(!_chatGroupReadable(group)) return;
+    const privateGroup=group.isPrivate || group.memberIds?.length;
+    const members=new Set([...(group.memberIds||[]),group.createdBy].filter(id=>id && id!==CU.id));
+    const mentions=_detectMentions(text).filter(id=>id!==CU.id && (!privateGroup || members.has(id)));
+    if(mentions.length) _notify('chatMention',{messageId:msg.id,userIds:mentions,subject:`${senderName} mentioned you in RadScheduler`,body});
+    const others=[...members].filter(id=>!mentions.includes(id));
+    if(others.length) _notify('chatGroup',{messageId:msg.id,userIds:others,subject:'New RadScheduler group message',body});
   }
 }
 
@@ -27436,7 +27055,7 @@ function saveChatGroup(){
   const memberIds=[...document.querySelectorAll('#cg-members input[type=checkbox]:checked')].map(cb=>cb.value);
   if(editId){
     const g=(S.chatGroups||[]).find(x=>String(x.id)===editId);
-    if(g){Object.assign(g,{name,description:desc,memberIds});triggerSave();}
+    if(g){Object.assign(g,{name,description:desc,memberIds,isPrivate:memberIds.length>0});triggerSave();}
   } else {
     if(!(S.chatGroups)) S.chatGroups=[];
     S.chatGroups.push({id:S.nextId++,name,description:desc,memberIds,createdBy:CU?.id,isPrivate:memberIds.length>0});
@@ -27463,8 +27082,8 @@ function deleteChatGroup(){
 function _getContextMessages(){
   if(!_chatContext)return[];
   if(_chatContext.type==='group')
-    return(S.chatMessages||[]).filter(m=>String(m.toGroupId)===_chatContext.id||m.channel===_chatContext.id);
-  return(S.chatMessages||[]).filter(m=>m.dmId===_chatContext.id||
+    return _chatSession.messages.filter(m=>String(m.toGroupId)===_chatContext.id||m.channel===_chatContext.id);
+  return _chatSession.messages.filter(m=>m.dmId===_chatContext.id||
     (m.toUserId===_chatContext.toUserId&&m.userId===CU?.id)||
     (m.toUserId===CU?.id&&m.userId===_chatContext.toUserId));
 }
@@ -27476,8 +27095,8 @@ const _chatLastSeen={};
 function _markRead(type,id){_chatLastSeen[type+'::'+id]=new Date().toISOString();}
 function _countUnread(type,id){
   const msgs=type==='group'
-    ?(S.chatMessages||[]).filter(m=>String(m.toGroupId)===id||m.channel===id)
-    :(S.chatMessages||[]).filter(m=>m.dmId===id);
+    ?_chatSession.messages.filter(m=>String(m.toGroupId)===id||m.channel===id)
+    :_chatSession.messages.filter(m=>m.dmId===id);
   const since=_chatLastSeen[type+'::'+id];
   if(!since) return msgs.filter(m=>m.userId!==CU?.id).length;
   return msgs.filter(m=>m.ts>since&&m.userId!==CU?.id).length;
@@ -27657,7 +27276,6 @@ function renderSettings(){
   if(typeof _restoreGMapsKeyField==='function') _restoreGMapsKeyField();
   if(typeof _themeRefreshControls==='function') _themeRefreshControls();
   if(typeof _loadAutoTrafficCfgUI==='function') _loadAutoTrafficCfgUI();
-  if(typeof ghLoadCfgIntoForm==='function') ghLoadCfgIntoForm();
   // Refresh the SW badge so the user sees current registration state when
   // they open Settings (not stale from initial render).
   if(typeof checkServiceWorkerStatus === 'function') checkServiceWorkerStatus();
@@ -32664,7 +32282,7 @@ async function _notify(kind, opts){
   }
   try{
     // Map recipients with their resolved delivery address
-    const recipList = recipients.map(u=>({email:_deliveryEmail(u), name:`${u.first||''} ${u.last||''}`.trim()}));
+    const recipList = recipients.map(u=>({userId:u.id,email:_deliveryEmail(u), name:`${u.first||''} ${u.last||''}`.trim()}));
 
     // Admin alert inbox receives operational notices only. Never copy private
     // chats, mentions, group messages, or user-to-user swap requests.
@@ -32694,6 +32312,7 @@ async function _notify(kind, opts){
         headers:await _edgeAuthHeaders(),
         body: JSON.stringify({
           kind,
+          messageId: opts.messageId,
           subject: opts.subject,
           body: opts.body,
           recipients: recipList,
@@ -33364,7 +32983,13 @@ function _rsDeleteSwapRows(clientIds, why){
 // result back, caches the set, and keeps it live via a realtime channel plus a
 // visibility-gated poll fallback.
 function _rsPracticeId(){
-  return (CU && CU.practiceId) || (typeof _ROW_ID !== 'undefined' ? _ROW_ID : 'main');
+  // Login and practice switching set the active row. A superuser's home
+  // assignment can differ from the practice currently displayed.
+  return (typeof _ROW_ID !== 'undefined' && _ROW_ID) || CU?.practiceId || 'main';
+}
+let _rsReadGeneration = 0;
+function _rsReadScope(){
+  return JSON.stringify([_rsReadGeneration, CU?.id, CU?.role, _rsPracticeId()]);
 }
 // Delivered work-RVU + CPT codes for a report string, via window.codingScore
 // (the DOM-free scorer) and the CMS wRVU reference (RVU_REFERENCE[3]=wRVU).
@@ -33420,10 +33045,11 @@ let _rsScoring = false;
 // Pull the practice's reports (RLS-scoped), newest first, then score any that
 // arrived without a wRVU. `force` bypasses the 15s freshness cache.
 async function _rsReportsPull(force){
-  if(!CU) return _RS_REPORTS;
+  if(!CU) return [];
   if(!force && _RS_REPORTS_STATE==='ready' && (Date.now()-_RS_REPORTS_AT) < 15000) return _RS_REPORTS;
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb) return _RS_REPORTS;   // transient — client not ready
+  const scope = _rsReadScope();
   _RS_REPORTS_STATE = 'loading';
   try{
     // report_text is intentionally EXCLUDED — it is KBs per row and this pull
@@ -33434,13 +33060,14 @@ async function _rsReportsPull(force){
       .eq('practice_id', _rsPracticeId())
       .order('signed_at', {ascending:false})
       .limit(3000);
+    if(scope !== _rsReadScope()) return [];
     if(error){ _RS_REPORTS_STATE='error'; return _RS_REPORTS; }
     _RS_REPORTS = Array.isArray(data) ? data : [];
     _RS_REPORTS_AT = Date.now();
     _RS_REPORTS_STATE = 'ready';
     _rsScoreUnscored();   // fire-and-forget; re-renders the visible tab when done
     return _RS_REPORTS;
-  }catch(_){ _RS_REPORTS_STATE='error'; return _RS_REPORTS; }
+  }catch(_){ if(scope !== _rsReadScope()) return []; _RS_REPORTS_STATE='error'; return _RS_REPORTS; }
 }
 // Score reports whose wRVU is still null (freshly ingested). Writes wrvu +
 // cpt_codes back under same-practice UPDATE RLS. Idempotent across clients
@@ -33456,13 +33083,14 @@ async function _rsScoreUnscored(){
   const pending = _RS_REPORTS.filter(r => r.wrvu == null && !_rsUnscorable.has(r.report_uid)).slice(0, 100);
   if(!pending.length) return;
   _rsScoring = true;
+  const scope = _rsReadScope();
   const pid = _rsPracticeId();
   let wrote = false;
   try{
     const uids = pending.map(r => r.report_uid);
     const { data: texts, error } = await sb.from('rs_reports')
       .select('report_uid, report_text').eq('practice_id', pid).in('report_uid', uids);
-    if(error || !Array.isArray(texts)) return;
+    if(scope !== _rsReadScope() || error || !Array.isArray(texts)) return;
     const textByUid = new Map(texts.map(t => [t.report_uid, t.report_text]));
     const writes = [];
     for(const r of pending){
@@ -33479,7 +33107,8 @@ async function _rsScoreUnscored(){
         .eq('practice_id', pid).eq('report_uid', r.report_uid).is('wrvu', null).eq('report_text', txt));
     }
     if(writes.length){ wrote = true; await Promise.allSettled(writes); }
-  }catch(_){ } finally { _rsScoring = false; }
+  }catch(_){ } finally { if(scope === _rsReadScope()) _rsScoring = false; }
+  if(scope !== _rsReadScope()) return;
   if(wrote) _wrvuInvalidateSummary();   // freshly-scored totals → refetch the server summary
   _rsRerenderActive();
 }
@@ -33550,12 +33179,15 @@ function _rsReportsStartLive(){
 // cached reports, never re-binds realtime for the new practice, and the peer
 // nudge/badge never re-arms.
 function _rsTeardown(){
+  _rsReadGeneration++;
   try{ if(_rsReportsChannel){ _rsReportsChannel.unsubscribe(); } }catch(_){}
   _rsReportsChannel = null;
   if(_rsPollTimer){ clearInterval(_rsPollTimer); _rsPollTimer = null; }
   if(_rsRtDebounce){ clearTimeout(_rsRtDebounce); _rsRtDebounce = null; }
   _RS_REPORTS = []; _RS_REPORTS_AT = 0; _RS_REPORTS_STATE = 'idle'; _rsScoring = false; _rsUnscorable = new Set();
   _PR_REVIEWS = []; _PR_AT = 0; _prFindMrn = ''; _prQuarter = null;
+  _prPriors.clear(); _prCloseGrader();
+  document.getElementById('peer-review-body')?.replaceChildren();
   try{ _prScorecard.clear(); _prScorecardLoading.clear(); _prAdminSummary.clear(); _prAdminSummaryLoading.clear(); }catch(_){}
   _wrvuSummary = new Map(); _wrvuSummaryKey = null; _wrvuSummaryLoading = false; _wrvuSummaryGen++;
   _wrvuKicked = false; _prKicked = false; _prWatcherStarted = false;
@@ -33837,18 +33469,20 @@ let _prPicked = null;       // score picked in the open grader
 let _prGradeCtx = null;
 function _prCurrentQuarter(){ const n=new Date(); return `${n.getFullYear()}-Q${Math.floor(n.getMonth()/3)+1}`; }
 async function _prPull(force){
-  if(!CU) return _PR_REVIEWS;
+  if(!CU) return [];
   if(!force && _PR_AT && (Date.now()-_PR_AT)<15000) return _PR_REVIEWS;
   const sb=(typeof _initAuthClient==='function')?_initAuthClient():null; if(!sb) return _PR_REVIEWS;
+  const scope = _rsReadScope();
   try{
     const {data,error}=await sb.from('rs_peer_reviews')
       .select('id, report_uid, accession, reviewed_phys_id, reviewer_phys_id, reviewer_uid, score, comments, quarter, status, ts, origin, shift_date')
       .eq('practice_id', _rsPracticeId()).order('ts',{ascending:false}).limit(4000);
+    if(scope !== _rsReadScope()) return [];
     if(error) return _PR_REVIEWS;
     _PR_REVIEWS=Array.isArray(data)?data:[]; _PR_AT=Date.now();
     _prUpdateNavBadge();
     return _PR_REVIEWS;
-  }catch(_){ return _PR_REVIEWS; }
+  }catch(_){ return scope === _rsReadScope() ? _PR_REVIEWS : []; }
 }
 // Pending reviews assigned to me → count + ⚖️ Peer Review nav badge. Auto
 // reviews (once per shift, server-created) need a nudge since the rad didn't
@@ -33918,6 +33552,7 @@ function _prPickScore(s){
 function _prCloseGrader(){ _prPicked=null; _prGradeCtx=null; const ov=document.getElementById('pr-grader'); if(ov) ov.remove(); }
 async function _prSubmitGrade(){
   if(!_prGradeCtx || !_prPicked || !CU) return;
+  const scope = _rsReadScope(), reviewerId = CU.id;
   const ctx=_prGradeCtx, score=_prPicked;
   const comments=(document.getElementById('pr-comment')?.value||'').trim().slice(0,2000);
   const sb=(typeof _initAuthClient==='function')?_initAuthClient():null;
@@ -33933,25 +33568,27 @@ async function _prSubmitGrade(){
       // it was set at creation from the read's shift_date (RADPEER convention);
       // re-stamping it to grade-time would misfile a Q1 read graded in Q2.
       ({error}=await sb.from('rs_peer_reviews')
-        .update({score,comments,status:'completed',reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
-        .eq('practice_id',pid).eq('id',ctx.existingId));
+        .update({score,comments,status:'completed'})
+        .eq('practice_id',pid).eq('id',ctx.existingId).select('id').single());
     } else {
       const ins=await sb.from('rs_peer_reviews').insert({
         practice_id:pid, report_uid:ctx.report_uid||null, accession:ctx.accession||null,
         reviewed_phys_id:reviewedPid, reviewer_phys_id:reviewerPid,
         score, comments, quarter:q, status:'completed', updated_at:now
       });
+      if(scope !== _rsReadScope()) return;
       if(ins.error && (String(ins.error.code)==='23505' || /duplicate|unique/i.test(ins.error.message||''))){
         // already reviewed this report — update MY OWN review. Scope to
         // reviewer_uid=me: RLS protects non-admins, but an admin/superuser
         // reviewer bypasses owns-row and would otherwise overwrite EVERY
         // reviewer's row for this report.
         ({error}=await sb.from('rs_peer_reviews')
-          .update({score,comments,status:'completed',reviewed_phys_id:reviewedPid,reviewer_phys_id:reviewerPid,updated_at:now})
-          .eq('practice_id',pid).eq('report_uid',ctx.report_uid).eq('reviewer_uid',CU.id));
+          .update({score,comments,status:'completed'})
+          .eq('practice_id',pid).eq('report_uid',ctx.report_uid).eq('reviewer_uid',reviewerId).select('id').single());
       } else error=ins.error;
     }
   }catch(e){ error=e; }
+  if(scope !== _rsReadScope()) return;
   if(error){ if(typeof _toast==='function')_toast('Save failed: '+(error.message||error),'err'); if(sub){sub.disabled=false;sub.textContent='Submit review';} return; }
   if(typeof _audit==='function') _audit('peerreview.submitted',{report_uid:ctx.report_uid,score,reviewed:reviewedPid});
   _prCloseGrader();
@@ -33961,6 +33598,8 @@ async function _prSubmitGrade(){
 // Prior-finder + review entry points -------------------------------------
 let _prPriors = new Map();   // report_uid → prior row from the last _prFind (may be older than the cache)
 async function _prFind(){
+  if(!CU) return;
+  const scope = _rsReadScope();
   const q=(document.getElementById('pr-find')?.value||'').trim(); _prFindMrn=q;
   const host=document.getElementById('pr-find-results'); if(!host) return;
   if(!q){ host.innerHTML=`<div class="note ni" style="font-size:12px">Enter an MRN or accession.</div>`; return; }
@@ -33980,6 +33619,7 @@ async function _prFind(){
     const {data:rows,error}=await sb.from('rs_reports')
       .select('report_uid, accession, mrn, exam, modality, phys_id, signed_at')
       .eq('practice_id',pid).eq('mrn',mrn).order('signed_at',{ascending:false}).limit(100);
+    if(scope !== _rsReadScope()) return;
     if(error){ host.innerHTML=`<div class="note ni" style="font-size:12px">Search failed — try again.</div>`; return; }
     // Exclude the caller's own reads AND unattributable priors (phys_id null):
     // a review of an unmatched reader inserts reviewed_phys_id=null, which every
@@ -33998,16 +33638,20 @@ async function _prFind(){
              :`<button class="bp bxs" data-uid="${escHtml(r.report_uid)}" onclick="_prReviewReport(this)">Review</button>`}</div>`;}).join('');
 }
 async function _prReviewReport(btn){
+  const scope = _rsReadScope();
   const uid=btn&&btn.dataset?btn.dataset.uid:null;
   const r=_prPriors.get(uid) || _RS_REPORTS.find(x=>x.report_uid===uid); if(!r) return;
   const reportText=await _rsFetchReportText(uid);   // fetched on demand (not in bulk pull)
+  if(!CU || scope !== _rsReadScope()) return;
   _prShowGrader({report_uid:r.report_uid, accession:r.accession, reviewed_phys_id:r.phys_id,
     examLabel:(r.exam||r.modality||'')+' · '+(r.signed_at||'').slice(0,10), reportText});
 }
 async function _prGradePending(id){
+  const scope = _rsReadScope();
   const v=_PR_REVIEWS.find(x=>x.id===id); if(!v) return;
   const r=_RS_REPORTS.find(x=>x.report_uid===v.report_uid);
   const reportText=await _rsFetchReportText(v.report_uid);
+  if(!CU || scope !== _rsReadScope()) return;
   _prShowGrader({report_uid:v.report_uid, accession:v.accession, reviewed_phys_id:v.reviewed_phys_id,
     examLabel:(r?(r.exam||r.modality||''):'')+(r?' · '+(r.signed_at||'').slice(0,10):''), reportText, existingId:v.id});
 }
@@ -34037,9 +33681,10 @@ let _prScorecardLoading = new Set();
 async function _prLoadScorecard(quarter){
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb || !CU) return null;
+  const scope = _rsReadScope();
   try{
     const {data,error} = await sb.rpc('rs_peer_my_scorecard', {p_practice:_rsPracticeId(), p_quarter:quarter});
-    if(error) return null;
+    if(error || scope !== _rsReadScope()) return null;
     _prScorecard.set(quarter, data || {n:0});
     return data;
   }catch(_){ return null; }
@@ -34051,9 +33696,10 @@ let _prAdminSummaryLoading = new Set();
 async function _prLoadAdminSummary(quarter){
   const sb = (typeof _initAuthClient==='function') ? _initAuthClient() : null;
   if(!sb || !CU) return null;
+  const scope = _rsReadScope();
   try{
     const {data,error} = await sb.rpc('rs_peer_review_summary', {p_practice:_rsPracticeId(), p_quarter:quarter});
-    if(error) return null;
+    if(error || scope !== _rsReadScope()) return null;
     _prAdminSummary.set(quarter, Array.isArray(data)?data:[]);
     return data;
   }catch(_){ return null; }
@@ -34061,6 +33707,7 @@ async function _prLoadAdminSummary(quarter){
 function renderPeerReview(){
   const host=document.getElementById('peer-review-body'); if(!host) return;
   if(!CU){ host.innerHTML=`<div class="note ni">Sign in to use peer review.</div>`; return; }
+  const scope = _rsReadScope();
   _rsReportsStartLive();
   const isAdm=(typeof _isAdminOrSU==='function')?_isAdminOrSU():false;
   const myPid=CU.physId;
@@ -34071,7 +33718,7 @@ function renderPeerReview(){
     // loop (both timestamps stay 0 on error).
     Promise.all([_rsReportsPull(true),_prPull(true)]).then(()=>{
       const ok = (_RS_REPORTS_AT!==0 && _PR_AT!==0);
-      const rerun = ()=>{ _prKicked=false; if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); };
+      const rerun = ()=>{ if(scope !== _rsReadScope()) return; _prKicked=false; if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); };
       if(ok) rerun(); else setTimeout(rerun, 5000);
     });
   }
@@ -34115,7 +33762,11 @@ function renderPeerReview(){
     const sc=_prScorecard.get(qsel);
     if(sc===undefined && !_prScorecardLoading.has(qsel)){
       _prScorecardLoading.add(qsel);
-      _prLoadScorecard(qsel).then(()=>{ _prScorecardLoading.delete(qsel); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+      _prLoadScorecard(qsel).then(data=>{
+        if(scope !== _rsReadScope()) return;
+        _prScorecardLoading.delete(qsel);
+        if(data && document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview();
+      });
     }
     html+=`<div class="card mb14" >
       <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -34150,7 +33801,11 @@ function renderPeerReview(){
     const asum=_prAdminSummary.get(qsel);
     if(asum===undefined && !_prAdminSummaryLoading.has(qsel)){
       _prAdminSummaryLoading.add(qsel);
-      _prLoadAdminSummary(qsel).then(()=>{ _prAdminSummaryLoading.delete(qsel); if(document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview(); });
+      _prLoadAdminSummary(qsel).then(data=>{
+        if(scope !== _rsReadScope()) return;
+        _prAdminSummaryLoading.delete(qsel);
+        if(data && document.getElementById('page-peer-review')?.classList.contains('on')) renderPeerReview();
+      });
     }
     const cAgg=_prAggregate(_PR_REVIEWS.filter(v=>v.quarter===qsel));   // comments source
     let list, totalN;
@@ -36276,25 +35931,23 @@ function _assignRotation(item, occurrences, opts){
     if(!rotation.assignments[iso] || typeof rotation.assignments[iso] !== 'object') {
       rotation.assignments[iso] = {};
     }
-    // Already-claimed phys for THIS occurrence (manual or just-auto-assigned)
-    // so the same person doesn't fill two slots on the same day.
+    const dayAssignments = rotation.assignments[iso];
     const claimedToday = new Set();
-    for(const sid of Object.keys(rotation.assignments[iso])){
-      const v = rotation.assignments[iso][sid];
-      if(v && typeof v === 'object' && v.physId != null) claimedToday.add(v.physId);
+    for(const [slotId, existing] of Object.entries(dayAssignments)){
+      if(existing == null) continue;
+      const prior = typeof existing === 'object' ? existing.physId : existing;
+      if(force && slotCounts[slotId] && existing.assignedBy !== 'manual'){
+        // Vacate every auto slot before choosing replacements. An unfillable
+        // slot stays empty, and its former physician is free for another slot.
+        delete dayAssignments[slotId];
+        if(slotCounts[slotId][prior] != null) slotCounts[slotId][prior]--;
+      } else {
+        claimedToday.add(prior);
+      }
     }
 
     for(const slot of slots){
-      const existing = rotation.assignments[iso][slot.id];
-      if(existing){
-        if(typeof existing === 'object' && existing.assignedBy === 'manual') continue;
-        if(!force) continue;
-        const prior = (typeof existing === 'object') ? existing.physId : existing;
-        if(slotCounts[slot.id][prior] != null){
-          slotCounts[slot.id][prior] = Math.max(0, slotCounts[slot.id][prior]-1);
-        }
-        claimedToday.delete(prior);
-      }
+      if(dayAssignments[slot.id] != null) continue;
       // Build slot's eligible candidate list: rotation order, filtered by
       // (a) eligibility, (b) not on vacation that day, (c) not already
       // claimed for another slot on this same occurrence.
@@ -37680,6 +37333,7 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
   }
   return true;
 }
+
 /* @JS_SCHED_RULES_END */
 // Defined OUTSIDE the @JS_SCHED_RULES managed block on purpose: the greedy builder and Rebalance
 // (unmanaged code) call _rulePlan, and the GitHub Pages deploy regenerates the managed blocks from
@@ -38770,20 +38424,7 @@ function _tbMoreToggle(ev){
     if(txt){ fsItemStatus.textContent = txt; fsItemStatus.style.display = ''; }
     else fsItemStatus.style.display = 'none';
   }
-  const ghStatus = document.getElementById('gh-toolbar-status');
-  const ghItem = document.getElementById('rs-tb-more-gh-status');
-  if(ghItem){
-    const txt = (ghStatus?.textContent || '').trim();
-    if(txt){ ghItem.textContent = '🚀 ' + txt; ghItem.style.display = ''; }
-    else ghItem.style.display = 'none';
-  }
-  if(fsSep){
-    // Show separator only if at least one of FS button / FS status / GH status is visible.
-    const anyFsGh = (fsItem && fsItem.style.display !== 'none')
-                 || (fsItemStatus && fsItemStatus.style.display !== 'none')
-                 || (ghItem && ghItem.style.display !== 'none');
-    fsSep.style.display = anyFsGh ? '' : 'none';
-  }
+  if(fsSep) fsSep.style.display = (fsItem?.style.display === '' || fsItemStatus?.style.display === '') ? '' : 'none';
   m.style.display = '';
   btn?.setAttribute('aria-expanded','true');
   // Hover style.
@@ -39754,7 +39395,7 @@ function _initToolsTab(){
 // ── System Health — operational readiness panel ───────────────────────
 // One compact surface for the failure modes admins actually hit: stale
 // service worker, missing PWA assets, disconnected Supabase, edge
-// functions not reachable, queued unsaved changes, GitHub deploy not
+// functions not reachable, queued unsaved changes, network not
 // configured, and runtime errors. This is intentionally browser-native:
 // no server secrets, no privileged calls, no dependency on DevTools.
 function _healthStatusRank(status){
@@ -39853,11 +39494,6 @@ async function renderSystemHealth(quick){
   const errCount = (typeof _errorLog !== 'undefined' && Array.isArray(_errorLog)) ? _errorLog.length : 0;
   add(errCount ? 'warn' : 'ok', 'Runtime error log', errCount ? `${errCount} captured entr${errCount===1?'y':'ies'}. Open Error log for details.` : 'No captured runtime errors.');
 
-  const ghCfg = (typeof _ghLoadCfg === 'function') ? (_ghLoadCfg() || {}) : {};
-  add(ghCfg.token && ghCfg.owner && ghCfg.repo ? (ghCfg.enabled ? 'ok' : 'warn') : 'warn',
-      'GitHub auto-deploy',
-      ghCfg.token && ghCfg.owner && ghCfg.repo ? `${ghCfg.owner}/${ghCfg.repo} ${ghCfg.enabled ? 'enabled' : 'configured but paused'}.` : 'Not configured in browser settings; local autosync may still be active.');
-
   add((typeof navigator !== 'undefined' && navigator.onLine === false) ? 'fail' : 'ok',
       'Network state',
       (typeof navigator !== 'undefined' && navigator.onLine === false) ? 'Browser reports offline.' : 'Browser reports online.');
@@ -39872,7 +39508,7 @@ async function renderSystemHealth(quick){
   _healthRender(host, [...items, {status:'pending', label:'Deep checks', detail:'Checking service worker, assets, session, data row, and edge functions…'}], 'System health');
 
   try{
-    const swRes = await _healthFetchText('/sw.js');
+    const swRes = await _healthFetchText('sw.js');
     const m = /CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(swRes.text || '');
     const liveSw = m ? m[1] : '';
     add(swRes.ok && liveSw === expected ? 'ok' : 'fail', 'Service worker source', swRes.ok ? `Live sw.js ${liveSw || 'unknown'}; HTML ${expected || 'unknown'}.` : `Could not fetch sw.js (HTTP ${swRes.status}).`);
@@ -39893,7 +39529,7 @@ async function renderSystemHealth(quick){
   }
 
   try{
-    const man = await _healthFetchText('/manifest.webmanifest');
+    const man = await _healthFetchText('manifest.webmanifest');
     const parsed = JSON.parse(man.text || '{}');
     const icons = Array.isArray(parsed.icons) ? parsed.icons : [];
     const iconChecks = await Promise.all(icons.map(i => _healthCheckAsset(i.src)));
@@ -39974,10 +39610,15 @@ async function _goLiveAuditChainItem(sb){
 async function _goLiveBackupItem(sb){
   if(!sb || !_ROW_ID) return _goLiveStatus('warn', 'Backup restore confidence', 'Sign in to a practice before checking backup inventory.');
   try{
-    const { data, error } = await sb.from(_BACKUP_TABLE).select('id, created_at').eq('practice_id', String(_ROW_ID)).order('created_at', { ascending:false }).limit(3);
+    const { data, error } = await sb.from(_BACKUP_TABLE).select('backup_day,created_at').eq('practice_id', String(_ROW_ID))
+      .order('backup_day', { ascending:false, nullsFirst:false }).limit(1);
     if(error) return _goLiveStatus('warn', 'Backup restore confidence', error.message || 'Could not read backup inventory.');
-    const count = Array.isArray(data) ? data.length : 0;
-    return _goLiveStatus(count ? 'ok' : 'warn', 'Backup restore confidence', count ? `${count} recent backup${count === 1 ? '' : 's'} visible; automated restore drill is covered by E2E.` : 'No backup rows visible yet. Let the daily backup run, then run the restore drill.');
+    const daily = data?.[0];
+    if(!daily?.backup_day) return _goLiveStatus('warn', 'Backup restore confidence', 'No server-managed daily snapshot is visible for this practice.');
+    const ageHours = (Date.now() - Date.parse(daily.created_at)) / 3600000;
+    const recent = ageHours >= 0 && ageHours < 25;
+    return _goLiveStatus(recent ? 'ok' : 'warn', 'Backup restore confidence',
+      'Latest server-managed schedule snapshot: '+daily.backup_day+' UTC.'+(recent ? '' : ' Check the scheduled database job.'));
   }catch(e){
     return _goLiveStatus('warn', 'Backup restore confidence', e?.message || String(e));
   }
@@ -40008,8 +39649,8 @@ async function _goLiveEdgeFunctionsItem(cfgUrl){
 async function _goLiveManifestItem(){
   try{
     const [sw, manifest] = await Promise.all([
-      _healthFetchText('/sw.js'),
-      _healthFetchText('/manifest.webmanifest'),
+      _healthFetchText('sw.js'),
+      _healthFetchText('manifest.webmanifest'),
     ]);
     const expected = (typeof _RS_HTML_BUILD !== 'undefined') ? _RS_HTML_BUILD : '';
     const liveSw = (/CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(sw.text || '') || [])[1] || '';
@@ -40264,7 +39905,7 @@ function runPerfSnapshot(){
   // Per-array sizes (JSON-stringified). The biggest movers first.
   const COLLECTIONS = [
     'drShifts','irShifts','weekendCalls','irCalls','vacations','holidays',
-    'auditLog','openShifts','swapRequests','chatMessages','broadcasts',
+    'auditLog','openShifts','swapRequests','broadcasts',
     'physicians','holidayBlackouts','holidayNeeds','shiftListings'
   ];
   const sizes = COLLECTIONS.map(k => {
@@ -41740,21 +41381,20 @@ function _violatesSiteCap(physId, ctx){
 function _missingShiftSubNeeds(date, site, shift){
   const needs = (S.shiftSubNeeds || {})[`${site}|${shift}`];
   if(!needs || !Object.keys(needs).length) return [];
-  // Count present subs
-  const present = {};
-  (S.drShifts||[]).forEach(s => {
-    if(s.date === date && s.site === site && s.shift === shift){
-      const phys = _physById(s.physId);
-      (phys?.drSubs || []).forEach(sub => { present[sub] = (present[sub]||0)+1; });
-      // Also count the directly-assigned sub on the shift if present
-      if(s.sub) present[s.sub] = (present[s.sub]||0)+1;
+  const present = new Map();
+  for(const s of S.drShifts || []){
+    if(s.date !== date || s.site !== site || s.shift !== shift || s.physId == null) continue;
+    const specialties = [...(_physById(s.physId)?.drSubs || []), s.sub];
+    for(const sub of specialties){
+      if(!sub) continue;
+      if(!present.has(sub)) present.set(sub, new Set());
+      present.get(sub).add(s.physId);
     }
-  });
+  }
   const missing = [];
   for(const [sub, minCount] of Object.entries(needs)){
-    if((present[sub] || 0) < minCount){
-      missing.push(`${sub} (have ${present[sub]||0}, need ${minCount})`);
-    }
+    const count = present.get(sub)?.size || 0;
+    if(count < minCount) missing.push(`${sub} (have ${count}, need ${minCount})`);
   }
   return missing;
 }
@@ -43263,9 +42903,8 @@ function saveEditWkCall(id){
   {
     const _p = S.physicians.find(x=>x.id===newPid);
     if(_p){
-      const _newSite = siteEl?.value || w.site || '';
       const _ctx = {
-        physId: newPid, date: newSat, site: _newSite,
+        physId: newPid, date: newSat, site: '',
         shift: 'wknd', kind: 'dr-weekend', sub: subEl?.value || '',
         ym: newSat.slice(0,7),
       };
@@ -43349,15 +42988,6 @@ function renderWkBuilder(){
   }).join('')||'<tr><td colspan="7" class="tac txt3">None</td></tr>';
 }
 
-function _wkeRefreshSub(id){
-  const w = S.weekendCalls.find(x=>x.id===id); if(!w) return;
-  const subEl  = document.getElementById(`wke-sub-${id}`);
-  if(!siteEl || !subEl) return;
-  const subs = siteDRSubsByName(siteEl.value);
-  const curSub = subEl.value;
-  subEl.innerHTML = '<option value="">—</option>' + subs.map(sub=>`<option value="${sub}">${sub}</option>`).join('');
-  if(curSub && subs.includes(curSub)) subEl.value = curSub;
-}
 function addWkCall(){
   if(!_adminOnly('assign weekend call'))return;
   const pid=+document.getElementById('wk-phys').value;const satDate=document.getElementById('wk-date').value;
@@ -43524,6 +43154,21 @@ function _iraTogglePeriodInputs(){
 }
 
 /* @JS_DR_ASSIGN_BEGIN — managed by tools/build-index.sh from src/parts/js-dr-assign.js. Edit the source file, not this block. See src/README.md. */
+// Settings stores five weekly profiles. A sixth calendar row uses the final
+// profile, including specialty requirements from practices using weekly data.
+function _drSlotWeek(date){
+  return Math.min(5, getWeek(date, date.slice(0,7)));
+}
+
+function _drAutoDatesFree(physId, dates){
+  const away = _awayDays(physId);
+  return dates.every(date => !away.has(date) && !_physBookingsOnDate(physId, date).length);
+}
+
+function _drAutoRulesOk(p, ctx){
+  return natLangRulesOk(ctx) && tbRulesOk(p, ctx) && callDayRulesOk(p, ctx);
+}
+
 function previewAA(){
   if(!_adminOnly('preview auto-assign')) return;
   const ym=document.getElementById('aa-mo').value||_todayLocalYM();
@@ -43545,7 +43190,7 @@ function previewAA(){
   const drs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
   // Per-physician effective target (vacation-adjusted) for this month
   const effTarget={};
-  drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym)||1; });
+  drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym); });
   // wd = total weekday DR shifts, home = subset that are Home shifts. The
   // home count powers the home/in-person preference tiebreaker in
   // sortByDeficit so we can compare current Home% to p.drHomePctPref.
@@ -43594,7 +43239,7 @@ function previewAA(){
       return isHomeSlot ? distance : -distance;
     };
     return pool.slice().sort((a,b)=>{
-      const rA=cnt[a.id].wd/effTarget[a.id], rB=cnt[b.id].wd/effTarget[b.id];
+      const rA=cnt[a.id].wd/Math.max(1,effTarget[a.id]), rB=cnt[b.id].wd/Math.max(1,effTarget[b.id]);
       if(Math.abs(rA-rB)>0.005) return rA-rB; // lowest fill% first
       // Home/in-person preference — only kicks in for physicians who set
       // drHomePctPref. 5% threshold prevents micro-fluctuations from
@@ -43630,7 +43275,7 @@ function previewAA(){
 
   if(typ==='weekday'||typ==='both'){
     cells.filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).forEach(c=>{
-      const wk=getWeek(c.date,ym);
+      const wk=_drSlotWeek(c.date);
       // TWO-PHASE FILL (2026-07): subspecialty slots fill FIRST across ALL
       // sites/shifts for the day, then general slots — so a scarce specialist
       // can't be consumed by one site's general slot while another site's
@@ -43690,38 +43335,12 @@ function previewAA(){
               if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
               if(!sequenceOk(p,c.date,ym,st.name,_slotLabel))return false;
               if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false;
-              const vd=_awayDays(p.id);if(vd.has(c.date))return false;
+              if(!_drAutoDatesFree(p.id,[c.date]))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
-              if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-              // Pre-existing manually-assigned shifts on this date. Previously
-              // only the current-preview pool was checked, so auto-assign could
-              // double-book a physician who already had a manual shift.
-              // For in-person shifts ('1st'/'2nd'/'3rd'): existing Home shifts
-              // don't block — auto can displace them with procedure work.
-              // For Home shifts: existing Home shifts DO block, otherwise we'd
-              // double-assign the same phys to two Home slots on the same day.
-              if(sh==='Home'){
-                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date))return false;
-              } else {
-                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
-              }
-              if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
-              // Also block on daily/weekend IR calls so auto-assign doesn't
-              // stack a DR day shift on top of call coverage.
-              if((S.irCalls||[]).some(ic=>{
-                if(ic.physId!==p.id) return false;
-                if(ic.callType==='daily') return ic.date===c.date;
-                if(ic.callType==='weekend'){
-                  return c.date===ic.date||c.date===addDays(ic.date,1)
-                       ||c.date===addDays(ic.date,2)||c.date===addDays(ic.date,3);
-                }
-                return false;
-              })) return false;
+              if(preview.some(a=>a.physId===p.id&&a.date===c.date))return false;
               const assumedSub = targetSub || p.drSubs?.[0] || '';
               const _ctx={physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'};
-              if(!natLangRulesOk(_ctx))return false;
-              if(!tbRulesOk(p,_ctx))return false;
-              if(!callDayRulesOk(p,_ctx))return false;
+              if(!_drAutoRulesOk(p,_ctx))return false;
               return cnt[p.id].wd<effTarget[p.id];
             });
             const sorted=sortByDeficit(pool,st.name,c.date,sh,'dr-shift');
@@ -43745,43 +43364,31 @@ function previewAA(){
         });
       });
       });   // end sub→any phase loop
-      // Configured home slots
-      const hNeed=S.siteSlots[`At Home / Remote|${wk}|Home`]||0;
-      const hEx=S.drShifts.filter(s=>s.date===c.date&&s.shift==='Home').length
-               +preview.filter(a=>a.date===c.date&&a.shift==='Home').length;
-      if(hNeed-hEx>0){
-        const hpool=sortByDeficit(drs.filter(p=>{
-          if(!p.shiftElig.home)return false;
-          const vd=_awayDays(p.id);if(vd.has(c.date))return false;
-          if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-          const _hctx={physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'};
-          if(!natLangRulesOk(_hctx))return false;
-          if(!tbRulesOk(p,_hctx))return false;
-          if(!callDayRulesOk(p,_hctx))return false;
-          return cnt[p.id].wd<effTarget[p.id];
-        }),'At Home / Remote',c.date,'Home','dr-shift');
-        for(let i=0;i<hNeed-hEx;i++){const p=hpool[i];if(!p)break;
-          // Home slots are also labeled per-shift, so look up the label
-          // for slot index = (already-placed Home count + i for THIS pass).
-          const _hSlotIdx = hEx + i;
-          const _hSlotLabel = (S.siteSlotLabels||{})[`At Home / Remote|Home|#${_hSlotIdx}`] || '';
-          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true,slotLabel:_hSlotLabel});
-          cnt[p.id].wd++;
-          cnt[p.id].home = (cnt[p.id].home||0) + 1;}
-      }
-      // Auto-home: fill ALL remaining physicians up to their effective FTE target
-      sortByDeficit(drs,'At Home / Remote',c.date,'Home','dr-shift').forEach(p=>{
-        const vd=_awayDays(p.id);if(vd.has(c.date))return;
-        if(!p.shiftElig.home)return;
-        const alreadyDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date);
-        const alreadyWk=S.weekendCalls.find(w=>w.physId===p.id&&((w.satDate||w.date)===c.date||(w.sunDate)===c.date));
-        const alreadyPrev=preview.find(a=>a.physId===p.id&&a.date===c.date);
-        if(!alreadyDR&&!alreadyWk&&!alreadyPrev&&cnt[p.id].wd<effTarget[p.id]){
-          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true});
-          cnt[p.id].wd++;
-          cnt[p.id].home = (cnt[p.id].home||0) + 1;
-        }
+      // Fill configured remote positions first, then eligible physicians who
+      // still need weekday work. Both use exactly the same eligibility rules.
+      const homeSite='At Home / Remote';
+      const homeNeed=Number(S.siteSlots[`${homeSite}|${wk}|Home`])||0;
+      let homeCount=S.drShifts.filter(s=>s.date===c.date && s.shift==='Home' && (!s.site || s.site===homeSite)).length;
+      const homePool=drs.filter(p=>{
+        if(!p.shiftElig?.home || cnt[p.id].wd>=effTarget[p.id])return false;
+        if(preview.some(a=>a.physId===p.id && a.date===c.date))return false;
+        if(!_drAutoDatesFree(p.id,[c.date]))return false;
+        const ctx={physId:p.id,date:c.date,site:homeSite,shift:'Home',sub:p.drSubs?.[0]||'',kind:'dr-shift'};
+        return _drAutoRulesOk(p,ctx);
       });
+      for(const p of sortByDeficit(homePool,homeSite,c.date,'Home','dr-shift')){
+        const slotLabel=homeCount<homeNeed ? (S.siteSlotLabels||{})[`${homeSite}|Home|#${homeCount}`]||'' : '';
+        preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:homeSite,sub:p.drSubs?.[0]||'',notes:'Auto-home',autoHome:true,slotLabel});
+        cnt[p.id].wd++;
+        cnt[p.id].home++;
+        homeCount++;
+      }
+      let posted=S.openShifts.filter(o=>!o.claimedBy && o.date===c.date && o.site===homeSite && o.shiftType==='Home Shift').length;
+      for(let i=homeCount;i<homeNeed;i++){
+        gaps.push(`${c.date} ${homeSite} Home`);
+        if(posted>0){ posted--; continue; }
+        S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Home Shift',sub:'',site:homeSite,group:'DR',claimedBy:null,notes:''});
+      }
     });
   }
   if(typ==='weekend'||typ==='both'){
@@ -43825,11 +43432,9 @@ function previewAA(){
               // Non-Eastern physicians (by home address) work SWING only —
               // their local hours align with the swing shift, not day.
               if(wshift==='day'&&!_wkndDayOk(p))return false;
-              const vd=_awayDays(p.id);
-              if(vd.has(c.date)||vd.has(sunDate))return false;
+              if(!_drAutoDatesFree(p.id,[c.date,sunDate]))return false;
               // Same physician shouldn't hold two shifts the same weekend
               if(preview.some(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&a.physId===p.id))return false;
-              if(S.weekendCalls.some(w=>(w.satDate||w.date)===c.date&&w.physId===p.id))return false;
               // No back-to-back weekend call — inherent to ALL weekend
               // assignment (matches the IR rule + the manual-add block).
               if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,c.date))return false;
@@ -43841,8 +43446,7 @@ function previewAA(){
               if(_yc!=null&&_wkndYearCount(p.id,_yr,preview)>=_yc)return false;
               const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
               const _wkctx={physId:p.id,date:c.date,site:'',shift:'wknd',sub,kind:'dr-weekend'};
-              if(!natLangRulesOk(_wkctx))return false;
-              if(!tbRulesOk(p,_wkctx))return false;
+              if(!_drAutoRulesOk(p,_wkctx))return false;
               return cnt[p.id].wk<_wkCap;
             }).sort((a,b)=>{
               const rA=cnt[a.id].wk/maxDR(a,'wk'), rB=cnt[b.id].wk/maxDR(b,'wk');
@@ -43951,8 +43555,18 @@ function previewAA(){
   if(!S.aaPreview.length){ if(typeof _toast==='function') _toast('Run Preview first to see what will be assigned.','info'); return; }
   const toApply=[...S.aaPreview];
   S.aaPreview=[];
+  let applied=0;
   toApply.forEach(a=>{
-    if(a.type==='wk')
+    const p=_physById(a.physId);
+    const weekend=a.type==='wk';
+    const date=a.date||a.satDate;
+    const dates=weekend ? [date,a.sunDate||addDays(date,1)] : [date];
+    const ctx={physId:a.physId,date,site:a.site||'',shift:weekend?'wknd':a.shift,sub:a.sub||'',kind:weekend?'dr-weekend':'dr-shift'};
+    if(!p || !_drAutoDatesFree(p.id,dates) || !_drAutoRulesOk(p,ctx))return;
+    const ym=date.slice(0,7);
+    if(!weekend && drCnt(p.id,ym)>=drEffectiveTarget(p,ym))return;
+    applied++;
+    if(weekend)
       S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift||'day',notes:'Auto'});
     else
       S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome,slotLabel:a.slotLabel||''});
@@ -43964,7 +43578,8 @@ function previewAA(){
   // apply runs. Without this, the second-and-later applies looked
   // like they did nothing on the calendar.
   if(typeof _afterMutation === 'function') _afterMutation();
-  document.getElementById('aa-box').innerHTML=`<div class="note ns">${toApply.length} shifts applied.</div>`;
+  const skipped=toApply.length-applied;
+  document.getElementById('aa-box').innerHTML=`<div class="note ${skipped?'nw':'ns'}">${applied} shifts applied.${skipped?' '+skipped+' skipped after eligibility changed. Run Preview again.':''}</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }
 
@@ -44792,17 +44407,17 @@ function _physBookingsOnDate(physId, date, excludeId){
   if(!physId || !date) return [];
   const out = [];
   (S.drShifts||[]).forEach(s => {
-    if(s.physId === physId && s.date === date && s.id !== excludeId){
+    if(s.physId === physId && s.date === date && (excludeId == null || s.id !== excludeId)){
       out.push({ kind: 'DR ' + (s.shift || '?'), site: s.site||'', id: s.id });
     }
   });
   (S.irShifts||[]).forEach(s => {
-    if(s.physId === physId && s.date === date && s.id !== excludeId){
+    if(s.physId === physId && s.date === date && (excludeId == null || s.id !== excludeId)){
       out.push({ kind: 'IR ' + (s.shift || '?'), site: s.site||'', id: s.id });
     }
   });
   (S.irCalls||[]).forEach(c => {
-    if(c.physId !== physId || c.id === excludeId) return;
+    if(c.physId !== physId || (excludeId != null && c.id === excludeId)) return;
     if(c.callType === 'daily' && c.date === date){
       out.push({ kind: 'IR daily call', site: c.site||'', id: c.id });
     } else if(c.callType === 'weekend'){
@@ -44814,7 +44429,7 @@ function _physBookingsOnDate(physId, date, excludeId){
     }
   });
   (S.weekendCalls||[]).forEach(w => {
-    if(w.physId !== physId || w.id === excludeId) return;
+    if(w.physId !== physId || (excludeId != null && w.id === excludeId)) return;
     if(w.satDate === date || w.sunDate === date || w.date === date){
       out.push({ kind: 'Weekend call', site: w.site||'', id: w.id });
     }
@@ -48109,8 +47724,9 @@ function _scanUnfilled(opts){
   // Pre-build maps for O(1) lookups: (site|date) → DR 1st count etc.
   const drCount = {};
   (S.drShifts||[]).forEach(s => {
-    if(s.shift !== '1st') return;
-    const k = s.site + '|' + s.date;
+    if(s.shift !== '1st' && s.shift !== 'Home') return;
+    const site = s.site || (s.shift === 'Home' ? 'At Home / Remote' : '');
+    const k = site + '|' + s.date + '|' + s.shift;
     drCount[k] = (drCount[k]||0) + 1;
   });
   const irCount = {};
@@ -48130,34 +47746,24 @@ function _scanUnfilled(opts){
     const sat = w.satDate || w.date;
     if(sat) wkndCovered.add(sat + '|' + (w.sub||'') + '|' + (w.site||''));
   });
-  // ── DR 1st-shift gaps ────────────────────────────────────────────
-  // For each (site, weekday, date) where slot capacity > assignments.
+  // Compare each configured DR position against bookings for that site and shift.
   if(wantDR){
-    const siteSlots = S.siteSlots || {};
-    sites.forEach(st => {
-      if(grp && grp === 'DR' && false) return;       // group filter is IR-specific
-      // skip the pseudo-site for at-home work
-      if(st.name === 'At Home / Remote') return;
-      cells.forEach(c => {
-        if(c.isWknd) return; // weekend coverage is a different category
-        if(isHolidayBlackout(c.date)) return;
-        const cap = +(siteSlots[st.name + '|' + c.dow + '|1st'] || 0);
-        if(!cap) return;
-        const have = drCount[st.name + '|' + c.date] || 0;
-        const missing = cap - have;
-        if(missing <= 0) return;
-        // Also pull the sub-specialty need so admins see the demand.
-        const subNeeds = (S.siteSlotsSubs||{})[st.name + '|' + c.dow + '|1st'] || {};
-        const subList = Object.keys(subNeeds).join(', ');
-        for(let i = 0; i < missing; i++){
-          out.push({
-            cat: 'dr', date: c.date, site: st.name, dow: c.dow,
-            shift: '1st', detail: subList || '—',
-            group: 'DR', slotIndex: have + i,
-          });
+    for(const c of cells){
+      if(c.isWknd || isHolidayBlackout(c.date)) continue;
+      const week = _drSlotWeek(c.date);
+      for(const st of sites){
+        const shifts = st.name==='At Home / Remote' ? ['Home'] : ['1st','Home'];
+        for(const shift of shifts){
+          const key = `${st.name}|${week}|${shift}`;
+          const cap = Number(S.siteSlots?.[key]) || 0;
+          const have = drCount[`${st.name}|${c.date}|${shift}`] || 0;
+          const detail = Object.keys(S.siteSlotsSubs?.[key] || {}).join(', ') || '—';
+          for(let i=have; i<cap; i++){
+            out.push({cat:'dr',date:c.date,site:st.name,dow:c.dow,shift,detail,group:'DR',slotIndex:i});
+          }
         }
-      });
-    });
+      }
+    }
   }
   // ── IR 1st-shift gaps ────────────────────────────────────────────
   if(wantIR){
@@ -48338,7 +47944,7 @@ function renderUnfilled(){
   if(sumEl){
     const byCat = {};
     gaps.forEach(g => { byCat[g.cat] = (byCat[g.cat]||0) + 1; });
-    const catLabels = { dr:'DR 1st', ir:'IR 1st', ircall:'IR daily call', irwknd:'IR weekend call', wknd:'DR weekend call', holiday:'Holiday call' };
+    const catLabels = { dr:'DR weekday', ir:'IR 1st', ircall:'IR daily call', irwknd:'IR weekend call', wknd:'DR weekend call', holiday:'Holiday call' };
     const chips = Object.entries(byCat).sort((a,b)=>b[1]-a[1])
       .map(([c,n]) => `<span class="tag" style="font-size:11px;margin-right:6px;background:${c==='holiday'?'var(--purple-bg,#f3e8ff)':'var(--amber-bg,#fef3c7)'};color:var(--amber-t,#854d0e)">${escHtml(catLabels[c]||c)}: ${n}</span>`)
       .join('');
@@ -49038,7 +48644,7 @@ function renderHolDefList(){
   // re-adding one date then replaced the holiday's dates (rs-v134).
   renderHoldefDatesChips();
   const el = document.getElementById('holdef-list'); if(!el) return;
-  const defs = (S.holidayDefs||[]).sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
+  const defs = [...(S.holidayDefs||[])].sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
   if(!defs.length){
     el.innerHTML = `
       <div class="rs-empty" style="text-align:center;padding:18px 12px">
@@ -56489,10 +56095,12 @@ async function _pullSavedAt(rowId){
     return data && data.saved_at ? data.saved_at : null;
   }catch(_){ return null; }
 }
-async function _pullFromSupabase(){
+async function _pullFromSupabase(practiceId=_ROW_ID){
   if(!_initSupabase())return null;
   try{
-    const {data,error}=await _supabase.from(_TABLE).select('data,saved_at').eq('id',_ROW_ID).single();
+    const origin = _ROW_ID;
+    const {data,error}=await _supabase.from(_TABLE).select('data,saved_at').eq('id',practiceId).single();
+    if(_ROW_ID !== origin) return null; // A late response belongs to the previous practice.
     if(error&&error.code!=='PGRST116')throw error;
     _pullFailCount = 0; // success — reset counter
     _lastPullFailed = false;  // definitive answer (row present OR confirmed absent)
@@ -56587,11 +56195,13 @@ async function _pullAndApplyRemote(why){
       const st = d ? (d._dbSavedAt || d.savedAt || null) : null;
       if(!d || !st || _sameInstant(st, S._remoteSavedAt)) continue;
       if(d._originTab === _TAB_ID && _isOwnPushStamp(d.savedAt)) continue;   // our own write
-      _applyRemoteData(d);
-      if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+      const accepted = _applyRemoteData(d);
       if(typeof _bcSend === 'function') _bcSend({type:'remote-update', tabId:_TAB_ID, payload:d, ts:Date.now()});
-      _syncNote('remote.pulled', { why: why || '' });
-      applied = true;
+      if(accepted){
+        if(typeof _refreshCurrentPage === 'function') _refreshCurrentPage();
+        _syncNote('remote.pulled', { why: why || '' });
+        applied = true;
+      }
     }while(_pullApplyAgain);
   }catch(e){
     console.warn('[RS] Pull-and-apply failed:', e);
@@ -56683,6 +56293,7 @@ async function _resolveConflictLoadLatest(opts){
   const silent = !!(opts && opts.silent);
   if(_conflictResolving) return false;
   _conflictResolving = true;
+  const revision = _dirtySeq, practice = _ROW_ID, actor = CU?.id;
   const btn = document.getElementById('rs-conflict-load');
   if(btn){ btn.disabled = true; btn.textContent = 'Loading…'; }
   const _fail = function(why){
@@ -56695,6 +56306,8 @@ async function _resolveConflictLoadLatest(opts){
   try{
     clearTimeout(_saveTimeout);
     const d = await _pullFromSupabase();
+    if(practice !== _ROW_ID || actor !== CU?.id) return false;
+    if(revision !== _dirtySeq) return _fail('There were new edits while loading. Review them before choosing the saved copy.');
     if(!d) return _fail('Could not reach the server just now — check the connection and try again.');
     // The automatic path is only valid while nothing of the user's is pending.
     // If they edited something during the round-trip, hand the decision to them.
@@ -56703,7 +56316,7 @@ async function _resolveConflictLoadLatest(opts){
     // Here the decision is already made (by the user, or because nothing of
     // theirs is pending) that the server copy wins, so stand the guard down.
     S._lastLocalChange = 0;
-    _applyRemoteData(d);
+    _applyRemoteData(d, true);
     if(!_sameInstant(S._remoteSavedAt, d._dbSavedAt || d.savedAt)){
       return _fail('The saved copy could not be loaded into this tab — reload the page to continue.');
     }
@@ -56728,6 +56341,7 @@ async function _resolveConflictLoadLatest(opts){
 }
 
 let _isSaving=false;
+let _saveAttemptId=0;
 let _saveWatchdog=null;     // Timer that force-clears _isSaving if a push hangs.
 let _consecutiveSaveFails=0; // Backoff state for the retry loop below.
 const _SAVE_TIMEOUT_MS = 30000; // Supabase-default-ish; if a push exceeds this we give up.
@@ -56769,6 +56383,7 @@ async function _pushToSupabase(){
     return false;
   }
   _isSaving=true;
+  const attempt = ++_saveAttemptId;
   // Capture _ROW_ID at the start of the push so a mid-flight
   // switchPractice() can't redirect our write to a different
   // practice's row. Without this, the conflict probe below reads
@@ -56781,6 +56396,8 @@ async function _pushToSupabase(){
   // rs-v125: edits are numbered; `finally` compares against this to tell "a new
   // edit landed while we were saving" from "this push did not go through".
   const _seqAtStart = _dirtySeq;
+  const actor = CU.id;
+  const active = () => attempt === _saveAttemptId && _ROW_ID === _pushRowId && CU?.id === actor;
   // Watchdog: if the underlying Supabase fetch hangs (mobile carrier captive
   // portal, dead TCP socket, etc.), `await` never resolves and the .finally
   // never runs — so `_isSaving` would be stuck `true` forever and every
@@ -56788,7 +56405,8 @@ async function _pushToSupabase(){
   // _SAVE_TIMEOUT_MS so the user gets an error and the queue keeps moving.
   clearTimeout(_saveWatchdog);
   _saveWatchdog = setTimeout(() => {
-    if(_isSaving){
+    if(_isSaving && active()){
+      _saveAttemptId++;  // A tardy result must not change another attempt's baseline or lock.
       console.warn('[RS] _pushToSupabase: watchdog timeout — clearing save lock');
       _isSaving = false;
       _hasUnsavedChanges = true;
@@ -56802,9 +56420,8 @@ async function _pushToSupabase(){
       _saveTimeout = setTimeout(() => { if(_hasUnsavedChanges) _pushToSupabase(); }, 1000);
     }
   }, _SAVE_TIMEOUT_MS);
-  // Snapshot the in-flight save's start so a mutation fired DURING the DB round-trip
-  // still queues a follow-up push below.
-  _hasUnsavedChanges=false;
+  // Leave the draft dirty until the server acknowledges its specific revision.
+  // A disconnected, deferred, or superseded attempt must leave the queue intact.
   // Optimistic concurrency: capture the remote savedAt we believe is current
   // BEFORE we send our payload. If another writer saved between our last
   // pull/push and now, the remote savedAt will exceed this baseline and we
@@ -56841,7 +56458,7 @@ async function _pushToSupabase(){
         // Bail early if the practice switched while we were waiting to
         // probe. The post-await state would otherwise be applied to the
         // wrong practice.
-        if(_ROW_ID !== _pushRowId){
+        if(!active()){
           console.warn('[RS] Push aborted before probe: _ROW_ID changed mid-flight');
           return false;
         }
@@ -56849,6 +56466,7 @@ async function _pushToSupabase(){
         // multi-MB blob. The full blob is pulled below ONLY if the remote is
         // actually newer and we need to merge it.
         const remoteNow = await _pullSavedAt(_pushRowId);
+        if(!active()) return false;
         if(remoteNow){
           // rs-v125: compare INSTANTS, not strings. The column reads back as
           // "…35.42+00:00"; a baseline that arrived over realtime/BroadcastChannel
@@ -56927,12 +56545,13 @@ async function _pushToSupabase(){
     if(outTotal === 0){
       try{
         // Practice-switch guard: same rationale as the conflict probe above.
-        if(_ROW_ID !== _pushRowId){
+        if(!active()){
           console.warn('[RS] Push aborted before catastrophic-loss probe: _ROW_ID changed mid-flight');
           return false;
         }
         const { data: prePushProbe } = await _supabase
           .from(_TABLE).select('data').eq('id', _pushRowId).single();
+        if(!active()) return false;
         if(prePushProbe?.data){
           let remote = null;
           try{ remote = JSON.parse(prePushProbe.data); }catch(_){}
@@ -56967,7 +56586,7 @@ async function _pushToSupabase(){
     // Final practice-switch guard — abort if _ROW_ID changed since
     // we built the payload. Otherwise we'd upsert into the new
     // practice's row with the old practice's data (silent corruption).
-    if(_ROW_ID !== _pushRowId){
+    if(!active()){
       console.warn('[RS] Push aborted at upsert: _ROW_ID changed during build');
       return false;
     }
@@ -56979,6 +56598,7 @@ async function _pushToSupabase(){
       p_data:payload.data,
       p_expected_saved_at:_baseRemoteSavedAt
     });
+    if(!active()) return false;
     if(error)throw error;
     if(!_cas?.ok){
       const _cur = _cas?.current_saved_at || null;
@@ -57001,11 +56621,13 @@ async function _pushToSupabase(){
     // no newer edit landed while this push was in the air — that edit is still
     // unsent and still needs the guard.
     if(_dirtySeq === _seqAtStart){
+      _hasUnsavedChanges = _followUpRequested;
       S._lastLocalChange=0; // successful push — stale-remote guard may resume blocking again only when NEW local mutations happen
       _userEditPending = false;
     }
     _consecutiveSaveFails = 0;
-    _updateSaveUI('✓ Synced','var(--green-t)');
+    if(!_hasUnsavedChanges) _updateSaveUI('✓ Synced','var(--green-t)');
+    else _updateSaveUI('● New edits queued','var(--amber)');
     if(typeof _updateStaleSaveBadge === 'function') _updateStaleSaveBadge();
     // ── Cross-tab broadcast of LOCAL save ────────────────────────────
     // Audit fix: previously followers only got `remote-update` from the
@@ -57034,6 +56656,7 @@ async function _pushToSupabase(){
     if(typeof _sideShiftsSync === 'function') { try { _sideShiftsSync(); } catch(_){} }
     return true;
   }catch(e){
+    if(!active()) return false;
     console.error('[RS] Push failed:',e);
     // ── JWT expiry detection ──────────────────────────────────────────
     // A 401/PGRST301-class error means our session token is no longer
@@ -57051,6 +56674,7 @@ async function _pushToSupabase(){
       console.warn('[RS] Push failed due to auth — attempting session refresh');
       try{
         const refreshed = await _supabase.auth.refreshSession();
+        if(!active()) return false;
         if(refreshed?.error || !refreshed?.data?.session){
           throw new Error('refresh failed');
         }
@@ -57115,6 +56739,7 @@ async function _pushToSupabase(){
     _saveTimeout=setTimeout(()=>{ if(_hasUnsavedChanges) _pushToSupabase(); }, backoffMs);
     return false;
   }finally{
+    if(attempt !== _saveAttemptId) return false;
     _isSaving=false;
     clearTimeout(_saveWatchdog); _saveWatchdog = null;
     // If a mutation landed while this save was in-flight, schedule a follow-up push
@@ -59397,12 +59022,10 @@ async function _toggleChatPin(convId, msgId){
   const _mid = (typeof msgId==='number') ? msgId : parseInt(msgId,10);
   if(!Number.isFinite(_mid)){ return; }
   let _res;
-  try{ _res=await _sb.rpc('rs_toggle_chat_pin',{p_practice:_rsPracticeId(), p_conv_id:String(convId), p_msg_id:_mid}); }
+  try{ _res=await _sb.rpc('rs_toggle_chat_pin',{p_practice:_ROW_ID, p_conv_id:String(convId), p_msg_id:_mid}); }
   catch(e){ if(typeof _toast==='function') _toast('Pin failed: '+(e&&e.message||e),'err'); return; }
   if(_res.error || !_res.data || _res.data.ok!==true){ if(typeof _toast==='function') _toast('Could not pin: '+((_res.data&&_res.data.error)||(_res.error&&_res.error.message)||'failed'),'warn'); return; }
-  try{ const d=await _pullFromSupabase(); if(d) _applyRemoteData(d); }catch(_){}
-  if(typeof renderChat === 'function') renderChat();
-  if(typeof _audit === 'function') _audit('chat.pin.toggle', { convId, msgId, pinned: !!_res.data.pinned });
+  await _refreshPrivateChat();
 }
 
 /**
@@ -59411,7 +59034,7 @@ async function _toggleChatPin(convId, msgId){
  * @param {Array<{id:string, text:string, author:string}>} messages
  */
 function _renderPinnedBanner(convId, messages){
-  const pins = (S.chatPins && S.chatPins[convId]) || [];
+  const pins = _getContextMessages().filter(m=>m.pinned).map(m=>m.id);
   if(!pins.length) return '';
   const lines = pins.map(id => {
     const m = (messages || []).find(x => x.id === id);
@@ -59703,5 +59326,6 @@ if(typeof window !== 'undefined'){
   </div>
 </div>
 
+<script>_SRC = '<!doctype html>\n' + document.documentElement.outerHTML;</script>
 </body>
 </html>

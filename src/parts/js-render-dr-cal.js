@@ -132,13 +132,13 @@ function renderDRCal(){
         if(fsite) filterBits.push(`site=${fsite}`);
         if(fsub) filterBits.push(`sub=${fsub}`);
         _bannerEl.innerHTML = `
-          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:#78350f">
+          <div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--rl);padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--amber-t)">
             <span style="font-size:16px">⚠</span>
             <div style="flex:1">
               <strong>${hidden}</strong> shift${hidden===1?'':'s'} hidden by active filters (${escHtml(filterBits.join(', '))})
-              ${kindsList ? `<br><span style="font-size:11.5px;opacity:0.85">Hidden shift types: ${escHtml(kindsList)}</span>` : ''}
+              ${kindsList ? `<br><span style="font-size:11px;opacity:0.85">Hidden shift types: ${escHtml(kindsList)}</span>` : ''}
             </div>
-            <button onclick="_drcClearFilters()" style="background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
+            <button onclick="_drcClearFilters()" style="background:#fff;border:1px solid var(--amber);color:var(--amber-t);font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear filters</button>
           </div>`;
         _bannerEl.style.display = '';
       } else {
@@ -254,7 +254,7 @@ function _renderDRCalDayView(focusISO, match){
     groups[site][bucket].push(s);
   });
   const siteKeys = Object.keys(groups).sort();
-  let html = `<div class="card" style="margin-bottom:12px">
+  let html = `<div class="card mb12" >
     <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span>${escHtml(dayLabel)}</span>
       ${isToday ? '<span class="tag tb" style="font-size:10px">TODAY</span>' : ''}
@@ -297,7 +297,7 @@ function _renderDRCalWeekView(focusISO, match){
   const sunISO = addDays(focusISO, -dow);
   const today = fmtDate(new Date());
   const wkLabel = `${parseDateLocal(sunISO).toLocaleString('default',{month:'short',day:'numeric'})} – ${parseDateLocal(addDays(sunISO,6)).toLocaleString('default',{month:'short',day:'numeric',year:'numeric'})}`;
-  let html = `<div class="card" style="margin-bottom:12px">
+  let html = `<div class="card mb12" >
     <div class="card-title">Week of ${escHtml(wkLabel)}</div>
     <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">`;
   ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach((dn,i) => {
@@ -345,7 +345,7 @@ function _renderDRCalListView(focusISO, match){
     el.innerHTML = `<div class="card"><div class="card-title">DR Assignments — Week of ${escHtml(wkLabel)}</div><div class="note ni">No DR assignments match the current filters for this week. Step ‹ › to browse other weeks.</div></div>`;
     return;
   }
-  let html = `<div class="card"><div class="card-title">DR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Subspecialty</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
+  let html = `<div class="card"><div class="card-title">DR Assignments — Week of ${escHtml(wkLabel)} <span style="font-weight:400;color:var(--rs-ink-3);font-size:11px">· ${rows.length} row${rows.length===1?'':'s'}</span></div><div class="scroll-x"><table><thead><tr><th>Date</th><th>Day</th><th>Shift</th><th>Physician</th><th>Hospital</th><th>Subspecialty</th><th>Slot</th><th>Notes</th></tr></thead><tbody>`;
   rows.forEach(s => {
     const p = _physById(s.physId);
     const pn = p ? `${p.last}, ${p.first}` : `Phys#${s.physId}`;
@@ -431,25 +431,25 @@ function _diagnoseDRImports(){
     const ms2 = monthsWithType('2nd');
     const ms3 = monthsWithType('3rd');
     const allMonths = [...new Set([...ms2, ...ms3])].sort();
-    verdictHtml = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;color:#78350f">
+    verdictHtml = `<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--rl);padding:12px 14px;color:var(--amber-t)">
       <strong>⚠ Most likely cause: viewing the wrong month.</strong><br>
       The calendar is showing <strong>${escHtml(ymView)}</strong> but no DR shifts exist for that month.
       ${allMonths.length ? `<br>2nd/3rd shifts exist for these months: <strong>${escHtml(allMonths.join(', '))}</strong> — change the Month picker above to one of those.` : '<br>You have DR shifts in other months but no 2nd/3rd in your data — confirm the import actually included those rows.'}
     </div>`;
   } else if(monthAll.length > monthShown.length && hasFilter){
-    verdictHtml = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;color:#78350f">
+    verdictHtml = `<div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--rl);padding:12px 14px;color:var(--amber-t)">
       <strong>⚠ Most likely cause: active filters are hiding records.</strong><br>
       ${monthAll.length - monthShown.length} of ${monthAll.length} shifts in ${escHtml(ymView)} are hidden.
       <br>Click <strong>Clear filters</strong> at the top of the calendar (yellow banner) to fix.
     </div>`;
   } else if(monthAll.length === 0 && all.length === 0){
-    verdictHtml = `<div style="background:#fee;border:1px solid #dc2626;border-radius:8px;padding:12px 14px;color:#7f1d1d">
+    verdictHtml = `<div style="background:#fee;border:1px solid var(--red);border-radius:var(--rl);padding:12px 14px;color:var(--red-t)">
       <strong>✗ Critical: no DR shifts in S at all.</strong><br>
       Either the import didn't write to local state, or local state was reset.
       Check Settings → Backups for a recent restore point.
     </div>`;
   } else {
-    verdictHtml = `<div style="background:#d1fae5;border:1px solid #059669;border-radius:8px;padding:12px 14px;color:#065f46">
+    verdictHtml = `<div style="background:var(--green-bg);border:1px solid var(--green);border-radius:var(--rl);padding:12px 14px;color:var(--green-t)">
       <strong>✓ Render path looks healthy.</strong><br>
       ${monthShown.length} of ${monthAll.length} shifts in ${escHtml(ymView)} are visible.
       If a specific record still isn't showing, paste its physId + date below.
@@ -467,7 +467,7 @@ function _diagnoseDRImports(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
         <div>
           <div style="font-weight:700;margin-bottom:6px">📊 Counts (entire S)</div>
-          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px;font-family:ui-monospace,monospace">
+          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12px;font-family:ui-monospace,monospace">
             Total DR shifts: <strong>${all.length}</strong><br>
             1st shifts: ${byType['1st'].length}<br>
             <strong style="color:${byType['2nd'].length>0?'var(--green-t)':'var(--red-t)'}">2nd shifts: ${byType['2nd'].length}</strong><br>
@@ -478,7 +478,7 @@ function _diagnoseDRImports(){
         </div>
         <div>
           <div style="font-weight:700;margin-bottom:6px">📅 Active month (${escHtml(ymView)})</div>
-          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px;font-family:ui-monospace,monospace">
+          <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12px;font-family:ui-monospace,monospace">
             In month total: <strong>${monthAll.length}</strong><br>
             1st: ${inMonth('1st').length}<br>
             <strong>2nd: ${inMonth('2nd').length}</strong><br>
@@ -488,17 +488,17 @@ function _diagnoseDRImports(){
           </div>
         </div>
       </div>
-      <div style="margin-top:14px">
+      <div class="mt14">
         <div style="font-weight:700;margin-bottom:6px">🎛 Active filters</div>
-        <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12.5px">
+        <div style="background:var(--bg3);padding:10px;border-radius:6px;font-size:12px">
           Physician: <strong>${escHtml(fpid?(_physById(+fpid)?.last||'#'+fpid):'(all)')}</strong> &middot;
           Shift: <strong>${escHtml(fsh||'(all)')}</strong> &middot;
           Site: <strong>${escHtml(fsite||'(all)')}</strong> &middot;
           Sub: <strong>${escHtml(fsub||'(all)')}</strong>
-          ${hasFilter ? '<br><button onclick="_drcClearFilters();document.querySelector(\'.modal-wrap.open .modal-close\')?.click()" style="margin-top:8px;background:#fff;border:1px solid #f59e0b;color:#78350f;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear all filters now</button>' : ''}
+          ${hasFilter ? '<br><button onclick="_drcClearFilters();document.querySelector(\'.modal-wrap.open .modal-close\')?.click()" style="margin-top:8px;background:#fff;border:1px solid var(--amber);color:var(--amber-t);font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer">Clear all filters now</button>' : ''}
         </div>
       </div>
-      <div style="margin-top:14px">
+      <div class="mt14">
         <div style="font-weight:700;margin-bottom:6px">🔬 Sample 2nd-shift records (first 5)</div>
         <div style="overflow-x:auto;background:var(--bg3);border-radius:6px">
           <table style="width:100%;font-size:12px;border-collapse:collapse">
@@ -518,7 +518,7 @@ function _diagnoseDRImports(){
           </table>
         </div>
       </div>
-      <div style="margin-top:14px;font-size:11.5px;color:var(--rs-ink-3);font-style:italic">
+      <div style="margin-top:14px;font-size:11px;color:var(--rs-ink-3);font-style:italic">
         If 2nd/3rd counts above are <strong>0</strong> but you expected imports, the rows never landed in S — re-run the Pick Sheet import and watch for errors in the success message. If counts are <strong>nonzero</strong> but visible-after-filters is 0, it's a filter problem.
       </div>
     </div>`;

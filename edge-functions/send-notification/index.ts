@@ -47,7 +47,8 @@ interface Body {
   html?: string;
   title?: string;
   url?: string;
-  recipients?: Array<{ email?: string; name?: string; first?: string; last?: string }>;
+  messageId?: number;
+  recipients?: Array<{ userId?: string; email?: string; name?: string; first?: string; last?: string }>;
   from_practice?: string;
   payload?: Record<string, unknown>;
 }
@@ -215,6 +216,19 @@ Deno.serve(async (req) => {
       }
       if (body.recipients.length > 25) return err(400, 'Message recipient limit is 25');
       body.html = undefined;
+      if (body.kind !== 'swapReq') {
+        if (!Number.isSafeInteger(body.messageId)) return err(409, 'Refresh RadScheduler to send a chat notification.');
+        const ids = body.recipients.map(r => r?.userId).filter((id): id is string => typeof id === 'string');
+        const { data, error } = await createClient(sbUrl, sbService).rpc('rs_chat_notification_targets', {
+          p_practice: callerPid, p_sender: callerUid, p_message: body.messageId, p_users: ids, p_kind: body.kind,
+        });
+        if (error) return err(503, 'Message delivery is unavailable.');
+        body.recipients = (data || []).filter((r: {email?: string}) => typeof r.email === 'string' && r.email);
+        if (!body.recipients?.length) return ok({ ok: true, sent: 0 });
+        body.subject = 'New RadScheduler chat message';
+        body.body = 'Sign in to RadScheduler to read the message.';
+        return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));
+      }
       body.subject = `[RadScheduler ${body.kind}] ${String(body.subject).slice(0, 180)}`;
       body.body = `${String(body.body).slice(0, 20_000)}\n\nSent by authenticated user ${callerEmail || callerUid}.`;
       return ok(await sendEmailBatch(body, sbUrl, sbService, callerPid));

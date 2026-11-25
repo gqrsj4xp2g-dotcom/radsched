@@ -346,6 +346,9 @@ test('backup restore drill validates and applies a Supabase backup row', async (
 
     S.physicians = [{ id: 99003, first: 'Current', last: 'Doctor', role: 'DR', fte: 1, active: true }];
     S._lastLocalChange = 0;
+    const expectedSavedAt = '2026-05-27T12:00:30.000Z';
+    S._remoteSavedAt = expectedSavedAt;
+    _hasUnsavedChanges = false;
     window.__rsMockSupabase.__backupRows.push({
       id: 'main_backup_e2e',
       practice_id: 'main',
@@ -391,6 +394,8 @@ test('backup restore drill validates and applies a Supabase backup row', async (
       sideAuditRows: window.__rsMockSupabase.__auditRows.filter(row => row.action === 'admin.restoreBackup').length,
       edgeFunctionName: window.__lastAdminOpsCall?.name || '',
       edgeAction: window.__lastAdminOpsCall?.body?.action || '',
+      expectedSavedAt: window.__lastAdminOpsCall?.body?.expectedSavedAt,
+      requestId: window.__lastAdminOpsCall?.body?.requestId,
     };
   });
 
@@ -401,6 +406,8 @@ test('backup restore drill validates and applies a Supabase backup row', async (
   expect(result.sideAuditRows).toBeGreaterThanOrEqual(1);
   expect(result.edgeFunctionName).toBe('admin-ops');
   expect(result.edgeAction).toBe('restore-backup');
+  expect(result.expectedSavedAt).toBe('2026-05-27T12:00:30.000Z');
+  expect(result.requestId).toMatch(/^[0-9a-f-]{36}$/);
 });
 
 test('stress-test revert helper opens backup restore picker', async ({ page }) => {

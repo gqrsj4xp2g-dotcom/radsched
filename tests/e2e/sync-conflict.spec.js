@@ -292,3 +292,23 @@ test('a realtime event too large to carry the data still updates the tab', async
   expect((await stat(A)).banner).toBe(false);
   await context.close();
 });
+
+test('a newer realtime update during debounce preserves the draft and its server baseline', async ({browser,baseURL}) => {
+  const {context,A,B}=await twoTabs(browser,baseURL);
+  await B.close();
+  await launch(A);
+  // Election is asynchronous. Wait for the row subscription before sending
+  // the mock's non-replayed event, just as a real subscribed tab would receive it.
+  await A.waitForFunction(()=>_isLeader && !!_realtimeSub);
+  const base=await A.evaluate(()=>S._remoteSavedAt);
+  await userEdit(A,'A');
+  await A.evaluate(()=>{
+    clearTimeout(_saveTimeout); // Deliver the remote event before this tab's flush.
+    window.__mockExternalWrite('main',d=>{d.cellNotes.__e2eB='other writer';});
+  });
+  await expect(A.locator('#rs-conflict-banner')).toBeVisible();
+  expect((await stat(A)).marks).toBe('__e2eA');
+  expect(await A.evaluate(()=>S._remoteSavedAt)).toBe(base);
+  expect(await serverMarks(A)).toBe('__e2eB');
+  await context.close();
+});

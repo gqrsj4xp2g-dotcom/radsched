@@ -7,7 +7,7 @@
 // Bump CACHE_VERSION when you ship index.html changes so old shells are
 // evicted on the next 'activate' event the moment the new SW takes control.
 
-const CACHE_VERSION = 'rs-v135';
+const CACHE_VERSION = 'rs-v136';
 const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 
 // The set of URLs we want available offline. Keep this minimal — every new
@@ -17,14 +17,14 @@ const CACHE_NAME = 'radsched-' + CACHE_VERSION;
 // be broken by a CDN-blocking network. Served same-origin via the handler below.
 // NOTE: keep this array string-literals only (the smoke-check scans it by regex).
 const SHELL = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/favicon.svg',
-  '/vendor/supabase.js',
-  '/vendor/xlsx.full.min.js',
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/favicon.svg',
+  './vendor/supabase.js',
+  './vendor/xlsx.full.min.js',
 ];
 
 // Third-party runtime dependencies the app needs to BOOT. They load
@@ -66,7 +66,7 @@ self.addEventListener('activate', (e) => {
         // (offline during activate), the existing shell stays as the fallback.
         k !== CACHE_NAME
           ? caches.delete(k)
-          : caches.open(k).then((c) => Promise.all(['/', '/index.html'].map((u) =>
+          : caches.open(k).then((c) => Promise.all(['./', './index.html'].map((u) =>
               fetch(u, { cache: 'no-store' })
                 .then((r) => (r && r.status === 200 && r.type === 'basic') ? c.put(u, r.clone()) : null)
                 .catch(() => null)
@@ -144,7 +144,7 @@ self.addEventListener('fetch', (e) => {
   // fallback only.
   const isNavigation = e.request.mode === 'navigate'
     || (e.request.destination === 'document')
-    || url.pathname === '/'
+    || url.href === self.registration.scope
     || url.pathname.endsWith('/index.html');
   if (isNavigation) {
     // rs-v126: for real page navigations ask the network for the document with
@@ -169,7 +169,7 @@ self.addEventListener('fetch', (e) => {
           }
           return resp;
         })
-        .catch(() => caches.match(e.request).then((cached) => cached || Promise.reject(new Error('offline'))))
+        .catch(() => caches.open(CACHE_NAME).then(async c => (await c.match(e.request)) || (await c.match('./index.html')) || Promise.reject(new Error('offline'))))
     );
     return;
   }
@@ -227,11 +227,11 @@ self.addEventListener('push', (e) => {
   catch (_) { payload = { title: 'RadScheduler', body: e.data.text() }; }
   const opts = {
     body: payload.body || '',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    icon: new URL('icons/icon-192.png', self.registration.scope).href,
+    badge: new URL('icons/icon-192.png', self.registration.scope).href,
     tag: payload.tag || 'rs-notif',
     data: {
-      url: payload.url || '/',
+      url: new URL((payload.url || './').replace(/^\/(?!\/)/, './'), self.registration.scope).href,
       // Pass through any RadScheduler-specific markers so the
       // notificationclick handler below can route ack actions.
       rsKind:  payload.rsKind  || payload.kind || null,

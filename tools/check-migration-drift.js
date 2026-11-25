@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 const sqlDir = path.join(root, 'docs/sql');
@@ -20,6 +21,27 @@ const migrationFiles = fs.existsSync(migrationDir)
   : [];
 if (migrationFiles.length < 58) {
   failures.push(`supabase/migrations: expected fetched remote history plus local hardening migrations (found ${migrationFiles.length}, need >= 58)`);
+}
+// These six production ledger entries were previously missing even though
+// the aggregate migration count passed. Pin the verified CLI exports so a
+// missing or rewritten historical migration fails independently of file count.
+const recoveredMigrations = [
+  ['20260720233544_rs_resolve_swap_atomic_approve.sql', '909ff1f73a9eff5ae6e4c7df39c8e9d2581165541991d5204461cd5379e23afa'],
+  ['20260728121532_rs_vacation_picker_rpcs.sql', '6c3b8ae43e3ab97dcea8b07d672f753cc43c3e1e02d52bf563336447d012e04d'],
+  ['20260728121600_rs_set_vac_picks_path_fix.sql', 'bb6ba5d5f67d85b995c2ddaa52409d3c38ea9576ba7bfe2177c93e475ab29ee0'],
+  ['20260731132930_rs_claim_open_shift_wshift.sql', '35700786b68cc08cbb01b3ca1ac3e0994d8197ffd070bbf28ae4773de3a82a1e'],
+  ['20260731134641_rs_partial_open_shift_claims.sql', 'ee546cfd79d367a37c1d4bccf28c4b6aff9a2917374dc0085b31403cda806061'],
+  ['20260731173416_rs_claim_open_shift_any_role.sql', '1bfdc1923d87b3b1f52fc3c3efb86983ef90adce2034db248aa66a6ed69fae15'],
+];
+for (const [name, expectedDigest] of recoveredMigrations) {
+  if (!migrationFiles.includes(name)) {
+    failures.push(`supabase/migrations: missing production migration ${name}`);
+    continue;
+  }
+  const sql = fs.readFileSync(path.join(migrationDir, name), 'utf8').replace(/\r\n/g, '\n');
+  if (createHash('sha256').update(sql).digest('hex') !== expectedDigest) {
+    failures.push(`${name}: SQL differs from the verified production migration`);
+  }
 }
 const ingestHashMigrationName = migrationFiles.find(name => name.includes('rs_hash_ingest_credentials'));
 if (!ingestHashMigrationName) {
@@ -111,6 +133,23 @@ for (const [label, pattern] of policyChecks) {
   requireMatch(label.startsWith('telemetry_') ? allScope : hardeningScope, label, pattern);
 }
 
+// Check executable history independently of reference SQL. A documented fix
+// missing from a fresh installation must fail even if the runbook describes it.
+const migrationSql = migrationFiles.map(name => fs.readFileSync(path.join(migrationDir, name), 'utf8')
+  .replace(/--[^\n]*/g, '')).join('\n');
+const migrationScope = { name: 'supabase/migrations/*.sql', text: migrationSql };
+const readFix = migrationFiles.find(name => name.endsWith('_rs_same_practice_read.sql'));
+const readFixScope = { name: 'same-practice read migration', text: readFix ? fs.readFileSync(path.join(migrationDir, readFix), 'utf8') : '' };
+requireMatch(readFixScope, 'SELECT-only policy repair', /cmd\s*=\s*'SELECT'/i);
+requireMatch(readFixScope, 'membership predicate', /select\s+target_practice_id\s*=\s*\(\(select\s+auth\.jwt\(\)\)\s*->\s*'app_metadata'\s*->>\s*'practiceId'\)/i);
+requireMatch(readFixScope, 'MFA-aware mutation helper', /radscheduler_non_admin_same_practice\([\s\S]*?not in \(\s*'admin'\s*,\s*'superuser'\s*\)[\s\S]*?->> 'aal' = 'aal2'/i);
+for (const name of ['rs_restore_practice_backup', 'rs_run_daily_practice_backups', 'rs_capture_practice_backup']) {
+  requireMatch(migrationScope, name, new RegExp('create (?:or replace )?function public\\.' + name + '\\(', 'i'));
+}
+requireMatch(migrationScope, 'server daily backup schedule', /cron\.schedule\('rs-daily-practice-backups',/i);
+requireMatch(migrationScope, 'durable restore receipt', /create table public\.rs_restore_receipts\s*\(/i);
+requireMatch(migrationScope, 'audit delete guard', /create trigger radscheduler_audit_prevent_delete_trg/i);
+
 const objectChecks = [
   ['audit dedupe unique index', /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+radscheduler_audit_dedupe_idx/i],
   ['shift touch function with fixed search_path', /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\._radscheduler_shifts_touch\(\)[\s\S]*?SET\s+search_path\s*=\s*public,\s*pg_temp/i],
@@ -130,6 +169,7 @@ const objectChecks = [
 
 for (const [label, pattern] of objectChecks) {
   requireMatch(allScope, label, pattern);
+  if (!label.startsWith('same-practice access helper')) requireMatch(migrationScope, label, pattern);
 }
 
 rejectMatch(hardeningScope, 'broad FOR ALL authenticated policy still present in hardening migration', /CREATE\s+POLICY[\s\S]*?\bFOR\s+ALL\s+TO\s+authenticated/i);

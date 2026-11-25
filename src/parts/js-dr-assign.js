@@ -1,3 +1,18 @@
+// Settings stores five weekly profiles. A sixth calendar row uses the final
+// profile, including specialty requirements from practices using weekly data.
+function _drSlotWeek(date){
+  return Math.min(5, getWeek(date, date.slice(0,7)));
+}
+
+function _drAutoDatesFree(physId, dates){
+  const away = _awayDays(physId);
+  return dates.every(date => !away.has(date) && !_physBookingsOnDate(physId, date).length);
+}
+
+function _drAutoRulesOk(p, ctx){
+  return natLangRulesOk(ctx) && tbRulesOk(p, ctx) && callDayRulesOk(p, ctx);
+}
+
 function previewAA(){
   if(!_adminOnly('preview auto-assign')) return;
   const ym=document.getElementById('aa-mo').value||_todayLocalYM();
@@ -19,7 +34,7 @@ function previewAA(){
   const drs=S.physicians.filter(p=>p.drFte>0&&p.role!=='IR');
   // Per-physician effective target (vacation-adjusted) for this month
   const effTarget={};
-  drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym)||1; });
+  drs.forEach(p=>{ effTarget[p.id]=drEffectiveTarget(p,ym); });
   // wd = total weekday DR shifts, home = subset that are Home shifts. The
   // home count powers the home/in-person preference tiebreaker in
   // sortByDeficit so we can compare current Home% to p.drHomePctPref.
@@ -68,7 +83,7 @@ function previewAA(){
       return isHomeSlot ? distance : -distance;
     };
     return pool.slice().sort((a,b)=>{
-      const rA=cnt[a.id].wd/effTarget[a.id], rB=cnt[b.id].wd/effTarget[b.id];
+      const rA=cnt[a.id].wd/Math.max(1,effTarget[a.id]), rB=cnt[b.id].wd/Math.max(1,effTarget[b.id]);
       if(Math.abs(rA-rB)>0.005) return rA-rB; // lowest fill% first
       // Home/in-person preference — only kicks in for physicians who set
       // drHomePctPref. 5% threshold prevents micro-fluctuations from
@@ -104,7 +119,14 @@ function previewAA(){
 
   if(typ==='weekday'||typ==='both'){
     cells.filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)).forEach(c=>{
-      const wk=getWeek(c.date,ym);
+      const wk=_drSlotWeek(c.date);
+      // TWO-PHASE FILL (2026-07): subspecialty slots fill FIRST across ALL
+      // sites/shifts for the day, then general slots — so a scarce specialist
+      // can't be consumed by one site's general slot while another site's
+      // subspecialty slot goes unfilled. Sub-holders whose specialty slots
+      // are already covered overflow into general slots in phase 2 (the
+      // general pool has no sub restriction).
+      ['sub','any'].forEach(_subPhase=>{
       S.sites.filter(st=>st.name!=='At Home / Remote').forEach(st=>{
         // Hospital sites now process BOTH '1st' (in-person) and 'Home' (read-
         // from-home attributed to this hospital). The same fillList / sub-
@@ -145,7 +167,7 @@ function previewAA(){
           const anyLeft = slots - fillList.length;
           for(let i=0; i<anyLeft; i++) fillList.push({targetSub: null, slotIndex:_nextSlotIdx++});
 
-          fillList.forEach(({targetSub, slotIndex}) => {
+          fillList.filter(f=>_subPhase==='sub'?!!f.targetSub:!f.targetSub).forEach(({targetSub, slotIndex}) => {
             // Resolve the admin-set slot label for this position, if any
             const _slotLabel = (S.siteSlotLabels||{})[`${st.name}|${sh}|#${slotIndex}`] || '';
             const pool=drs.filter(p=>{
@@ -157,38 +179,12 @@ function previewAA(){
               if(!dayConditionSiteOk(p,st.name,c.date,'dr-shift'))return false;
               if(!sequenceOk(p,c.date,ym,st.name,_slotLabel))return false;
               if(isSoldBackDate(p.id,c.date)&&st.name!=='At Home / Remote')return false;
-              const vd=vacDays(p.id);if(vd.has(c.date))return false;
+              if(!_drAutoDatesFree(p.id,[c.date]))return false;
               if(_has2ndOr3rdShift(p.id,c.date))return false;
-              if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-              // Pre-existing manually-assigned shifts on this date. Previously
-              // only the current-preview pool was checked, so auto-assign could
-              // double-book a physician who already had a manual shift.
-              // For in-person shifts ('1st'/'2nd'/'3rd'): existing Home shifts
-              // don't block — auto can displace them with procedure work.
-              // For Home shifts: existing Home shifts DO block, otherwise we'd
-              // double-assign the same phys to two Home slots on the same day.
-              if(sh==='Home'){
-                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date))return false;
-              } else {
-                if(S.drShifts.some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
-              }
-              if((S.irShifts||[]).some(s=>s.physId===p.id&&s.date===c.date&&s.shift!=='Home'))return false;
-              // Also block on daily/weekend IR calls so auto-assign doesn't
-              // stack a DR day shift on top of call coverage.
-              if((S.irCalls||[]).some(ic=>{
-                if(ic.physId!==p.id) return false;
-                if(ic.callType==='daily') return ic.date===c.date;
-                if(ic.callType==='weekend'){
-                  return c.date===ic.date||c.date===addDays(ic.date,1)
-                       ||c.date===addDays(ic.date,2)||c.date===addDays(ic.date,3);
-                }
-                return false;
-              })) return false;
+              if(preview.some(a=>a.physId===p.id&&a.date===c.date))return false;
               const assumedSub = targetSub || p.drSubs?.[0] || '';
               const _ctx={physId:p.id,date:c.date,site:st.name,shift:sh,sub:assumedSub,kind:'dr-shift'};
-              if(!natLangRulesOk(_ctx))return false;
-              if(!tbRulesOk(p,_ctx))return false;
-              if(!callDayRulesOk(p,_ctx))return false;
+              if(!_drAutoRulesOk(p,_ctx))return false;
               return cnt[p.id].wd<effTarget[p.id];
             });
             const sorted=sortByDeficit(pool,st.name,c.date,sh,'dr-shift');
@@ -211,82 +207,116 @@ function previewAA(){
           });
         });
       });
-      // Configured home slots
-      const hNeed=S.siteSlots[`At Home / Remote|${wk}|Home`]||0;
-      const hEx=S.drShifts.filter(s=>s.date===c.date&&s.shift==='Home').length
-               +preview.filter(a=>a.date===c.date&&a.shift==='Home').length;
-      if(hNeed-hEx>0){
-        const hpool=sortByDeficit(drs.filter(p=>{
-          if(!p.shiftElig.home)return false;
-          const vd=vacDays(p.id);if(vd.has(c.date))return false;
-          if(preview.find(a=>a.physId===p.id&&a.date===c.date))return false;
-          const _hctx={physId:p.id,date:c.date,site:'At Home / Remote',shift:'Home',kind:'dr-shift'};
-          if(!natLangRulesOk(_hctx))return false;
-          if(!tbRulesOk(p,_hctx))return false;
-          if(!callDayRulesOk(p,_hctx))return false;
-          return cnt[p.id].wd<effTarget[p.id];
-        }),'At Home / Remote',c.date,'Home','dr-shift');
-        for(let i=0;i<hNeed-hEx;i++){const p=hpool[i];if(!p)break;
-          // Home slots are also labeled per-shift, so look up the label
-          // for slot index = (already-placed Home count + i for THIS pass).
-          const _hSlotIdx = hEx + i;
-          const _hSlotLabel = (S.siteSlotLabels||{})[`At Home / Remote|Home|#${_hSlotIdx}`] || '';
-          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true,slotLabel:_hSlotLabel});
-          cnt[p.id].wd++;
-          cnt[p.id].home = (cnt[p.id].home||0) + 1;}
-      }
-      // Auto-home: fill ALL remaining physicians up to their effective FTE target
-      sortByDeficit(drs,'At Home / Remote',c.date,'Home','dr-shift').forEach(p=>{
-        const vd=vacDays(p.id);if(vd.has(c.date))return;
-        if(!p.shiftElig.home)return;
-        const alreadyDR=S.drShifts.find(s=>s.physId===p.id&&s.date===c.date);
-        const alreadyWk=S.weekendCalls.find(w=>w.physId===p.id&&((w.satDate||w.date)===c.date||(w.sunDate)===c.date));
-        const alreadyPrev=preview.find(a=>a.physId===p.id&&a.date===c.date);
-        if(!alreadyDR&&!alreadyWk&&!alreadyPrev&&cnt[p.id].wd<effTarget[p.id]){
-          preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:'At Home / Remote',sub:p.drSubs[0]||'',notes:'Auto-home',autoHome:true});
-          cnt[p.id].wd++;
-          cnt[p.id].home = (cnt[p.id].home||0) + 1;
-        }
+      });   // end sub→any phase loop
+      // Fill configured remote positions first, then eligible physicians who
+      // still need weekday work. Both use exactly the same eligibility rules.
+      const homeSite='At Home / Remote';
+      const homeNeed=Number(S.siteSlots[`${homeSite}|${wk}|Home`])||0;
+      let homeCount=S.drShifts.filter(s=>s.date===c.date && s.shift==='Home' && (!s.site || s.site===homeSite)).length;
+      const homePool=drs.filter(p=>{
+        if(!p.shiftElig?.home || cnt[p.id].wd>=effTarget[p.id])return false;
+        if(preview.some(a=>a.physId===p.id && a.date===c.date))return false;
+        if(!_drAutoDatesFree(p.id,[c.date]))return false;
+        const ctx={physId:p.id,date:c.date,site:homeSite,shift:'Home',sub:p.drSubs?.[0]||'',kind:'dr-shift'};
+        return _drAutoRulesOk(p,ctx);
       });
+      for(const p of sortByDeficit(homePool,homeSite,c.date,'Home','dr-shift')){
+        const slotLabel=homeCount<homeNeed ? (S.siteSlotLabels||{})[`${homeSite}|Home|#${homeCount}`]||'' : '';
+        preview.push({type:'home',physId:p.id,date:c.date,shift:'Home',site:homeSite,sub:p.drSubs?.[0]||'',notes:'Auto-home',autoHome:true,slotLabel});
+        cnt[p.id].wd++;
+        cnt[p.id].home++;
+        homeCount++;
+      }
+      let posted=S.openShifts.filter(o=>!o.claimedBy && o.date===c.date && o.site===homeSite && o.shiftType==='Home Shift').length;
+      for(let i=homeCount;i<homeNeed;i++){
+        gaps.push(`${c.date} ${homeSite} Home`);
+        if(posted>0){ posted--; continue; }
+        S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Home Shift',sub:'',site:homeSite,group:'DR',claimedBy:null,notes:''});
+      }
     });
   }
   if(typ==='weekend'||typ==='both'){
     const excludedWeekends = []; // {satDate, matchedDate, reason} for diagnostic output
     cells.filter(c=>c.day&&c.dow===6).forEach(c=>{
-      // Skip a weekend ONLY when BOTH Saturday and Sunday are defined holidays.
-      // A single-day holiday (only Sat or only Sun) still needs the OTHER day
-      // covered by regular weekend call — holiday call handles the holiday day
-      // and weekend call handles the non-holiday day. A Friday-before or
-      // Monday-after holiday does NOT affect the Sat-Sun weekend assignment.
-      // The Holiday Definitions tab is authoritative for what's a holiday.
+      // HOLIDAY WEEKENDS are excluded from the auto-builder up front: if
+      // EITHER Saturday or Sunday is a defined holiday, holiday call covers
+      // that whole weekend — regular weekend call must not be assigned (or
+      // gaps posted) for it. A Friday-before or Monday-after holiday does
+      // NOT affect the Sat–Sun weekend by itself unless the holiday block's
+      // dates include a weekend day. The Holiday Definitions tab (with the
+      // federal-holiday fallback) is authoritative for what's a holiday.
       const sunDate = addDays(c.date, 1);
       const satIsHoliday = isHolidayBlackout(c.date);
       const sunIsHoliday = isHolidayBlackout(sunDate);
-      if(satIsHoliday && sunIsHoliday){
-        const reason = _holidayReasonFor(c.date);
-        excludedWeekends.push({satDate: c.date, matchedDate: c.date, reason, allHoliday: true});
+      if(satIsHoliday || sunIsHoliday){
+        const reason = _holidayReasonFor(satIsHoliday ? c.date : sunDate);
+        excludedWeekends.push({satDate: c.date, matchedDate: satIsHoliday ? c.date : sunDate, reason, allHoliday: satIsHoliday && sunIsHoliday});
         return;
       }
-      Object.entries(S.wkndNeeds).forEach(([sub,need])=>{
-        const ex=S.weekendCalls.filter(w=>(w.satDate||w.date)===c.date&&w.sub===sub).length
-                +preview.filter(a=>a.type==='wk'&&a.date===c.date&&a.sub===sub).length;
-        if(ex>=1)return;
-        const pool=drs.filter(p=>{
-          if(!p.shiftElig.wknd||!p.drSubs.includes(sub))return false;
-          const vd=vacDays(p.id);
-          if(vd.has(c.date)||vd.has(sunDate))return false;
-          const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
-          const _wkctx={physId:p.id,date:c.date,site:p.anchorSite||p.drSite||'',shift:'wknd',sub,kind:'dr-weekend'};
-          if(!natLangRulesOk(_wkctx))return false;
-          if(!tbRulesOk(p,_wkctx))return false;
-          return cnt[p.id].wk<_wkCap;
-        }).sort((a,b)=>{
-          const rA=cnt[a.id].wk/maxDR(a,'wk'), rB=cnt[b.id].wk/maxDR(b,'wk');
-          if(Math.abs(rA-rB)>0.005) return rA-rB;
-          return cnt[b.id].wk-cnt[a.id].wk;
+      // 2026-07 redesign: each needed slot is TWO shifts (day + swing);
+      // SUBSPECIALTY slots fill BEFORE general ('') slots so specialty
+      // coverage is staffed first; needs come from the per-weekend override
+      // merged over the global defaults, and the configured COUNT is honored
+      // (the old pass hard-capped at 1 and even assigned subs with need=0).
+      const _needEntries=Object.entries(_wkndNeedsFor(c.date))
+        .filter(([,need])=>(_wkndNeedCount(need,'day')+_wkndNeedCount(need,'swing'))>0)
+        .sort((a,b)=>(a[0]===''?1:0)-(b[0]===''?1:0));   // subs first, general last
+      const _yr=c.date.slice(0,4);
+      _needEntries.forEach(([sub,need])=>{
+        ['day','swing'].forEach(wshift=>{
+          let ex=S.weekendCalls.filter(w=>(w.satDate||w.date)===c.date&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
+                +preview.filter(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&(a.sub||'')===sub&&((a.wshift||'day')===wshift)).length;
+          while(ex<_wkndNeedCount(need,wshift)){
+            const pool=drs.filter(p=>{
+              if(!p.shiftElig.wknd)return false;
+              // Diagnostic weekend call keys on DAY-shift DR FTE: a 2nd/3rd-
+              // shift-only radiologist (day FTE 0) gets no weekend call.
+              if(_drDayFte(p)<=0)return false;   // daytime DR FTE required for ALL weekend call (2026-07-31: no swing exception)
+              if(sub&&!p.drSubs.includes(sub))return false;
+              // Non-Eastern physicians (by home address) work SWING only —
+              // their local hours align with the swing shift, not day.
+              if(wshift==='day'&&!_wkndDayOk(p))return false;
+              if(!_drAutoDatesFree(p.id,[c.date,sunDate]))return false;
+              // Same physician shouldn't hold two shifts the same weekend
+              if(preview.some(a=>a.type==='wk'&&(a.satDate||a.date)===c.date&&a.physId===p.id))return false;
+              // No back-to-back weekend call — inherent to ALL weekend
+              // assignment (matches the IR rule + the manual-add block).
+              if(typeof _hasAdjacentWeekend==='function'&&_hasAdjacentWeekend(p.id,c.date))return false;
+              if(preview.some(a=>a.type==='wk'&&a.physId===p.id&&_daysBetween(a.satDate||a.date,c.date)===7))return false;
+              // Summer cap: ≤ N weekends Jun 1 – Aug 31 (default 2)
+              if(_wkndIsSummer(c.date)&&_wkndSummerCount(p.id,_yr,preview)>=_wkndSummerCapFor(p,_yr))return false;
+              // Yearly cap × DR FTE × part of the start year on staff (unset = no cap)
+              const _yc=_wkndYearCap(p,_yr);
+              if(_yc!=null&&_wkndYearCount(p.id,_yr,preview)>=_yc)return false;
+              const _wkCap=p.seqRules?.maxWkCalls||maxDR(p,'wk');
+              const _wkctx={physId:p.id,date:c.date,site:'',shift:'wknd',sub,kind:'dr-weekend'};
+              if(!_drAutoRulesOk(p,_wkctx))return false;
+              return cnt[p.id].wk<_wkCap;
+            }).sort((a,b)=>{
+              const rA=cnt[a.id].wk/maxDR(a,'wk'), rB=cnt[b.id].wk/maxDR(b,'wk');
+              if(Math.abs(rA-rB)>0.005) return rA-rB;
+              return cnt[b.id].wk-cnt[a.id].wk;
+            });
+            if(pool.length){
+              const p=pool[0];
+              preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:'',ctype:'Primary',wshift,notes:'Auto'});
+              cnt[p.id].wk++;
+            } else {
+              // No candidates — post EVERY remaining unfilled slot of this
+              // sub+shift to the shift market (not just the first), deduped
+              // against unclaimed posts already there so re-previewing never
+              // double-posts, then stop looping the same empty pool.
+              let _osDup=(S.openShifts||[]).filter(o=>o.shiftType==='Weekend Call'&&!o.claimedBy&&o.date===c.date&&(o.sub||'')===sub&&(o.wshift||(o.notes==='Swing shift'?'swing':'day'))===wshift).length;
+              for(let miss=ex;miss<_wkndNeedCount(need,wshift);miss++){
+                gaps.push(`Weekend ${c.date} ${sub||'General'} (${wshift})`);
+                if(_osDup>0){ _osDup--; continue; }
+                S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'At Home / Remote',group:'DR',claimedBy:null,wshift,notes:wshift==='swing'?'Swing shift':'Day shift'});
+              }
+              break;
+            }
+            ex++;
+          }
         });
-        if(pool.length){const p=pool[0];preview.push({type:'wk',physId:p.id,satDate:c.date,sunDate,sub,site:p.anchorSite||p.drSite,ctype:'Primary',notes:'Auto'});cnt[p.id].wk++;}
-        else{gaps.push(`Weekend ${c.date} ${sub}`);S.openShifts.push({id:S.nextId++,date:c.date,shiftType:'Weekend Call',sub,site:'TBD',group:'DR',claimedBy:null,notes:''});}
       });
     });
     // Stash excluded weekends in a module-level var so the UI render can show them
@@ -304,7 +334,7 @@ function previewAA(){
   const excluded = S._lastAAExcludedHolidayWknds || [];
   if(excluded.length){
     html += `<div class="note ni" style="margin-bottom:10px;font-size:11px">
-      <strong>🏖 ${excluded.length} weekend${excluded.length>1?'s':''} skipped (both Sat + Sun are defined holidays)</strong> — fully covered by Holiday Auto-Assign:
+      <strong>🏖 ${excluded.length} holiday weekend${excluded.length>1?'s':''} skipped (Sat or Sun is a defined holiday)</strong> — covered by Holiday Auto-Assign:
       <div style="margin-top:6px;font-family:monospace;line-height:1.6;max-height:120px;overflow-y:auto">
         ${excluded.map(x=>{
           const name = x.reason?.name || '—';
@@ -315,11 +345,11 @@ function previewAA(){
   }
 
   // ── FTE Attainment Table ──────────────────────────────────────────────────
-  html+=`<div class="card" style="margin-bottom:10px">
+  html+=`<div class="card mb10" >
     <div class="card-title" style="font-size:12px">FTE Attainment — ${new Date(ym+'-01').toLocaleString('default',{month:'long',year:'numeric'})}
       <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Targets adjusted for vacation/blackout days</span>
     </div>
-    <div style="overflow-x:auto"><table><thead><tr>
+    <div class="scroll-x"><table><thead><tr>
       <th>Physician</th><th>FTE</th><th>Available Days</th>
       <th>Existing</th><th>+New</th><th>Total</th><th>Target</th><th>Attain %</th>
       ${typ!=='weekday'?'<th>Wknd</th><th>Wknd Target</th>':''}
@@ -331,37 +361,37 @@ function previewAA(){
     const tgt=effTarget[p.id];
     const pct=tgt>0?Math.round(total/tgt*100):100;
     const pctColor=pct>=95?'var(--green-t)':pct>=80?'var(--amber,#d97706)':'var(--red-t)';
-    const vdCount=vacDays(p.id);
+    const vdCount=_awayDays(p.id);
     const availDays=buildCal(ym).filter(c=>c.day&&!c.isWknd&&!isHolidayBlackout(c.date)&&!vdCount.has(c.date)).length;
     const wkExist=wkCnt(p.id,ym);
     const wkNew=preview.filter(a=>a.physId===p.id&&a.type==='wk').length;
     const wkTgt=maxDR(p,'wk');
     html+=`<tr>
-      <td style="font-weight:600">${pnameHtml(p.id)}</td>
-      <td style="text-align:center">${p.drFte}</td>
-      <td style="text-align:center;color:var(--txt3)">${availDays}</td>
-      <td style="text-align:center;color:var(--txt3)">${existing}</td>
+      <td class="fw6">${pnameHtml(p.id)}</td>
+      <td class="tac">${p.drFte}</td>
+      <td class="tac txt3">${availDays}</td>
+      <td class="tac txt3">${existing}</td>
       <td style="text-align:center;color:var(--teal-t)">+${newShifts}</td>
-      <td style="text-align:center;font-weight:700">${total}</td>
-      <td style="text-align:center;color:var(--txt3)">${tgt}</td>
+      <td class="tac fw7">${total}</td>
+      <td class="tac txt3">${tgt}</td>
       <td style="text-align:center;font-weight:800;color:${pctColor}">${pct}%</td>
-      ${typ!=='weekday'?`<td style="text-align:center">${wkExist+wkNew}</td><td style="text-align:center;color:var(--txt3)">${wkTgt}</td>`:''}
+      ${typ!=='weekday'?`<td class="tac">${wkExist+wkNew}</td><td class="tac txt3">${wkTgt}</td>`:''}
     </tr>`;
   });
   html+=`</tbody></table></div></div>`;
 
   if(hospPrev.length+wkPrev.length>0){
-    html+='<div style="overflow-x:auto"><table><thead><tr><th>Physician</th><th>Date</th><th>Type</th><th>Site</th><th>Anchor?</th></tr></thead><tbody>';
+    html+='<div class="scroll-x"><table><thead><tr><th>Physician</th><th>Date</th><th>Type</th><th>Site</th><th>Anchor?</th></tr></thead><tbody>';
     [...hospPrev,...wkPrev].slice(0,30).forEach(a=>{
       const p=_physById(a.physId);
       const site=a.site||''; const isAnc=p?.anchorSite===site;
       html+=`<tr><td>${pnameHtml(a.physId)}</td><td>${a.satDate||a.date}</td><td><span class="tag ${a.type==='wk'?'tg':'tb'}">${a.type==='wk'?'Weekend':a.shift}</span></td><td>${site}</td><td>${isAnc?'<span class="tag tg">✓</span>':'—'}</td></tr>`;
     });
-    if(hospPrev.length+wkPrev.length>30) html+=`<tr><td colspan="5" style="color:var(--txt3)">...and ${hospPrev.length+wkPrev.length-30} more</td></tr>`;
+    if(hospPrev.length+wkPrev.length>30) html+=`<tr><td colspan="5" class="txt3">...and ${hospPrev.length+wkPrev.length-30} more</td></tr>`;
     html+='</tbody></table></div>';
   }
-  if(homePrev.length) html+=`<div class="note ni" style="margin-top:8px">+ ${homePrev.length} at-home fills for unscheduled DR physicians.</div>`;
-  if(gaps.length) html+=`<div class="note nw" style="margin-top:8px">${gaps.length} gap(s) — open shifts created.</div>`;
+  if(homePrev.length) html+=`<div class="note ni mt8" >+ ${homePrev.length} at-home fills for unscheduled DR physicians.</div>`;
+  if(gaps.length) html+=`<div class="note nw mt8" >${gaps.length} gap(s) — open shifts created.</div>`;
   document.getElementById('aa-box').innerHTML=html;
   document.getElementById('aa-apply').style.display=preview.length?'inline-block':'none';
 }function applyAA(){
@@ -369,9 +399,19 @@ function previewAA(){
   if(!S.aaPreview.length){ if(typeof _toast==='function') _toast('Run Preview first to see what will be assigned.','info'); return; }
   const toApply=[...S.aaPreview];
   S.aaPreview=[];
+  let applied=0;
   toApply.forEach(a=>{
-    if(a.type==='wk')
-      S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',notes:'Auto'});
+    const p=_physById(a.physId);
+    const weekend=a.type==='wk';
+    const date=a.date||a.satDate;
+    const dates=weekend ? [date,a.sunDate||addDays(date,1)] : [date];
+    const ctx={physId:a.physId,date,site:a.site||'',shift:weekend?'wknd':a.shift,sub:a.sub||'',kind:weekend?'dr-weekend':'dr-shift'};
+    if(!p || !_drAutoDatesFree(p.id,dates) || !_drAutoRulesOk(p,ctx))return;
+    const ym=date.slice(0,7);
+    if(!weekend && drCnt(p.id,ym)>=drEffectiveTarget(p,ym))return;
+    applied++;
+    if(weekend)
+      S.weekendCalls.push({id:S.nextId++,physId:a.physId,satDate:a.satDate||a.date,sunDate:a.sunDate||addDays(a.satDate||a.date,1),sub:a.sub,site:a.site,ctype:'Primary',wshift:a.wshift||'day',notes:'Auto'});
     else
       S.drShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:a.shift,site:a.site,sub:a.sub,notes:a.notes||'Auto',autoHome:!!a.autoHome,slotLabel:a.slotLabel||''});
   });
@@ -382,6 +422,7 @@ function previewAA(){
   // apply runs. Without this, the second-and-later applies looked
   // like they did nothing on the calendar.
   if(typeof _afterMutation === 'function') _afterMutation();
-  document.getElementById('aa-box').innerHTML=`<div class="note ns">${toApply.length} shifts applied.</div>`;
+  const skipped=toApply.length-applied;
+  document.getElementById('aa-box').innerHTML=`<div class="note ${skipped?'nw':'ns'}">${applied} shifts applied.${skipped?' '+skipped+' skipped after eligibility changed. Run Preview again.':''}</div>`;
   S.aaPreview=[];document.getElementById('aa-apply').style.display='none';
 }

@@ -1,8 +1,7 @@
 name: Deploy to GitHub Pages
 
 # Auto-deploy index.html + sibling files to GitHub Pages on every push to main.
-# The repo's existing disk-watch autopush keeps index.html in sync from the
-# author's laptop; this workflow takes that committed state and serves it.
+# Build and test the same artifact that this workflow publishes.
 #
 # To enable: in the repo's Settings → Pages, set the source to "GitHub Actions".
 # That swaps the legacy branch-based publish for this workflow's artifact upload.
@@ -24,6 +23,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  database:
+    uses: ./.github/workflows/database-tests.yml
+
   ci:
     name: CI checks
     runs-on: ubuntu-latest
@@ -34,6 +36,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Package the public site and verify source consistency
+        run: bash tools/package-site.sh
+
+      - name: Run regression tests
+        run: npm run test:unit
 
       # Sanity-check the inline JS parses before publishing. Catches typo-grade
       # syntax errors that would brick the live site for everyone.
@@ -80,6 +88,8 @@ jobs:
 
       - name: Playwright E2E smoke
         run: npm run test:e2e
+        env:
+          RAD_E2E_PACKAGED: 1
 
       - name: Rollback drill dry-run
         run: npm run test:rollback-drill
@@ -100,29 +110,6 @@ jobs:
                 --outfile=/tmp/rs-edge-function-check.js >/dev/null
             done
 
-  build:
-    name: Build + deploy
-    needs: ci
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      # Concatenate src/parts/*.html into index.html (no-op while
-      # src/parts is empty; takes ownership progressively as the
-      # monolith is broken up). See src/README.md for the migration
-      # plan. Today's autoship pipeline keeps working unchanged.
-      - name: Build index.html from src/parts
-        run: ./tools/build-index.sh
-
-      - name: Assemble public site artifact
-        run: |
-          mkdir -p _site/icons _site/edge-functions/send-notification _site/supabase/functions/create-user _site/supabase/functions/admin-ops
-          cp index.html 404.html manifest.webmanifest robots.txt sw.js _site/
-          cp -R icons/. _site/icons/
-          cp edge-functions/send-notification/index.ts _site/edge-functions/send-notification/
-          cp supabase/functions/create-user/index.ts _site/supabase/functions/create-user/
-          cp supabase/functions/admin-ops/index.ts _site/supabase/functions/admin-ops/
-
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5
@@ -130,7 +117,7 @@ jobs:
           path: _site
 
   deploy:
-    needs: build
+    needs: [ci, database]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

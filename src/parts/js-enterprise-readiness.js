@@ -78,8 +78,8 @@ async function renderTelemetryPanel(){
     host.innerHTML = '<div class="note nw">No telemetry events yet. Click Write probe event to verify the path.</div>';
     return;
   }
-  host.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;font-size:12px">
-    <thead><tr><th style="text-align:left">Time</th><th>Level</th><th style="text-align:left">Event</th><th style="text-align:left">User</th><th style="text-align:left">Detail</th></tr></thead>
+  host.innerHTML = `<div class="scroll-x"><table style="width:100%;font-size:12px">
+    <thead><tr><th class="tal">Time</th><th>Level</th><th class="tal">Event</th><th class="tal">User</th><th class="tal">Detail</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td>${escHtml((r.created_at||'').replace('T',' ').slice(0,19))}</td>
       <td><span class="tag ${r.level === 'error' ? 'tr' : r.level === 'warn' ? 'tw' : 'tb'}">${escHtml(r.level||'info')}</span></td>
@@ -136,7 +136,7 @@ async function renderEnterpriseOpsDashboard(){
     </div>
     <div style="margin-top:12px;overflow-x:auto">
       <table style="width:100%;font-size:12px">
-        <thead><tr><th style="text-align:left">Time</th><th>Level</th><th style="text-align:left">Event</th><th style="text-align:left">User</th></tr></thead>
+        <thead><tr><th class="tal">Time</th><th>Level</th><th class="tal">Event</th><th class="tal">User</th></tr></thead>
         <tbody>${recent || '<tr><td colspan="4" style="color:var(--rs-ink-3)">No telemetry events yet.</td></tr>'}</tbody>
       </table>
     </div>`;

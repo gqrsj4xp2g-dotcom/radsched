@@ -52,6 +52,7 @@ declare -a REGIONS=(
   "AUTH:css-auth.css"
   "COMPONENTS:css-components.css"
   "REFINED:css-refined.css"
+  "PAGE_CODING:page-coding.html"
   "PAGE_WIDGET:page-widget.html"
   "PAGE_BROADCAST:page-broadcast.html"
   "PAGE_PUBLISH:page-publish.html"
@@ -118,22 +119,19 @@ print(f'  injected {marker} ({len(src)} chars)')
 PY
 done
 
-if [ "$CHECK_ONLY" = "1" ]; then
-  if diff -q "$HTML" "$TMPFILE" > /dev/null; then
-    echo "✓ index.html matches src/parts (no changes needed)"
-    rm -f "$TMPFILE"
-    exit 0
-  else
-    echo "✗ index.html and src/parts disagree. Diff:"
-    diff "$HTML" "$TMPFILE" | head -40
-    rm -f "$TMPFILE"
-    exit 1
-  fi
-fi
-
-if diff -q "$HTML" "$TMPFILE" > /dev/null; then
-  echo "✓ No changes (index.html already matches src/parts)"
+# Use the same Python runtime as the fragment builder. Vercel's build image
+# does not ship the standalone diff program.
+if python3 - "$HTML" "$TMPFILE" <<'PYTHON'
+import filecmp, sys
+sys.exit(0 if filecmp.cmp(sys.argv[1], sys.argv[2], shallow=False) else 1)
+PYTHON
+then
   rm -f "$TMPFILE"
+  echo "✓ index.html matches src/parts (no changes needed)"
+elif [ "$CHECK_ONLY" = "1" ]; then
+  rm -f "$TMPFILE"
+  echo "✗ index.html and src/parts disagree. Rebuild with tools/build-index.sh." >&2
+  exit 1
 else
   mv "$TMPFILE" "$HTML"
   SIZE=$(wc -c < "$HTML" | tr -d ' ')

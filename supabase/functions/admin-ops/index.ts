@@ -12,18 +12,6 @@ const CORS = {
 };
 
 const PRIVILEGED_ROLES = new Set(["admin", "superuser"]);
-const RESTORE_ARRAY_FIELDS = [
-  "physicians",
-  "sites",
-  "drShifts",
-  "irShifts",
-  "irCalls",
-  "weekendCalls",
-  "holidays",
-  "vacations",
-];
-const MAX_BACKUP_BYTES = 12 * 1024 * 1024;
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -66,41 +54,6 @@ function rateLimit(key: string, capPerMinute: number): boolean {
   if (current.n >= capPerMinute) return false;
   current.n++;
   return true;
-}
-
-function parseBackupPayload(value: unknown): Record<string, unknown> {
-  if (typeof value === "string") {
-    if (new TextEncoder().encode(value).length > MAX_BACKUP_BYTES) {
-      throw new Error("Backup is too large to restore through admin-ops.");
-    }
-    return JSON.parse(value);
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const encoded = JSON.stringify(value);
-    if (new TextEncoder().encode(encoded).length > MAX_BACKUP_BYTES) {
-      throw new Error("Backup is too large to restore through admin-ops.");
-    }
-    return JSON.parse(encoded);
-  }
-  throw new Error("Backup payload is not a JSON object.");
-}
-
-function validateRestorePayload(payload: Record<string, unknown>) {
-  const problems: string[] = [];
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    problems.push("Backup root must be an object.");
-  }
-  const presentArrays = RESTORE_ARRAY_FIELDS.filter((field) => field in payload);
-  for (const field of presentArrays) {
-    if (!Array.isArray(payload[field])) problems.push(`${field} must be an array.`);
-  }
-  if (!presentArrays.length) {
-    problems.push("Backup does not contain any schedule arrays.");
-  }
-  return {
-    ok: problems.length === 0,
-    problems,
-  };
 }
 
 async function resolveCaller(token: string): Promise<{
@@ -201,102 +154,29 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: backup, error: backupErr } = await admin
-      .from("radscheduler_backups")
-      .select("id, practice_id, data, created_at")
-      .eq("id", backupId)
-      .eq("practice_id", requestedPracticeId)
-      .maybeSingle();
-    if (backupErr) return json({ error: "Backup lookup failed: " + backupErr.message }, 500);
-    if (!backup) return json({ error: "Backup not found for this practice." }, 404);
-
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseBackupPayload((backup as any).data);
-    } catch (e) {
-      return json({ error: "Backup is not valid restore JSON: " + String((e as any)?.message || e) }, 400);
+    const requestId = cleanId(body.requestId);
+    const expectedSavedAt = cleanId(body.expectedSavedAt);
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId) ||
+        !expectedSavedAt || !Number.isFinite(Date.parse(expectedSavedAt))) {
+      return json({ error: "Reload the backup picker to confirm the current version before restoring." }, 400);
     }
-    const validation = validateRestorePayload(parsed);
-    if (!validation.ok) {
-      return json({ error: "Backup payload failed validation.", problems: validation.problems.slice(0, 10) }, 400);
-    }
-
-    const savedAt = new Date().toISOString();
-    const restored = {
-      ...parsed,
-      savedAt,
-      _restoredFromBackup: backupId,
-      _restoredAt: savedAt,
-    };
-    // Canonical side-table data is intentionally outside a blob-backup
-    // restore. Never resurrect stale copies or a legacy browser-visible
-    // widget signing key from an older backup.
-    delete (restored as any).swapRequests;
-    delete (restored as any).onCallAcks;
-    if ((restored as any).cfg && typeof (restored as any).cfg === "object") {
-      delete (restored as any).cfg._widgetSecret;
-      delete (restored as any).cfg.mapsKey;
-      delete (restored as any).cfg.gmapsKey;
-    }
-
-    const { data: currentRow, error: currentErr } = await admin
-      .from("radscheduler").select("saved_at").eq("id", requestedPracticeId).maybeSingle();
-    if (currentErr) return json({ error: "Restore version check failed: " + currentErr.message }, 500);
-    const { data: writeResult, error: writeErr } = await admin.rpc("rs_save_practice_cas", {
+    const { data, error } = await admin.rpc("rs_restore_practice_backup", {
       p_practice: requestedPracticeId,
-      p_data: JSON.stringify(restored),
-      p_expected_saved_at: (currentRow as any)?.saved_at || null,
+      p_backup: backupId,
+      p_expected_saved_at: expectedSavedAt,
+      p_request: requestId,
+      p_actor: caller.id,
+      p_email: caller.email || "",
+      p_role: callerRole,
     });
-    if (writeErr) return json({ error: "Restore write failed: " + writeErr.message }, 500);
-    if (!(writeResult as any)?.ok) {
-      return json({ error: "Practice changed while the restore was being prepared. No data was overwritten; retry after reviewing the latest save." }, 409);
+    if (error) {
+      if (error.code === "40001") return json({ error: error.message }, 409);
+      if (error.code === "P0002") return json({ error: "Practice backup or schedule not found." }, 404);
+      if (error.code?.startsWith("22")) return json({ error: "The backup or current schedule failed validation. A valid safety snapshot is required before restoring." }, 400);
+      console.error("[admin-ops] restore transaction failed", { code: error.code, requestId });
+      return json({ error: "Restore transaction failed. Retry with the same restore request." }, 500);
     }
-    const committedAt = String((writeResult as any)?.saved_at || savedAt);
-    (restored as any)._dbSavedAt = committedAt;
-
-    const warnings: string[] = [];
-    const auditRow = {
-      practice_id: requestedPracticeId,
-      ts: savedAt,
-      who: caller.email || "",
-      who_id: caller.id || "",
-      role: callerRole,
-      action: "admin.restoreBackup",
-      detail: {
-        backupId,
-        backupCreatedAt: (backup as any).created_at || null,
-        restoredAt: savedAt,
-        via: "admin-ops",
-      },
-    };
-    const { error: auditErr } = await admin.from("radscheduler_audit").insert(auditRow);
-    if (auditErr) warnings.push("Audit insert failed: " + auditErr.message);
-
-    const { error: telemetryErr } = await admin.from("radscheduler_telemetry").insert({
-      id: crypto.randomUUID(),
-      practice_id: requestedPracticeId,
-      user_id: caller.id || null,
-      user_email: caller.email || null,
-      level: "warn",
-      event: "admin.restore_backup",
-      detail: {
-        backupId,
-        backupCreatedAt: (backup as any).created_at || null,
-        via: "admin-ops",
-      },
-      created_at: savedAt,
-    });
-    if (telemetryErr) warnings.push("Telemetry insert failed: " + telemetryErr.message);
-
-    return json({
-      ok: true,
-      action,
-      backupId,
-      practiceId: requestedPracticeId,
-      savedAt: committedAt,
-      payload: restored,
-      warnings,
-    });
+    return json({ ...data, action, practiceId: requestedPracticeId, backupId });
   } catch (e) {
     console.error("[admin-ops] unhandled error:", e);
     return json({ error: "Unhandled error: " + String((e as any)?.message || e) }, 500);

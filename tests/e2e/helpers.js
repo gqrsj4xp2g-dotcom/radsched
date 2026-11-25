@@ -184,7 +184,6 @@ async function installSyntheticSupabase(page, { session = null, aal = 'aal2', mf
     _startAutoRefreshTrafficLoop = () => {};
     _bootOnCallReminders = () => {};
     fsTryRestoreAutosave = () => {};
-    _runDailyBackupIfDue = () => {};
   }, { session, aal, mfaFactors });
 }
 

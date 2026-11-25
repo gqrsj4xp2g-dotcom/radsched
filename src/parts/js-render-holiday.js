@@ -109,8 +109,13 @@ function renderHolCounter(){
         ).size;
         if(!slotsThisYear) return;
         poolPhys.forEach(p=>{
-          const myFte = g==='DR' ? p.drFte : p.irFte;
-          const fairShare = slotsThisYear * (myFte / gFteTot);
+          // rs-v127: the share comes out of the FTE on staff THAT year, so a new
+          // hire does not appear to owe holidays from before they arrived. With
+          // no start dates both factors are exactly the plain FTE figures.
+          const _fy = q => (g==='DR' ? q.drFte : q.irFte) * _physYearFraction(q, year);
+          const _gTotY = poolPhys.some(q=>_physStartDate(q)) ? (poolPhys.reduce((sum,q)=>sum+_fy(q),0) || 1) : gFteTot;
+          const myFte = _fy(p);
+          const fairShare = slotsThisYear * (myFte / _gTotY);
           const actual = (new Set(
             S.holidays.filter(h=>h.group===g && h.year===year && h.physId===p.id).map(h=>h.name)
           )).size;
@@ -124,7 +129,7 @@ function renderHolCounter(){
     });
   }
 
-  let html = `<div class="g3" style="margin-bottom:12px">
+  let html = `<div class="g3 mb12" >
     <div class="met"><div class="met-lbl">Total Assignments</div>
       <div class="met-val">${filtered.length}</div></div>
     <div class="met"><div class="met-lbl">Avg per Physician</div>
@@ -133,12 +138,12 @@ function renderHolCounter(){
       <div class="met-val" style="font-size:16px">${minTotal}–${maxTotal}</div></div>
   </div>`;
 
-  html += `<div style="overflow-x:auto"><table><thead><tr>
+  html += `<div class="scroll-x"><table><thead><tr>
     <th>Physician</th>
     ${grp === 'ALL' ? '<th>DR</th><th>IR N</th><th>IR S</th>' : ''}
-    ${showYears ? allYears.map(y => `<th style="text-align:center">${y}</th>`).join('') : ''}
+    ${showYears ? allYears.map(y => `<th class="tac">${y}</th>`).join('') : ''}
     <th style="text-align:center;border-left:2px solid var(--bdr)">Total</th>
-    ${isCareer ? '<th style="text-align:center" title="Actual minus FTE-weighted fair share across all visible years. Negative = owed more holidays, positive = ahead of fair share.">Balance</th>' : ''}
+    ${isCareer ? '<th class="tac" title="Actual minus FTE-weighted fair share across all visible years. Negative = owed more holidays, positive = ahead of fair share.">Balance</th>' : ''}
     <th style="min-width:200px">Holiday Breakdown</th>
   </tr></thead><tbody>`;
 
@@ -175,13 +180,13 @@ function renderHolCounter(){
 
     // When grp==='ALL' show DR + one column per IR group (dynamic)
     const allCells = grp === 'ALL'
-      ? `<td style="text-align:center">${cellDR}</td>` + irGroups.map(g => `<td style="text-align:center">${perGroupCells[g]}</td>`).join('')
+      ? `<td class="tac">${cellDR}</td>` + irGroups.map(g => `<td class="tac">${perGroupCells[g]}</td>`).join('')
       : '';
 
     html += `<tr>
-      <td style="font-weight:600">${p ? pnameHtml(+id) : '?'}</td>
+      <td class="fw6">${p ? pnameHtml(+id) : '?'}</td>
       ${allCells}
-      ${showYears ? allYears.map(y => `<td style="text-align:center;color:var(--txt3)">${v.byYear[y]||'—'}</td>`).join('') : ''}
+      ${showYears ? allYears.map(y => `<td class="tac txt3">${v.byYear[y]||'—'}</td>`).join('') : ''}
       <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);font-size:16px">${v.total}</td>
       ${balCell}
       <td>
@@ -208,15 +213,15 @@ function renderHolCounter(){
         zBal = `<td style="text-align:center;font-weight:700;color:${balCol}" title="Fair share: ${fair}">${fair==='0.0'?'—':balTxt}</td>`;
       }
       const allDashes = grp === 'ALL'
-        ? ('<td style="text-align:center">—</td>' + irGroups.map(() => '<td style="text-align:center">—</td>').join(''))
+        ? ('<td class="tac">—</td>' + irGroups.map(() => '<td class="tac">—</td>').join(''))
         : '';
       html += `<tr style="opacity:.5">
-        <td style="font-weight:600">${pnameHtml(p.id)}</td>
+        <td class="fw6">${pnameHtml(p.id)}</td>
         ${allDashes}
         ${showYears ? allYears.map(() => '<td>—</td>').join('') : ''}
         <td style="text-align:center;font-weight:800;border-left:2px solid var(--bdr);color:var(--txt3)">0</td>
         ${zBal}
-        <td style="color:var(--txt3);font-size:11px">No assignments</td>
+        <td class="muted-xs">No assignments</td>
       </tr>`;
     });
   }
@@ -276,7 +281,7 @@ function renderHolSchedule(){
       <div class="rs-empty" style="text-align:center;padding:20px 12px">
         <div style="font-size:24px;margin-bottom:6px">🎉</div>
         <div style="font-weight:600;font-size:13px;margin-bottom:3px">No holidays for ${escHtml(String(yr))}</div>
-        <div style="font-size:11.5px;color:var(--rs-ink-3);margin-bottom:10px">Define a holiday (and its dates) to start tracking holiday-call coverage. The auto-assigner will then skip those dates and route them through the Holiday Call tab.</div>
+        <div style="font-size:11px;color:var(--rs-ink-3);margin-bottom:10px">Define a holiday (and its dates) to start tracking holiday-call coverage. The auto-assigner will then skip those dates and route them through the Holiday Call tab.</div>
         <button class="bp bsm" onclick="document.getElementById('hol-name')?.focus()">+ Define a holiday</button>
       </div>`;
     return;
@@ -298,7 +303,7 @@ function renderHolSchedule(){
   const pools = ['DR', ...getIRGroups().map(g => 'IR-'+g)];
   const poolLabel = (g) => g==='DR' ? 'DR' : 'IR '+g.slice(3);
 
-  let html = '<div style="overflow-x:auto"><table><thead><tr>'+
+  let html = '<div class="scroll-x"><table><thead><tr>'+
     '<th>Date</th><th>Holiday</th>' +
     pools.map(p=>`<th>${escHtml(poolLabel(p))}</th>`).join('') +
     '</tr></thead><tbody>';
@@ -308,8 +313,12 @@ function renderHolSchedule(){
             `<td>${escHtml(def.name)}</td>`;
     pools.forEach(pool => {
       const list = (assignsByKey[`${def.name}|${date}|${pool}`] || [])
-        .map(h => escHtml(physName(h.physId)));
-      html += `<td>${list.length ? list.map(n=>`<span class="tag tb" style="font-size:10px;margin:1px">${n}</span>`).join('') : '<span style="color:var(--txt3)">—</span>'}</td>`;
+        .map(h => {
+          const slot = (pool==='DR'&&h.wshift)
+            ? ` <span class="muted-xs">(${h.sub?escHtml(h.sub)+' ':''}${h.wshift==='swing'?'🌙':'☀️'})</span>` : '';
+          return `<span class="tag tb" style="font-size:10px;margin:1px">${escHtml(physName(h.physId))}${slot}</span>`;
+        });
+      html += `<td>${list.length ? list.join('') : '<span class="txt3">—</span>'}</td>`;
     });
     html += '</tr>';
   });
