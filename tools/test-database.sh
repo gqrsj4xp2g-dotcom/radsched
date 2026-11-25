@@ -43,7 +43,9 @@ done
 
 # Rehearse the private-chat cutover against actual legacy practice/backup rows.
 # In each phase the Supabase migration runner tracks the version normally.
-cutover=20261125120000_private_chat.sql
+cutover_files=("$repo"/supabase/migrations/*_private_chat.sql)
+[[ ${#cutover_files[@]} -eq 1 && -f ${cutover_files[0]} ]]
+cutover=${cutover_files[0]##*/}
 mkdir -p "$scratch/supabase/migrations"
 [[ -f "$repo/supabase/migrations/$cutover" ]]
 for migration in "$repo"/supabase/migrations/*.sql; do
