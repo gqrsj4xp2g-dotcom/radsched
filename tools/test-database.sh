@@ -23,7 +23,12 @@ sed "s/^project_id = .*/project_id = \"$project\"/" "$repo/supabase/config.toml"
 # first, while allowing the real scheduling functions and tables to be tested.
 supabase start --workdir "$scratch" -x analytics,edge-runtime,imgproxy,inbucket,meta,studio,vector
 psql_local() {
-  docker exec -i "supabase_db_$project" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres "$@"
+  # The Supabase image requires a password even on its local socket.
+  # Resolve it inside the disposable container so it never appears in CI logs.
+  docker exec -i "supabase_db_$project" sh -eu -c '
+    export PGPASSWORD="${POSTGRES_PASSWORD:?local database password missing}"
+    exec psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres "$@"
+  ' sh "$@"
 }
 psql_local <<'SQL'
 create extension if not exists pg_cron;
