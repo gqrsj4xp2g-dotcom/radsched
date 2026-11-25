@@ -297,6 +297,9 @@ test('a newer realtime update during debounce preserves the draft and its server
   const {context,A,B}=await twoTabs(browser,baseURL);
   await B.close();
   await launch(A);
+  // Election is asynchronous. Wait for the row subscription before sending
+  // the mock's non-replayed event, just as a real subscribed tab would receive it.
+  await A.waitForFunction(()=>_isLeader && !!_realtimeSub);
   const base=await A.evaluate(()=>S._remoteSavedAt);
   await userEdit(A,'A');
   await A.evaluate(()=>{

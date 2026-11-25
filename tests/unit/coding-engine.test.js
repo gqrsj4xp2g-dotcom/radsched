@@ -5,7 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "../../index.html"), "utf8");
-const scripts = Array.from(html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi), m => m[1]);
+const scripts = Array.from(html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi), m => m[1]);
 const engine = scripts.find(script => script.includes("window.codingScore = function"));
 assert.ok(engine, "the shipped browser scorer is present");
 
@@ -97,4 +97,11 @@ test("global imaging fees independently rank the professional and technical comp
   const dollars = rvu => Math.round(rvu * 32.3465 * 100) / 100;
   assert.equal(estimate.per.find(p => p.code === "74176").allowance, dollars(2.45 + 3.14 * 0.5));
   assert.equal(estimate.per.find(p => p.code === "73721").allowance, dollars(1.91 * 0.95 + 4.28));
+});
+
+test("global vascular studies use the indicator-6 technical allowance", () => {
+  const globalScore = loadScorer("global");
+  const exam = "EXAM: Ultrasound carotid and lower extremity venous duplex.";
+  assert.equal(globalScore(exam).reimbursement.total, 272.68);
+  assert.equal(score(exam).reimbursement.total, score(exam).reimbursement.naive);
 });

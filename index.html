@@ -8139,6 +8139,8 @@ window.RVU_REFERENCE = [
     // 95% of each subsequent PC. Rank PC independently of TC for global bills.
     const pcReduced = new Set(info.filter(x=>!x.blocked && !x.isAddon && x.mult===4 && x.comp.pc>0)
       .sort((a,b)=>b.comp.pc-a.comp.pc).slice(1).map(x=>x.i));
+    // CMS multiple-procedure indicators 4, 6 and 7 have distinct technical allowances.
+    const subsequentTechnicalRate = {4: 0.50, 6: 0.75, 7: 0.80};
     const tcReduced = new Set(), fam = {};
     info.filter(x=>!x.blocked && !x.isAddon && x.comp.tc>0 && (x.mult===4||x.mult===6||x.mult===7))
         .forEach(x=>{ (fam[x.mult]=fam[x.mult]||[]).push(x); });
@@ -8158,7 +8160,7 @@ window.RVU_REFERENCE = [
       if(x.blocked) return {code:x.ln.code, base:face, allowance:0, naive:face, units, blocked:true};
       let pc = x.comp.pc, tc = x.comp.tc;
       if(pcReduced.has(x.i)) pc *= 0.95;
-      if(tcReduced.has(x.i)) tc *= 0.50;
+      if(tcReduced.has(x.i)) tc *= subsequentTechnicalRate[x.mult];
       let rvu = pc + tc;
       if(surgReduced.has(x.i)) rvu = rvu * 0.50;       // surgical MPPR
       let mult = 1.0;
@@ -48642,7 +48644,7 @@ function renderHolDefList(){
   // re-adding one date then replaced the holiday's dates (rs-v134).
   renderHoldefDatesChips();
   const el = document.getElementById('holdef-list'); if(!el) return;
-  const defs = (S.holidayDefs||[]).sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
+  const defs = [...(S.holidayDefs||[])].sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
   if(!defs.length){
     el.innerHTML = `
       <div class="rs-empty" style="text-align:center;padding:18px 12px">

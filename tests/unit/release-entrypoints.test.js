@@ -47,7 +47,7 @@ test("the release includes the app, recovery page, offline assets and admin setu
 });
 
 test("404 recovery points back to the project and Vercel clean URLs target the public shell", () => {
-  const script = read("404.html").match(/<script>([\s\S]*?)<\/script>/)[1];
+  const script = read("404.html").match(/<script>([\s\S]*?)<\/script\s*>/i)[1];
   for (const [url, expected] of [["https://radsched.org/old/path", "/"], ["https://example.github.io/radsched/old/path", "/radsched/"]]) {
     const link = {};
     vm.runInNewContext(script, { location: new URL(url), document: { getElementById: () => link }, setTimeout() {} });

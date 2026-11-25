@@ -142,23 +142,29 @@ test('Rebalance → Day-Fill keeps shift ids and slot labels', async ({ page }) 
 });
 
 test('Define Holidays keeps the open holiday\'s dates when another session saves, and a new holiday\'s Year follows its dates', async ({ page }) => {
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     _isRestoring = true;
     S.holidayDefs = [{ id: 9001, name: 'Christmas Day', year: 2027, dates: ['2027-12-24', '2027-12-25'], drSlots: 1, irSlotsByGroup: {} },
       { id: 9002, name: 'Labor Day', year: 2027, dates: ['2027-09-06'], drSlots: 1, irSlotsByGroup: {} }];
     S.holidays = [];
     _isRestoring = false;
+    // These definitions are the starting server revision. The editor holds
+    // its form values separately until the user submits the form.
+    if (!await _pushToSupabase()) throw new Error('Could not save the initial holiday fixture.');
+    const baseline = _dirtySeq;
     const $ = id => document.getElementById(id);
     const chips = () => [...document.querySelectorAll('#holdef-dates-list > span')].map(s => s.textContent.replace('×', '').trim());
     const addDate = dt => { $('holdef-add-date').value = dt; holdefAddDate(); };
     const remote = mut => {
       const d = {}; _PERSISTED_KEYS.forEach(k => { if (S[k.key] !== undefined) d[k.key] = JSON.parse(JSON.stringify(S[k.key])); });
-      mut(d); S._lastLocalChange = 0; S._lastSaved = new Date(); d.savedAt = new Date(Date.now() + 60000).toISOString();
-      _applyRemoteData(d); _refreshCurrentPage();
+      mut(d); d.savedAt = new Date(Date.now() + 60000).toISOString();
+      if (!_applyRemoteData(d)) throw new Error('A clean holiday editor rejected a remote revision.');
+      _refreshCurrentPage();
     };
     const realConfirm = window.confirm, realAlert = window.alert; window.confirm = () => true; window.alert = () => {};
     nav('holidays', document.querySelector('.snav-item[data-pg="holidays"]')); holTab('define');
     editHolDef(9001);
+    const changesOnOpen = _dirtySeq - baseline;
     remote(d => { d.holidayDefs.find(x => x.id === 9002).notes = 'remote edit'; });
     const chipsAfterRemote = chips();
     addDate('2027-12-27'); submitHolDef();
@@ -171,8 +177,9 @@ test('Define Holidays keeps the open holiday\'s dates when another session saves
     ['2028-12-30', '2028-12-31', '2029-01-01'].forEach(addDate);
     const ny = $('holdef-year').value; cancelHolDef();
     window.confirm = realConfirm; window.alert = realAlert;
-    return { chipsAfterRemote: chipsAfterRemote.length, saved, remoteKept, thanks, ny };
+    return { changesOnOpen, chipsAfterRemote: chipsAfterRemote.length, saved, remoteKept, thanks, ny };
   });
+  expect(r.changesOnOpen).toBe(0);
   expect(r.chipsAfterRemote).toBe(2);                          // was: 0 (the refresh cleared the form)
   expect(r.saved).toEqual(['2027-12-24', '2027-12-25', '2027-12-27']);   // was: only the new date
   expect(r.remoteKept).toBe('remote edit');
