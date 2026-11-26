@@ -1378,6 +1378,8 @@ tbody tr:hover{background:var(--bg3)}
       .no-print, [data-no-print] {
         display: none !important;
       }
+      /* rs-v139: the Unfilled slots list is capped on screen; its "N more not shown" line must print too */
+      .note.uf-more { display: block !important; }
       @page { margin: 0.5in; }
       html, body {
         background: #fff !important;
@@ -2141,9 +2143,9 @@ tbody tr:hover{background:var(--bg3)}
      left `supabase` undefined, so login failed with "Supabase is not configured.
      Offline login is disabled." (audit fix 2026-07). Each falls back to its CDN
      only if the same-origin file is missing (e.g. a downloaded portable copy),
-     via a synchronous global-presence check. Update /vendor/* when bumping. -->
-<script src="/vendor/xlsx.full.min.js"></script>
-<script>window.XLSX||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');</script>
+     via a synchronous global-presence check. Update /vendor/* when bumping.
+     /vendor/xlsx.full.min.js is NOT loaded here: _rsLoadXLSX() loads it on
+     first import/export (same CDN fallback; the service worker precaches it). -->
 <script src="/vendor/supabase.js"></script>
 <script>window.supabase||document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');</script>
 </head>
@@ -3749,7 +3751,7 @@ tbody tr:hover{background:var(--bg3)}
         </select>
       </div>
       <div class="fg m0" ><label>Filter Month</label>
-        <input id="drb-filter-mo" type="month" oninput="renderDRBuilder()">
+        <input id="drb-filter-mo" type="month" placeholder="YYYY-MM" oninput="renderDRBuilder()">
       </div>
       <div style="margin-top:18px;display:flex;gap:6px">
         <button class="br bsm" onclick="clearDRShifts('filtered')" title="Clear shifts matching current filters">🗑 Clear Filtered</button>
@@ -15140,6 +15142,25 @@ async function doLogout(){
   document.querySelector('.snav-item')?.classList.add('on');
 }
 
+// Boot (rs-v139): send the practices lookup and the practice-row download at
+// the START of launchApp, alongside the admin MFA check, instead of one after
+// the other. Nothing is applied early: launchApp still waits for the MFA result
+// and sets the role/MFA visibility first, then reads these answers at the same
+// points and in the same order as before. The MFA check only reads the session,
+// so the server answers these requests exactly as it did when they were sent
+// after it. Uses the already-created client only; null → launchApp makes the
+// requests itself, as before.
+function _bootNetPrefetch(){
+  try{
+    if(!_supabase || !(_getUrl()&&_getKey())) return null;
+    const sbp=_initSupabase();
+    if(!sbp) return null;
+    const pracs=Promise.resolve(sbp.from('practices').select('id,name').order('name'));
+    pracs.catch(()=>{});            // awaited (and its failure handled) in launchApp
+    return { pracs, row: _pullFromSupabase() };
+  }catch(_){ return null; }
+}
+
 async function launchApp(){
   // Re-entrance guard: _checkSession IIFE and doLogin can both race to call launchApp.
   // The second invocation would double-load from Supabase. Use a module-level flag.
@@ -15152,6 +15173,7 @@ async function launchApp(){
     if(typeof _applyFontScale==='function') _applyFontScale(CU?.fontScale || 1);
     const isSU = CU.role==='superuser';
     const roleAdmin = CU.role==='admin' || isSU;  // superusers get all admin UI + more after MFA
+    const _bootNet = _bootNetPrefetch();   // requests only; applied below, after the MFA check
     if(roleAdmin && typeof _refreshMfaStatus === 'function'){
       try{ await _refreshMfaStatus(); }catch(_){}
     }
@@ -15184,7 +15206,7 @@ async function launchApp(){
       const sbp=_initSupabase();
       if(sbp){
         try{
-          const {data:pracs}=await sbp.from('practices').select('id,name').order('name');
+          const {data:pracs}=await (_bootNet ? _bootNet.pracs : sbp.from('practices').select('id,name').order('name'));
           if(pracs) _PRACTICES=pracs;
         }catch(pe){console.warn('[RS] practices load:',pe);}
       }
@@ -15192,7 +15214,7 @@ async function launchApp(){
         const prac=(_PRACTICES||[]).find(p=>p.id===_PRACTICE_ID);
         tbPrac.textContent = prac?prac.name : (_PRACTICE_ID&&_PRACTICE_ID!=='main'?_PRACTICE_ID:'');
       }
-      const d=await _pullFromSupabase();
+      const d=await (_bootNet ? _bootNet.row : _pullFromSupabase());
       if(d){
         _applyRemoteData(d);
         if(si){si.textContent='✓ Synced';si.style.color='var(--green-t)';
@@ -16030,7 +16052,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v138';
+const _SW_VERSION = 'rs-v139';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16156,12 +16178,12 @@ function _registerServiceWorker(){
     navigator.serviceWorker.register(swUrl, { updateViaCache: 'none' })
       .then(reg => {
         console.log('[RS] Service worker registered ✓ scope:', reg.scope);
-        // Aggressively check for a new SW on this page load and again
-        // every 60s while the tab is open. Cheap (just a HEAD on sw.js
-        // when nothing changed) and means deploys propagate to long-
-        // lived tabs without the user having to do anything.
+        // Check for a new SW once on this page load. Long-lived tabs are
+        // covered by _rsUpdateCheck (boot, every 5 min, on return to the
+        // tab), the one periodic update check — rs-v139 removed the 60-s
+        // reg.update() interval that duplicated it (a 14 KB sw.js GET a
+        // minute per open tab).
         _safeServiceWorkerUpdate(reg);
-        setInterval(() => _safeServiceWorkerUpdate(reg), 60_000);
         // When a new SW reaches "installed" state with another SW
         // currently in control, that's an update. Tell it to skip
         // waiting so it activates immediately, then the
@@ -18205,7 +18227,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v138';
+const _RS_HTML_BUILD = 'rs-v139';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -20637,6 +20659,9 @@ function clearDRShifts(mode){
   let targets=S.drShifts;
   let desc='all DR shifts';
   if(mode==='filtered'){
+    // rs-v139: the table lists nothing until the month box holds a whole month or year, so neither does this:
+    // with an empty or half-typed box it used to delete every DR shift matching the shift filter.
+    if(!/^\d{4}(-\d{2})?$/.test(fmo)){ alert('Choose a month (YYYY-MM) or a year above first. To delete every DR shift, use Clear All DR.'); return; }
     targets=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)));
     const parts=[];
     if(fsh) parts.push(fsh+' shift');
@@ -27399,13 +27424,41 @@ function downloadPhysTemplate(){
   }catch(e){ alert('Template download failed: '+e.message); }
 }
 
-function previewPhysImport(input){
+// SheetJS (/vendor/xlsx.full.min.js, ~880 KB) is loaded on first use instead of
+// at every start; every caller of XLSX awaits this. Same fallback as the old
+// <head> tag (CDN copy if the same-origin file is missing). Offline it comes
+// from the service worker's precache; if this device has no cached copy the
+// promise rejects with a message the caller shows. A failure is not remembered,
+// so the next attempt tries again.
+let _rsXlsxLoading = null;
+function _rsLoadXLSX(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(_rsXlsxLoading) return _rsXlsxLoading;
+  const add = src => new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('SheetJS did not start'));
+    s.onerror = () => { s.remove(); reject(new Error('could not load ' + src)); };
+    document.head.appendChild(s);
+  });
+  _rsXlsxLoading = add('/vendor/xlsx.full.min.js')
+    .catch(() => add('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'))
+    .catch(() => {
+      _rsXlsxLoading = null;
+      throw new Error(navigator.onLine === false
+        ? 'The Excel library (SheetJS) is not saved on this device yet and you are offline. Connect to the internet once, then try again.'
+        : 'The Excel library (SheetJS) could not be loaded. Check your connection and try again.');
+    });
+  return _rsXlsxLoading;
+}
+
+async function previewPhysImport(input){
   if(!_adminOnly('preview physicians import')) return;
   const file = input.files[0]; if(!file) return;
   const prev = document.getElementById('xl-phys-preview');
   prev.innerHTML = `<div class="note ni" style="font-size:12px">Reading <strong>${escHtml(file.name)}</strong>…</div>`;
-  if(!window.XLSX){
-    prev.innerHTML = '<div class="note ne">SheetJS library failed to load.</div>';
+  try{ await _rsLoadXLSX(); }catch(err){
+    prev.innerHTML = '<div class="note ne">' + escHtml(err.message) + '</div>';
     return;
   }
   const reader = new FileReader();
@@ -39308,6 +39361,15 @@ function saveEditDRShift(id){
 function _renderDRTable(){
   const fsh=document.getElementById('drb-filter-shift')?.value||'';
   const fmo=document.getElementById('drb-filter-mo')?.value||'';
+  // An empty or half-typed month used to match every DR shift (startsWith ''),
+  // drawing the whole multi-year table on each keystroke. List nothing until
+  // the box holds a whole month — or a whole year: Safari on the Mac shows this
+  // month box as a plain text field, where typing "2027" listed that year.
+  if(!/^\d{4}(-\d{2})?$/.test(fmo)){
+    const el0=document.getElementById('drb-tbody');
+    if(el0) el0.innerHTML='<tr><td colspan="8" class="tac txt3">Choose a month above (YYYY-MM, or a year) to list its DR shifts</td></tr>';
+    return;
+  }
   const rows=S.drShifts.filter(s=>(!fsh||s.shift===fsh)&&(!fmo||s.date.startsWith(fmo)))
     .sort((a,b)=>a.date>b.date?1:-1);
   const el=document.getElementById('drb-tbody');if(!el)return;
@@ -41374,10 +41436,18 @@ const _SANITY_CHECKS = [
         ['Weekend call', S.weekendCalls,   w => w.satDate || w.sunDate || w.date],
         ['Holiday',      S.holidays,       h => h.date],
       ];
+      // Each array's records grouped by physician once (array order kept), so a
+      // vacation looks at its physician's records instead of every record again.
+      const _byPhys = new Map();
+      const ofPhys = (arr, pid) => {
+        let m = _byPhys.get(arr);
+        if(!m){ m = new Map(); for(const s of (arr || [])){ const b = m.get(s.physId); if(b) b.push(s); else m.set(s.physId, [s]); } _byPhys.set(arr, m); }
+        return m.get(pid) || [];
+      };
       for(const v of (S.vacations || [])){
         if(!v.physId || !v.start || !v.end) continue;
         for(const [label, arr, getDate] of arrs){
-          for(const s of (arr || [])){
+          for(const s of ofPhys(arr, v.physId)){
             if(s.physId !== v.physId) continue;
             const d = getDate(s);
             if(d && d >= v.start && d <= v.end){
@@ -42669,9 +42739,11 @@ function _physicianBurnoutFlags(physId, ym){
   // Consecutive days — walk backward from the LAST day of ym.
   const [y,m] = (ym || fmtDate(new Date()).slice(0,7)).split('-').map(Number);
   const lastDay = new Date(y, m, 0).getDate();
+  // The date index (built once per data change) holds every shift dated ds, so
+  // this asks the same question without scanning both arrays for each day.
   const dayHasShift = (ds) => {
-    return (S.drShifts||[]).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home') ||
-           (S.irShifts||[]).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home');
+    return _shiftsOnDate('dr', ds).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home') ||
+           _shiftsOnDate('ir', ds).some(s => s.physId === physId && s.date === ds && s.shift !== 'Home');
   };
   let streak = 0, maxStreak = 0;
   for(let d = 1; d <= lastDay; d++){
@@ -43419,6 +43491,7 @@ function _wkndPlanRange(fromIso, toIso){
   // _daysBetween is DST-safe; raw ms/86400000 measures the Mar/Nov DST weeks
   // as 6.96/7.04 days and lets back-to-back weekends slip through ===7.
   const adjacentInPlan=(pid,sat)=>plan.some(a=>a.physId===pid&&_daysBetween(a.satDate,sat)===7);
+  const awayOf={};   // each physician's vacation set, built once per plan (S does not change while it runs)
   const haveCount=(sat,sub,wshift)=>
     S.weekendCalls.filter(w=>(w.satDate||w.date)===sat&&(w.sub||'')===sub&&((w.wshift||'day')===wshift)).length
     +plan.filter(a=>a.satDate===sat&&(a.sub||'')===sub&&a.wshift===wshift).length;
@@ -43428,7 +43501,7 @@ function _wkndPlanRange(fromIso, toIso){
       if(_drDayFte(p)<=0)return false;   // daytime DR FTE required for ALL weekend call (2026-07-31: no swing exception)
       if(sub&&!(p.drSubs||[]).includes(sub))return false;
       if(wshift==='day'&&!_wkndDayOk(p))return false;
-      const vd=_awayDays(p.id);   // vacation, or not started yet
+      const vd=awayOf[p.id]||(awayOf[p.id]=_awayDays(p.id));   // vacation, or not started yet
       if(vd.has(sat)||vd.has(sunDate))return false;
       if(plan.some(a=>a.satDate===sat&&a.physId===p.id))return false;
       if(S.weekendCalls.some(w=>(w.satDate||w.date)===sat&&w.physId===p.id))return false;
@@ -46534,14 +46607,15 @@ function previewIRAA(){
   //   opts.allowRelaxBreakable = true → ignore tbRules flagged with
   //     allowBreakForUnfilledIR. Used during the relaxation retry after a gap.
   //     Adjacency, site rules, vacation, and participation are NEVER relaxed.
+  const _awayOf = {};
   function whyBlocked(p, date, kind, g, skipAdjacency, opts){
     const allowRelax = !!(opts && opts.allowRelaxBreakable);
     const isWkd = (kind === 'weekend');
     const span  = isWkd ? [date, addDays(date,1), addDays(date,2), addDays(date,3)] : [date];
     const ym    = date.slice(0,7);
 
-    // Vacation — any day of span
-    const vd = _awayDays(p.id);
+    // Vacation — any day of span (each physician's set built once per preview: S does not change while it runs)
+    const vd = _awayOf[p.id] || (_awayOf[p.id] = _awayDays(p.id));
     for(const d of span) if(vd.has(d)) return (vd.notStartedBefore && d < vd.notStartedBefore) ? 'not started yet' : 'vacation';
     // Sold-back
     for(const d of span) if(isSoldBackDate(p.id, d)) return 'sold-back';
@@ -49718,8 +49792,17 @@ function renderUnfilled(){
     '<th>Date</th><th>DOW</th><th>Type</th><th>Site</th><th>Detail</th><th>Group</th><th></th>' +
     '</tr></thead><tbody>';
   const dowName = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d] || '';
+  // A window with thousands of gaps wrote one row each (40,000+ elements). List
+  // the first 300 by date unless "Show all" was clicked; the summary above and
+  // the CSV export still count and carry every gap.
+  const _ufCap = renderUnfilled._all ? Infinity : 300;
+  renderUnfilled._all = false;
+  let _ufShown = 0;
   for(const [date, items] of byDate){
+    if(_ufShown >= _ufCap) break;
     items.forEach((g, idx) => {
+      if(_ufShown >= _ufCap) return;
+      _ufShown++;
       const jumpFn = g.cat === 'dr' || g.cat === 'wknd' ? 'dr-cal'
                    : (g.cat === 'ir' || g.cat === 'ircall' || g.cat === 'irwknd') ? 'ir-cal'
                    : 'holidays';
@@ -49737,6 +49820,10 @@ function renderUnfilled(){
     });
   }
   html += '</tbody></table></div>';
+  if(_ufShown < _ufRows.length){
+    const _ufMore = _ufRows.length - _ufShown;
+    html += `<div class="note ni mt8 uf-more" style="font-size:12px">Showing the first ${_ufShown} of ${_ufRows.length} unfilled slots listed by date — ${_ufMore} more not shown. The totals above and “Copy as CSV” include all of them. <button class="bsm" style="margin-left:6px" onclick="renderUnfilled._all=true;renderUnfilled()">Show all ${_ufRows.length}</button></div>`;
+  }
   listEl.innerHTML = html;
 }
 
@@ -51149,14 +51236,14 @@ function _holHistOfficialDates(holName, year){
   });
   return hit ? hit.dates.slice() : null;
 }
-function previewHolHistImport(input){
+async function previewHolHistImport(input){
   if(!_adminOnly('import holiday history')) return;
   const file = input.files && input.files[0]; if(!file) return;
   input.value = '';                                          // same file re-selectable
   const prev = document.getElementById('holhist-preview');
   if(!prev) return;
   prev.innerHTML = `<div class="note ni" style="font-size:12px">Reading <strong>${escHtml(file.name)}</strong>…</div>`;
-  if(!window.XLSX){ prev.innerHTML = '<div class="note ne">SheetJS library failed to load.</div>'; return; }
+  try{ await _rsLoadXLSX(); }catch(err){ prev.innerHTML = '<div class="note ne">' + escHtml(err.message) + '</div>'; return; }
   const reader = new FileReader();
   reader.onload = e => {
     try{
@@ -52791,6 +52878,7 @@ function _renderCoverageGapBanner(isAdmin){
   const gaps = _scanCoverageGaps();
   S._coverageGaps = gaps; // expose for diagnostics
   if(!gaps.length){
+    _covGapAuditDue(gaps);     // remember "no gaps" so the same gaps coming back are logged again
     banner.style.display = 'none';
     banner.innerHTML = '';
     return;
@@ -52817,11 +52905,41 @@ function _renderCoverageGapBanner(isAdmin){
     ${rows}
     ${more}
   </div>`;
-  if(typeof _audit === 'function' && !_audit._lastGapTs || (Date.now() - (_audit._lastGapTs || 0) > 3600000)){
-    // Throttle: log once per hour to keep the audit log readable.
+  if(_covGapAuditDue(gaps) && typeof _audit === 'function'){
+    // Log only when the set of gaps differs from the one last logged, and at
+    // most once an hour (rs-v139). The old once-an-hour throttle lived in
+    // memory, so every page load and every tab wrote a row (~40% of the
+    // in-row audit log was this entry).
     _audit('coverage.gap.detected', { count: gaps.length, sample: gaps.slice(0, 3) });
-    _audit._lastGapTs = Date.now();
   }
+}
+// Should the banner write its audit row now? Yes only when the set of gaps is
+// not the one this device last logged for this practice AND the last row is
+// over an hour old. Kept in localStorage (memory if storage is blocked), so a
+// reload, a second tab or a re-render with the same gaps writes nothing, and a
+// run of edits writes at most one row an hour — never more than before.
+function _covGapAuditDue(gaps){
+  const mem = _covGapAuditDue._mem || (_covGapAuditDue._mem = {});
+  const list = gaps || [];
+  const txt = list.map(g => g.date + '|' + g.kind + '|' + g.label).sort().join('\n');
+  let h = 5381;
+  for(let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  const sig = list.length + ':' + h.toString(36);
+  let key = 'rs.covGapLogged.main';
+  try{ key = 'rs.covGapLogged.' + (_ROW_ID || 'main'); }catch(_){}
+  let last = mem[key] || '';
+  try{ const v = localStorage.getItem(key); if(v != null) last = v; }catch(_){}
+  const at = last.lastIndexOf('@');
+  const lastSig = at >= 0 ? last.slice(0, at) : last, lastTs = at >= 0 ? (+last.slice(at + 1) || 0) : 0;
+  if(lastSig === sig) return false;
+  const now = Date.now();
+  const due = list.length > 0 && (now - lastTs) > 3600000;
+  if(due || !list.length){
+    const v = sig + '@' + (due ? now : lastTs);
+    mem[key] = v;
+    try{ localStorage.setItem(key, v); }catch(_){}
+  }
+  return due;
 }
 
 // ── Workload Fairness Scoreboard ───────────────────────────────────────
@@ -55252,8 +55370,8 @@ function jumpToToday(){
 
 // Inject a "Today" button into each calendar page header. Idempotent —
 // only adds once per page. Runs on page navigation via _refreshCurrentPage.
-function _injectTodayButton(){
-  document.querySelectorAll('.page').forEach(page => {
+function _injectTodayButton(pages){
+  (pages || document.querySelectorAll('.page')).forEach(page => {
     if(page._rsTodayBtn) return;
     const monthInp = page.querySelector('input[type="month"]');
     if(!monthInp) return;
@@ -55279,8 +55397,39 @@ function _injectTodayButton(){
 // refined design layer above; this just adds the marker class.
 (function _markStickyHeaders(){
   if(typeof document === 'undefined') return;
+  // rs-v139: the 5-s pass used to search every page's whole subtree each time —
+  // most of an idle tab's script time, growing with the DOM. A MutationObserver
+  // now notes which pages changed; the pass looks only at those (all pages at
+  // start-up, or when a new .page appears). Same result, since the pass reacts
+  // only to the DOM; a tab whose DOM is quiet scans nothing.
+  let scanAll = true, obs = null;
+  const changed = new Set();
+  const notePage = el => {
+    let p = (el && el.closest) ? el.closest('.page') : null;
+    if(!p) return false;
+    while(p){ changed.add(p); p = p.parentElement ? p.parentElement.closest('.page') : null; }
+    return true;
+  };
+  try{
+    obs = new MutationObserver(records => {
+      if(scanAll) return;
+      for(const r of records){
+        if(notePage(r.target.nodeType === 1 ? r.target : r.target.parentElement)) continue;
+        if(r.type !== 'childList') continue;
+        for(const n of r.addedNodes){
+          if(n.nodeType === 1 && (n.classList.contains('page') || n.querySelector('.page'))){ scanAll = true; return; }
+        }
+      }
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'id', 'type'] });
+  }catch(_){ obs = null; }
   const apply = () => {
-    document.querySelectorAll('.page').forEach(page => {
+    let pages;
+    if(scanAll || !obs) pages = document.querySelectorAll('.page');
+    else if(changed.size) pages = [...changed].filter(p => p.isConnected);
+    else return;
+    scanAll = false; changed.clear();
+    pages.forEach(page => {
       const monthInp = page.querySelector('input[type="month"]');
       if(!monthInp) return;
       const ctrlBox = monthInp.closest('.flexe, .filter-bar, [class*="ctrl"], [id*="ctrl"]');
@@ -55288,7 +55437,8 @@ function _injectTodayButton(){
         ctrlBox.classList.add('rs-sticky-bar');
       }
     });
-    if(typeof _injectTodayButton === 'function') _injectTodayButton();
+    if(typeof _injectTodayButton === 'function') _injectTodayButton(pages);
+    if(obs) obs.takeRecords();   // this pass's own class/button changes need no second pass
   };
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
   // Re-apply on each page change too — _refreshCurrentPage triggers re-render
@@ -56830,9 +56980,9 @@ function runLocalDataValidation(){
 // Writes an XLSX with one sheet per category (DR Shifts, IR Shifts, IR
 // Calls, Weekend Calls, Holidays, Vacations) so admins can round-trip
 // edits in Excel. SheetJS already loaded for import; we reuse it.
-function exportScheduleXLSX(){
-  if(!window.XLSX){
-    alert('SheetJS not loaded — try again in a moment.');
+async function exportScheduleXLSX(){
+  try{ await _rsLoadXLSX(); }catch(err){
+    alert(err.message);
     return;
   }
   if(!_adminOnly('export schedule XLSX')) return;
@@ -59003,7 +59153,7 @@ function _xlPickClonePristine(weeks){
   catch(_){ return null; }
 }
 
-function previewPickImport(input){
+async function previewPickImport(input){
   if(!_adminOnly('preview picks import')) return;
   const file = input.files[0]; if(!file) return;
   // If the admin picked a DIFFERENT file (different name+size), clear
@@ -59024,8 +59174,8 @@ function previewPickImport(input){
       <div>Reading <strong>${escHtml(file.name)}</strong> (${Math.round(file.size/1024)} KB)…</div>
       <div class="rs-progress"><div class="rs-progress-bar indeterminate"></div></div>
     </div>`;
-  if(!window.XLSX){
-    prev.innerHTML = '<div class="note ne">SheetJS library failed to load. Check your connection — the CDN script tag may have been blocked.</div>';
+  try{ await _rsLoadXLSX(); }catch(err){
+    prev.innerHTML = '<div class="note ne">' + escHtml(err.message) + '</div>';
     return;
   }
   const reader = new FileReader();
