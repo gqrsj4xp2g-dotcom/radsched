@@ -19,6 +19,11 @@ const setup = Array.from(edgePaths.matchAll(/'([^']+)':\s*'([^']+)'/g));
 test("the release includes the app, recovery page, offline assets and admin setup sources at both mount points", () => {
   assert.deepEqual(setup.map(match => match[1]).sort(), ["admin-ops", "create-user", "send-notification"]);
   const linked = Array.from(index.matchAll(/(?:src|href)="((?:icons\/|vendor\/)[^"]+|manifest\.webmanifest|reset\.html)"/g), m => m[1]);
+  // SheetJS is loaded on first use by _rsLoadXLSX, not by a <head> tag. Its
+  // same-origin path must stay page-relative and be the file sw.js precaches.
+  const lazyXlsx = index.match(/_rsXlsxLoading = add\('([^']+)'\)/)[1];
+  assert.ok(shell.includes("./" + lazyXlsx), lazyXlsx + " is not precached by sw.js");
+  linked.push(lazyXlsx);
   for (const base of ["https://radsched.org/", "https://example.github.io/radsched/"]) {
     for (const entry of ["", "index.html", "#/dr-cal"]) {
       const location = new URL(entry, base);
