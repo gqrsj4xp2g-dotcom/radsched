@@ -12974,6 +12974,36 @@ function _undoSnapshot(label){
   }
 }
 
+// rs-v138: the undo entry for a load or an update from another device, taken
+// by _applyRemoteData with no save. Ring entries are the state AFTER a change
+// (triggerSave snapshots after the mutation) and Undo steps back to the entry
+// below, so each applied state needs its own entry. The holiday re-sync's
+// needless save used to make one as a side effect; now that an apply that
+// changes nothing saves nothing, without this the first Undo after an update
+// from another device stepped back past that update and saved its removal,
+// and the first edit after a load could not be undone. Updates that arrive
+// with no edit here in between share one entry (the newest), so they cannot
+// fill the ring; entries the re-sync's own repairs pushed during this apply
+// (states partway through the repair; _undoResyncAt) are replaced by it too.
+let _undoResyncAt = 0;   // set when _resyncAllHolidaysCore starts
+function _undoBaseline(){
+  if(_isRestoring) return;
+  const since = _undoResyncAt; _undoResyncAt = 0;
+  const prevTop = _undoStack[_undoStack.length-1];
+  _undoLastSnapAt = 0;
+  _undoSnapshot('edit');
+  _undoLastSnapAt = 0;   // the next edit here gets its own entry
+  const top = _undoStack[_undoStack.length-1];
+  if(!top || top === prevTop) return;
+  top._baseline = true;
+  for(let i = _undoStack.length - 2; i >= 0; i--){
+    const e = _undoStack[i];
+    if(!(e._baseline || (since && e.ts >= since))) break;
+    _undoStack.splice(i, 1);
+  }
+  _updateUndoUI();
+}
+
 function _undoRestore(snap){
   if(!snap) return;
   _isRestoring = true;
@@ -15567,9 +15597,9 @@ function _applyRemoteData(d){
     return;
   }
   _isRestoring=true;
-  // Side-table snapshot is invalid as soon as we replace S.* with the
-  // remote payload — drop it so the next sync does a full re-diff.
-  if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot();
+  // Side-table snapshot: kept across a remote apply of the same practice so the
+  // next sync sends only what differs (see _sideShiftsResetSnapshot).
+  if(typeof _sideShiftsResetSnapshot === 'function') _sideShiftsResetSnapshot('apply');
   // Manifest-driven load: every _PERSISTED_KEYS entry is applied here EXCEPT the
   // ones with bespoke handling below (legacy migrations, merge semantics, pruning).
   // AUDIT FIX (2026-07 deep dive): the previous hand-maintained KEYS list had
@@ -15891,6 +15921,7 @@ function _applyRemoteData(d){
   } catch(e) {
     console.warn('[RS] Holiday auto-sync skipped:', e.message||e);
   }
+  try{ if(typeof _undoBaseline === 'function') _undoBaseline(); }catch(_){} // rs-v138: undo entry for this state, no save
 
   // #17 canonical cutover: swaps/acks live in rs_* tables, not the blob — but
   // every mutation RPC still bumps the blob's savedAt, so this apply (poll,
@@ -15999,7 +16030,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v137';
+const _SW_VERSION = 'rs-v138';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -18174,7 +18205,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v137';
+const _RS_HTML_BUILD = 'rs-v138';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -50009,11 +50040,30 @@ function _syncHolidayToIRCall(physId, date, holName){
   else{callType='daily';callDate=date;}
   // Daily call is group-wide (no single site); weekend call can reference primary site
   const site=callType==='weekend'?(p.irSitePrim||(S.sites.find(s=>s.irGroup===p.irGroup)?.name||'')):'';
+  // rs-v138: this physician's holiday call is already on this group/date/type —
+  // keep it (its id, site and notes) and drop only other calls on that slot, if
+  // any. Removing and re-adding it minted a new id and marked the practice
+  // changed on every load and every update from another device, which saved the
+  // whole row back each time (and two open sessions then saved back and forth).
+  const _slotCalls=S.irCalls.filter(c=>c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate);
+  const _keep=_slotCalls.find(c=>c.physId===physId&&typeof c.notes==='string'&&c.notes.includes('(Holiday)'));
+  if(_keep){
+    if(_slotCalls.length>1) S.irCalls=S.irCalls.filter(c=>c===_keep||
+      !(c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
+    // Bring the kept call's note and site in line with the assignment, as re-creating it did (a renamed
+    // holiday, a changed primary site). Only a real difference writes, and saves, anything.
+    const _wantNotes=holName+' (Holiday)';
+    if(_keep.notes!==_wantNotes||(_keep.site||'')!==site){
+      _keep.notes=_wantNotes; _keep.site=site;
+      if(typeof triggerSave==='function') triggerSave();
+    }
+  } else {
   // Remove any existing call for this group/date/type — holiday physician takes priority
   S.irCalls=S.irCalls.filter(c=>
     !(c.irGroup===p.irGroup&&c.callType===callType&&c.date===callDate));
   S.irCalls.push({id:S.nextId++,physId,date:callDate,callType,
     irGroup:p.irGroup,site,notes:holName+' (Holiday)'});
+  }
   // Auto-pair daily holiday call with an IR procedure shift on the
   // same date so the assigned physician shows up correctly on the IR
   // calendar as both on-call AND scheduled to work. Weekend holiday
@@ -50358,7 +50408,9 @@ function renderHolDefList(){
   // re-adding one date then replaced the holiday's dates (rs-v134).
   renderHoldefDatesChips();
   const el = document.getElementById('holdef-list'); if(!el) return;
-  const defs = (S.holidayDefs||[]).sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
+  // rs-v138: sort a copy — S.holidayDefs is a reactive array, and sorting it in
+  // place marked the practice changed (a whole-row save) just for opening this tab.
+  const defs = [...(S.holidayDefs||[])].sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
   if(!defs.length){
     el.innerHTML = `
       <div class="rs-empty" style="text-align:center;padding:18px 12px">
@@ -50894,12 +50946,26 @@ async function deleteHoliday(id){
 // - removes any existing DR shifts on those dates for other physicians
 // - marks dates as holiday blackout so auto-assign skips them
 function _syncHolDRDates(physId, dates, holName){
-  dates.forEach(date=>{
-    // Remove any auto-assigned DR shifts on that date (keep manually-assigned shifts
-    // unless they're for a different physician on a hospital shift)
-    S.drShifts=S.drShifts.filter(s=>
-      !(s.date===date&&s.physId!==physId&&s.shift!=='Home'));
-  });
+  // Remove any auto-assigned DR shifts on those dates (keep manually-assigned shifts
+  // unless they're for a different physician on a hospital shift).
+  // rs-v138: one pass for all dates, and S.drShifts is reassigned only when a
+  // shift really goes — every assignment of it marks the practice changed.
+  const _dates=new Set(dates);
+  const _kept=S.drShifts.filter(s=>
+    !(_dates.has(s.date)&&s.physId!==physId&&s.shift!=='Home'));
+  if(_kept.length!==S.drShifts.length) S.drShifts=_kept;
+}
+
+// rs-v138: the IR call slot a holiday date is filed on — the same mapping as
+// _syncHolidayToIRCall (Fri–Mon ride with that weekend's Friday; Tue–Thu are
+// daily calls).
+function _holIRCallSlot(date){
+  const dow=parseDateLocal(date).getDay();
+  if(dow===5) return {callType:'weekend',callDate:date};
+  if(dow===6) return {callType:'weekend',callDate:addDays(date,-1)};
+  if(dow===0) return {callType:'weekend',callDate:addDays(date,-2)};
+  if(dow===1) return {callType:'weekend',callDate:addDays(date,-3)};
+  return {callType:'daily',callDate:date};
 }
 
 // Sync all dates of a holiday block to IR calendar
@@ -50913,6 +50979,7 @@ function _syncHolIRDates(physId, dates, holName){
 // DOM-free so the bootstrap path can call it before any UI exists. Returns
 // {drCount, irCount} describing how many date-assignments were processed.
 function _resyncAllHolidaysCore(){
+  _undoResyncAt = Date.now(); // rs-v138: see _undoBaseline
   if(!Array.isArray(S.holidays) || !S.holidays.length) return {drCount:0, irCount:0};
   const irBatches = {};
   const drBatches = {};
@@ -50929,14 +50996,52 @@ function _resyncAllHolidaysCore(){
     bucket[key].dates.push(h.date);
   });
   let irCount = 0, drCount = 0;
+  // rs-v138: this runs on every load and every update from another device, so
+  // it must change (and so mark for saving) only what is really missing or
+  // wrong. IR: when several holiday dates land on one IR call slot (one group's
+  // weekend, or one daily call), the one processed LAST holds the call — as
+  // before — and only that one is synced; the others still get their paired
+  // IR shift. Syncing each in turn swapped the call between them (new id, a
+  // save) on every load.
+  const irOps = [];
   Object.values(irBatches).forEach(b => {
-    _syncHolIRDates(b.physId, b.dates, b.name);
+    b.dates.forEach(date => irOps.push({physId:b.physId, date, name:b.name}));
     irCount += b.dates.length;
   });
+  const lastOnSlot = new Map();
+  irOps.forEach((op, i) => {
+    const p = S.physicians.find(x=>x.id===op.physId);
+    if(!p||!p.irGroup||!(p.irFte>0)) return; // _syncHolidayToIRCall ignores these too
+    op.p = p; op.slot = _holIRCallSlot(op.date);
+    lastOnSlot.set(p.irGroup+'|'+op.slot.callType+'|'+op.slot.callDate, i);
+  });
+  irOps.forEach((op, i) => {
+    if(!op.p) return;
+    if(lastOnSlot.get(op.p.irGroup+'|'+op.slot.callType+'|'+op.slot.callDate) === i){
+      _syncHolidayToIRCall(op.physId, op.date, op.name);
+    } else if(op.slot.callType === 'daily' && typeof _ensureIRShiftForCall === 'function'){
+      _ensureIRShiftForCall(op.physId, op.slot.callDate, op.p.irGroup, '', 'holiday-sync');
+    }
+  });
+  // DR: one pass over S.drShifts for every DR holiday date at once (it was one
+  // pass per assignment), with the same rule as _syncHolDRDates: a non-Home
+  // shift on a holiday date goes unless every DR holiday assignment on that
+  // date is its own physician's. Reassigned only when a shift really goes.
+  const drOnDate = new Map();
   Object.values(drBatches).forEach(b => {
-    _syncHolDRDates(b.physId, b.dates, b.name);
+    b.dates.forEach(date => { if(!drOnDate.has(date)) drOnDate.set(date, new Set()); drOnDate.get(date).add(b.physId); });
     drCount += b.dates.length;
   });
+  if(drOnDate.size){
+    const kept = S.drShifts.filter(s => {
+      if(s.shift === 'Home') return true;
+      const ids = drOnDate.get(s.date);
+      if(!ids) return true;
+      for(const id of ids){ if(id !== s.physId) return false; }
+      return true;
+    });
+    if(kept.length !== S.drShifts.length) S.drShifts = kept;
+  }
   return {drCount, irCount};
 }
 
@@ -57789,6 +57894,11 @@ if(typeof document !== 'undefined' && !window._rsVisibilityWired){
     try{
       if(_supabase && !_isRestoring && !_saveConflict && (!S._lastSaved || (Date.now() - S._lastSaved.getTime()) > 5000)){
         (async () => {
+          // rs-v138: read saved_at first, as the 10 s poll does, and download
+          // the whole row only when it is not the version this tab holds.
+          // null = the cheap read is unavailable → fall back to the full pull.
+          const cheap = await _pullSavedAt();
+          if(cheap !== null && _sameInstant(cheap, S._remoteSavedAt)) return;
           const d = await _pullFromSupabase();
           const remoteSaved = d?.savedAt ? new Date(d.savedAt).getTime() : 0;
           const knownSaved = S._remoteSavedAt ? new Date(S._remoteSavedAt).getTime() : 0;
@@ -58593,6 +58703,7 @@ async function _pushToSupabase(){
 //   • Per-batch cap. UPSERT/DELETE chunks of 500 rows max so a giant
 //     reset (e.g. paste-reload) doesn't hang Supabase.
 let _sideShiftsSnapshot = null;     // Map<"kind:client_id", hashStr>
+let _sideShiftsSnapshotRow = null;  // rs-v138: the practice row _sideShiftsSnapshot was written for
 let _sideShiftsSyncing  = false;
 let _sideShiftsLastSyncAt = 0;
 let _sideShiftsConsecFails = 0;
@@ -58603,7 +58714,19 @@ const _SIDE_SHIFTS_KINDS = [
   ['weekend','weekendCalls'],
   ['ircall', 'irCalls'],
 ];
-function _sideShiftsResetSnapshot(){ _sideShiftsSnapshot = null; }
+function _sideShiftsResetSnapshot(why){
+  // rs-v138: a remote apply ('apply') keeps the snapshot. It records what THIS
+  // tab last wrote to the mirror, so the next sync sends exactly what differs
+  // from that — the other device's changes and this tab's own, deletes
+  // included — instead of re-uploading every shift (2,071 rows now, 16,846 with
+  // the 2027 DR schedule) after each update from another device. It also stays
+  // right when the other writer never mirrored its change (a restored backup,
+  // a failed or throttled sync), which a snapshot rebuilt from the applied row
+  // would hide. A tab that has not synced yet (no snapshot: boot), another
+  // practice, sign-out and the backfill still start from scratch.
+  if(why === 'apply' && _sideShiftsSnapshot && _sideShiftsSnapshotRow === _ROW_ID) return;
+  _sideShiftsSnapshot = null;
+}
 function _sideShiftsHash(s){
   // Stable string-cat of mutable fields. Anything not listed here is
   // ignored for change-detection purposes (e.g. ephemeral UI flags).
@@ -58648,7 +58771,8 @@ async function _sideShiftsSync(opts){
   _sideShiftsSyncing = true;
   _sideShiftsLastSyncAt = now;
   try {
-    const isFullSync = !_sideShiftsSnapshot || opts.force;
+    const _snapRow = _ROW_ID;
+    const isFullSync = !_sideShiftsSnapshot || opts.force || _sideShiftsSnapshotRow !== _snapRow;
     const newSnap = new Map();
     const upserts = [];
     const deletes = []; // [{kind, client_id}]
@@ -58664,7 +58788,7 @@ async function _sideShiftsSync(opts){
         }
       }
     }
-    if(_sideShiftsSnapshot){
+    if(_sideShiftsSnapshot && _sideShiftsSnapshotRow === _snapRow){
       for(const k of _sideShiftsSnapshot.keys()){
         if(!newSnap.has(k)){
           const [kind, idStr] = k.split(':');
@@ -58701,6 +58825,7 @@ async function _sideShiftsSync(opts){
       }
     }
     _sideShiftsSnapshot = newSnap;
+    _sideShiftsSnapshotRow = _snapRow;
     _sideShiftsConsecFails = 0;
     if(upserts.length || deletes.length){
       console.log('[RS] Side-table sync: +'+upserts.length+' / -'+deletes.length+' rows');
