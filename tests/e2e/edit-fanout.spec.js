@@ -134,7 +134,11 @@ function remoteSave([ym, on, patch]) {
   else if (patch && patch.gone) d.irCalls = d.irCalls.filter(c => c.id !== patch.id);
   else if (patch) Object.assign(d.irCalls.find(c => c.id === patch.id), patch);
   S._lastLocalChange = 0; S._lastSaved = new Date(); d.savedAt = new Date(Date.now() + 60000).toISOString();
-  return window.__measure(() => { _applyRemoteData(d); _refreshCurrentPage(); });
+  // These specs are about what is drawn, so the save always lands, as it did before rs-v140 with
+  // the clock guard stood down above. Since PR #22 an unsent local change (here: the synthetic
+  // boot's audit entry, or this spec's own edits, whose saves meet these simulated revisions as
+  // a conflict) holds a revision back instead; replaceDraft says this one is taken anyway.
+  return window.__measure(() => { if (!_applyRemoteData(d, true)) throw new Error('remote save not applied'); _refreshCurrentPage(); });
 }
 
 const go = (page, pg, tab) => page.evaluate(([pg, tab]) => window.__go(pg, tab), [pg, tab || null]);
