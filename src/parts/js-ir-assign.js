@@ -67,7 +67,9 @@ function previewIRAA(){
   const lim = {};
   const _L = (p, kind) => (lim[p.id] || {})[kind === 'weekend' ? 'W' : 'D'];
   // The most this physician may hold in the period, in cntD/cntW terms.
-  const _quota = (p, kind) => { const L = _L(p, kind); return L ? Math.min(L.cap, L.pm) : 0; };
+  // Call pools (rs-v136): the fair share (cap) counts calls in this pool only, the maximum (pm) every
+  // pool — L.xP is what they already hold in other pools inside the period (0 for nearly everyone).
+  const _quota = (p, kind) => { const L = _L(p, kind); return L ? Math.min(L.cap + (L.xP || 0), L.pm) : 0; };
   const _cnt = (p, kind) => kind === 'weekend' ? cntW[p.id] : cntD[p.id];
   const underLimit = (p, kind) => _cnt(p, kind) < _quota(p, kind);
   const limitReason = (p, kind) => {
@@ -78,7 +80,7 @@ function previewIRAA(){
       if(yr >= L.max) return `at Settings maximum (${yr} of ${L.max} in ${planYear})`;
       return `at Settings maximum for this point in the year (${L.before + have} of ${L.pace} through ${periodEnd}; ${L.max} for ${planYear})`;
     }
-    return `at fair share (${have} of ${L.share.toFixed(1)})`;
+    return `at fair share (${have - (L.xP || 0)} of ${L.share.toFixed(1)})`;
   };
   const gapMeta = [];                   // one entry per unfilled slot: {date, kind, group, limited, maxed}
 
@@ -161,7 +163,9 @@ function previewIRAA(){
       // Overlap within span
       for(const d of span){
         if(_coversDate(c, d)){
-          if(c.callType === 'weekend' && c.date === fri) continue; // self
+          // The slot being filled is open, so a weekend call this physician already holds on this
+          // Friday is in ANOTHER pool (call pools, rs-v136): the same weekend twice.
+          if(c.callType === 'weekend' && c.date === fri) return 'already on weekend call this date';
           return c.callType === 'weekend'
             ? `another weekend call covers ${d} (${c.date}→${addDays(c.date,3)})`
             : `daily call on ${d} within the weekend span`;
@@ -196,14 +200,15 @@ function previewIRAA(){
   //   opts.allowRelaxBreakable = true → ignore tbRules flagged with
   //     allowBreakForUnfilledIR. Used during the relaxation retry after a gap.
   //     Adjacency, site rules, vacation, and participation are NEVER relaxed.
+  const _awayOf = {};
   function whyBlocked(p, date, kind, g, skipAdjacency, opts){
     const allowRelax = !!(opts && opts.allowRelaxBreakable);
     const isWkd = (kind === 'weekend');
     const span  = isWkd ? [date, addDays(date,1), addDays(date,2), addDays(date,3)] : [date];
     const ym    = date.slice(0,7);
 
-    // Vacation — any day of span
-    const vd = _awayDays(p.id);
+    // Vacation — any day of span (each physician's set built once per preview: S does not change while it runs)
+    const vd = _awayOf[p.id] || (_awayOf[p.id] = _awayDays(p.id));
     for(const d of span) if(vd.has(d)) return (vd.notStartedBefore && d < vd.notStartedBefore) ? 'not started yet' : 'vacation';
     // Sold-back
     for(const d of span) if(isSoldBackDate(p.id, d)) return 'sold-back';
@@ -302,11 +307,11 @@ function previewIRAA(){
   //   name, for a deterministic result.
   let _avail = {}, _rem = {};           // per call type within one group — set by fillKind
   const _urgency = (p, kind) => {
-    const q = _quota(p, kind);
+    const _xpU = (_L(p, kind) || {}).xP || 0, q = _quota(p, kind) - _xpU;
     if(q <= 0) return -Infinity;
     const a = _avail[p.id] || 0;
     const aheadFrac = a > 0 ? Math.max(_rem[p.id] || 0, 0.5) / a : 1;
-    return (1 - _cnt(p, kind) / q) / aheadFrac;
+    return (1 - (_cnt(p, kind) - _xpU) / q) / aheadFrac;
   };
   // The year so far: calls held this year up to and including this run, against
   // the FTE share of the year's slots through the end of the build period
@@ -317,7 +322,7 @@ function previewIRAA(){
   const _ytd = (p, kind) => {
     const L = _L(p, kind);
     if(!L || !(L.toDate > 0)) return { met: 1, ratio: 1e9 };
-    const have = L.before + _cnt(p, kind);
+    const have = L.before - (L.xB || 0) + _cnt(p, kind) - (L.xP || 0);     // this pool's calls only
     // ...and only while they are not already ahead of an even spread of this
     // period's quota (urgency < 1): someone far behind for the year (back from
     // a long leave) would otherwise take every date until their cap was used up.
@@ -348,9 +353,32 @@ function previewIRAA(){
   }
 
   // ─── MAIN LOOP ─────────────────────────────────────────────────────────
+  // Stage 1: each pool's regular slots go to its own members (fair share, Settings maximum).
+  // What stays open is kept per pool (_cpOpen) for stage 2, and the gap rows wait (_cpPend)
+  // until stage 2 has run: a slot another pool's volunteer covers is not a gap.
+  const _cpOpen = {}, _cpPend = [];
   groups.forEach(g => {
     const gPhys = irPs.filter(p => p.irGroup === g);
-    if(!gPhys.length) return;
+    if(!gPhys.length){
+      // Call pools (rs-v136): a pool with no members — its open slots come only from the
+      // physicians who list it (stage 2). Same slot lists as below.
+      const o = _cpOpen[g] = { weekend: [], daily: [] };
+      if(typ === 'weekend' || typ === 'both'){
+        o.weekend = allCells.filter(c => c.dow === 5).map(c => c.date).filter(fri => {
+          if(!_irHolidayWeekend(fri, g)) return true;
+          const span = [fri, addDays(fri,1), addDays(fri,2), addDays(fri,3)];
+          const matched = span.find(d => (S.holidayDefs||[]).some(h => (h.dates||[]).includes(d) && _irHolSlotsFor(h, g) > 0)) || span.find(d => isHolidayBlackout(d)) || fri;
+          const held = S.irCalls.find(ic => ic.date === fri && ic.irGroup === g && ic.callType === 'weekend' && _isHolidaySyncedCall(ic));
+          S._lastIRAAExcludedHolidayWknds.push({ friday: fri, matchedDate: matched, reason: _holidayReasonFor(matched), group: g, heldBy: held ? held.physId : null });
+          return false;
+        }).filter(fri => !S.irCalls.find(ic => ic.date === fri && ic.irGroup === g && ic.callType === 'weekend'));
+      }
+      if(typ === 'daily' || typ === 'both'){
+        o.daily = allCells.filter(c => c.dow >= 1 && c.dow <= 4 && !isHolidayBlackout(c.date)).map(c => c.date)
+          .filter(d => !S.irCalls.find(ic => ic.date === d && ic.irGroup === g && ic.callType === 'daily'));
+      }
+      return;
+    }
 
     // A slot already held by a holiday-synced call belongs to holiday call, not
     // to anyone's share of regular call.
@@ -375,13 +403,14 @@ function previewIRAA(){
     // whichever type is being built.
     [['daily', 'D', dailySlotsAll, cntD], ['weekend', 'W', wkndSlotsAll, cntW]].forEach(([kind, key, slots, cnt]) => {
       const mx = _irGroupCallMax(gPhys, kind, _irYearSlots(kind, planYear, g), periodStart, periodEnd, planYear);
+      const xc = _irCoverCounts(gPhys, kind, g, periodStart, periodEnd, planYear);   // calls in other pools (rs-v136)
       const ceilings = {};
       gPhys.forEach(p => {
         const free = openDates[kind].filter(d => baseEligOf[kind][d].includes(p));
-        const can = mx[p.id].inP + _irCallCapacity(free, kind);
-        ceilings[p.id] = Math.min(mx[p.id].pm, can);
+        const can = mx[p.id].inP + _irCallCapacity(free, kind), x = xc[p.id];
+        ceilings[p.id] = Math.min(mx[p.id].pm, can) - x.xP;           // the most of THIS pool's slots
         cnt[p.id] = mx[p.id].inP;
-        (lim[p.id] = lim[p.id] || {})[key] = Object.assign({ can, ceil: ceilings[p.id] }, mx[p.id]);
+        (lim[p.id] = lim[p.id] || {})[key] = Object.assign({ can, ceil: ceilings[p.id] }, mx[p.id], (x.xB || x.xP || x.xA) ? x : {});
       });
       const sh = _irFairShares(gPhys, slots, kind, ceilings);
       gPhys.forEach(p => {
@@ -526,11 +555,11 @@ function previewIRAA(){
       // — split by FTE like everything else, never past anyone's Settings
       // maximum — and try the open dates again.
       const ceilNow = {};
-      gPhys.forEach(p => { const L = lim[p.id][key]; ceilNow[p.id] = Math.min(L.pm, L.can); });
+      gPhys.forEach(p => { const L = lim[p.id][key]; ceilNow[p.id] = Math.min(L.pm, L.can) - (L.xP || 0); });
       for(let round = 0; round < gPhys.length && left.length; round++){
         const stuck = gPhys.filter(p => underLimit(p, kind));
         if(!stuck.length) break;
-        stuck.forEach(p => { ceilNow[p.id] = lim[p.id][key].ceil = cnt[p.id]; });
+        stuck.forEach(p => { ceilNow[p.id] = lim[p.id][key].ceil = cnt[p.id] - (lim[p.id][key].xP || 0); });
         const sh = _irFairShares(gPhys, slotsAll, kind, ceilNow);
         let grew = false;
         gPhys.forEach(p => {
@@ -553,7 +582,7 @@ function previewIRAA(){
         gPhys.forEach(p => {
           if(!(p.tbRules || []).some(r => r && r.allowBreakForUnfilledIR)) return;
           const extra = left.filter(d => !whyBlocked(p, d, kind, g, false, {allowRelaxBreakable: true}));
-          const c = Math.min(lim[p.id][key].pm, cnt[p.id] + _irCallCapacity(extra, kind));
+          const c = Math.min(lim[p.id][key].pm, cnt[p.id] + _irCallCapacity(extra, kind)) - (lim[p.id][key].xP || 0);
           if(extra.length && c > ceilNow[p.id]){ ceilNow[p.id] = c; raised = true; }
         });
         if(raised){
@@ -575,11 +604,11 @@ function previewIRAA(){
           else { reasons[p.id] = limitReason(p, kind); limited = true; }
         });
         const breakdown = gPhys.map(p => `${p.last}=${reasons[p.id]}`).join(', ');
-        gaps.push(`${isW ? 'Wknd ' : ''}${date} ${g} [${breakdown}]`);
-        gapMeta.push({ date, kind, group: g, limited,
+        _cpPend.push({ g, kind, date, row: `${isW ? 'Wknd ' : ''}${date} ${g} [${breakdown}]`, meta: { date, kind, group: g, limited,
           maxed: Object.values(reasons).some(r => /^at Settings maximum/.test(r)),
-          paced: Object.values(reasons).some(r => /^at Settings maximum for this point/.test(r)) });
+          paced: Object.values(reasons).some(r => /^at Settings maximum for this point/.test(r)) } });
       });
+      (_cpOpen[g] = _cpOpen[g] || { weekend: [], daily: [] })[kind] = left.slice().sort();
     };
 
     // Weekends are filled BEFORE daily call (rs-v128). A weekend is a four-day
@@ -617,11 +646,103 @@ function previewIRAA(){
     }
   });
 
+  // ─── STAGE 2: COVER OTHER POOLS (rs-v136) ──────────────────────────────
+  // The slots each pool of this run still has open are offered to the physicians who
+  // list that pool in their profile ("Also takes IR call for"), whatever their own group
+  // (none included), spread evenly by the room they have left under the Settings
+  // maximum; their ranking decides only which pool that room goes to first
+  // (_irCoverAllocate). Every hard rule stage 1 applies to a pool's own members
+  // applies (whyBlocked with the covered pool), back-to-back is checked against every
+  // call they hold in any pool, and the one limit is the Settings maximum for the
+  // period (paced, counted over all pools) — their own pool's fair share does not cap it.
+  // Cover spends only the room their OWN pool will not need: their FTE share of its
+  // open slots that this run does not build (later in the year, or all of it when their
+  // pool is not part of this run) stays free under the maximum (_irCoverYearCap).
+  const _cpPools = getIRGroups();
+  const _cpVols = irPs.map(p => ({ p, pools: _physCallPools(p, _cpPools).filter(g => groups.includes(g)) })).filter(v => v.pools.length);
+  const _cpPicked = new Set(), _cpLeft = new Map();
+  const _cpCache = {}, _cpCapOf = {}, _cpRunDates = new Set(periodDates);
+  const _cpDecided = (g, kind, d) => groups.includes(g) && (typ === 'both' || typ === kind) && _cpRunDates.has(d);
+  const _cpCap = (p, kind) => { const k = p.id + '|' + kind; return _cpCapOf[k] || (_cpCapOf[k] = _irCoverYearCap(p, kind, planYear, periodStart, periodEnd, _cpDecided, _cpCache)); };
+  // Why a volunteer has no room left: the Settings maximum, or the room kept for their own pool.
+  const _cpRoomWhy = (p, kind) => { const L = _L(p, kind), c = _cpCap(p, kind), have = _cnt(p, kind);
+    return (L && c.keep > 0 && have < L.pm && have >= c.cap) ? `keeping ${c.keep} of their maximum for ${p.irGroup}'s own open calls through ${c.t}` : limitReason(p, kind); };
+  if(_cpVols.length){
+    // A volunteer outside this run's pools, or with no primary group, has no limit
+    // record yet: the Settings maximum for the period and the calls already held in it.
+    const _cpGM = {};
+    _cpVols.forEach(({ p }) => {
+      [['daily', 'D', cntD], ['weekend', 'W', cntW]].forEach(([kind, key, cnt]) => {
+        if(lim[p.id] && lim[p.id][key]) return;
+        const og = p.irGroup && _cpPools.includes(p.irGroup) ? p.irGroup : '';
+        let mx;
+        if(og){
+          const gk = og + '|' + kind;
+          if(!_cpGM[gk]) _cpGM[gk] = _irGroupCallMax(irPs.filter(q => q.irGroup === og), kind, _irYearSlots(kind, planYear, og), periodStart, periodEnd, planYear);
+          mx = _cpGM[gk][p.id];
+        } else mx = _irSoloCallMax(p, kind, planYear, periodStart, periodEnd);
+        cnt[p.id] = mx.inP;
+        (lim[p.id] = lim[p.id] || {})[key] = Object.assign({ coverOnly: true }, mx);
+      });
+    });
+    const _cpSlots = [];
+    groups.forEach(g => ['weekend', 'daily'].forEach(kind => ((_cpOpen[g] || {})[kind] || []).forEach(date => _cpSlots.push({ g, kind, date }))));
+    const _cpRes = _irCoverAllocate({
+      slots: _cpSlots, vols: _cpVols, poolOrder: groups,
+      base: (p, date, kind, g) => whyBlocked(p, date, kind, g, true) || _irCoverHolidayBlock(p, date, kind, g),
+      adj: (p, date, kind) => kind === 'weekend' ? adjacencyReasonWeekend(p.id, date) : adjacencyReasonDaily(p.id, date),
+      room: (p, kind) => { const L = _L(p, kind); if(!L) return 0; const m = Math.min(L.pm, _cpCap(p, kind).cap); return isFinite(m) ? Math.max(0, m - _cnt(p, kind)) : Infinity; },
+      load: (p, kind) => { const L = _L(p, kind) || {}, e = (p.irFte || 0) * _physYearFraction(p, planYear);
+        return ((L.before || 0) + (L.after || 0) + _cnt(p, kind)) / (e > 0 ? e : 1e-9); },
+      place: (p, sl) => {
+        const entry = { physId: p.id, date: sl.date, callType: sl.kind, irGroup: sl.g, site: '', notes: `Auto (covering ${sl.g})` };
+        if(sl.kind !== 'weekend') entry.needsProcShift = !_hasIRShiftOnDate(p.id, sl.date);
+        entry._overFte = false; entry._relaxedBreakable = false; entry._cover = true;
+        preview.push(entry);
+        if(sl.kind === 'weekend') cntW[p.id]++; else cntD[p.id]++;
+      },
+    });
+    _cpRes.picks.forEach(x => _cpPicked.add(x.slot.g + '|' + x.slot.kind + '|' + x.slot.date));
+    _cpRes.left.forEach(x => {
+      // 'kept': somebody with room under the maximum keeps it for their own pool's open calls.
+      if(x.why === 'maxed' && x.detail.some(d => !d.why && /^keeping /.test(_cpRoomWhy(d.p, x.slot.kind)))) x.why = 'kept';
+      _cpLeft.set(x.slot.g + '|' + x.slot.kind + '|' + x.slot.date, x);
+    });
+  }
+  // Stage 1's gap rows, for the slots stage 2 did not cover either (same order and wording;
+  // a pool somebody lists also says why nobody from another pool took it).
+  const _cpListed = new Set(); _cpVols.forEach(v => v.pools.forEach(g => _cpListed.add(g)));
+  const _cpWhy = { none: 'nobody lists this pool', maxed: 'everyone who lists it is at their maximum', kept: 'everyone who lists it is at their maximum or keeping the rest for their own pool', busy: 'nobody who lists it is free that day' };
+  _cpPend.forEach(x => {
+    const k = x.g + '|' + x.kind + '|' + x.date;
+    if(_cpPicked.has(k)) return;
+    const l = _cpLeft.get(k);
+    if(l && _cpListed.has(x.g)){
+      gaps.push(`${x.row} \u00b7 other pools: ${_cpWhy[l.why]} [${l.detail.map(d => `${d.p.last}=${d.why || _cpRoomWhy(d.p, x.kind)}`).join(', ')}]`);
+      gapMeta.push(Object.assign(x.meta, { cover: l.why }));
+    } else { gaps.push(x.row); gapMeta.push(x.meta); }
+  });
+  // Per pool of this run: what stage 2 covered and what is still open (why → count).
+  const _cpSum = groups.map(g => {
+    const _cpMemN = irPs.filter(p => p.irGroup === g).length, n = { weekend: 0, daily: 0 }, by = { weekend: {}, daily: {} }, open = { weekend: {}, daily: {} };
+    preview.forEach(a => { if(a._cover && a.irGroup === g){ n[a.callType]++; by[a.callType][a.physId] = (by[a.callType][a.physId] || 0) + 1; } });
+    ['weekend', 'daily'].forEach(kind => ((_cpOpen[g] || {})[kind] || []).forEach(date => {
+      const k = g + '|' + kind + '|' + date; if(_cpPicked.has(k)) return;
+      const l = _cpLeft.get(k), why = l ? l.why : 'none';
+      open[kind][why] = (open[kind][why] || 0) + 1;
+    }));
+    const nOpen = kind => Object.values(open[kind]).reduce((a, b) => a + b, 0);
+    return { g, members: _cpMemN, n, by, open, openD: nOpen('daily'), openW: nOpen('weekend'), listed: _cpListed.has(g) };
+  });
+  const _cpUncovered = _cpSum.filter(x => !x.members).reduce((a, x) => a + x.openD + x.openW, 0);
+
   // ─── TAIL: keep the rest (render) intact ───────────────────────────────
 
-  S.iraPreview=preview;
+  // A preview never queues a save or an undo step (S is the reactive store; rs-v136).
+  { const _r0=_isRestoring; _isRestoring=true; try{ S.iraPreview=preview; } finally { _isRestoring=_r0; } }
   // The limits this run applied — read by the regression tests and handy in the console.
-  previewIRAA._last = { lim, planYear, periodStart, periodEnd, stamp: _iraStamp() };
+  previewIRAA._last = { lim, planYear, periodStart, periodEnd, stamp: _iraStamp(),
+    pools: _cpSum.map(x => ({ group: x.g, members: x.members, covered: { daily: x.n.daily, weekend: x.n.weekend }, open: { daily: x.openD, weekend: x.openW }, why: x.open, listed: x.listed })) };
   const dailyPrev=preview.filter(a=>a.callType==='daily');
   const wkndPrev=preview.filter(a=>a.callType==='weekend');
   // Hard rules (never waived): no back-to-back call, vacations and start dates,
@@ -663,7 +784,7 @@ function previewIRAA(){
   const _rotOpen = [];
   [...(S.tumorBoards||[]), ...(S.clinics||[])].forEach(ev => {
     if(!ev || ev.active === false || !ev.rotation || !ev.rotation.enabled) return;
-    const who = irPs.filter(p => groups.includes(p.irGroup) && (ev.allowedPhysIds||[]).includes(p.id));
+    const who = irPs.filter(p => (groups.includes(p.irGroup) || _cpVols.some(v => v.p === p)) && (ev.allowedPhysIds||[]).includes(p.id));
     if(!who.length) return;
     const miss = _eventOccurrencesInRange(ev, periodStart, periodEnd).filter(d => {
       if(_rotationPhysIdsFor(ev, d).length) return false;
@@ -679,6 +800,26 @@ function previewIRAA(){
   if(relaxedFills>0) html+=` \u00b7 <span style="color:var(--amber,#d97706);font-weight:700">${relaxedFills} conference rule relaxed</span>`;
   html+=`</span></div>`;
 
+  // Call pools (rs-v136): what other pools' volunteers covered, and what is still open per pool.
+  {
+    const _kn = (n, kind) => `${n} ${kind === 'weekend' ? 'weekend' : 'weekday'} call${n === 1 ? '' : 's'}`;
+    const _whyL = (x, kind) => Object.entries(x.open[kind]).map(([w, n]) => `${_cpWhy[w]}: ${n}`).join(' \u00b7 ');
+    const cov = _cpSum.filter(x => x.n.daily || x.n.weekend).map(x => ['weekend', 'daily'].filter(k => x.n[k]).map(k =>
+      `<strong>${escHtml(x.g)}:</strong> ${x.n[k]} open ${k === 'weekend' ? 'weekend' : 'weekday'} call${x.n[k] === 1 ? '' : 's'} covered from other pools (${Object.entries(x.by[k]).sort((a, b) => b[1] - a[1] || irPs.findIndex(p => p.id === +a[0]) - irPs.findIndex(p => p.id === +b[0])).map(([id, n]) => `${escHtml((_physById(+id) || {}).last || '?')} ${n}`).join(', ')})`).join('<br>')).join('<br>');
+    const rest = _cpSum.filter(x => x.members && (x.openD || x.openW) && _cpVols.length).map(x => `<strong>${escHtml(x.g)}:</strong> ${[x.openW ? _kn(x.openW, 'weekend') : '', x.openD ? _kn(x.openD, 'daily') : ''].filter(Boolean).join(' + ')} still open \u2014 ${x.listed ? ['weekend', 'daily'].filter(k => x[k === 'weekend' ? 'openW' : 'openD']).map(k => `${k === 'weekend' ? 'weekend' : 'weekday'}: ${_whyL(x, k)}`).join('; ') : 'nobody lists this pool'}.`).join('<br>');
+    // Volunteers from a pool this run does not build, while that pool still has open slots in the period:
+    // their cover uses only the room left after their share of those slots (_irCoverYearCap).
+    const _cpOut = [...new Set(preview.filter(a => a._cover).map(a => (_physById(a.physId) || {}).irGroup).filter(g => g && !groups.includes(g) && _cpPools.includes(g)))]
+      .filter(g => allCells.some(c => ((c.dow >= 1 && c.dow <= 4 && !isHolidayBlackout(c.date)) || (c.dow === 5 && !_irHolidayWeekend(c.date, g)))
+        && !S.irCalls.some(ic => ic.irGroup === g && ic.date === c.date && ic.callType === (c.dow === 5 ? 'weekend' : 'daily'))));
+    const outNote = _cpOut.length ? `<div class="mt8">${_cpOut.map(escHtml).join(', ')} ${_cpOut.length > 1 ? 'are' : 'is'} not part of this run and still ha${_cpOut.length > 1 ? 've' : 's'} open calls in this period: ${_cpOut.length > 1 ? 'their' : 'its'} members cover here only with the room their Settings maximum leaves after their FTE share of their own pool's open calls this year, which stays free for its own build.</div>` : '';
+    if(cov || rest) html+=`<div class="note ni mb8" style="font-size:11px"><strong>Other pools.</strong> A pool's open calls left after its own members' fair share go to the physicians who list it (physician profile \u2192 \u201cAlso takes IR call for\u201d), most room left under the Settings maximum first; their ranking only decides which pool their spare room goes to first.${cov ? `<div class="mt8">${cov}</div>` : ''}${rest ? `<div class="mt8">${rest}</div>` : ''}${outNote}</div>`;
+    const ml = _cpSum.filter(x => !x.members && (x.openD || x.openW)).map(x => x.listed
+      ? `<strong>${escHtml(x.g)}:</strong> no members \u2014 ${[x.openD ? _kn(x.openD, 'daily') : '', x.openW ? _kn(x.openW, 'weekend') : ''].filter(Boolean).join(' + ')} uncovered (${['daily', 'weekend'].filter(k => x[k === 'weekend' ? 'openW' : 'openD']).map(k => `${k === 'weekend' ? 'weekend' : 'weekday'}: ${_whyL(x, k)}`).join('; ')}).`
+      : `<strong>${escHtml(x.g)}:</strong> no members and nobody lists it \u2014 ${[x.openD ? _kn(x.openD, 'daily') : '', x.openW ? _kn(x.openW, 'weekend') : ''].filter(Boolean).join(' + ')} uncovered.`).join('<br>');
+    if(ml) html+=`<div class="note nw mb8" style="font-size:11px">${ml} <span class="txt3">A pool with no members is covered only by physicians who list it in their profile.</span></div>`;
+  }
+
   if(limitedGaps>0)
     html+=`<div class="note nw mb8" >&#9888; <strong>${limitedGaps} slot(s) were left open rather than assign anyone past a limit.</strong> Nobody is given more than their fair share of the period or more than the Settings maximum for the year (${_maxLbl}, \u00d7 their FTE \u00d7 the part of the year they are on staff). Holiday call is counted on the Holiday tab and is not part of either limit.${_maxedNote} The open dates are listed at the bottom.</div>`;
   if(_rotOpen.length)
@@ -689,7 +830,10 @@ function previewIRAA(){
   // Holiday weekends panel — a weekend a defined holiday touches is left to
   // holiday call (_irHolidayWeekend). Say which ones, and whether the Holiday
   // tab has someone on them yet: an unassigned one is nobody's call until then.
-  const irExcluded = S._lastIRAAExcludedHolidayWknds || [];
+  // A pool with no members that nobody lists is reported in one line above (call pools, rs-v136): nobody can
+  // take its holiday weekends either, so they are not listed here one by one.
+  const _cpQuiet = new Set(_cpSum.filter(x => !x.members && !x.listed).map(x => x.g));
+  const irExcluded = (S._lastIRAAExcludedHolidayWknds || []).filter(x => !_cpQuiet.has(x.group));
   if(irExcluded.length){
     const byGroup = {};
     irExcluded.forEach(x => {
@@ -714,19 +858,21 @@ function previewIRAA(){
 
   if(preview.length){
     html+='<div class="scroll-x"><table><thead><tr><th>Physician</th><th>Group</th><th>Date</th><th>Type</th><th>Covers</th></tr></thead><tbody>';
-    preview.slice(0,60).forEach(a=>{
+    // Cover for other pools (stage 2) is listed first, so it is not cut off below the first 60 rows.
+    [...preview.filter(a=>a._cover),...preview.filter(a=>!a._cover)].slice(0,60).forEach(a=>{
       const dates=a.callType==='weekend'?`${a.date} \u2192 ${addDays(a.date,3)}`:a.date;
       const gSites=S.sites.filter(s=>s.irGroup===a.irGroup||s.irGroup==='Both').map(s=>s.name.split(' ')[0]).join(', ');
-      const coverLbl=a.callType==='daily'?`All ${a.irGroup} sites (${gSites})`:a.site;
+      const coverLbl=a.callType==='daily'?(gSites?`All ${a.irGroup} sites (${gSites})`:`${escHtml(a.irGroup)} call`)+(a._cover?' \u00b7 procedure shift at their own site':''):a.site;
       const rowStyle = a._overFte ? 'background:var(--red-bg,#fef2f2)'
                      : a._relaxedBreakable ? 'background:var(--amber-bg)'
                      : '';
       let passBadge = '';
       if(a._overFte) passBadge += `<span class="tag tr" style="font-size:9px;margin-left:4px" title="Assigned over FTE target — no other eligible physician">over FTE</span>`;
       if(a._relaxedBreakable) passBadge += `<span class="tag ta" style="font-size:9px;margin-left:4px;background:var(--amber-bg);color:var(--amber-t)" title="Conference rule broken — no other eligible physician and rule was flagged breakable">rule relaxed</span>`;
+      if(a._cover) passBadge += `<span class="tag tgr" style="font-size:9px;margin-left:4px" title="Covers an open call of another pool they list in their profile">covering ${escHtml(a.irGroup)}</span>`;
       html+=`<tr style="${rowStyle}">
         <td>${pnameHtml(a.physId)}${passBadge}</td>
-        <td><span class="tag ${irGroupColorClass(a.irGroup)}">${a.irGroup}</span></td>
+        <td><span class="tag ${irGroupColorClass(a.irGroup)}">${escHtml(String(a.irGroup))}</span></td>
         <td>${dates}</td>
         <td><span class="tag ${a.callType==='weekend'?'tpk':'tt'}">${a.callType}</span></td>
         <td style="font-size:11px;color:var(--txt2)">${coverLbl}</td></tr>`;
@@ -736,35 +882,44 @@ function previewIRAA(){
   }
 
   const tally=[];
-  irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter).forEach(p=>{
+  // Calls a physician holds in OTHER pools inside the period, by pool — on the schedule and this run's.
+  const _cpOther=(p,kind,list)=>{ const m={}, own=p.irGroup||'';
+    S.irCalls.forEach(c=>{ if(c.physId===p.id&&c.callType===kind&&_irIsCoverCall(c,p,_cpPools)&&c.date>=periodStart&&c.date<=periodEnd&&String(c.date).slice(0,4)===planYear&&!_isHolidaySyncedCall(c)) m[c.irGroup]=(m[c.irGroup]||0)+1; });
+    list.forEach(a=>{ if(a.physId===p.id&&a.irGroup!==own) m[a.irGroup]=(m[a.irGroup]||0)+1; });
+    return m; };
+  irPs.filter(p=>grpFilter==='both'||p.irGroup===grpFilter||_cpVols.some(v=>v.p===p)).forEach(p=>{
     const L=lim[p.id]; if(!L||!L.D||!L.W) return;
-    const row=(K,cnt,list)=>{
-      const tot=cnt[p.id]||0, yr=K.before+K.after+tot;                 // period total / calendar-year total, this run included
-      const shown=Math.max(K.base,K.share);                             // the FTE share, or the larger re-split share
-      return { n:list.filter(a=>a.physId===p.id).length, tot, yr, shown, up:K.share>K.base+0.05,
-               pct:shown>0?Math.round(tot/shown*100):0, over:tot>K.cap, K };
+    const row=(K,cnt,list,kind)=>{
+      const tot=cnt[p.id]||0, yr=K.before+K.after+tot;                 // period total / calendar-year total (every pool), this run included
+      const oth=_cpOther(p,kind,list), on=Object.values(oth).reduce((a,b)=>a+b,0), prim=tot-on, cov=!!K.coverOnly;
+      const shown=cov?0:Math.max(K.base,K.share);                       // the FTE share, or the larger re-split share
+      return { n:list.filter(a=>a.physId===p.id).length, tot, prim, oth, on, cov, yr, shown, up:!cov&&K.share>K.base+0.05,
+               pct:shown>0?Math.round(prim/shown*100):0, over:!cov&&prim>K.cap, K };
     };
-    tally.push({p, d:row(L.D,cntD,dailyPrev), w:row(L.W,cntW,wkndPrev)});
+    tally.push({p, d:row(L.D,cntD,dailyPrev,'daily'), w:row(L.W,cntW,wkndPrev,'weekend')});
   });
+  const _cpAnyOther=tally.some(t=>t.d.on||t.w.on||t.d.cov);
   if(tally.length){
     const anyUp=tally.some(t=>t.d.up||t.w.up);
     html+=`<div class="card" style="margin-top:10px"><div class="card-title" style="font-size:12px">FTE Distribution — ${label}
       <span style="font-size:10px;font-weight:400;color:var(--txt3);margin-left:6px">Fair share = this period's calls split by IR FTE (× the part of it each physician is on staff); vacation does not change it.${anyUp?' ↑ = includes calls a colleague cannot take (at their maximum, or away).':''} Max = Settings → FTE Caps for ${planYear} × FTE × part of the year on staff. Both are hard limits.</span>
     </div>
       <table class="fs-xs"><thead><tr><th>Physician</th><th>FTE</th>
-        <th>Daily +new</th><th>Daily total</th><th title="Fair share of this period">Fair share</th><th title="Calls in ${planYear} / Settings maximum for ${planYear}">${planYear} / max</th><th>Daily %</th>
-        <th>Wknd +new</th><th>Wknd total</th><th title="Fair share of this period">Fair share</th><th title="Calls in ${planYear} / Settings maximum for ${planYear}">${planYear} / max</th><th>Wknd %</th>
+        <th>Daily +new</th><th>${_cpAnyOther?'Daily own pool':'Daily total'}</th>${_cpAnyOther?'<th title="Weekday calls in other pools this period (cover)">Other pools</th>':''}<th title="Fair share of this period">Fair share</th><th title="Calls in ${planYear} / Settings maximum for ${planYear}">${planYear} / max</th><th>Daily %</th>
+        <th>Wknd +new</th><th>${_cpAnyOther?'Wknd own pool':'Wknd total'}</th>${_cpAnyOther?'<th title="Weekend calls in other pools this period (cover)">Other pools</th>':''}<th title="Fair share of this period">Fair share</th><th title="Calls in ${planYear} / Settings maximum for ${planYear}">${planYear} / max</th><th>Wknd %</th>
       </tr></thead><tbody>`;
     const cells=r=>{
       const K=r.K, cls=r.over?'color:var(--red-t)':r.pct>=80?'color:var(--green-t)':'color:var(--txt2)';
       const mx=isFinite(K.max)
         ? `<span style="${r.yr>K.max?'color:var(--red-t);font-weight:700':r.yr>=K.max?'font-weight:700':''}">${r.yr} / ${K.max}</span>`
         : `<span title="No maximum set in Settings">${r.yr} / —</span>`;
+      const oth=Object.entries(r.oth).map(([g,n])=>`${escHtml(g)} ${n}`).join(', ');
       return `<td style="text-align:center;color:var(--teal-t)">+${r.n}</td>
-        <td class="tac">${r.tot}</td>
-        <td class="tac txt3"${r.up?` title="FTE share ${K.base.toFixed(1)}; the rest is what colleagues cannot take"`:''}>${r.shown.toFixed(1)}${r.up?' ↑':''}</td>
+        <td class="tac">${r.prim}</td>
+        ${_cpAnyOther?`<td class="tac"${oth?` title="${oth}"`:''}>${r.on?`+${r.on} <span class="txt3">(${oth})</span>`:'\u2014'}</td>`:''}
+        <td class="tac txt3"${r.up?` title="FTE share ${K.base.toFixed(1)}; the rest is what colleagues cannot take"`:''}>${r.cov?'<span title="Takes call only in pools they list">\u2014</span>':r.shown.toFixed(1)}${r.up?' ↑':''}</td>
         <td class="tac txt3">${mx}</td>
-        <td style="text-align:center;font-weight:700;${cls}">${r.pct}%</td>`;
+        <td style="text-align:center;font-weight:700;${cls}">${r.cov?'\u2014':r.pct+'%'}</td>`;
     };
     tally.forEach(({p,d,w})=>{
       const _fr=_physYearFraction(p,planYear);
@@ -783,7 +938,7 @@ function previewIRAA(){
 
   // IR physicians the builder never schedules: IR FTE but no IR group (or one
   // that is no longer in the list). They have no row above — say so.
-  const _noGroup = irPs.filter(p => !getIRGroups().includes(p.irGroup));
+  const _noGroup = irPs.filter(p => !getIRGroups().includes(p.irGroup) && !_physCallPools(p, _cpPools).length);
   if(_noGroup.length)
     html+=`<div class="note ni mt8" style="font-size:11px">Not scheduled for IR call: <strong>${_noGroup.map(p=>escHtml(p.last)).join(', ')}</strong> \u2014 IR FTE but no IR group. Set the group in the physician editor to include ${_noGroup.length>1?'them':'this physician'}.</div>`;
 
@@ -802,7 +957,7 @@ function previewIRAA(){
       </div>
     </div>`;
   }
-  if(!preview.length&&!gaps.length)
+  if(!preview.length&&!gaps.length&&!_cpUncovered)
     html='<div class="note ns">All IR call slots already filled for this period.</div>';
 
   document.getElementById('ira-box').innerHTML=html;
@@ -828,7 +983,7 @@ function applyIRAA(){
   let procShiftsSkipped=0;
   const skippedLog=[];
   toApply.forEach(a=>{
-    S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:'Auto'});
+    S.irCalls.push({id:S.nextId++,physId:a.physId,date:a.date,callType:a.callType,irGroup:a.irGroup,site:a.site,notes:a._cover?`Auto (covering ${a.irGroup})`:'Auto'});
     // Auto-create a 1st proc shift for daily calls where physician had none scheduled.
     // CRITICAL: if the physician has callDayRules that pin them to a specific
     // site when on call (e.g. "Greene: IR call → must be at CHN"), we MUST
@@ -880,9 +1035,10 @@ function applyIRAA(){
         candidateSites.unshift(r.requiredSite);
         seen.add(r.requiredSite);
       });
-      // Then all sites in the phys's group.
+      // Then all sites in the phys's OWN group (call pools: also when the call covers another pool).
+      const _ownG = p.irGroup || '';
       (S.sites||[]).forEach(s => {
-        if(s.irGroup === a.irGroup || s.irGroup === 'Both') _push(s.name);
+        if(_ownG && (s.irGroup === _ownG || s.irGroup === 'Both')) _push(s.name);
       });
       // Dedup while preserving order (requiredSite-prioritized → primary → group)
       const orderedCandidates = [];
@@ -895,7 +1051,7 @@ function applyIRAA(){
       for(const siteName of orderedCandidates){
         const ctx = {
           physId: p.id, date: a.date, site: siteName, shift: '1st',
-          kind: 'ir-shift', irGroup: a.irGroup,
+          kind: 'ir-shift', irGroup: _ownG,
           shiftKey: 's1', ym: a.date.slice(0,7), sub: '',
         };
         // callDayRulesOk direction 1: must match requiredSite when on call.
@@ -915,7 +1071,7 @@ function applyIRAA(){
       }
       if(chosenSite){
         S.irShifts.push({id:S.nextId++,physId:a.physId,date:a.date,shift:'1st',
-          site:chosenSite,sub:'',notes:'Auto (with call)',irGroup:a.irGroup});
+          site:chosenSite,sub:'',notes:'Auto (with call)',irGroup:_ownG});
         procShiftsAdded++;
       } else {
         // No rule-valid site could be found. Skip the auto-shift rather
@@ -927,6 +1083,8 @@ function applyIRAA(){
     }
   });
   const n=toApply.length;
+  const _nCover=toApply.filter(a=>a._cover).length;
+  if(_nCover && typeof _audit==='function') _audit('irCall.coverAssign', {n:_nCover, pools:[...new Set(toApply.filter(a=>a._cover).map(a=>a.irGroup))]});
   triggerSave();
   _afterMutation();
   let note=procShiftsAdded?` · ${procShiftsAdded} proc shift(s) auto-created`:'';

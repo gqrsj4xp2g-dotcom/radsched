@@ -154,7 +154,8 @@ Respects vacations, existing shifts, blackouts, site rules, sequence rules, and 
         physId:        { type: 'number' },
         drFte:         { type: 'number', description: 'DR FTE (0.0-1.0)' },
         irFte:         { type: 'number', description: 'IR FTE (0.0-1.0)' },
-        irGroup:       { type: 'string', enum: ['North','South','none'] },
+        irGroup:       { type: 'string', description: "Primary IR group (call pool): one of the practice's IR groups, or 'none'" },
+        irCallPools:   { type: 'array', items: {type:'string'}, description: 'Other IR groups this physician also takes IR call in once their own group is covered, most preferred first (never their own group); [] = own group only' },
         anchorSite:    { type: 'string', description: 'DR anchor site name' },
         irSitePrim:    { type: 'string', description: 'IR primary site name' },
         allowedSites:  { type: 'array', items: {type:'string'}, description: 'All sites this physician can be assigned to' },
@@ -696,13 +697,20 @@ function _aiExecuteTool(name, input) {
   // ── PHYSICIAN MANAGEMENT ──────────────────────────────────────────────────
   if(name === 'update_physician'){
     if(!adminOk) return { ok:false, error:'Admin access required.' };
-    const {physId, drFte, irFte, irGroup, anchorSite, irSitePrim, allowedSites, drSubs, irSubs, shiftElig} = input;
+    const {physId, drFte, irFte, irGroup, irCallPools, anchorSite, irSitePrim, allowedSites, drSubs, irSubs, shiftElig} = input;
     const p = S.physicians.find(x=>x.id===physId);
     if(!p) return { ok:false, error:`Physician ID ${physId} not found.` };
+    if(irGroup!==undefined && irGroup!=='none' && !getIRGroups().includes(irGroup)) return { ok:false, error:`"${irGroup}" is not an IR group (${getIRGroups().join(', ')||'none defined'}).` };
     const changes = [];
     if(drFte!==undefined){ p.drFte=Math.max(0,Math.min(1,+drFte)); changes.push(`drFte=${p.drFte}`); }
     if(irFte!==undefined){ p.irFte=Math.max(0,Math.min(1,+irFte)); changes.push(`irFte=${p.irFte}`); }
     if(irGroup!==undefined){ p.irGroup = irGroup==='none'?null:irGroup; changes.push(`irGroup=${p.irGroup||'(none)'}`); }
+    // Call pools (rs-v136): ranked list of the OTHER IR groups; re-normalized when the primary group changes.
+    if(Array.isArray(irCallPools) || (irGroup!==undefined && Array.isArray(p.irCallPools))){
+      const _cpl = _normCallPools(Array.isArray(irCallPools) ? irCallPools : p.irCallPools, p.irGroup || null);
+      if(_cpl.length) p.irCallPools = _cpl; else delete p.irCallPools;
+      if(Array.isArray(irCallPools)) changes.push(`irCallPools=${_cpl.join(' > ')||'(own group only)'}`);
+    }
     if(anchorSite!==undefined){ p.anchorSite=anchorSite||null; changes.push(`anchorSite=${p.anchorSite||'(none)'}`); }
     if(irSitePrim!==undefined){ p.irSitePrim=irSitePrim||null; changes.push(`irSitePrim=${p.irSitePrim||'(none)'}`); }
     if(Array.isArray(allowedSites)){ p.allowedSites=allowedSites.slice(); changes.push(`allowedSites=${p.allowedSites.length}`); }
@@ -894,6 +902,7 @@ function _aiExecuteTool(name, input) {
       name: `${p.last}, ${p.first}`,
       role: p.role,
       irGroup: p.irGroup || null,
+      irCallPools: _physCallPools(p),
       siteRules:    (p.siteRules    || []).map((r,i)=>({idx:i, ...r})),
       dayConditions:(p.dayConditions|| []).map((r,i)=>({idx:i, ...r})),
       seqRules:      p.seqRules     || null,

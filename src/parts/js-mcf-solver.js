@@ -134,6 +134,10 @@ function _mcfSolveAsync(numNodes, edges, source, sink, maxFlow){
 }
 
 function _mcfSolve(numNodes, edges, source, sink, maxFlow){
+  // rs-v136: the same algorithm on flat arrays, without the work that never relaxed anything — same
+  // paths, ties, flows and cost (_mcfSolveFast, outside this managed block). It declines inputs it does
+  // not cover (null), and those run the loop below.
+  if(typeof _mcfSolveFast === 'function'){ const viaFast = _mcfSolveFast(numNodes, edges, source, sink, maxFlow); if(viaFast) return viaFast; }
   const adj = Array.from({length: numNodes}, () => []);
   // Each forward edge stores its index in the input array so the caller
   // can decode flow assignments. Reverse edges store -1.
@@ -545,7 +549,7 @@ function _renderUnfilledDiagnostic(unfilledSlots, opts){
       <summary style="cursor:pointer;font-size:12px;font-weight:600">
         <span style="color:var(--red-t)">${escHtml(slot.date)}</span>
         <span style="color:var(--txt2);margin-left:6px">${escHtml(slot.site)}${slotLabel}</span>
-        <span style="margin-left:8px;font-weight:400;color:var(--txt3)">${slot._group || ''}</span>
+        <span style="margin-left:8px;font-weight:400;color:var(--txt3)">${escHtml(slot._group || '')}</span>
         ${uhBadge}${placedNote}${availNote}${coverNote}${overQNote}
       </summary>
       <div style="margin-top:6px;font-size:11px">
@@ -797,6 +801,8 @@ function _irsaMcfGroupModel(grp, cells, months, inPeriod, allP, allS){
   const callDays = {}, existing = {}, existingAnc = {}, quota = {};
   phys.forEach(p => { callDays[p.id] = 0; existing[p.id] = 0; existingAnc[p.id] = 0; });
   Object.keys(callMap).forEach(d => { if(callDays.hasOwnProperty(callMap[d])) callDays[callMap[d]]++; });
+  const xOn = (typeof _irsaXPoolOnCall === 'function') ? _irsaXPoolOnCall(grp, months, S.irCalls || []) : {};
+  Object.keys(xOn).forEach(d => xOn[d].forEach(id => { if(id !== callMap[d] && callDays.hasOwnProperty(id)) callDays[id]++; }));
   (S.irShifts || []).forEach(es => {
     if(!es || es.shift !== '1st' || !es.date || !inPeriod[es.date]) return;
     if(existing[es.physId] == null) return;                       // only physicians of this group
@@ -811,7 +817,7 @@ function _irsaMcfGroupModel(grp, cells, months, inPeriod, allP, allS){
     if(pp && pp.anchorSite === es.site) existingAnc[es.physId]++;
   });
   phys.forEach(p => { quota[p.id] = _irsaEffQ(p, rawQ, callDays, months); });
-  return { grp, phys, slots, callMap, callDays, existing, existingAnc, quota };
+  return { grp, phys, slots, callMap, xOn, callDays, existing, existingAnc, quota };
 }
 
 // Can physician p ever be routed to this slot, and at which rule tier?
@@ -901,7 +907,7 @@ function _irsaMcfSpreadOffAnchor(asg, allSlots, cands, info, dayCost, rulesHold)
   return swaps;
 }
 
-function _irsaSolveMCF(opts){
+function _irsaSolveMCF(opts){ return _rsSolveScope(() => {
   opts = opts || {};
   const C = _IRSA_MCF_COST;
   const _now = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -955,7 +961,7 @@ function _irsaSolveMCF(opts){
   // site / sequence rule is priced, not hidden). Outside the slot's group
   // ONLY a physician registered in the site's irFillins, and only with every
   // rule intact.
-  const blockedDay = {}, dayCost = {}, monthCost = {};
+  const blockedDay = {}, dayCost = {}, monthCost = {}, awayOf = [];
   const cands = allSlots.map(() => []);
   let considered = 0, eligible = 0;
   allSlots.forEach((s, j) => {
@@ -967,7 +973,7 @@ function _irsaSolveMCF(opts){
       considered++;
       const dk = pi + '|' + s.date;
       // Day-level block is slot-independent → evaluate once per physician-day.
-      if(blockedDay[dk] === undefined) blockedDay[dk] = !!_irsaBlocked(p, s.date, []);
+      if(blockedDay[dk] === undefined) blockedDay[dk] = !!_irsaBlocked(p, s.date, [], awayOf[pi] || (awayOf[pi] = _awayDays(p.id)));
       const t = _irsaMcfEdgeTier(p, s, blockedDay[dk]);
       if(!t) return;
       if(cross && !(t.siteOk && t.seqOk)) return;
@@ -1007,7 +1013,7 @@ function _irsaSolveMCF(opts){
         if(fillsUnmet) cost -= 300;
       }
       // On-call bonus sits on the physician→day edge (same for every slot that day).
-      if(dayCost[dk] === undefined) dayCost[dk] = (pin.gm && pin.gm.callMap[s.date] === p.id) ? C.ONCALL : 0;
+      if(dayCost[dk] === undefined) dayCost[dk] = (pin.gm && (pin.gm.callMap[s.date] === p.id || ((pin.gm.xOn || {})[s.date] || []).indexOf(p.id) >= 0)) ? C.ONCALL : 0;
       cands[j].push({ pi: pi, cost: cost, counts: counts, cross: cross, siteOk: t.siteOk, seqOk: t.seqOk });
       eligible++;
     });
@@ -1302,7 +1308,7 @@ function _irsaSolveMCF(opts){
     unfilledSlots,   // slot objects (with _group) the network could not fill
     perPhys,         // physId → {group, quota, existing, counting, fillin, over, atAnchor}
   };
-}
+}); }
 
 /* ═══════════════════════════════════════════════════════════════════════
    ALTERNATIVE IR SHIFT SOLVER + SIDE-BY-SIDE COMPARISON HARNESS

@@ -66,8 +66,9 @@ function renderFTE(){
         <th>Status</th>
       </tr></thead><tbody>`;
     irPs.forEach(p=>{
-      const dailyCalls=irDailyCnt(p.id,ym);
-      const wkndCalls=irWkndCnt(p.id,ym);
+      const xD=_irCoverCallCnt(p,[ym],'daily'), xW=_irCoverCallCnt(p,[ym],'weekend');   // call pools (rs-v136): cover for other pools
+      const dailyCalls=irDailyCnt(p.id,ym)-xD;
+      const wkndCalls=irWkndCnt(p.id,ym)-xW;
       const procShifts=irProcShiftCnt(p.id,ym);
       const dailyTgt=irDailyTargetMonth(p,ym);
       const wkndTgt=irWkndTargetMonth(p,ym);
@@ -84,11 +85,11 @@ function renderFTE(){
       html+=`<tr>
         <td class="fw6">${pnameHtml(p.id)}</td>
         <td class="tac">${p.irFte}</td>
-        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${p.irGroup||'—'}</span></td>
-        <td class="tac fw7">${dailyCalls}</td>
+        <td><span class="tag ${irGroupColorClass(p.irGroup)}">${escHtml(p.irGroup||'—')}</span></td>
+        <td class="tac fw7">${dailyCalls}${xD?` <span class="txt3" style="font-weight:400" title="Weekday calls covering other pools (not part of the fair share)">+${xD} other</span>`:''}</td>
         <td class="tac txt3">${dailyTgt.toFixed(1)}</td>
         <td class="tac"><span style="${dCls};font-weight:700">${dailyPct}%</span></td>
-        <td class="tac fw7">${wkndCalls}</td>
+        <td class="tac fw7">${wkndCalls}${xW?` <span class="txt3" style="font-weight:400" title="Weekend calls covering other pools (not part of the fair share)">+${xW} other</span>`:''}</td>
         <td class="tac txt3">${wkndTgt.toFixed(1)}</td>
         <td class="tac"><span style="${wCls};font-weight:700">${wkndPct}%</span></td>
         <td class="tac fw7">${procShifts}</td>

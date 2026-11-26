@@ -826,19 +826,17 @@ function natLangRulesOk(ctx){
           if(period==='month') return d.startsWith(monthKey);
           if(period==='year')  return d.startsWith(yearKey);
           if(period==='week'){
-            // ISO-ish: same Mon-Sun block
-            const d1=parseDateLocal(ctx.date), d2=parseDateLocal(d);
-            const toMon = dt => { const c=new Date(dt); c.setDate(c.getDate()-((c.getDay()+6)%7)); return fmtDate(c); };
-            return toMon(d1)===toMon(d2);
+            // ISO-ish: same Mon-Sun block (the Monday of each date: _nlWeekKey)
+            return _nlWeekKey(ctx.date)===_nlWeekKey(d);
           }
           return false;
         };
         let n=0;
         const drop=ctx.plan&&ctx.plan.drop;
-        (S.drShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
-        (S.irShifts||[]).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date) && !(drop&&drop.has(s.id))) n++; });
-        (S.irCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.date)) n++; });
-        (S.weekendCalls||[]).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.satDate||c.date)) n++; });
+        _rsOfPhys(S.drShifts||[],ctx.physId).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date)) n++; });
+        _rsOfPhys(S.irShifts||[],ctx.physId).forEach(s=>{ if(s.physId===ctx.physId && inRange(s.date) && !(drop&&drop.has(s.id))) n++; });
+        _rsOfPhys(S.irCalls||[],ctx.physId).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.date)) n++; });
+        _rsOfPhys(S.weekendCalls||[],ctx.physId).forEach(c=>{ if(c.physId===ctx.physId && inRange(c.satDate||c.date)) n++; });
         if(ctx.plan) ctx.plan.of(ctx.physId).forEach(a=>{ if(inRange(a.date)) n++; });
         return n;
       };
@@ -872,12 +870,16 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
   // Per-site maxConsec from siteRules (old model, kept for compat)
   const perSiteRules = (p.siteRules||[]).filter(r=>r.maxConsec>0);
   for(const rule of perSiteRules){
+    // rs-v136: a per-site cap counts consecutive days AT that site, so — like a site sequence rule below — it
+    // only applies to a shift there; a shift at another site neither extends nor is blocked by that run.
+    // A caller that names no site still gets every per-site cap (as before).
+    if(candSite && rule.site !== candSite) continue;
     const cap = rule.maxConsec;
     let streak=0, d=date;
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
-      const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site&&kept(s))
+      const has=_rsOnDate(S.drShifts,d).some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site)
+             ||_rsOnDate(S.irShifts,d).some(s=>s.physId===p.id&&s.date===d&&s.site===rule.site&&kept(s))
              ||planned(d,a=>a.site===rule.site);
       if(has) streak++; else break;
     }
@@ -889,8 +891,8 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
     let streak=0, d=date;
     for(let i=0;i<cap;i++){
       d=addDays(d,-1);
-      const has=S.drShifts.some(s=>s.physId===p.id&&s.date===d)
-             ||S.irShifts.some(s=>s.physId===p.id&&s.date===d&&kept(s))
+      const has=_rsOnDate(S.drShifts,d).some(s=>s.physId===p.id&&s.date===d)
+             ||_rsOnDate(S.irShifts,d).some(s=>s.physId===p.id&&s.date===d&&kept(s))
              ||planned(d);
       if(has) streak++; else break;
     }
@@ -900,8 +902,8 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
   if(seq?.minRest){
     for(let i=1;i<=seq.minRest;i++){
       const prev=addDays(date,-i);
-      const prevHas=S.drShifts.some(s=>s.physId===p.id&&s.date===prev)
-                  ||S.irShifts.some(s=>s.physId===p.id&&s.date===prev&&kept(s))
+      const prevHas=_rsOnDate(S.drShifts,prev).some(s=>s.physId===p.id&&s.date===prev)
+                  ||_rsOnDate(S.irShifts,prev).some(s=>s.physId===p.id&&s.date===prev&&kept(s))
                   ||planned(prev);
       if(prevHas) return false;
       if(plan && plan.ahead && planned(addDays(date,i))) return false;
@@ -930,11 +932,11 @@ function sequenceOk(p, date, ym, candSite, candSlotLabel, plan){
       // carry slotLabel — site-only rules match either; slot-scoped rules
       // require the label to match.
       const counts = (d) => {
-        const irHits = (S.irShifts||[]).filter(s =>
+        const irHits = _rsOnDate(S.irShifts||[], d).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
           && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel) && kept(s));
         if(irHits.length) return true;
-        const drHits = (S.drShifts||[]).filter(s =>
+        const drHits = _rsOnDate(S.drShifts||[], d).filter(s =>
           s.physId === p.id && s.date === d && s.site === rule.site
           && (!rule.slotLabel || (s.slotLabel||'') === rule.slotLabel));
         return drHits.length > 0
