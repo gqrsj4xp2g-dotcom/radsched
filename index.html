@@ -15999,7 +15999,7 @@ function _runLeaderElection(){
 // Download support fetches the deployed sibling sw.js so Settings cannot hand
 // admins an obsolete embedded worker. Keep this fallback empty on purpose:
 // if sw.js is missing, the correct fix is to deploy it beside index.html.
-const _SW_VERSION = 'rs-v136';
+const _SW_VERSION = 'rs-v137';
 const _SW_SOURCE = '';
 
 async function _serviceWorkerSourceForDownload(){
@@ -16581,6 +16581,7 @@ function _refreshCurrentPage(){
   };
   try{
     if(fns[pg]) fns[pg]();
+    _rsDrawOpenViews(pg, true); // rs-v137: views of this page its own render does not draw; the rest are marked stale
     // Restore scroll on the next animation frame so DOM has settled.
     requestAnimationFrame(() => {
       try{ if(_scroller && _savedScroll) _scroller.scrollTop = _savedScroll; }catch(_){}
@@ -16614,47 +16615,124 @@ function _refreshCurrentPage(){
   }
 }
 
-// Called after ANY mutation that could affect schedule data. Refreshes the
-// current page (via _refreshCurrentPage) AND invalidates the render of every
-// schedule view — DR calendar, IR calendar, builders, tables, tally, etc. —
-// regardless of whether they're the currently-active page. This catches the
-// common failure pattern where a user deletes a row on page A, switches to
-// page B, and sees stale data because B's render function wasn't re-run.
-//
-// Uses try/catch around each call so one render failure (e.g. a not-yet-
-// initialized DOM element on a page that hasn't been opened) doesn't block
-// the rest. Only calls a render if its anchor DOM element actually exists,
-// so first-time-opening-a-page still lazy-initializes normally.
-function _afterMutation(){
-  try{ _refreshCurrentPage(); }catch(e){
-    try{ if(typeof _logError === 'function') _logError('_refreshCurrentPage', e?.message||String(e), e); }catch(_){}
+// ── Schedule views and when each is drawn (rs-v137) ─────────────────────────
+// These are the eleven views an edit used to redraw every time, on screen or
+// not: about 45,000 DOM nodes per edit, 245,000 once a full year of DR shifts
+// exists. Now a view is drawn only while it is on screen. One that is not is
+// marked in _rsStaleViews and left alone: nav() draws a page every time it is
+// opened, and a tab inside a page draws its view when the tab is clicked.
+// Each entry: the view's anchor element, its render function, and whether the
+// page's own render (the one nav() and _refreshCurrentPage() call) draws it
+// when it is showing. Where it does not, _rsDrawOpenViews() draws it.
+const _RS_EDIT_VIEWS = [
+  ['drc-mo',       'renderDRCal',        true],
+  ['drb-tbody',    'renderDRBuilder',    true],
+  ['wk-tbody',     'renderWkBuilder',    true],
+  ['irc-mo',       'renderIRCal',        true],
+  ['irs-tbody',    'renderIRShiftTable', true],   // renderIRShiftBuilder ends with it
+  ['irl-tbody',    'renderIRList',       false],  // neither renderIRBuilder nor renderIRWeekBuilder draws it
+  ['vac-tbody',    'renderVacations',    true],
+  ['hol-tbody',    'renderHolTable',     true],   // renderHolidays → holTab draws the open tab
+  ['hol-counter',  'renderHolCounter',   true],
+  ['dash-metrics', 'renderDash',         true],
+  ['my-content',   'renderMySched',      true],
+];
+let _rsStaleViews = {};   // render function name → 1: the data changed while that view was not on screen
+let _rsEditDrawn = null;  // during one _afterMutation: the views already drawn for it, so none is drawn twice
+
+// On screen = on the open page `pg`, and not inside a closed tab (tabs inside
+// a page are closed with an inline display:none). An anchor outside every
+// .page is always on screen.
+function _rsViewOnScreen(a, pg){
+  const page = a.closest('.page');
+  if(!page) return true;
+  if(page.id !== 'page-' + pg) return false;
+  for(let e = a; e && e !== page; e = e.parentElement){
+    if(e.style && e.style.display === 'none') return false;
   }
-  // Schedule-adjacent views that might be holding stale snapshots
-  const renders = [
-    ['drc-mo', 'renderDRCal'],
-    ['drb-tbody', 'renderDRBuilder'],
-    ['wk-tbody', 'renderWkBuilder'],
-    ['irc-mo', 'renderIRCal'],
-    ['irs-tbody', 'renderIRShiftTable'],
-    ['irl-tbody', 'renderIRList'],
-    ['vac-tbody', 'renderVacations'],
-    ['hol-tbody', 'renderHolTable'],
-    ['hol-counter', 'renderHolCounter'],
-    ['dash-metrics', 'renderDash'],
-    ['my-content', 'renderMySched'],
-  ];
-  renders.forEach(([anchorId, fnName])=>{
-    if(!document.getElementById(anchorId)) return;
-    try{
-      const fn = window[fnName];
-      if(typeof fn === 'function') fn();
-    }catch(e){
-      // Log render failures so admins can triage — a renderer
-      // throwing silently used to take down a whole page with no
-      // signal beyond the user seeing a blank area.
-      try{ if(typeof _logError === 'function') _logError(fnName, e?.message||String(e), e); }catch(_){}
-    }
+  return true;
+}
+
+// `keepIn` = the view's anchor, passed for a draw that rs-v136 did not make:
+// the IR call list when its page is opened, when another session saves, and
+// before printing. A call being edited in its row there (All Entries, pencil)
+// used to keep what the user had picked or typed through all three, because
+// nothing redrew the list. It still must, or the tick would save the old
+// values. So the fields the user has changed are read before the draw and put
+// back after it; fields not touched, and every other row, show the new data.
+function _rsDrawView(fnName, keepIn){
+  const held = keepIn ? _rsUnsavedFields(keepIn) : [];
+  try{
+    const fn = window[fnName];
+    if(typeof fn === 'function') fn();
+  }catch(e){
+    // Log render failures so admins can triage — a renderer
+    // throwing silently used to take down a whole page with no
+    // signal beyond the user seeing a blank area.
+    try{ if(typeof _logError === 'function') _logError(fnName, e?.message||String(e), e); }catch(_){}
+  }
+  held.forEach(([id, v])=>{
+    const e = document.getElementById(id);   // gone when the row is no longer being edited
+    if(!e || e.value === v) return;
+    const drawn = e.value;
+    e.value = v;
+    if(e.value !== v) e.value = drawn;        // a choice that no longer exists: leave what was drawn
   });
+}
+
+// The fields inside `a` that no longer hold the value they were drawn with: [id, value].
+function _rsUnsavedFields(a){
+  return Array.from(a.querySelectorAll('input[id],select[id]')).filter(e=>{
+    if(e.tagName !== 'SELECT') return e.value !== e.defaultValue;
+    const d = Array.from(e.options).findIndex(o=>o.defaultSelected);
+    return e.selectedIndex !== (d < 0 ? 0 : d);
+  }).map(e=>[e.id, e.value]);
+}
+
+// Call right after the open page's own render. Draws the listed views that
+// are on screen and that the page's own render does not draw. `changed` = the
+// data may have changed (an edit, another session's save, undo): every listed
+// view that is not on screen is then marked stale.
+function _rsDrawOpenViews(pg, changed){
+  _RS_EDIT_VIEWS.forEach(([anchorId, fnName, byPageRender])=>{
+    const a = document.getElementById(anchorId);
+    if(!a) return;
+    if(!_rsViewOnScreen(a, pg)){ if(changed) _rsStaleViews[fnName] = 1; return; }
+    delete _rsStaleViews[fnName];
+    if(byPageRender && a.closest('.page')) return;
+    if(_rsEditDrawn){ if(_rsEditDrawn[fnName]) return; _rsEditDrawn[fnName] = 1; }
+    // An edit made here redrew this view in rs-v136 too (and reset a row left in edit mode); any other draw is new.
+    _rsDrawView(fnName, (_rsEditDrawn || byPageRender) ? null : a);
+  });
+}
+
+// Printing shows every page, open or not (the print stylesheet forces .page
+// to display), so bring the views that were skipped up to date first.
+window.addEventListener('beforeprint', ()=>{
+  _RS_EDIT_VIEWS.forEach(([anchorId, fnName, byPageRender])=>{
+    if(!_rsStaleViews[fnName]) return;
+    delete _rsStaleViews[fnName];
+    _rsDrawView(fnName, byPageRender ? null : document.getElementById(anchorId));
+  });
+});
+
+// Called after ANY mutation that could affect schedule data. Refreshes the
+// current page (via _refreshCurrentPage) and the schedule views on it that the
+// page's own render does not draw. Views that are not on screen are NOT drawn
+// here any more (rs-v137): they are marked stale and drawn when their page or
+// tab is next opened — see _RS_EDIT_VIEWS above. Each render function runs at
+// most once per call.
+function _afterMutation(){
+  const own = !_rsEditDrawn;
+  if(own) _rsEditDrawn = {};
+  try{
+    try{ _refreshCurrentPage(); }catch(e){
+      try{ if(typeof _logError === 'function') _logError('_refreshCurrentPage', e?.message||String(e), e); }catch(_){}
+    }
+    _rsDrawOpenViews(document.querySelector('.page.on')?.id?.replace('page-',''), true);
+  } finally {
+    if(own) _rsEditDrawn = null;
+  }
 }
 
 /* ═══════════════════════════════════════════════════
@@ -18096,7 +18174,7 @@ function _toggleMobileNav(force){
 // is built. The update lifecycle below compares this constant against
 // the deployed sw.js's CACHE_VERSION; a difference means the server has
 // a newer build than this tab is running (see "Update lifecycle").
-const _RS_HTML_BUILD = 'rs-v136';
+const _RS_HTML_BUILD = 'rs-v137';
 // rs-v114 hotfix: reload circuit-breaker. A stale cached shell vs a fresh
 // sw.js (or any errant reload path) can trap a device refreshing forever.
 // Cap auto-reloads at 3 per 30s (persisted in localStorage so it survives
@@ -18655,6 +18733,7 @@ function nav(pg, el, subTab, opts){
     'tools':renderTools,
   };
   if(fns[pg]) fns[pg]();
+  _rsDrawOpenViews(pg); // rs-v137: views of this page its own render does not draw (the IR call list)
   // ── Sync URL hash so browser back/forward + bookmarks deep-link ───
   // Format: `#/<page>` or `#/<page>/<subTab>`. The leading `/` is the
   // discriminator that lets _bootDeepLink ignore non-routing hashes
@@ -20515,9 +20594,8 @@ function addVac(){
       cur.setDate(cur.getDate()+1);
     }
   }
-  renderVacations();
   triggerSave();
-  _afterMutation();
+  _afterMutation(); // draws the vacation table when it is on screen (it was also drawn here first, so twice per add)
 }
 
 
@@ -44179,8 +44257,7 @@ function addWkCall(){
   S.weekendCalls.push({id:_newId,physId:pid,satDate,sunDate,sub,site,ctype:document.getElementById('wk-ctype').value,wshift,notes:document.getElementById('wk-notes').value});
   if(typeof _audit==='function') _audit('weekendCall.add', {id:_newId, physId:pid, satDate, sunDate, site, wshift});
   triggerSave();
-  renderWkBuilder();
-  _afterMutation();
+  _afterMutation(); // draws the weekend table when it is on screen (it was also drawn here first, so twice per add)
 }
 
 /* ─── AUTO-ASSIGN DR (anchor-aware) ─── */
@@ -45907,8 +45984,7 @@ function addIRCallFromGrid(sel,date,callType,group){
   }
   sel.value='';
   triggerSave();
-  renderIRWeekBuilder();
-  _afterMutation();
+  _afterMutation(); // draws the week grid (it was also drawn here first, so twice per add)
 }
 
 function addIRWeekend(group,fridayDate){
@@ -45951,8 +46027,7 @@ function addIRWeekend(group,fridayDate){
   }
   S.irCalls.push({id:S.nextId++,physId,date:fridayDate,callType:'weekend',irGroup:group,site,notes:''});
   triggerSave();
-  renderIRWeekBuilder();
-  _afterMutation();
+  _afterMutation(); // draws the week grid (it was also drawn here first, so twice per add)
 }
 
 function addIRCallManual(){
@@ -46040,10 +46115,9 @@ function addIRCallManual(){
     autoPairedShiftId: _autoPairedShift?.id || null,
   });
   triggerSave();
+  // Draws the IR call surfaces that are on screen: the week grid, and the list
+  // when its tab is open (both were also drawn here a second time).
   _afterMutation();
-  // Re-render any IR call surfaces so the addition appears immediately
-  if(typeof renderIRList === 'function') try{ renderIRList(); }catch(_){}
-  if(typeof renderIRWeekBuilder === 'function') try{ renderIRWeekBuilder(); }catch(_){}
   const _pairNote = _autoPairedShift ? ' (auto-paired with IR daily shift)' : '';
   _toast('Added.' + _pairNote, 'ok');
 }
